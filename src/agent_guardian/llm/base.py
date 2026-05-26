@@ -121,5 +121,5 @@ class BaseLLM(ABC):
     async def __aenter__(self) -> BaseLLM:
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
+    async def __aexit__(self, *_exc: object) -> None:
         await self.aclose()

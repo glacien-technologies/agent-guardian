@@ -109,7 +109,7 @@ class BedrockClient(BaseLLM):
     def host(self) -> str:
         return BEDROCK_HOST_TEMPLATE.format(region=self.region)
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
+    async def complete(self, _request: LLMRequest) -> LLMResponse:
         raise NotImplementedError(
             "Bedrock SigV4 authentication lands in M9. Use StubLLM in tests, "
             "OpenAIClient / AnthropicClient / OllamaClient in development."
