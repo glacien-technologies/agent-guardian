@@ -1,0 +1,27 @@
+"""Attack strategies (PRD §3.1, M6)."""
+
+from agent_guardian.strategies.base import (
+    NextPrompt,
+    Strategy,
+    StrategyContext,
+    StrategyDone,
+    StrategyResult,
+    Turn,
+)
+from agent_guardian.strategies.crescendo import CrescendoStrategy
+from agent_guardian.strategies.mad_max import MadMaxStrategy
+from agent_guardian.strategies.pair import PAIRStrategy
+from agent_guardian.strategies.tap import TAPStrategy
+
+__all__ = [
+    "CrescendoStrategy",
+    "MadMaxStrategy",
+    "NextPrompt",
+    "PAIRStrategy",
+    "Strategy",
+    "StrategyContext",
+    "StrategyDone",
+    "StrategyResult",
+    "TAPStrategy",
+    "Turn",
+]
