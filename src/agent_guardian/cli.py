@@ -295,111 +295,74 @@ def build_target_adapter(
 # ---------------------------------------------------------------------------
 
 
-def _scan_to_json(scan: Scan) -> str:
-    return scan.model_dump_json(indent=2)
-
-
-def _scan_to_md(scan: Scan) -> str:
-    findings_lines = [
-        f"- **{f.severity.value}** — {f.summary} (ASI: {f.asi.value})" for f in scan.findings
-    ]
-    findings_block = "\n".join(findings_lines) if findings_lines else "_No findings._"
-    return (
-        f"# AgentGuardian scan {scan.id}\n\n"
-        f"- AIVSS: **{scan.aivss}** ({scan.band.value})\n"
-        f"- Tier: {scan.tier.value}\n"
-        f"- Target: `{scan.target_ref}` ({scan.target_mode})\n"
-        f"- Duration: {scan.duration_seconds:.2f}s\n"
-        f"- Created: {scan.created_at.isoformat()}\n\n"
-        f"## Findings ({len(scan.findings)})\n\n"
-        f"{findings_block}\n"
-    )
-
-
-def _scan_to_sarif(scan: Scan) -> str:
-    sarif = {
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": "agent-guardian",
-                        "version": scan.package_version,
-                        "informationUri": "https://agentguardian.ai",
-                    }
-                },
-                "results": [
-                    {
-                        "ruleId": f.probe_id,
-                        "level": _sarif_level(f.severity.value),
-                        "message": {"text": f.summary},
-                        "properties": {
-                            "asi": f.asi.value,
-                            "severity": f.severity.value,
-                        },
-                    }
-                    for f in scan.findings
-                ],
-                "properties": {
-                    "aivss": scan.aivss,
-                    "band": scan.band.value,
-                    "tier": scan.tier.value,
-                },
-            }
-        ],
-    }
-    return json.dumps(sarif, indent=2)
-
-
-def _sarif_level(severity: str) -> str:
-    return {
-        "critical": "error",
-        "high": "error",
-        "medium": "warning",
-        "low": "note",
-    }.get(severity, "warning")
-
-
-def _scan_to_junit(scan: Scan) -> str:
-    # Tiny SuiteXML — one testcase per ASI category, failed when score < 100.
-    cases: list[str] = []
-    for category in AsiCategory:
-        score = scan.asi_scores.get(category, 100.0)
-        name = asi_description(category)
-        if score < 100:
-            cases.append(
-                f'  <testcase classname="agent_guardian.{category.value}" '
-                f'name="{name}"><failure message="score={score}"/></testcase>'
-            )
-        else:
-            cases.append(f'  <testcase classname="agent_guardian.{category.value}" name="{name}"/>')
-    body = "\n".join(cases)
-    return (
-        f'<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<testsuite name="agent-guardian" tests="{len(AsiCategory)}" '
-        f'failures="{sum(1 for c in AsiCategory if scan.asi_scores.get(c, 100.0) < 100)}">\n'
-        f"{body}\n"
-        f"</testsuite>\n"
-    )
-
-
-_FORMAT_RENDERERS = {
-    "json": _scan_to_json,
-    "md": _scan_to_md,
-    "sarif": _scan_to_sarif,
-    "junit": _scan_to_junit,
-}
+_TEXT_FORMATS: frozenset[str] = frozenset({"json", "sarif", "junit", "md"})
+_ALL_FORMATS: frozenset[str] = _TEXT_FORMATS | {"pdf"}
 
 
 def _render_scan(scan: Scan, output_format: str) -> str:
-    renderer = _FORMAT_RENDERERS.get(output_format)
-    if renderer is None:
+    """Render a textual report (returns the in-memory string).
+
+    PDF is handled separately because it's binary and goes straight to disk.
+    """
+    if output_format not in _TEXT_FORMATS:
         raise typer.BadParameter(
             f"unknown output format '{output_format}' "
-            f"— choose one of: {', '.join(sorted(_FORMAT_RENDERERS))} (pdf in M13)"
+            f"— choose one of: {', '.join(sorted(_ALL_FORMATS))}"
         )
-    return renderer(scan)
+    if output_format == "json":
+        from agent_guardian.reports.json_report import emit_json
+
+        return json.dumps(emit_json(scan), indent=2, sort_keys=True)
+    if output_format == "sarif":
+        from agent_guardian.reports.sarif import emit_sarif
+
+        return json.dumps(emit_sarif(scan), indent=2, sort_keys=True)
+    if output_format == "junit":
+        from xml.etree import ElementTree as ET
+
+        from agent_guardian.reports.junit import emit_junit
+
+        root = emit_junit(scan)
+        ET.indent(root, space="  ")
+        return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+    # markdown
+    from agent_guardian.reports.markdown import emit_markdown
+
+    return emit_markdown(scan)
+
+
+def _write_report(scan: Scan, output_format: str, path: Path) -> None:
+    """Persist the chosen report format at ``path``."""
+    if output_format not in _ALL_FORMATS:
+        raise typer.BadParameter(
+            f"unknown output format '{output_format}' "
+            f"— choose one of: {', '.join(sorted(_ALL_FORMATS))}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if output_format == "json":
+        from agent_guardian.reports.json_report import write_json
+
+        write_json(scan, path)
+        return
+    if output_format == "sarif":
+        from agent_guardian.reports.sarif import write_sarif
+
+        write_sarif(scan, path)
+        return
+    if output_format == "junit":
+        from agent_guardian.reports.junit import write_junit
+
+        write_junit(scan, path)
+        return
+    if output_format == "md":
+        from agent_guardian.reports.markdown import write_markdown
+
+        write_markdown(scan, path)
+        return
+    # pdf
+    from agent_guardian.reports.pdf import write_pdf
+
+    write_pdf(scan, path)
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +552,7 @@ def serve(
 def report(
     scan_id: str = typer.Argument(..., help="Scan ID to regenerate reports for."),
     output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md."
+        "json", "--output", help="Report format: json | sarif | junit | md | pdf."
     ),
 ) -> None:
     """Regenerate a report from a stored scan."""
@@ -604,12 +567,30 @@ def report(
 
 
 @app.command()
-def verify(path: Path = typer.Argument(..., help="Path to an evidence bundle.")) -> None:
-    """Verify HMAC/Ed25519 signatures on an evidence bundle (M13 — stub)."""
+def verify(path: Path = typer.Argument(..., help="Path to a signed JSON report.")) -> None:
+    """Verify HMAC-SHA256 + Ed25519 signatures on a JSON report (M13)."""
     if not path.exists():
         typer.echo(f"path not found: {path}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
-    typer.echo("M13 ships signed-evidence verification. Stub OK.")
+    suffix = path.suffix.lower()
+    if suffix != ".json":
+        typer.echo(
+            f"unsupported file type '{suffix}' — verify currently accepts .json reports. "
+            f"PDFs ship a signed JSON sidecar at <name>.json.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    from agent_guardian.reports.json_report import verify_signatures
+
+    result = verify_signatures(path)
+    typer.echo(f"schema:       {'OK' if result.schema_ok else 'FAIL'}")
+    typer.echo(f"HMAC-SHA256:  {'OK' if result.hmac_valid else 'FAIL'}")
+    typer.echo(f"Ed25519:      {'OK' if result.ed25519_valid else 'FAIL'}")
+    if result.error:
+        typer.echo(f"error:        {result.error}", err=True)
+    if not result.ok:
+        raise typer.Exit(code=EXIT_FAIL_UNDER)
 
 
 @app.command()
@@ -682,7 +663,7 @@ def scan(
         None, "--fail-under", help="Exit 1 if final AIVSS < this value."
     ),
     output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md."
+        "json", "--output", help="Report format: json | sarif | junit | md | pdf."
     ),
     output_path: Path | None = typer.Option(
         None, "--output-path", help="Where to write the report file."
@@ -854,16 +835,17 @@ async def _run_scan(
         await adapter.aclose()
 
     # 9. Render + persist report.
+    if output_path is None:
+        output_path = Path.home() / ".agentguardian" / "scans" / scan_id / f"report.{output}"
     try:
-        rendered = _render_scan(scan_result, output)
+        _write_report(scan_result, output, output_path)
     except typer.BadParameter as exc:
         typer.echo(f"output format error: {exc}", err=True)
         return EXIT_CONFIG
-
-    if output_path is None:
-        output_path = Path.home() / ".agentguardian" / "scans" / scan_id / f"report.{output}"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="utf-8")
+    except Exception as exc:
+        # PDF engines can raise PdfFeatureUnavailable etc. Surface clearly.
+        typer.echo(f"report write error: {type(exc).__name__}: {exc}", err=True)
+        return EXIT_CONFIG
 
     # Also persist the raw scan.json for later `report` calls.
     scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id

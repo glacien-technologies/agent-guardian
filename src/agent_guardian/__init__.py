@@ -63,6 +63,24 @@ from agent_guardian.core.swarm import (
     SwarmObserver,
 )
 from agent_guardian.core.tiering import detect_tier
+from agent_guardian.crypto.ed25519_sig import (
+    DEFAULT_KEYS_DIR,
+    Ed25519Keypair,
+    Ed25519SignatureBlock,
+    load_or_create_keypair,
+    sign_ed25519,
+    verify_ed25519,
+)
+from agent_guardian.crypto.hmac_sig import (
+    DEFAULT_PBKDF2_ITERATIONS,
+    DEFAULT_SIGNING_SECRET,
+    HMAC_ALGORITHM,
+    SIGNATURE_VERSION,
+    HmacSignatureBlock,
+    derive_key,
+    sign_hmac,
+    verify_hmac,
+)
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
@@ -107,6 +125,23 @@ from agent_guardian.probes.loader import (
     load_all_probes,
     load_probes_for_asi,
 )
+from agent_guardian.reports.canonical import to_canonical_json
+from agent_guardian.reports.json_report import (
+    SCHEMA_VERSION,
+    VerifyResult,
+    emit_json,
+    sign_payload,
+    verify_signatures,
+    write_json,
+)
+from agent_guardian.reports.junit import emit_junit, write_junit
+from agent_guardian.reports.markdown import emit_markdown, write_markdown
+from agent_guardian.reports.pdf import (
+    PdfFeatureUnavailable,
+    available_pdf_engines,
+    write_pdf,
+)
+from agent_guardian.reports.sarif import emit_sarif, write_sarif
 from agent_guardian.server import ScanStore, create_app
 from agent_guardian.strategies.base import (
     NextPrompt,
@@ -123,7 +158,13 @@ from agent_guardian.strategies.tap import TAPStrategy
 
 __all__ = [
     "AIVSS_FORMULA_VERSION",
+    "DEFAULT_KEYS_DIR",
+    "DEFAULT_PBKDF2_ITERATIONS",
+    "DEFAULT_SIGNING_SECRET",
+    "HMAC_ALGORITHM",
     "PROBE_CORPUS_VERSION",
+    "SCHEMA_VERSION",
+    "SIGNATURE_VERSION",
     "A2AAgent",
     "ADKAdapter",
     "AgentBudget",
@@ -145,9 +186,12 @@ __all__ = [
     "CrewAIAdapter",
     "CsaCategory",
     "DriftAgent",
+    "Ed25519Keypair",
+    "Ed25519SignatureBlock",
     "Finding",
     "FrameworkAdapter",
     "GoalHijackAgent",
+    "HmacSignatureBlock",
     "HttpAdapter",
     "HttpShape",
     "Judge",
@@ -176,6 +220,7 @@ __all__ = [
     "OpenAIAgentsAdapter",
     "OpenAIClient",
     "PAIRStrategy",
+    "PdfFeatureUnavailable",
     "PiiRedactor",
     "PrivilegeAgent",
     "Probe",
@@ -211,18 +256,38 @@ __all__ = [
     "TrustExploitAgent",
     "Turn",
     "VectorHit",
+    "VerifyResult",
     "VertexClient",
     "__version__",
+    "available_pdf_engines",
     "band_for_score",
     "colour_for_band",
     "compute_aivss",
     "create_app",
+    "derive_key",
     "detect_tier",
+    "emit_json",
+    "emit_junit",
+    "emit_markdown",
+    "emit_sarif",
     "get_shape",
     "list_shapes",
     "load_all_probes",
+    "load_or_create_keypair",
     "load_probe",
     "load_probes_for_asi",
     "load_probes_from_dir",
     "register_shape",
+    "sign_ed25519",
+    "sign_hmac",
+    "sign_payload",
+    "to_canonical_json",
+    "verify_ed25519",
+    "verify_hmac",
+    "verify_signatures",
+    "write_json",
+    "write_junit",
+    "write_markdown",
+    "write_pdf",
+    "write_sarif",
 ]

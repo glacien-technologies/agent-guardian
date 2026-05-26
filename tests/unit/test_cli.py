@@ -180,18 +180,44 @@ def test_serve_reload_passes_import_string(
     assert kwargs["factory"] is True
 
 
-def test_verify_stub_on_missing_path(runner: CliRunner, tmp_path: Path) -> None:
-    missing = tmp_path / "nope.zip"
+def test_verify_missing_path(runner: CliRunner, tmp_path: Path) -> None:
+    missing = tmp_path / "nope.json"
     result = runner.invoke(app, ["verify", str(missing)])
     assert result.exit_code == EXIT_CONFIG
 
 
-def test_verify_stub_on_existing_path(runner: CliRunner, tmp_path: Path) -> None:
+def test_verify_rejects_non_json_suffix(runner: CliRunner, tmp_path: Path) -> None:
     bundle = tmp_path / "bundle.zip"
     bundle.write_text("placeholder", encoding="utf-8")
     result = runner.invoke(app, ["verify", str(bundle)])
+    assert result.exit_code == EXIT_CONFIG
+
+
+def test_verify_succeeds_on_freshly_signed_report(runner: CliRunner, tmp_path: Path) -> None:
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path)
+    result = runner.invoke(app, ["verify", str(path)])
     assert result.exit_code == 0
-    assert "M13" in result.stdout
+    assert "OK" in result.stdout
+
+
+def test_verify_fails_on_tampered_report(runner: CliRunner, tmp_path: Path) -> None:
+    import json as _json
+
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path)
+    data = _json.loads(path.read_text(encoding="utf-8"))
+    data["aivss"] = 0
+    path.write_text(_json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    result = runner.invoke(app, ["verify", str(path)])
+    assert result.exit_code != 0
+    assert "FAIL" in result.stdout
 
 
 def test_publish_stub(runner: CliRunner) -> None:
