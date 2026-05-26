@@ -22,6 +22,24 @@ from agent_guardian.adapters.http_shapes.base import (
     register_shape,
 )
 from agent_guardian.adapters.prompt import PromptAdapter
+from agent_guardian.agents.a2a import A2AAgent
+from agent_guardian.agents.base import (
+    AgentBudget,
+    AgentReport,
+    AsiAgent,
+    Judge,
+    JudgeRubric,
+)
+from agent_guardian.agents.cascade import CascadeAgent
+from agent_guardian.agents.code_exec import CodeExecAgent
+from agent_guardian.agents.drift import DriftAgent
+from agent_guardian.agents.goal_hijack import GoalHijackAgent
+from agent_guardian.agents.memory_poison import MemoryPoisonAgent
+from agent_guardian.agents.privilege import PrivilegeAgent
+from agent_guardian.agents.recon import ReconAgent
+from agent_guardian.agents.supply_chain import SupplyChainAgent
+from agent_guardian.agents.tool_abuse import ToolAbuseAgent
+from agent_guardian.agents.trust_exploit import TrustExploitAgent
 from agent_guardian.core.budget import BudgetController, BudgetSlice
 from agent_guardian.core.memory import (
     MemoryFeatureUnavailable,
@@ -92,23 +110,33 @@ from agent_guardian.strategies.tap import TAPStrategy
 
 __all__ = [
     "AIVSS_FORMULA_VERSION",
+    "A2AAgent",
     "ADKAdapter",
+    "AgentBudget",
+    "AgentReport",
     "AivssResult",
     "AnthropicClient",
+    "AsiAgent",
     "AsiCategory",
     "AutoGenAdapter",
     "BaseLLM",
     "BedrockClient",
     "BudgetController",
     "BudgetSlice",
+    "CascadeAgent",
     "CodeAdapter",
+    "CodeExecAgent",
     "CrescendoStrategy",
     "CrewAIAdapter",
     "CsaCategory",
+    "DriftAgent",
     "Finding",
     "FrameworkAdapter",
+    "GoalHijackAgent",
     "HttpAdapter",
     "HttpShape",
+    "Judge",
+    "JudgeRubric",
     "JudgeVerdict",
     "LLMAuthError",
     "LLMError",
@@ -124,6 +152,7 @@ __all__ = [
     "LangGraphAdapter",
     "MadMaxStrategy",
     "MemoryFeatureUnavailable",
+    "MemoryPoisonAgent",
     "MemoryRecord",
     "MemoryStats",
     "NextPrompt",
@@ -133,9 +162,11 @@ __all__ = [
     "OpenAIClient",
     "PAIRStrategy",
     "PiiRedactor",
+    "PrivilegeAgent",
     "Probe",
     "ProbeValidationError",
     "PromptAdapter",
+    "ReconAgent",
     "Sandbox",
     "SandboxPolicy",
     "SandboxViolation",
@@ -150,11 +181,14 @@ __all__ = [
     "StrategyResult",
     "StubLLM",
     "StubScript",
+    "SupplyChainAgent",
     "TAPStrategy",
     "TargetAdapter",
     "TargetFingerprint",
     "TargetMode",
     "Tier",
+    "ToolAbuseAgent",
+    "TrustExploitAgent",
     "Turn",
     "VectorHit",
     "VertexClient",
