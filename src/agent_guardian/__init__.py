@@ -23,6 +23,13 @@ from agent_guardian.adapters.http_shapes.base import (
 )
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.core.budget import BudgetController, BudgetSlice
+from agent_guardian.core.memory import (
+    MemoryFeatureUnavailable,
+    MemoryRecord,
+    MemoryStats,
+    SharedMemory,
+    VectorHit,
+)
 from agent_guardian.core.redact import PiiRedactor
 from agent_guardian.core.sandbox import Sandbox, SandboxPolicy, SandboxViolation
 from agent_guardian.core.scoring import (
@@ -102,6 +109,9 @@ __all__ = [
     "LLMTransientError",
     "LLMUsage",
     "LangGraphAdapter",
+    "MemoryFeatureUnavailable",
+    "MemoryRecord",
+    "MemoryStats",
     "ObservedSurface",
     "OllamaClient",
     "OpenAIAgentsAdapter",
@@ -116,6 +126,7 @@ __all__ = [
     "Scan",
     "Severity",
     "SeverityBand",
+    "SharedMemory",
     "StrandsAdapter",
     "StubLLM",
     "StubScript",
@@ -123,6 +134,7 @@ __all__ = [
     "TargetFingerprint",
     "TargetMode",
     "Tier",
+    "VectorHit",
     "VertexClient",
     "__version__",
     "band_for_score",
