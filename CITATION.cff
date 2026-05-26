@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use AgentGuardian in academic work, please cite it as below."
+title: "AgentGuardian Open: A Multi-Agent Adversarial Swarm for OWASP ASI-Aligned Red Teaming"
+authors:
+  - family-names: "Glacien Pte. Ltd."
+    given-names: "Engineering"
+type: software
+repository-code: "https://github.com/glacien-technologies/agent-guardian"
+license: Apache-2.0
+version: "0.0.1.dev0"
+date-released: "2026-05-26"
+url: "https://agentguardian.ai"
+preferred-citation:
+  type: article
+  title: "AgentGuardian: A Multi-Agent Adversarial Swarm for OWASP ASI-Aligned Red Teaming"
+  authors:
+    - family-names: "Glacien Pte. Ltd."
+      given-names: "Engineering"
+  year: 2026
+  notes: "arXiv preprint forthcoming"

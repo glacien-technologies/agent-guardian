@@ -1,0 +1,24 @@
+AgentGuardian Open
+Copyright 2026 Glacien Pte. Ltd.
+
+This product includes software developed at Glacien Pte. Ltd. (https://glacien.ai)
+
+This product bundles or depends on the following third-party software:
+
+- FastAPI (MIT)              Copyright (c) Sebastián Ramírez
+- uvicorn (BSD-3-Clause)     Copyright (c) Tom Christie
+- httpx (BSD-3-Clause)       Copyright (c) Encode OSS Ltd.
+- pydantic (MIT)             Copyright (c) Samuel Colvin and Pydantic contributors
+- rich (MIT)                 Copyright (c) Will McGugan
+- textual (MIT)              Copyright (c) Textualize, Inc.
+- typer (MIT)                Copyright (c) Sebastián Ramírez
+- click (BSD-3-Clause)       Copyright (c) Pallets
+- Jinja2 (BSD-3-Clause)      Copyright (c) Pallets
+- PyYAML (MIT)               Copyright (c) Kirill Simonov
+- WeasyPrint (BSD-3-Clause)  Copyright (c) Kozea and contributors
+- sentence-transformers (Apache-2.0)  Copyright (c) UKP Lab / Hugging Face
+- faiss-cpu (MIT)            Copyright (c) Facebook, Inc.
+- structlog (MIT / Apache-2.0)  Copyright (c) Hynek Schlawack
+- cryptography (Apache-2.0 / BSD-3-Clause)  Copyright (c) Individual contributors
+
+Full license texts for every package are available via `pip-licenses` after installation.

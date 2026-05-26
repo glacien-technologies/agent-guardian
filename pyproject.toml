@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-guardian"
+dynamic = ["version"]
+description = "Adversarial swarm framework for agentic AI red-teaming. Eleven specialist agents, deterministic AIVSS score, OWASP ASI / MITRE ATLAS / CSA aligned."
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Glacien Pte. Ltd.", email = "opensource@glacien.ai" }]
+keywords = ["llm", "agent", "red-team", "security", "owasp", "mitre-atlas", "aivss", "agentic-ai"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "httpx>=0.28",
+  "pydantic>=2.9",
+  "rich>=13.9",
+  "textual>=0.86",
+  "typer>=0.15",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "structlog>=24.4",
+  "cryptography>=43.0",
+  "exceptiongroup>=1.2; python_version<'3.11'",
+]
+
+[project.optional-dependencies]
+full = [
+  "weasyprint>=63.0",
+  "faiss-cpu>=1.9",
+  "sentence-transformers>=3.3",
+  "presidio-analyzer>=2.2",
+]
+pdf-fallback = ["reportlab>=4.2"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "hypothesis>=6.115",
+  "pre-commit>=4.0",
+  "respx>=0.22",
+  "pip-licenses>=5.0",
+]
+
+[project.urls]
+Homepage = "https://agentguardian.ai"
+Documentation = "https://agentguardian.ai/docs"
+Repository = "https://github.com/glacien-technologies/agent-guardian"
+Issues = "https://github.com/glacien-technologies/agent-guardian/issues"
+Changelog = "https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md"
+
+[project.scripts]
+agent-guardian = "agent_guardian.cli:app"
+
+[tool.hatch.version]
+path = "src/agent_guardian/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_guardian"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "LICENSE", "NOTICE", "CITATION.cff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = ["tests/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+
+[tool.coverage.run]
+source = ["src/agent_guardian"]
+branch = true
