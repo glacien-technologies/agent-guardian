@@ -1,0 +1,22 @@
+version: "3.9"
+
+# Convenience compose file for running the AgentGuardian dashboard locally.
+#
+#   docker compose up --build
+#
+# The dashboard will be available at http://localhost:7474. Scan state and
+# the local cache are persisted to ./.agentguardian on the host.
+
+services:
+  agentguardian:
+    build: .
+    image: agent-guardian:dev
+    container_name: agent-guardian
+    ports:
+      - "7474:7474"
+    volumes:
+      - ./.agentguardian:/home/ag/.agentguardian
+    environment:
+      - AGENT_GUARDIAN_LOG_LEVEL=info
+    command: ["serve", "--host", "0.0.0.0", "--port", "7474"]
+    restart: unless-stopped
