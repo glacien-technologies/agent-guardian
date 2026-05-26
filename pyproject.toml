@@ -104,3 +104,8 @@ addopts = "-ra --strict-markers --strict-config"
 [tool.coverage.run]
 source = ["src/agent_guardian"]
 branch = true
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20260518",
+]
