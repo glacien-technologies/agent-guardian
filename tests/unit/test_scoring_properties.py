@@ -86,7 +86,7 @@ def _lift(
     return findings, list(probes_by_id.values())
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(records=finding_lists, tier=tier_strategy)
 def test_compute_aivss_score_always_in_range(
     records: list[tuple[AsiCategory, Severity, int, bool]],
@@ -97,7 +97,7 @@ def test_compute_aivss_score_always_in_range(
     assert 0 <= result.score <= 100
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(records=finding_lists, tier=tier_strategy)
 def test_penalty_always_in_range(
     records: list[tuple[AsiCategory, Severity, int, bool]],
@@ -108,7 +108,7 @@ def test_penalty_always_in_range(
     assert 0.0 <= result.penalty <= 0.5
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(records=finding_lists, tier=tier_strategy)
 def test_compute_aivss_is_deterministic(
     records: list[tuple[AsiCategory, Severity, int, bool]],
@@ -120,14 +120,14 @@ def test_compute_aivss_is_deterministic(
     assert a == b
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(tier=tier_strategy)
 def test_empty_findings_always_score_100(tier: Tier) -> None:
     result = compute_aivss([], [], tier)
     assert result.score == 100
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(records=finding_lists, tier=tier_strategy)
 def test_flipping_attacks_to_defended_never_decreases_score(
     records: list[tuple[AsiCategory, Severity, int, bool]],
@@ -145,7 +145,7 @@ def test_flipping_attacks_to_defended_never_decreases_score(
     assert score_defended >= score_attacks
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(
     successes=st.integers(min_value=0, max_value=10_000),
     total=st.integers(min_value=0, max_value=10_000),
@@ -157,7 +157,7 @@ def test_pass_rate_in_unit_interval(successes: int, total: int) -> None:
     assert 0.0 <= rate <= 1.0
 
 
-@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@settings(max_examples=1500, suppress_health_check=[HealthCheck.too_slow])
 @given(
     aggregate=st.floats(min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False),
     crit=st.integers(min_value=0, max_value=20),

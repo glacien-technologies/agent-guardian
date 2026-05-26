@@ -39,9 +39,26 @@ jobs:
           enable-cache: true
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra dev
-      - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term
+      - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
       - uses: codecov/codecov-action@v5
         if: matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Inventory installed licenses
+        run: uv run pip-licenses --format=plain --with-system | tee licenses.txt
+      - name: Reject copyleft transitive dependencies
+        run: |
+          # pip-licenses exits non-zero (1) if any package matches one of the
+          # forbidden licenses. The set below is the standard "strong copyleft"
+          # roster — anything reciprocal that would taint a downstream
+          # Apache-2.0 redistributor.
+          uv run pip-licenses --fail-on="GPLv2;GPLv3;LGPLv2;LGPLv3;AGPLv3"
