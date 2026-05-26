@@ -20,7 +20,7 @@ This appends a line like:
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-to the commit message. The name and email must match the values in your `git config user.name` and `git config user.email`. Anonymous or pseudonymous sign-offs (e.g. `noreply@github.com`) are rejected.
+to the commit message. The name and email must match the values in your `git config user.name` and `git config user.email`. Anonymous or untraceable sign-offs (e.g. the bare `noreply@github.com`) are not accepted. GitHub's per-user privacy email of the form `<numeric-id>+<username>@users.noreply.github.com` is permitted because it remains uniquely tied to the contributor's account; this matches the Linux kernel and Kubernetes DCO policies. Real email is recommended when feasible.
 
 Our CI enforces DCO on every pull request via `tim-actions/dco`. If a commit is missing the trailer, the PR check fails until you rebase and add it (`git rebase --signoff origin/main`). Unsigned commits cannot be merged.
 

@@ -14,13 +14,15 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: [--maxkb=1024]
+        args: [--maxkb=500]
+        exclude: ^uv\.lock$
       - id: detect-private-key
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
     hooks:
       - id: mypy
         files: ^src/
+        # mypy hook runs in an isolated venv; list runtime imports used in src/
         additional_dependencies:
           - pydantic>=2.9
           - types-PyYAML
