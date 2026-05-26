@@ -1,0 +1,64 @@
+site_name: AgentGuardian Open
+site_url: https://agentguardian.ai/docs/
+site_description: First open-source adversarial-swarm framework for agentic AI red-teaming.
+site_author: Glacien Pte. Ltd.
+copyright: Copyright &copy; 2026 Glacien Pte. Ltd. Apache-2.0.
+
+repo_url: https://github.com/glacien-technologies/agent-guardian
+repo_name: glacien-technologies/agent-guardian
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: cyan
+      accent: cyan
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+  icon:
+    logo: material/shield-search
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Why: why.md
+  - Quickstart: quickstart.md
+  - Architecture: architecture.md
+  - AIVSS Formula: aivss-formula.md
+  - Adapters:
+      - Overview: adapters/index.md
+      - System Prompt: adapters/prompt.md
+      - Code: adapters/code.md
+      - HTTP: adapters/http.md
+      - Framework: adapters/framework.md
+  - API Reference: api-reference.md
+  - Ethics: ethics.md
+  - Roadmap: roadmap.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/glacien-technologies/agent-guardian
