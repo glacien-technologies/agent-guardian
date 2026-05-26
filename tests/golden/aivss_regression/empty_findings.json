@@ -1,0 +1,8 @@
+{
+  "_doc": "Vacuous case: no probes run, no findings, T4 (lowest-risk surface).",
+  "tier": "T4",
+  "probes": [],
+  "findings": [],
+  "expected_aivss": 100,
+  "expected_band": "EXCELLENT"
+}
