@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="scan-header" data-scan-id="{{ scan_id }}">
+  <div class="scan-id-row">
+    <h1><span class="mono">{{ scan_id }}</span></h1>
+    {% if is_running %}
+    <span class="pill pill-running">live</span>
+    {% else %}
+    <span class="pill pill-done">done</span>
+    {% endif %}
+  </div>
+  <p class="muted">
+    {% if scan %}
+      Target <code>{{ scan.target_ref }}</code> ({{ scan.target_mode }}) ·
+      Tier {{ scan.tier.value }} ·
+      Duration {{ "%.1f"|format(scan.duration_seconds) }}s
+    {% else %}
+      Subscribed to live events. Waiting for first signal…
+    {% endif %}
+  </p>
+</section>
+
+<section class="scan-summary">
+  <div class="card score-card">
+    <div class="score-label">AIVSS</div>
+    <div class="score-value aivss-live" data-band="{{ scan.band.value if scan else '' }}">
+      {% if scan %}{{ scan.aivss }}{% else %}—{% endif %}
+    </div>
+    <div class="score-band">
+      {% if scan %}<span class="pill pill-band-{{ scan.band.value|lower }}">{{ scan.band.value }}</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="score-label">Findings</div>
+    <div class="counter findings-counter">
+      {% if scan %}{{ scan.findings|length }}{% else %}0{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="score-label">Status</div>
+    <div class="status-message">
+      {% if is_running %}
+        running
+      {% elif scan %}
+        complete
+      {% else %}
+        waiting
+      {% endif %}
+    </div>
+    <div class="progress" aria-hidden="true"><span class="progress-bar"></span></div>
+  </div>
+</section>
+
+<section class="scan-views">
+  <nav class="tabs" aria-label="Scan views">
+    <a href="/scan/{{ scan_id }}/swarm">Swarm</a>
+    <a href="/scan/{{ scan_id }}/findings">Findings</a>
+    <a href="/scan/{{ scan_id }}/aivss">AIVSS</a>
+    <a href="/scan/{{ scan_id }}/export">Export</a>
+  </nav>
+</section>
+
+<section class="card event-log-card">
+  <h2>Event log</h2>
+  <ol class="event-log" aria-live="polite"></ol>
+</section>
+{% endblock %}

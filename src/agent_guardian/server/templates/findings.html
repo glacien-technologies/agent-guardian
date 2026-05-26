@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="scan-header">
+  <h1>Findings</h1>
+  <p class="muted"><a href="/scan/{{ scan_id }}" class="mono">{{ scan_id }}</a></p>
+</section>
+
+<nav class="filter-chips" aria-label="Filter by ASI category">
+  <a class="chip {% if not asi_filter %}chip-active{% endif %}" href="/scan/{{ scan_id }}/findings">all</a>
+  {% for cat in asi_categories %}
+    <a class="chip {% if asi_filter == cat.value %}chip-active{% endif %}"
+       href="/scan/{{ scan_id }}/findings?asi={{ cat.value }}">{{ cat.value }}</a>
+  {% endfor %}
+</nav>
+
+{% if findings %}
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Finding</th>
+        <th>Probe</th>
+        <th>ASI</th>
+        <th>Severity</th>
+        <th>Attempts</th>
+        <th>Success</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr>
+        <td><a href="/scan/{{ scan_id }}/transcripts/{{ f.id }}" class="mono">{{ f.id }}</a></td>
+        <td class="mono">{{ f.probe_id }}</td>
+        <td><span class="pill pill-asi">{{ f.asi.value }}</span></td>
+        <td><span class="pill pill-sev-{{ f.severity.value }}">{{ f.severity.value }}</span></td>
+        <td>{{ f.attempt_count }}</td>
+        <td>{% if f.success %}<span class="pill pill-fail">attack hit</span>{% else %}<span class="pill pill-pass">defended</span>{% endif %}</td>
+        <td class="truncate" title="{{ f.summary }}">{{ f.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card empty">
+  <p>No findings to display.</p>
+</div>
+{% endif %}
+{% endblock %}

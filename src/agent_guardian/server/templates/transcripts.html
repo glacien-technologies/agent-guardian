@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="scan-header">
+  <h1>Transcript</h1>
+  <p class="muted">
+    Scan <a href="/scan/{{ scan_id }}" class="mono">{{ scan_id }}</a> · Finding
+    <span class="mono">{{ finding.id }}</span>
+  </p>
+</section>
+
+<section class="card transcript-meta">
+  <dl class="meta-grid">
+    <dt>Probe</dt>
+    <dd class="mono">{{ finding.probe_id }}</dd>
+    <dt>ASI</dt>
+    <dd><span class="pill pill-asi">{{ finding.asi.value }}</span></dd>
+    <dt>Severity</dt>
+    <dd><span class="pill pill-sev-{{ finding.severity.value }}">{{ finding.severity.value }}</span></dd>
+    <dt>Attempts</dt>
+    <dd>{{ finding.attempt_count }}</dd>
+    <dt>Attack succeeded</dt>
+    <dd>{{ "yes" if finding.success else "no" }}</dd>
+    <dt>Confidence</dt>
+    <dd>{{ "%.2f"|format(finding.confidence) }}</dd>
+  </dl>
+</section>
+
+<section class="card">
+  <div class="redact-toggle">
+    {% if redact %}
+      <a href="?redact=false" class="chip chip-active">PII redaction: on</a>
+      <a href="?redact=false" class="chip">show raw</a>
+    {% else %}
+      <a href="?redact=true" class="chip">re-redact</a>
+      <a href="?redact=false" class="chip chip-active">PII redaction: off (raw)</a>
+    {% endif %}
+  </div>
+  <h2>Summary</h2>
+  <p>{{ finding.summary }}</p>
+
+  {% if finding.transcript_ref %}
+  <h2>Transcript</h2>
+  <pre class="code"><code>{{ finding.transcript_ref }}</code></pre>
+  {% else %}
+  <p class="muted">No transcript artefact attached to this finding.</p>
+  {% endif %}
+</section>
+{% endblock %}

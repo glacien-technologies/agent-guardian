@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="scan-header">
+  <h1>AIVSS sub-scores</h1>
+  <p class="muted"><a href="/scan/{{ scan_id }}" class="mono">{{ scan_id }}</a></p>
+</section>
+
+<section class="aivss-grid">
+  <div class="card radar-card">
+    <h2>Radar</h2>
+    <div data-radar="{{ sub_scores_json|e }}" class="radar-host">
+      <svg class="radar" viewBox="-110 -110 220 220" role="img" aria-label="AIVSS sub-score radar">
+        <!-- The radar is filled in by JS; this is the static fallback. -->
+        <circle cx="0" cy="0" r="100" class="radar-grid" />
+        <circle cx="0" cy="0" r="75" class="radar-grid" />
+        <circle cx="0" cy="0" r="50" class="radar-grid" />
+        <circle cx="0" cy="0" r="25" class="radar-grid" />
+      </svg>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Sub-scores</h2>
+    <ul class="sub-score-list">
+      {% for name, score in sub_scores_ordered %}
+        <li class="sub-score-row">
+          <span class="sub-score-name">{{ name.replace('_', ' ') }}</span>
+          <span class="sub-score-bar-wrap">
+            <span class="sub-score-bar" style="width: {{ score|round }}%"></span>
+          </span>
+          <span class="sub-score-value">{{ "%.1f"|format(score) }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+
+{% if scan %}
+<section class="card">
+  <h2>Per-ASI scores</h2>
+  <ul class="sub-score-list">
+    {% for cat, score in scan.asi_scores|dictsort %}
+      <li class="sub-score-row">
+        <span class="sub-score-name mono">{{ cat.value if cat.value is defined else cat }}</span>
+        <span class="sub-score-bar-wrap"><span class="sub-score-bar" style="width: {{ score|round }}%"></span></span>
+        <span class="sub-score-value">{{ "%.1f"|format(score) }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="scan-header" data-scan-id="{{ scan_id }}">
+  <h1>Swarm</h1>
+  <p class="muted"><a href="/scan/{{ scan_id }}" class="mono">{{ scan_id }}</a></p>
+</section>
+
+<section class="card swarm-card">
+  <svg class="swarm-graph" viewBox="0 0 800 800" role="img" aria-label="Adversarial swarm topology">
+    <defs>
+      <radialGradient id="target-glow" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.5" />
+        <stop offset="100%" stop-color="#22d3ee" stop-opacity="0" />
+      </radialGradient>
+    </defs>
+
+    <!-- Glow + target node -->
+    <circle cx="400" cy="400" r="120" fill="url(#target-glow)" />
+    <g class="target">
+      <circle cx="400" cy="400" r="56" class="target-circle" />
+      <text x="400" y="402" text-anchor="middle" class="target-label">target</text>
+      <text x="400" y="420" text-anchor="middle" class="target-sublabel">AIVSS <tspan class="target-aivss">—</tspan></text>
+    </g>
+
+    <!-- Eleven satellites in fixed slots; JS positions them at runtime -->
+    {% for slug, label in agents %}
+      <g class="satellite" data-agent="{{ slug }}" data-slot="{{ loop.index0 }}">
+        <line class="link" />
+        <circle class="ring-bg" r="34" />
+        <circle class="ring-progress" r="34" stroke-dasharray="213.628" stroke-dashoffset="213.628" />
+        <circle class="node" r="28" />
+        <text class="agent-name">{{ label }}</text>
+        <text class="finding-count" data-count="0">0</text>
+      </g>
+    {% endfor %}
+  </svg>
+</section>
+{% endblock %}

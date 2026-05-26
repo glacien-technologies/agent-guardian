@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>Scan history</h1>
+  <p class="muted">
+    Adversarial scans you've run on this machine. Live scans appear at the top.
+  </p>
+</section>
+
+<section class="card launcher" aria-labelledby="launch-heading">
+  <h2 id="launch-heading">Launch a scan</h2>
+  <p class="muted">Scans are launched via the CLI. The dashboard streams progress live.</p>
+  <pre class="code"><code>agent-guardian scan --system-prompt prompt.txt --model stub</code></pre>
+</section>
+
+<section aria-labelledby="history-heading">
+  <h2 id="history-heading" class="section-title">Recent scans ({{ scans|length }})</h2>
+  {% if scans %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Status</th>
+          <th scope="col">Scan</th>
+          <th scope="col">Target</th>
+          <th scope="col">AIVSS</th>
+          <th scope="col">Band</th>
+          <th scope="col">Findings</th>
+          <th scope="col">When</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in scans %}
+        <tr>
+          <td>
+            {% if s.is_running %}
+            <span class="pill pill-running">live</span>
+            {% else %}
+            <span class="pill pill-done">done</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/scan/{{ s.scan_id }}" class="mono">{{ s.scan_id }}</a>
+          </td>
+          <td class="muted truncate" title="{{ s.target_ref or '' }}">
+            {% if s.target_ref %}{{ s.target_mode }}: {{ s.target_ref }}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if s.aivss is not none %}
+            <span class="aivss aivss-{{ (s.band or '')|lower }}">{{ s.aivss }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}—{% endif %}
+          </td>
+          <td>{{ s.findings_count if s.findings_count is not none else '—' }}</td>
+          <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card empty">
+    <p>No scans yet. Run <code>agent-guardian scan --system-prompt prompt.txt --model stub</code> in another terminal.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

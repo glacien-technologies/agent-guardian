@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="prose">
+  <h1>About AgentGuardian Open</h1>
+
+  <p>
+    AgentGuardian is an adversarial swarm framework for red-teaming agentic AI
+    systems. Eleven specialist agents probe a target across the ten OWASP
+    ASI categories; their findings combine into a deterministic AIVSS score
+    aligned with MITRE ATLAS and the CSA Agentic Threat taxonomy.
+  </p>
+
+  <h2>Methodology</h2>
+  <ul>
+    <li><strong>Recon:</strong> phase-1 fingerprint of the target surface.</li>
+    <li><strong>Swarm:</strong> ten ASI specialists run in parallel under a
+      commander with periodic AIVSS checkpoints.</li>
+    <li><strong>Scoring:</strong> the AIVSS formula is purely deterministic —
+      same findings, same score, every time.</li>
+  </ul>
+
+  <h2>Citations</h2>
+  <ul>
+    <li>OWASP Top 10 for Agentic Applications, 2026 edition.</li>
+    <li>MITRE ATLAS adversarial threat matrix.</li>
+    <li>Cloud Security Alliance Agentic Threat taxonomy.</li>
+  </ul>
+
+  <h2>License</h2>
+  <p>
+    Apache-2.0. See the <a href="https://github.com/glacien-technologies/agent-guardian">GitHub repository</a>
+    for the full source, ethical-use policy, and contribution guide.
+  </p>
+
+  <h2>Version</h2>
+  <p>This dashboard is served by <code>agent-guardian</code> v{{ version }}.</p>
+</section>
+{% endblock %}

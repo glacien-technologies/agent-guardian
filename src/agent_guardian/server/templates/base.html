@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>{% block title %}{{ page_title|default("AgentGuardian") }} · AgentGuardian{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2228%22%20fill%3D%22%2322d3ee%22%2F%3E%3C%2Fsvg%3E" />
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/" class="brand" aria-label="AgentGuardian home">
+        <span class="brand-dot" aria-hidden="true"></span>
+        AgentGuardian
+      </a>
+      <ul class="nav-links">
+        <li><a href="/">Scans</a></li>
+        <li><a href="/about">About</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main id="main" class="site-main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <span>AgentGuardian Open v{{ version }}</span>
+    <span>·</span>
+    <span>Apache-2.0</span>
+    <span>·</span>
+    <a href="https://github.com/glacien-technologies/agent-guardian" rel="noopener noreferrer">github</a>
+  </footer>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
