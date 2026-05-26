@@ -76,6 +76,12 @@ path = "src/agent_guardian/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_guardian"]
+# Make sure the bundled seed-probe corpus (M11) ships in the wheel — these
+# globs cover the YAML probes plus the ``_meta/version.yaml`` stamp.
+artifacts = [
+  "src/agent_guardian/probes/**/*.yaml",
+  "src/agent_guardian/probes/_meta/*.yaml",
+]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/", "tests/", "README.md", "LICENSE", "NOTICE", "CITATION.cff"]

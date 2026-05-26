@@ -500,12 +500,29 @@ def list_agents() -> None:
 def list_probes(
     asi: str | None = typer.Option(None, "--asi", help="Filter by ASI category (e.g. ASI01)."),
 ) -> None:
-    """Print the seed probe library (empty until M11)."""
-    # The probe content lands in M11 — for M10 we surface the placeholder
-    # so CI users know the command exists.
-    typer.echo("no probes yet — the seed probe library lands in M11.")
+    """Print the bundled seed-probe corpus (one line per probe)."""
+    from agent_guardian.probes.loader import PROBE_CORPUS_VERSION, load_all_probes
+
+    probes = load_all_probes()
+    asi_filter: AsiCategory | None = None
     if asi is not None:
-        typer.echo(f"(filter: {asi})")
+        try:
+            asi_filter = AsiCategory(asi)
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"unknown ASI category '{asi}' — expected one of "
+                f"{', '.join(c.value for c in AsiCategory)}."
+            ) from exc
+        probes = [p for p in probes if p.asi == asi_filter]
+
+    typer.echo(f"Probe corpus version: {PROBE_CORPUS_VERSION}")
+    suffix = f" (filtered by {asi_filter.value})" if asi_filter is not None else ""
+    typer.echo(f"Found {len(probes)} probes{suffix}:")
+    for probe in probes:
+        typer.echo(
+            f"  {probe.id}  [{probe.asi.value}/{probe.severity.value}/"
+            f"{probe.tier_floor.value}]  {probe.name}"
+        )
 
 
 @app.command()

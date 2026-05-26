@@ -102,6 +102,11 @@ from agent_guardian.models.severity import (
     colour_for_band,
 )
 from agent_guardian.models.tier import ObservedSurface, Tier
+from agent_guardian.probes.loader import (
+    PROBE_CORPUS_VERSION,
+    load_all_probes,
+    load_probes_for_asi,
+)
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -117,6 +122,7 @@ from agent_guardian.strategies.tap import TAPStrategy
 
 __all__ = [
     "AIVSS_FORMULA_VERSION",
+    "PROBE_CORPUS_VERSION",
     "A2AAgent",
     "ADKAdapter",
     "AgentBudget",
@@ -211,7 +217,9 @@ __all__ = [
     "detect_tier",
     "get_shape",
     "list_shapes",
+    "load_all_probes",
     "load_probe",
+    "load_probes_for_asi",
     "load_probes_from_dir",
     "register_shape",
 ]

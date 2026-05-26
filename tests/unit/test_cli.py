@@ -86,15 +86,27 @@ def test_list_agents_prints_eleven_rows(runner: CliRunner) -> None:
         assert asi in result.stdout
 
 
-def test_list_probes_placeholder(runner: CliRunner) -> None:
+def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     result = runner.invoke(app, ["list-probes"])
     assert result.exit_code == 0
-    assert "no probes yet" in result.stdout.lower()
+    # M11: 50 bundled probes + corpus-version stamp.
+    assert "Probe corpus version" in result.stdout
+    assert "Found 50 probes" in result.stdout
+    # At least one ID from each category should appear.
+    for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
+        assert asi in result.stdout
 
 
 def test_list_probes_with_asi_filter(runner: CliRunner) -> None:
     result = runner.invoke(app, ["list-probes", "--asi", "ASI01"])
     assert result.exit_code == 0
+    assert "Found 5 probes (filtered by ASI01)" in result.stdout
+    assert "ASI02" not in result.stdout
+
+
+def test_list_probes_with_invalid_asi_filter(runner: CliRunner) -> None:
+    result = runner.invoke(app, ["list-probes", "--asi", "BOGUS"])
+    assert result.exit_code != 0
 
 
 def test_badge_text(runner: CliRunner) -> None:
