@@ -40,12 +40,12 @@ def test_golden_fixture_matches_expected_score(fixture_path: Path) -> None:
     expected_score = data["expected_aivss"]
     expected_band = SeverityBand(data["expected_band"])
 
-    assert (
-        result.score == expected_score
-    ), f"{fixture_path.name}: expected AIVSS {expected_score}, got {result.score}"
-    assert (
-        result.band is expected_band
-    ), f"{fixture_path.name}: expected band {expected_band}, got {result.band}"
+    assert result.score == expected_score, (
+        f"{fixture_path.name}: expected AIVSS {expected_score}, got {result.score}"
+    )
+    assert result.band is expected_band, (
+        f"{fixture_path.name}: expected band {expected_band}, got {result.band}"
+    )
 
 
 @pytest.mark.parametrize("fixture_path", _fixture_files(), ids=lambda p: p.stem)
