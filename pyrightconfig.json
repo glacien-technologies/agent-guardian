@@ -1,0 +1,8 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": ["src"],
+  "include": ["src"],
+  "exclude": [".venv", "**/__pycache__", "dist", "tests/golden"],
+  "reportMissingImports": "warning"
+}
