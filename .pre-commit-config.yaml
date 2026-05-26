@@ -29,3 +29,5 @@ repos:
           - typer>=0.15
           - httpx>=0.28
           - structlog>=24.4
+          - fastapi>=0.115
+          - jinja2>=3.1
