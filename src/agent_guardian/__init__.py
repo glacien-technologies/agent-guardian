@@ -55,6 +55,13 @@ from agent_guardian.core.scoring import (
     AivssResult,
     compute_aivss,
 )
+from agent_guardian.core.swarm import (
+    CheckpointDecision,
+    SwarmCommander,
+    SwarmConfig,
+    SwarmEvent,
+    SwarmObserver,
+)
 from agent_guardian.core.tiering import detect_tier
 from agent_guardian.llm import (
     AnthropicClient,
@@ -124,6 +131,7 @@ __all__ = [
     "BudgetController",
     "BudgetSlice",
     "CascadeAgent",
+    "CheckpointDecision",
     "CodeAdapter",
     "CodeExecAgent",
     "CrescendoStrategy",
@@ -182,6 +190,10 @@ __all__ = [
     "StubLLM",
     "StubScript",
     "SupplyChainAgent",
+    "SwarmCommander",
+    "SwarmConfig",
+    "SwarmEvent",
+    "SwarmObserver",
     "TAPStrategy",
     "TargetAdapter",
     "TargetFingerprint",
