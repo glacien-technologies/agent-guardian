@@ -58,7 +58,7 @@ class HttpAdapter(TargetAdapter):
     def shape_name(self) -> str:
         return self._shape_name
 
-    async def call(self, _prompt: str, *, session: str | None = None) -> str:
+    async def call(self, prompt: str, *, session: str | None = None) -> str:
         raise NotImplementedError(
             "HttpAdapter.call() is a stub in M4. Production HTTP transport with "
             "request templating, response extraction, and provider-specific shapes "

@@ -115,7 +115,7 @@ class VertexClient(BaseLLM):
     def host(self) -> str:
         return VERTEX_HOST_TEMPLATE.format(region=self.region)
 
-    async def complete(self, _request: LLMRequest) -> LLMResponse:
+    async def complete(self, request: LLMRequest) -> LLMResponse:
         raise NotImplementedError(
             "Vertex AI OAuth2 service-account authentication lands in M9. "
             "Use StubLLM in tests, OpenAIClient / AnthropicClient / OllamaClient "

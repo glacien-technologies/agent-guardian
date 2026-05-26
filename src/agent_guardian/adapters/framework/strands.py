@@ -29,7 +29,7 @@ class StrandsAdapter(FrameworkAdapter):
             notes="Mode D STUB — Strands instrumentation lands in M9.",
         )
 
-    async def call(self, _prompt: str, *, session: str | None = None) -> str:
+    async def call(self, prompt: str, *, session: str | None = None) -> str:
         raise NotImplementedError(
             "StrandsAdapter.call() is a stub in M4. M9 will land the real "
             "instrumentation (Agent.invoke() integration + tool taps)."

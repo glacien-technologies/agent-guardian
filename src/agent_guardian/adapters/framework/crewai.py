@@ -29,7 +29,7 @@ class CrewAIAdapter(FrameworkAdapter):
             notes="Mode D STUB — CrewAI instrumentation lands in M9.",
         )
 
-    async def call(self, _prompt: str, *, session: str | None = None) -> str:
+    async def call(self, prompt: str, *, session: str | None = None) -> str:
         raise NotImplementedError(
             "CrewAIAdapter.call() is a stub in M4. M9 will land the real "
             "instrumentation (Crew.kickoff() integration + task/agent taps)."
