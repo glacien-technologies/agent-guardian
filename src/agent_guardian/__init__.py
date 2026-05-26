@@ -77,6 +77,18 @@ from agent_guardian.models.severity import (
     colour_for_band,
 )
 from agent_guardian.models.tier import ObservedSurface, Tier
+from agent_guardian.strategies.base import (
+    NextPrompt,
+    Strategy,
+    StrategyContext,
+    StrategyDone,
+    StrategyResult,
+    Turn,
+)
+from agent_guardian.strategies.crescendo import CrescendoStrategy
+from agent_guardian.strategies.mad_max import MadMaxStrategy
+from agent_guardian.strategies.pair import PAIRStrategy
+from agent_guardian.strategies.tap import TAPStrategy
 
 __all__ = [
     "AIVSS_FORMULA_VERSION",
@@ -90,6 +102,7 @@ __all__ = [
     "BudgetController",
     "BudgetSlice",
     "CodeAdapter",
+    "CrescendoStrategy",
     "CrewAIAdapter",
     "CsaCategory",
     "Finding",
@@ -109,13 +122,16 @@ __all__ = [
     "LLMTransientError",
     "LLMUsage",
     "LangGraphAdapter",
+    "MadMaxStrategy",
     "MemoryFeatureUnavailable",
     "MemoryRecord",
     "MemoryStats",
+    "NextPrompt",
     "ObservedSurface",
     "OllamaClient",
     "OpenAIAgentsAdapter",
     "OpenAIClient",
+    "PAIRStrategy",
     "PiiRedactor",
     "Probe",
     "ProbeValidationError",
@@ -128,12 +144,18 @@ __all__ = [
     "SeverityBand",
     "SharedMemory",
     "StrandsAdapter",
+    "Strategy",
+    "StrategyContext",
+    "StrategyDone",
+    "StrategyResult",
     "StubLLM",
     "StubScript",
+    "TAPStrategy",
     "TargetAdapter",
     "TargetFingerprint",
     "TargetMode",
     "Tier",
+    "Turn",
     "VectorHit",
     "VertexClient",
     "__version__",

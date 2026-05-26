@@ -579,28 +579,34 @@ def test_public_all_has_no_duplicates() -> None:
 
 
 def test_public_all_memory_types_grouped_alphabetically() -> None:
-    """Within the M-class entries, the new memory types insert in order.
+    """The memory types remain alphabetically ordered within ``__all__``.
 
-    The full ``__all__`` follows the existing convention (constants first,
-    then PascalCase classes, then snake_case functions). Within the
-    PascalCase block, alphabetical order is preserved — assert the five
-    new ``Memory*`` / ``SharedMemory`` / ``VectorHit`` entries appear in
-    the expected positions relative to their neighbours.
+    ``__all__`` follows the existing convention (constants first, then
+    PascalCase classes, then snake_case functions). Within the PascalCase
+    block, alphabetical order is preserved. We assert relative ordering
+    rather than tight contiguous slices so additive milestones (M6+)
+    don't force this test to be rewritten every time.
     """
     import agent_guardian
 
     order = agent_guardian.__all__
-    # Memory* names cluster between LangGraphAdapter and ObservedSurface.
+    # All five Memory*-cluster names appear, in alphabetical order, between
+    # LangGraphAdapter and ObservedSurface.
     idx_lang = order.index("LangGraphAdapter")
     idx_observed = order.index("ObservedSurface")
-    block = order[idx_lang + 1 : idx_observed]
-    assert block == ["MemoryFeatureUnavailable", "MemoryRecord", "MemoryStats"]
-    # SharedMemory comes between SeverityBand and StrandsAdapter.
-    assert order.index("SharedMemory") == order.index("SeverityBand") + 1
-    assert order.index("StrandsAdapter") == order.index("SharedMemory") + 1
-    # VectorHit comes between Tier and VertexClient.
-    assert order.index("VectorHit") == order.index("Tier") + 1
-    assert order.index("VertexClient") == order.index("VectorHit") + 1
+    memory_names = ["MemoryFeatureUnavailable", "MemoryRecord", "MemoryStats"]
+    indices = [order.index(n) for n in memory_names]
+    assert all(idx_lang < i < idx_observed for i in indices)
+    assert indices == sorted(indices)
+
+    # SharedMemory falls between SeverityBand and StrandsAdapter.
+    assert order.index("SeverityBand") < order.index("SharedMemory")
+    assert order.index("SharedMemory") < order.index("StrandsAdapter")
+
+    # VectorHit falls between Tier and VertexClient (other PascalCase
+    # entries may now interleave; we only care about the relative order).
+    assert order.index("Tier") < order.index("VectorHit")
+    assert order.index("VectorHit") < order.index("VertexClient")
 
 
 def test_public_surface_exposes_memory_types() -> None:
