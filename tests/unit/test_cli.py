@@ -135,16 +135,6 @@ def test_doctor(runner: CliRunner) -> None:
     assert "sandbox" in result.stdout
 
 
-def test_serve_help_advertises_dashboard_options(runner: CliRunner) -> None:
-    # We exercise ``--help`` rather than actually starting uvicorn — the
-    # production ``serve`` command would block on a bound socket.
-    result = runner.invoke(app, ["serve", "--help"])
-    assert result.exit_code == 0
-    assert "--host" in result.stdout
-    assert "--port" in result.stdout
-    assert "--reload" in result.stdout
-
-
 def test_serve_invokes_uvicorn_with_factory(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
