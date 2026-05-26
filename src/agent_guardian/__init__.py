@@ -63,6 +63,13 @@ from agent_guardian.core.swarm import (
     SwarmObserver,
 )
 from agent_guardian.core.tiering import detect_tier
+from agent_guardian.cost import (
+    PRICE_TABLE,
+    PRICE_TABLE_AS_OF,
+    PriceRow,
+    estimate_scan_cost,
+    lookup_price,
+)
 from agent_guardian.crypto.ed25519_sig import (
     DEFAULT_KEYS_DIR,
     Ed25519Keypair,
@@ -162,6 +169,8 @@ __all__ = [
     "DEFAULT_PBKDF2_ITERATIONS",
     "DEFAULT_SIGNING_SECRET",
     "HMAC_ALGORITHM",
+    "PRICE_TABLE",
+    "PRICE_TABLE_AS_OF",
     "PROBE_CORPUS_VERSION",
     "SCHEMA_VERSION",
     "SIGNATURE_VERSION",
@@ -222,6 +231,7 @@ __all__ = [
     "PAIRStrategy",
     "PdfFeatureUnavailable",
     "PiiRedactor",
+    "PriceRow",
     "PrivilegeAgent",
     "Probe",
     "ProbeValidationError",
@@ -270,6 +280,7 @@ __all__ = [
     "emit_junit",
     "emit_markdown",
     "emit_sarif",
+    "estimate_scan_cost",
     "get_shape",
     "list_shapes",
     "load_all_probes",
@@ -277,6 +288,7 @@ __all__ = [
     "load_probe",
     "load_probes_for_asi",
     "load_probes_from_dir",
+    "lookup_price",
     "register_shape",
     "sign_ed25519",
     "sign_hmac",
