@@ -594,9 +594,120 @@ def verify(path: Path = typer.Argument(..., help="Path to a signed JSON report."
 
 
 @app.command()
-def publish(scan_id: str = typer.Argument(..., help="Scan ID to publish.")) -> None:
-    """Publish a scan to the public leaderboard (M15 — stub)."""
-    typer.echo(f"M15 ships leaderboard publishing. Would publish scan {scan_id}.")
+def publish(
+    scan_id: str = typer.Argument(
+        ...,
+        help="Scan ID (under ~/.agentguardian/scans/) or path to a signed scan.json.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Where to write the redacted payload. Default: alongside the scan.",
+    ),
+) -> None:
+    """Publish a signed scan to the public AgentGuardian leaderboard.
+
+    Today this is a placeholder: the public leaderboard endpoint
+    (``https://agentguardian.ai/api/v1/leaderboard``) is Glacien-edge
+    infrastructure that has not yet been deployed. What the command does
+    *now* still has user value:
+
+    1. Locate and load the scan JSON (by ID or path).
+    2. Verify the M13 HMAC + Ed25519 signatures so we never publish a
+       tampered report.
+    3. Strip transcripts and other PII-prone fields (``transcript_ref``,
+       per-finding ``summary`` is already redacted at emit time).
+    4. Write the redacted, leaderboard-ready payload alongside the scan
+       and print operator-facing instructions for hand submission via the
+       project's GitHub issue tracker.
+
+    When the public endpoint goes live this command will POST the
+    redacted payload instead of printing the manual-submission message.
+    """
+    # 1. Resolve the source path.
+    direct = Path(scan_id)
+    if direct.is_file():
+        scan_path = direct
+    else:
+        scan_path = Path.home() / ".agentguardian" / "scans" / scan_id / "report.json"
+        if not scan_path.is_file():
+            # Some flows persist the raw model dump at ``scan.json`` instead.
+            fallback = Path.home() / ".agentguardian" / "scans" / scan_id / "scan.json"
+            if fallback.is_file():
+                scan_path = fallback
+            else:
+                typer.echo(
+                    f"no scan found for '{scan_id}'. Looked in {scan_path} and {fallback}.",
+                    err=True,
+                )
+                raise typer.Exit(code=EXIT_CONFIG)
+
+    # 2. Verify signatures (M13). We only allow publishing what's signed —
+    #    the leaderboard's integrity story depends on it.
+    from agent_guardian.reports.json_report import verify_signatures
+
+    payload: dict[str, Any]
+    try:
+        payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        typer.echo(f"could not read scan JSON: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from None
+
+    if not isinstance(payload, dict):
+        typer.echo("scan JSON is not a JSON object — refusing to publish.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    if "signatures" not in payload:
+        typer.echo(
+            "scan is not signed — refusing to publish. Re-emit the report "
+            "with the JSON emitter (which signs by default).",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    verify_result = verify_signatures(payload)
+    if not verify_result.ok:
+        typer.echo(
+            "signature verification failed — refusing to publish a possibly "
+            "tampered scan. Details:",
+            err=True,
+        )
+        typer.echo(f"  schema:       {'OK' if verify_result.schema_ok else 'FAIL'}", err=True)
+        typer.echo(f"  HMAC-SHA256:  {'OK' if verify_result.hmac_valid else 'FAIL'}", err=True)
+        typer.echo(f"  Ed25519:      {'OK' if verify_result.ed25519_valid else 'FAIL'}", err=True)
+        raise typer.Exit(code=EXIT_FAIL_UNDER)
+
+    # 3. Strip PII / transcript references. Per-finding ``summary`` is
+    #    already redacted at emit time (json_report.py), but ``transcript_ref``
+    #    can point at on-disk traces that the public leaderboard must never
+    #    see. We also drop the M13 signature block because the redacted
+    #    payload is no longer the originally signed bytes.
+    redacted = {k: v for k, v in payload.items() if k != "signatures"}
+    findings = redacted.get("findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if isinstance(finding, dict):
+                finding.pop("transcript_ref", None)
+                finding.pop("transcript", None)
+                # ``summary`` already passed through PiiRedactor at emit time
+                # but we coerce a hard cap here just in case a custom emitter
+                # ever bypasses redaction.
+                summary = finding.get("summary")
+                if isinstance(summary, str) and len(summary) > 280:
+                    finding["summary"] = summary[:277] + "..."
+
+    # 4. Write the redacted payload + print the manual-submission message.
+    if output is None:
+        output = scan_path.parent / "leaderboard.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(redacted, indent=2, sort_keys=True), encoding="utf-8")
+
+    typer.echo(
+        "Leaderboard endpoint not yet deployed. To submit your scan, file an "
+        "issue at github.com/glacien-technologies/agent-guardian/issues with "
+        "the redacted JSON attached."
+    )
+    typer.echo(f"redacted payload written to: {output}")
 
 
 @telemetry_app.command("enable")

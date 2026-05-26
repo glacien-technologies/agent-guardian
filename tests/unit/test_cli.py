@@ -220,10 +220,150 @@ def test_verify_fails_on_tampered_report(runner: CliRunner, tmp_path: Path) -> N
     assert "FAIL" in result.stdout
 
 
-def test_publish_stub(runner: CliRunner) -> None:
-    result = runner.invoke(app, ["publish", "fake-id"])
-    assert result.exit_code == 0
-    assert "M15" in result.stdout
+def test_publish_missing_scan_errors_out(runner: CliRunner) -> None:
+    """Publishing a non-existent scan must exit with the config exit code."""
+    result = runner.invoke(app, ["publish", "no-such-scan"])
+    assert result.exit_code == EXIT_CONFIG
+    # Error messages go to stderr; ``result.output`` aggregates whichever
+    # stream the command actually wrote to.
+    assert "no scan found" in (result.stderr or result.output)
+
+
+def test_publish_redacts_transcripts_and_prints_manual_message(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """The publish flow must (a) refuse unsigned scans implicitly via verify
+    (b) strip transcript_ref + transcript from each finding, and (c) print
+    the manual-submission placeholder pointing at the GitHub issue tracker."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    scan_path = tmp_path / "report.json"
+    write_json(make_scan(), scan_path)
+
+    # Sprinkle a fake transcript ref into the emitted JSON so we can prove
+    # redaction happens. (The emitter already redacts PII inside ``summary``.)
+    payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    for finding in payload["findings"]:
+        finding["transcript_ref"] = "/tmp/super-secret-trace.json"
+        finding["transcript"] = "USER: my email is leaky@example.com\nBOT: ..."
+    scan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    out_path = tmp_path / "leaderboard.json"
+    result = runner.invoke(app, ["publish", str(scan_path), "--output", str(out_path)])
+
+    # NB: because we mutated the payload above the M13 signature no longer
+    # matches; the command exits with EXIT_FAIL_UNDER in that case. To prove
+    # the happy path we re-emit a fresh signed scan with transcripts:
+    if result.exit_code != EXIT_OK:
+        # Re-sign with the tampered transcripts.
+        from agent_guardian.reports.json_report import sign_payload
+
+        payload = json.loads(scan_path.read_text(encoding="utf-8"))
+        payload.pop("signatures", None)
+        payload["signatures"] = sign_payload(payload)
+        scan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        result = runner.invoke(app, ["publish", str(scan_path), "--output", str(out_path)])
+
+    assert result.exit_code == EXIT_OK, result.stdout
+    assert "Leaderboard endpoint not yet deployed" in result.stdout
+    assert "github.com/glacien-technologies/agent-guardian/issues" in result.stdout
+
+    # Redacted output must not contain transcripts or the original signature.
+    redacted = json.loads(out_path.read_text(encoding="utf-8"))
+    assert "signatures" not in redacted, "signatures must be stripped"
+    for finding in redacted["findings"]:
+        assert "transcript_ref" not in finding, "transcript_ref must be stripped"
+        assert "transcript" not in finding, "transcript must be stripped"
+
+
+def test_publish_rejects_unsigned_scan(runner: CliRunner, tmp_path: Path) -> None:
+    """A scan without ``signatures`` must be refused — we never publish what
+    we cannot prove came from the local install."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    scan_path = tmp_path / "report.json"
+    write_json(make_scan(), scan_path)
+    payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    payload.pop("signatures", None)
+    scan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = runner.invoke(app, ["publish", str(scan_path)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "not signed" in (result.stderr or result.output)
+
+
+def test_publish_rejects_tampered_scan(runner: CliRunner, tmp_path: Path) -> None:
+    """A scan whose signatures don't verify must be refused with exit-1."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    scan_path = tmp_path / "report.json"
+    write_json(make_scan(), scan_path)
+    payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    # Tamper with a scored field — signatures will fail.
+    payload["aivss"] = 0
+    scan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = runner.invoke(app, ["publish", str(scan_path)])
+    assert result.exit_code == EXIT_FAIL_UNDER
+    assert "signature verification failed" in (result.stderr or result.output)
+
+
+def test_publish_rejects_non_object_json(runner: CliRunner, tmp_path: Path) -> None:
+    """A JSON file whose top level is a list (or anything non-object) must be
+    refused before signature verification runs."""
+    scan_path = tmp_path / "report.json"
+    scan_path.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
+    result = runner.invoke(app, ["publish", str(scan_path)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "not a JSON object" in (result.stderr or result.output)
+
+
+def test_publish_resolves_scan_id_to_scan_json_fallback(runner: CliRunner, tmp_path: Path) -> None:
+    """When the scan-id directory has scan.json but not report.json, the
+    publish command must fall back gracefully."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    scan_id = "cli-fallback-test"
+    # The autouse fixture pins HOME to tmp_path so this lands inside the
+    # isolated tree.
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    scan_dir.mkdir(parents=True)
+    write_json(make_scan(), scan_dir / "scan.json")
+
+    result = runner.invoke(app, ["publish", scan_id])
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Leaderboard endpoint not yet deployed" in result.stdout
+    # The redacted payload landed alongside scan.json.
+    assert (scan_dir / "leaderboard.json").is_file()
+
+
+def test_publish_truncates_oversize_finding_summary(runner: CliRunner, tmp_path: Path) -> None:
+    """Any finding whose ``summary`` somehow exceeds 280 chars (custom emitter)
+    must be hard-capped before the redacted payload is written."""
+    from agent_guardian.reports.json_report import sign_payload, write_json
+    from tests.unit._report_fixtures import make_scan
+
+    scan_path = tmp_path / "report.json"
+    write_json(make_scan(), scan_path)
+    payload = json.loads(scan_path.read_text(encoding="utf-8"))
+    long_summary = "A" * 600  # Well above the 280 char cap.
+    payload["findings"][0]["summary"] = long_summary
+    # Re-sign so verify passes.
+    payload.pop("signatures", None)
+    payload["signatures"] = sign_payload(payload)
+    scan_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    out_path = tmp_path / "leaderboard.json"
+    result = runner.invoke(app, ["publish", str(scan_path), "--output", str(out_path)])
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    redacted = json.loads(out_path.read_text(encoding="utf-8"))
+    summary = redacted["findings"][0]["summary"]
+    assert len(summary) <= 280
+    assert summary.endswith("...")
 
 
 # ---------------------------------------------------------------------------
