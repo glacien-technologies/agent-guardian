@@ -26,11 +26,11 @@ agent-guardian serve  # live dashboard at http://localhost:7474
 
 ## Status
 
-Active development, pre-1.0. See [the roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/roadmap.md) for what ships when.
+Active development, pre-1.0. See the [PRD](https://github.com/glacien-technologies/agent-guardian) and the milestone-tracking issues for what ships when.
 
 ## Why we built this
 
-Read the [project rationale](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/why.md) — short version: the agentic-security category will standardise on whichever 0–100 score is published openly first. We want that score to be AIVSS, aligned with the OWASP AIVSS v0.8 working group.
+The agentic-security category will standardise on whichever 0–100 score is published openly first. We want that score to be AIVSS, aligned with the OWASP AIVSS v0.8 working group, so production teams have one number they can track over time and one open framework that maps cleanly to OWASP ASI, MITRE ATLAS, and CSA Agentic-RT categories.
 
 ## Contributing
 
