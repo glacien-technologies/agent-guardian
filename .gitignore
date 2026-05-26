@@ -34,6 +34,10 @@ ENV/
 htmlcov/
 coverage.xml
 .cache/
+.hypothesis/
+
+# --- mkdocs build output ---
+site/
 
 # --- Type checkers / linters ---
 .mypy_cache/
