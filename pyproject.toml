@@ -85,6 +85,8 @@ artifacts = [
   "src/agent_guardian/server/templates/*.html",
   "src/agent_guardian/server/static/*.css",
   "src/agent_guardian/server/static/*.js",
+  # M13 PDF report template (used by WeasyPrint).
+  "src/agent_guardian/reports/templates/pdf/*.jinja",
 ]
 
 [tool.hatch.build.targets.sdist]

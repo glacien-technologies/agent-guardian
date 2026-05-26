@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+{# AgentGuardian PDF report template (PRD §10.2, M13).
+
+   Renders the full scan layout: cover page, executive summary, AIVSS
+   sub-score table, ASI-by-ASI breakdown with findings, and footer
+   appendix. System fonts only (no bundled fonts in M13). #}
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AgentGuardian scan {{ scan.id }}</title>
+    <style>
+      @page {
+        size: Letter;
+        margin: 0.75in 0.75in 1in 0.75in;
+        @bottom-right {
+          content: "AgentGuardian " counter(page) " / " counter(pages);
+          font-family: "Helvetica", "Arial", sans-serif;
+          font-size: 9pt;
+          color: #6b7280;
+        }
+        @bottom-left {
+          content: "Scan {{ scan.id }}";
+          font-family: "Helvetica", "Arial", sans-serif;
+          font-size: 9pt;
+          color: #6b7280;
+        }
+      }
+      @page :first {
+        @bottom-left { content: ""; }
+        @bottom-right { content: ""; }
+      }
+      body {
+        font-family: "Helvetica", "Arial", sans-serif;
+        color: #111827;
+        line-height: 1.45;
+        font-size: 10pt;
+      }
+      h1, h2, h3 { color: #0f172a; margin-top: 1.2em; }
+      h1 { font-size: 22pt; margin-bottom: 0.2em; }
+      h2 { font-size: 14pt; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.2em; }
+      h3 { font-size: 11pt; }
+      .cover {
+        page-break-after: always;
+        height: 9in;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+      }
+      .cover .badge {
+        font-size: 56pt;
+        font-weight: 700;
+        color: {{ band_colour }};
+        margin: 0.2em 0;
+      }
+      .cover .band {
+        font-size: 18pt;
+        color: {{ band_colour }};
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+      }
+      .cover .meta {
+        margin-top: 2em;
+        color: #374151;
+        font-size: 11pt;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1em 0;
+        font-size: 9.5pt;
+      }
+      th, td {
+        text-align: left;
+        padding: 0.45em 0.6em;
+        border-bottom: 1px solid #e5e7eb;
+        vertical-align: top;
+      }
+      th { background: #f9fafb; font-weight: 600; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .sev-critical { color: #991b1b; font-weight: 600; }
+      .sev-high { color: #ef4444; font-weight: 600; }
+      .sev-medium { color: #f59e0b; }
+      .sev-low { color: #16a34a; }
+      .pill {
+        display: inline-block;
+        padding: 0.1em 0.55em;
+        border-radius: 999px;
+        font-size: 9pt;
+        background: #f3f4f6;
+        color: #111827;
+      }
+      .finding {
+        page-break-inside: avoid;
+        margin-bottom: 0.8em;
+        border-left: 3px solid #d1d5db;
+        padding: 0.4em 0.8em;
+      }
+      .finding.crit { border-left-color: #991b1b; }
+      .finding.high { border-left-color: #ef4444; }
+      .finding.med { border-left-color: #f59e0b; }
+      .finding.low { border-left-color: #16a34a; }
+      footer.appendix {
+        margin-top: 2em;
+        font-size: 8.5pt;
+        color: #6b7280;
+      }
+      code, .mono { font-family: "Menlo", "Consolas", monospace; font-size: 9pt; }
+    </style>
+  </head>
+  <body>
+    <section class="cover">
+      <div>
+        <div style="font-size: 14pt; letter-spacing: 0.4em; color: #6b7280;">
+          AGENT&middot;GUARDIAN
+        </div>
+        <div class="badge">{{ scan.aivss }}</div>
+        <div class="band">{{ scan.band.value }}</div>
+        <div class="meta">
+          <div><strong>Scan ID:</strong> <span class="mono">{{ scan.id }}</span></div>
+          <div><strong>Target:</strong> <span class="mono">{{ scan.target_ref }}</span> ({{ scan.target_mode }})</div>
+          <div><strong>Tier:</strong> {{ scan.tier.value }}</div>
+          <div><strong>Generated:</strong> {{ scan.created_at.isoformat() }}</div>
+          <div><strong>Probe library:</strong> {{ scan.probe_library_version }}</div>
+          <div><strong>AIVSS formula:</strong> {{ scan.aivss_formula_version }}</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Executive summary</h2>
+      <p>
+        Scan <span class="mono">{{ scan.id }}</span> finished in
+        {{ "%.2f"|format(scan.duration_seconds) }}s at a cost of
+        ${{ "%.4f"|format(scan.cost_usd) }}. The target was probed with the
+        bundled AgentGuardian corpus and scored
+        <strong>{{ scan.aivss }} / 100</strong> ({{ scan.band.value }}).
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th class="num">Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set summary = scan.findings_summary() %}
+          <tr><td class="sev-critical">Critical</td><td class="num">{{ summary['critical'] }}</td></tr>
+          <tr><td class="sev-high">High</td><td class="num">{{ summary['high'] }}</td></tr>
+          <tr><td class="sev-medium">Medium</td><td class="num">{{ summary['medium'] }}</td></tr>
+          <tr><td class="sev-low">Low</td><td class="num">{{ summary['low'] }}</td></tr>
+          <tr><td><strong>Total</strong></td><td class="num"><strong>{{ scan.findings|length }}</strong></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>AIVSS sub-scores</h2>
+      <table>
+        <thead>
+          <tr><th>Sub-score</th><th class="num">Value</th></tr>
+        </thead>
+        <tbody>
+          {% for key, value in scan.sub_scores.items() %}
+          <tr>
+            <td><span class="mono">{{ key }}</span></td>
+            <td class="num">{{ "%.1f"|format(value) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>OWASP ASI breakdown</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ASI</th>
+            <th>Description</th>
+            <th class="num">Score</th>
+            <th class="num">Findings</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in asi_rows %}
+          <tr>
+            <td><span class="mono">{{ row.id }}</span></td>
+            <td>{{ row.description }}</td>
+            <td class="num">{{ "%.1f"|format(row.score) }}</td>
+            <td class="num">{{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    {% for row in asi_rows if row.findings %}
+    <section>
+      <h2>{{ row.id }} &mdash; {{ row.description }}</h2>
+      {% for finding in row.findings %}
+      <div class="finding {{ finding.severity.value[:4] }}">
+        <h3>
+          <span class="sev-{{ finding.severity.value }}">[{{ finding.severity.value|upper }}]</span>
+          <span class="mono">{{ finding.probe_id }}</span> &mdash; {{ finding.summary }}
+        </h3>
+        <p>
+          <span class="pill">CSA: {{ finding.csa_category.value }}</span>
+          {% for technique in finding.mitre_atlas %}
+          <span class="pill">ATLAS: {{ technique }}</span>
+          {% endfor %}
+          <span class="pill">conf {{ "%.2f"|format(finding.confidence) }}</span>
+          <span class="pill">{{ finding.attempt_count }} attempt(s)</span>
+          <span class="pill">success: {{ finding.success }}</span>
+        </p>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+
+    <footer class="appendix">
+      <h2>Appendix A &mdash; Versioning</h2>
+      <p>
+        Probe library: <code>{{ scan.probe_library_version }}</code>.
+        AIVSS formula: <code>{{ scan.aivss_formula_version }}</code>.
+        Package: <code>{{ scan.package_version }}</code>.
+      </p>
+      <h2>Appendix B &mdash; Signatures</h2>
+      <p>
+        This PDF is a visualisation of the canonical JSON report. Use
+        <code>agent-guardian verify &lt;report.json&gt;</code> to verify
+        the HMAC-SHA256 and Ed25519 signatures on the source artefact.
+      </p>
+    </footer>
+  </body>
+</html>
