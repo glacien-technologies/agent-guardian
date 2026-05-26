@@ -27,3 +27,5 @@ repos:
           - pydantic>=2.9
           - types-PyYAML
           - typer>=0.15
+          - httpx>=0.28
+          - structlog>=24.4
