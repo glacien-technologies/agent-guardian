@@ -551,9 +551,38 @@ def last_score() -> None:
 
 
 @app.command()
-def serve() -> None:
-    """Start the dashboard server (placeholder — M12 ships the dashboard)."""
-    typer.echo("M12 ships the dashboard. Until then use `agent-guardian scan` directly.")
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Bind host. Default 127.0.0.1 (loopback only).",
+    ),
+    port: int = typer.Option(7474, "--port", help="Bind port."),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
+) -> None:
+    """Start the local dashboard at http://<host>:<port>."""
+    import uvicorn
+
+    from agent_guardian.server.app import create_app
+
+    if reload:
+        # uvicorn's reload mode requires an import string, not a factory.
+        uvicorn.run(
+            "agent_guardian.server.app:create_app",
+            host=host,
+            port=port,
+            reload=True,
+            factory=True,
+            log_level="info",
+        )
+        return
+    uvicorn.run(
+        create_app,
+        host=host,
+        port=port,
+        factory=True,
+        log_level="info",
+    )
 
 
 @app.command()

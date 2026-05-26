@@ -81,6 +81,10 @@ packages = ["src/agent_guardian"]
 artifacts = [
   "src/agent_guardian/probes/**/*.yaml",
   "src/agent_guardian/probes/_meta/*.yaml",
+  # M12 dashboard assets — templates and static files.
+  "src/agent_guardian/server/templates/*.html",
+  "src/agent_guardian/server/static/*.css",
+  "src/agent_guardian/server/static/*.js",
 ]
 
 [tool.hatch.build.targets.sdist]

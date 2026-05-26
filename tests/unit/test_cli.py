@@ -135,10 +135,59 @@ def test_doctor(runner: CliRunner) -> None:
     assert "sandbox" in result.stdout
 
 
-def test_serve_placeholder(runner: CliRunner) -> None:
-    result = runner.invoke(app, ["serve"])
+def test_serve_help_advertises_dashboard_options(runner: CliRunner) -> None:
+    # We exercise ``--help`` rather than actually starting uvicorn — the
+    # production ``serve`` command would block on a bound socket.
+    result = runner.invoke(app, ["serve", "--help"])
     assert result.exit_code == 0
-    assert "M12" in result.stdout
+    assert "--host" in result.stdout
+    assert "--port" in result.stdout
+    assert "--reload" in result.stdout
+
+
+def test_serve_invokes_uvicorn_with_factory(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``agent-guardian serve`` must hand the app factory to uvicorn."""
+    captured: dict[str, object] = {}
+
+    def fake_run(target: object, **kwargs: object) -> None:
+        captured["target"] = target
+        captured["kwargs"] = kwargs
+
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    result = runner.invoke(app, ["serve", "--host", "127.0.0.1", "--port", "9999"])
+    assert result.exit_code == 0
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["host"] == "127.0.0.1"
+    assert kwargs["port"] == 9999
+    assert kwargs["factory"] is True
+
+
+def test_serve_reload_passes_import_string(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--reload`` requires uvicorn's import-string form, not a callable."""
+    captured: dict[str, object] = {}
+
+    def fake_run(target: object, **kwargs: object) -> None:
+        captured["target"] = target
+        captured["kwargs"] = kwargs
+
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    result = runner.invoke(app, ["serve", "--reload"])
+    assert result.exit_code == 0
+    # Reload path must hand uvicorn the import-string form, not a callable.
+    assert captured["target"] == "agent_guardian.server.app:create_app"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["reload"] is True
+    assert kwargs["factory"] is True
 
 
 def test_verify_stub_on_missing_path(runner: CliRunner, tmp_path: Path) -> None:

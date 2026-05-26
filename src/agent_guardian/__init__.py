@@ -107,6 +107,7 @@ from agent_guardian.probes.loader import (
     load_all_probes,
     load_probes_for_asi,
 )
+from agent_guardian.server import ScanStore, create_app
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -185,6 +186,7 @@ __all__ = [
     "SandboxPolicy",
     "SandboxViolation",
     "Scan",
+    "ScanStore",
     "Severity",
     "SeverityBand",
     "SharedMemory",
@@ -214,6 +216,7 @@ __all__ = [
     "band_for_score",
     "colour_for_band",
     "compute_aivss",
+    "create_app",
     "detect_tier",
     "get_shape",
     "list_shapes",
