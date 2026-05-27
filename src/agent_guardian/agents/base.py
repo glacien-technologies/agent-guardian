@@ -412,6 +412,10 @@ class AsiAgent(ABC):
         turns = 0
         terminated_by: TerminationReason = "exhausted"
         error: str | None = None
+        # Track which seeds we've already announced via write_attempted_seed
+        # for this run so we don't churn JSONL when a strategy revisits the
+        # same seed.
+        seeds_announced: set[str] = set()
 
         while True:
             # Budget / wall-time pre-check before the strategy LLM call.
@@ -473,6 +477,61 @@ class AsiAgent(ABC):
                     },
                 )
             )
+
+            # Persist every turn to SharedMemory as a structured reflection so
+            # downstream tooling (coverage report, forensic replay) can see
+            # ALL attack attempts — not only the ones the judge labelled
+            # "fail". Embedding is skipped: the hash-fallback embedder is not
+            # semantically meaningful and real semantic recall needs the
+            # ``[full]`` extra (FAISS + sentence-transformers). Vector search
+            # is not needed for forensic replay.
+            strategy_name = getattr(strategy, "name", strategy.__class__.__name__)
+            seed_id = (
+                str(result.metadata.get("seed_id"))
+                if result.metadata and "seed_id" in result.metadata
+                else None
+            )
+            turn_record = {
+                "agent": self.name or type(self).__name__,
+                "asi_category": self.asi_category.value,
+                "mitre_techniques": [str(t) for t in self.default_mitre_techniques],
+                "csa_category": self.default_csa_category.value,
+                "turn": turns,
+                "strategy": strategy_name,
+                "prompt": result.text,
+                "rationale": getattr(result, "rationale", ""),
+                "target_response": target_response,
+                "verdict": verdict.verdict,
+                "confidence": verdict.confidence,
+                "reasoning": verdict.reasoning,
+                "strategy_metadata": dict(result.metadata or {}),
+                "seed_id": seed_id,
+            }
+            try:
+                await memory.write_reflection(
+                    self.name or type(self).__name__,
+                    json.dumps(turn_record),
+                    embed=False,
+                )
+            except Exception as exc:  # pragma: no cover — defensive
+                terminated_by = "error"
+                error = f"memory.write_reflection raised {type(exc).__name__}: {exc}"
+                break
+
+            # Record the seed-id so the dedup index in SharedMemory knows
+            # this category-attempt was tried. Strategies that do not
+            # propagate a seed_id metadata key still get a deterministic
+            # synthetic id (first 64 chars of the prompt) so coverage tools
+            # can answer "did this scan touch any of the ASI-XX-NNN seeds?".
+            seed_key = seed_id or result.text[:64]
+            if seed_key and seed_key not in seeds_announced:
+                seeds_announced.add(seed_key)
+                try:
+                    await memory.write_attempted_seed(self.asi_category, seed_key)
+                except Exception as exc:  # pragma: no cover — defensive
+                    terminated_by = "error"
+                    error = f"memory.write_attempted_seed raised {type(exc).__name__}: {exc}"
+                    break
 
             if verdict.verdict == "fail":
                 finding = self._build_finding(
