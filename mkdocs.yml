@@ -41,6 +41,7 @@ nav:
       - Framework: adapters/framework.md
   - API Reference: api-reference.md
   - Ethics: ethics.md
+  - Glossary: glossary.md
   - Roadmap: roadmap.md
 
 markdown_extensions:

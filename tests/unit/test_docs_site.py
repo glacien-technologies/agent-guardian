@@ -129,6 +129,14 @@ def test_aivss_formula_page_has_worked_example() -> None:
     assert "83" in body  # the documented hand-computed score
 
 
+def test_glossary_exists_and_lists_aivss_term() -> None:
+    glossary = (REPO_ROOT / "docs" / "glossary.md").read_text(encoding="utf-8")
+    assert "AIVSS" in glossary
+    assert "ASI" in glossary
+    assert "PAIR" in glossary
+    assert "MITRE ATLAS" in glossary
+
+
 # --------------------------------------------------------------------- readme
 
 
