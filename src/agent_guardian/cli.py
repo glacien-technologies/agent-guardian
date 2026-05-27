@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import sys
 import uuid
@@ -53,6 +54,7 @@ from agent_guardian.llm import (
     OpenAIClient,
     StubScript,
 )
+from agent_guardian.logging_setup import configure_logging
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import (
@@ -1094,10 +1096,20 @@ def main(
     ),
 ) -> None:
     """AgentGuardian Open — eleven-agent adversarial swarm CLI."""
+    # Wire centralised logging FIRST so .env loading + every sub-command
+    # see structured logs. Default level is INFO; operators bump to DEBUG
+    # via AGENT_GUARDIAN_LOG_LEVEL=DEBUG when they need the full review
+    # trace. See ``agent_guardian.logging_setup``.
+    configure_logging()
     # Project-local .env auto-loading. Fires for every sub-command so
     # ``agent-guardian scan`` / ``doctor`` / ``serve`` all see the keys.
     # See ``_try_load_dotenv`` for the (deliberately conservative) lookup.
     _try_load_dotenv()
+    logging.getLogger(__name__).debug(
+        "CLI initialised: log level=%s, version=%s",
+        logging.getLevelName(logging.getLogger().getEffectiveLevel()),
+        __version__,
+    )
 
 
 if __name__ == "__main__":

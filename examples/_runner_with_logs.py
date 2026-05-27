@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -30,14 +29,14 @@ sys.path = [p for p in sys.path if Path(p).resolve() != _HERE]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Wire logging to stderr at INFO (DEBUG is too noisy; let users bump via env)
-LOG_LEVEL = os.environ.get("AG_RUNNER_LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    stream=sys.stderr,
-    format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)-44s %(message)s",
-    datefmt="%H:%M:%S",
-)
+# Wire logging via the centralised setup so this runner honours the same
+# AGENT_GUARDIAN_LOG_LEVEL env var the CLI uses. The legacy
+# AG_RUNNER_LOG_LEVEL knob is still respected for backwards compatibility
+# but AGENT_GUARDIAN_LOG_LEVEL takes precedence when both are set.
+from agent_guardian.logging_setup import configure_logging  # noqa: E402
+
+_runner_level = os.environ.get("AGENT_GUARDIAN_LOG_LEVEL") or os.environ.get("AG_RUNNER_LOG_LEVEL")
+configure_logging(level=_runner_level, force=True)
 
 # NOTE: deliberately imported AFTER sys.path/dotenv setup above. E402 silenced
 # because these imports depend on the .env-loaded GEMINI_API_KEY and on
