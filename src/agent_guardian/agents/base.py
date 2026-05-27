@@ -687,6 +687,14 @@ class AsiAgent(ABC):
                 )
 
         combined_seeds = list(standard_seeds) + goal_specific_seeds
+        if goal_specific_seeds:
+            _LOG.info(
+                "agent %s: combined seeds standard=%d goal_specific=%d total=%d",
+                self.name or type(self).__name__,
+                len(standard_seeds),
+                len(goal_specific_seeds),
+                len(combined_seeds),
+            )
         ctx = StrategyContext(
             attacker_llm=self.attacker_llm,
             attacker_model=self.attacker_model,

@@ -39,7 +39,6 @@ unconditionally and lets each agent's :meth:`is_applicable` decide.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import random
@@ -374,6 +373,12 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     async def _phase_recon(self) -> None:
+        _LOG.info(
+            "phase recon: starting (scan_id=%s, wall_budget=%.1fs)",
+            self.config.scan_id,
+            self.config.recon_wall_seconds,
+        )
+        recon_started = time.monotonic()
         self._emit(SwarmEvent(kind="recon_start", timestamp=_utcnow(), agent="recon-agent"))
         recon = ReconAgent(
             attacker_llm=self.attacker_llm,
@@ -395,9 +400,16 @@ class SwarmCommander:
                 timeout=self.config.recon_wall_seconds,
             )
         except asyncio.TimeoutError:
-            _LOG.warning("recon timed out after %.1fs", self.config.recon_wall_seconds)
+            _LOG.warning(
+                "recon timed out after %.1fs — using minimal fingerprint",
+                self.config.recon_wall_seconds,
+            )
         except Exception as exc:
-            _LOG.warning("recon failed: %s: %s", type(exc).__name__, exc)
+            _LOG.warning(
+                "recon failed (%s: %s) — using minimal fingerprint",
+                type(exc).__name__,
+                exc,
+            )
 
         if recon_report is not None:
             self._agent_reports.append(recon_report)
@@ -421,6 +433,11 @@ class SwarmCommander:
                 },
             )
         )
+        _LOG.info(
+            "phase recon: done (duration=%.1fs, notes=%r)",
+            time.monotonic() - recon_started,
+            fingerprint.notes[:80],
+        )
 
     # ------------------------------------------------------------------
     # Spec §6 — Commander goal-decomposition (LLM)
@@ -441,9 +458,15 @@ class SwarmCommander:
         still runs with sensible defaults.
         """
         if self.config.target_goal is None:
+            _LOG.debug("phase commander-decompose: skipped (no target_goal supplied)")
             return
         if self.commander_llm is None:  # pragma: no cover — defensive
+            _LOG.debug("phase commander-decompose: skipped (commander_llm is None)")
             return
+        _LOG.info(
+            "phase commander-decompose: starting (goal[:80]=%r)",
+            self.config.target_goal[:80],
+        )
 
         fingerprint = self._fingerprint or self._minimal_fingerprint()
         coverage = self._asi_coverage_snapshot()
@@ -486,6 +509,15 @@ class SwarmCommander:
             return
 
         self._swarm_brief = brief
+        per_agent_summary = {
+            name: (b.priority_weight, b.n_scenarios_requested)
+            for name, b in brief.agent_briefs.items()
+        }
+        _LOG.info(
+            "phase commander-decompose: done (n_agent_briefs=%d, per_agent[weight,n]=%s)",
+            len(brief.agent_briefs),
+            per_agent_summary,
+        )
 
     def _asi_coverage_snapshot(self) -> dict[str, int]:
         """Per-ASI finding count snapshot for the Commander prompt."""
@@ -493,7 +525,13 @@ class SwarmCommander:
         for cat in AsiCategory:
             try:
                 snapshot[cat.value] = len(self.memory.findings_by_asi(cat))
-            except Exception:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover — defensive
+                _LOG.debug(
+                    "asi coverage snapshot: findings_by_asi(%s) raised %s: %s — assuming 0",
+                    cat.value,
+                    type(exc).__name__,
+                    exc,
+                )
                 snapshot[cat.value] = 0
         return snapshot
 
@@ -534,7 +572,13 @@ class SwarmCommander:
         """
         try:
             return self.target.fingerprint()
-        except Exception:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover — defensive
+            _LOG.warning(
+                "minimal fingerprint: target.fingerprint() raised %s: %s — "
+                "synthesising all-false stub",
+                type(exc).__name__,
+                exc,
+            )
             return TargetFingerprint(
                 mode=self.target.mode,
                 ref="<unknown>",
@@ -554,6 +598,12 @@ class SwarmCommander:
         static slate; the LLM-driven decomposition lands later.
         """
         assert fingerprint is not None
+        _LOG.info(
+            "phase decompose: starting (candidate_classes=%d, max_parallel=%d, total_tokens=%d)",
+            len(_ASI_AGENT_CLASSES),
+            self.config.max_parallel_agents,
+            self.config.total_tokens,
+        )
         agents: list[AsiAgent] = []
         per_agent_tokens = max(1, self.config.total_tokens // (len(_ASI_AGENT_CLASSES) + 3))
         # Each ASI agent gets ~150k tokens by default (per PRD §14.2). We
@@ -581,6 +631,16 @@ class SwarmCommander:
             if not agent.is_applicable(fingerprint):
                 skipped_name = agent.name or type(agent).__name__
                 reason = "not applicable for fingerprint"
+                _LOG.info(
+                    "agent skipped: %s asi=%s (reason: %s, fp.has_tools=%s, "
+                    "fp.has_memory=%s, fp.is_multi_agent=%s)",
+                    skipped_name,
+                    agent.asi_category.value,
+                    reason,
+                    fingerprint.has_tools,
+                    fingerprint.has_memory,
+                    fingerprint.is_multi_agent,
+                )
                 self._emit(
                     SwarmEvent(
                         kind="agent_skipped",
@@ -610,7 +670,14 @@ class SwarmCommander:
             agents.append(agent)
         # Respect max_parallel_agents (10 is the natural cap; lower values
         # serialise the tail).
-        return agents[: max(1, self.config.max_parallel_agents)]
+        capped = agents[: max(1, self.config.max_parallel_agents)]
+        _LOG.info(
+            "phase decompose: done (applicable=%d, capped_to=%d, per_agent_tokens=%d)",
+            len(agents),
+            len(capped),
+            per_agent_tokens,
+        )
+        return capped
 
     # ------------------------------------------------------------------
     # Phase 3 + 4 — Parallel launch with concurrent checkpoint
@@ -618,8 +685,18 @@ class SwarmCommander:
 
     async def _phase_parallel(self, agents: list[AsiAgent]) -> None:
         if not agents:
+            _LOG.info("phase parallel: no applicable agents — skipping")
             return
 
+        _LOG.info(
+            "phase parallel: starting %d agents (checkpoint every %.1fs, "
+            "taskgroup=%s, overall_wall_budget=%.1fs)",
+            len(agents),
+            self.config.checkpoint_interval_seconds,
+            _supports_taskgroup(),
+            self.config.overall_wall_seconds,
+        )
+        parallel_started = time.monotonic()
         checkpoint_task = asyncio.create_task(self._checkpoint_loop(), name="swarm-checkpoint")
         try:
             if _supports_taskgroup():
@@ -628,8 +705,22 @@ class SwarmCommander:
                 await self._run_gather(agents)
         finally:
             checkpoint_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            try:
                 await checkpoint_task
+            except asyncio.CancelledError:
+                _LOG.debug("phase parallel: checkpoint task cancelled cleanly")
+            except Exception as exc:
+                _LOG.warning(
+                    "phase parallel: checkpoint task raised on shutdown (%s: %s)",
+                    type(exc).__name__,
+                    exc,
+                )
+        _LOG.info(
+            "phase parallel: done (%d agents, duration=%.1fs, last_decision=%s)",
+            len(agents),
+            time.monotonic() - parallel_started,
+            self._final_decision.value,
+        )
 
     async def _run_taskgroup(self, agents: list[AsiAgent]) -> None:
         # Python 3.11+ path. We resolve the class via attribute access so
@@ -734,10 +825,12 @@ class SwarmCommander:
                     )
                 )
                 if decision is CheckpointDecision.EARLY_STOP:
+                    _LOG.info("checkpoint: EARLY_STOP triggered — cancelling remaining agents")
                     self._cancel_event.set()
                     return
                 # TODO(v1.1): RE_TASK / ESCALATE_JUDGE wiring lands later.
         except asyncio.CancelledError:
+            _LOG.debug("checkpoint loop: cancelled by parent task")
             return
 
     def _checkpoint(self) -> CheckpointDecision:
@@ -754,6 +847,12 @@ class SwarmCommander:
 
         # Need at least three samples to evaluate variance.
         if len(self._aivss_window) < 3:
+            _LOG.info(
+                "checkpoint: aivss=%d decision=continue (warming up, window=%d/3, findings=%d)",
+                provisional,
+                len(self._aivss_window),
+                current_findings,
+            )
             return CheckpointDecision.CONTINUE
 
         variance = _variance(self._aivss_window)
@@ -761,7 +860,23 @@ class SwarmCommander:
             now - self._last_finding_seen_at
         ) >= self.config.checkpoint_interval_seconds
         if variance < self.config.early_stop_variance_threshold and no_recent_findings:
+            _LOG.info(
+                "checkpoint: aivss=%d decision=early_stop (variance=%.2f<%.2f, "
+                "no_recent_findings=True, findings=%d)",
+                provisional,
+                variance,
+                self.config.early_stop_variance_threshold,
+                current_findings,
+            )
             return CheckpointDecision.EARLY_STOP
+        _LOG.info(
+            "checkpoint: aivss=%d decision=continue (variance=%.2f, "
+            "no_recent_findings=%s, findings=%d)",
+            provisional,
+            variance,
+            no_recent_findings,
+            current_findings,
+        )
         return CheckpointDecision.CONTINUE
 
     def _compute_provisional_aivss(self) -> int:
@@ -789,16 +904,22 @@ class SwarmCommander:
         """
         remaining = max(0, completed.budget.tokens_remaining)
         if remaining <= 0:
+            _LOG.debug(
+                "budget donate: %s exhausted its tokens — no donation",
+                completed.name or type(completed).__name__,
+            )
             return
         # Pick the ASI category with the fewest findings as the donor target.
         finding_counts = {cat: len(self.memory.findings_by_asi(cat)) for cat in AsiCategory}
         # Pick the lowest count (ties broken by AsiCategory enum order).
         target_cat = min(finding_counts.keys(), key=lambda c: finding_counts[c])
         _LOG.debug(
-            "swarm budget donation: %d tokens from %s -> %s",
-            remaining,
+            "budget donate: from=%s to=%s tokens=%d (target_asi_findings=%d, "
+            "reason=lowest-coverage)",
             completed.name or type(completed).__name__,
             target_cat.value,
+            remaining,
+            finding_counts[target_cat],
         )
 
     # ------------------------------------------------------------------
@@ -806,6 +927,11 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     async def _phase_finalise(self) -> Scan:
+        _LOG.info(
+            "phase finalise: starting (findings=%d, agent_reports=%d)",
+            len(self.memory.all_findings()),
+            len(self._agent_reports),
+        )
         findings = list(self.memory.all_findings())
         tier = self._effective_tier()
         result: AivssResult = compute_aivss(findings, probes=[], tier=tier)
@@ -877,6 +1003,19 @@ class SwarmCommander:
                     "duration_seconds": duration,
                 },
             )
+        )
+        _LOG.info(
+            "aivss final: score=%d band=%s penalty=%.2f sub_scores=%s "
+            "tier=%s findings=%d duration=%.1fs cost_usd=%.4f tokens=%d",
+            result.score,
+            result.band.value,
+            result.penalty,
+            {k: round(v, 1) for k, v in sub_scores.items()},
+            tier.value,
+            len(findings),
+            duration,
+            cost_usd,
+            tokens_total,
         )
         return scan
 
