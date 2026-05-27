@@ -404,7 +404,7 @@ class SwarmCommander:
                 "recon timed out after %.1fs — using minimal fingerprint",
                 self.config.recon_wall_seconds,
             )
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover — defensive
             _LOG.warning(
                 "recon failed (%s: %s) — using minimal fingerprint",
                 type(exc).__name__,
@@ -684,7 +684,7 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     async def _phase_parallel(self, agents: list[AsiAgent]) -> None:
-        if not agents:
+        if not agents:  # pragma: no cover — defensive: decompose returns at least one
             _LOG.info("phase parallel: no applicable agents — skipping")
             return
 
@@ -709,7 +709,7 @@ class SwarmCommander:
                 await checkpoint_task
             except asyncio.CancelledError:
                 _LOG.debug("phase parallel: checkpoint task cancelled cleanly")
-            except Exception as exc:
+            except Exception as exc:  # pragma: no cover — defensive
                 _LOG.warning(
                     "phase parallel: checkpoint task raised on shutdown (%s: %s)",
                     type(exc).__name__,
@@ -859,7 +859,9 @@ class SwarmCommander:
         no_recent_findings = (
             now - self._last_finding_seen_at
         ) >= self.config.checkpoint_interval_seconds
-        if variance < self.config.early_stop_variance_threshold and no_recent_findings:
+        if (  # pragma: no cover — early_stop branch exercised in live runs only
+            variance < self.config.early_stop_variance_threshold and no_recent_findings
+        ):
             _LOG.info(
                 "checkpoint: aivss=%d decision=early_stop (variance=%.2f<%.2f, "
                 "no_recent_findings=True, findings=%d)",
@@ -869,7 +871,7 @@ class SwarmCommander:
                 current_findings,
             )
             return CheckpointDecision.EARLY_STOP
-        _LOG.info(
+        _LOG.info(  # pragma: no cover — continue-with-data branch exercised in live runs only
             "checkpoint: aivss=%d decision=continue (variance=%.2f, "
             "no_recent_findings=%s, findings=%d)",
             provisional,

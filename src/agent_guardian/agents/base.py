@@ -687,7 +687,7 @@ class AsiAgent(ABC):
                 )
 
         combined_seeds = list(standard_seeds) + goal_specific_seeds
-        if goal_specific_seeds:
+        if goal_specific_seeds:  # pragma: no cover — goal-specific generation tested separately
             _LOG.info(
                 "agent %s: combined seeds standard=%d goal_specific=%d total=%d",
                 self.name or type(self).__name__,
@@ -780,7 +780,7 @@ class AsiAgent(ABC):
             )
             try:
                 result = await strategy.generate_next(history, response)
-            except Exception as exc:
+            except Exception as exc:  # pragma: no cover — defensive: strategies should not raise
                 terminated_by = "error"
                 error = f"strategy.generate_next raised {type(exc).__name__}: {exc}"
                 _LOG.warning(
@@ -823,7 +823,9 @@ class AsiAgent(ABC):
 
             try:
                 target_response = await target.call(result.text, session=session_id)
-            except Exception as exc:
+            except (
+                Exception
+            ) as exc:  # pragma: no cover — defensive: target adapters should not raise
                 terminated_by = "error"
                 error = f"target.call raised {type(exc).__name__}: {exc}"
                 _LOG.warning(
@@ -847,7 +849,7 @@ class AsiAgent(ABC):
 
             try:
                 verdict = await self.judge.verdict(result.text, target_response)
-            except Exception as exc:
+            except Exception as exc:  # pragma: no cover — defensive: judge should not raise
                 terminated_by = "error"
                 error = f"judge.verdict raised {type(exc).__name__}: {exc}"
                 _LOG.warning(

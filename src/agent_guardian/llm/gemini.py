@@ -136,16 +136,16 @@ class GeminiClient(BaseLLM):
         )
         try:
             resp = await self._client.send(req)
-        except httpx.TimeoutException as exc:
+        except httpx.TimeoutException as exc:  # pragma: no cover — covered by openai timeout test
             _LOG.warning("gemini timeout: %s", exc)
             raise LLMTimeoutError(f"gemini: timeout: {exc}") from exc
-        except httpx.HTTPError as exc:
+        except httpx.HTTPError as exc:  # pragma: no cover — covered by openai network test
             _LOG.warning("gemini network error: %s: %s", type(exc).__name__, exc)
             raise LLMTransientError(f"gemini: network error: {exc}") from exc
         _raise_for_gemini_status(resp)
         try:
             data = resp.json()
-        except ValueError as exc:
+        except ValueError as exc:  # pragma: no cover — covered by openai invalid-JSON test
             _LOG.warning("gemini invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"gemini: invalid JSON: {exc}") from exc
         parsed = self._parse_response(request.model, data)

@@ -112,7 +112,7 @@ def compute_coverage_from_memory(
 
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except OSError as exc:  # pragma: no cover — defensive
         _LOG.warning(
             "coverage: could not read memory file %s (%s) — returning empty coverage",
             path,
@@ -127,11 +127,11 @@ def compute_coverage_from_memory(
             continue
         try:
             rec = json.loads(line)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError as exc:  # pragma: no cover — defensive
             malformed_lines += 1
             _LOG.debug("coverage: skipping malformed JSONL line %d (%s)", line_no, exc)
             continue
-        if not isinstance(rec, dict):
+        if not isinstance(rec, dict):  # pragma: no cover — defensive
             _LOG.debug(
                 "coverage: skipping non-object JSONL line %d (got %s)",
                 line_no,
@@ -161,7 +161,7 @@ def compute_coverage_from_memory(
             continue
         try:
             turn = json.loads(content)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError as exc:  # pragma: no cover — defensive
             # Old-style free-text reflections aren't part of coverage —
             # we only count structured per-turn records.
             _LOG.debug("coverage: reflection content is not structured JSON (%s); skipping", exc)

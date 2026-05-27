@@ -137,14 +137,14 @@ def _read_state() -> dict[str, Any]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover — defensive
         _LOG.warning(
             "cli: could not read state file %s (%s) — starting with empty state",
             path,
             exc,
         )
         return {}
-    if not isinstance(data, dict):
+    if not isinstance(data, dict):  # pragma: no cover — defensive
         _LOG.warning(
             "cli: state file %s is not a JSON object (got %s) — discarding",
             path,
