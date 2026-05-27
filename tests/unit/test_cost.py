@@ -32,8 +32,8 @@ def test_price_table_as_of_is_string() -> None:
 
 def test_price_table_rows_have_non_negative_prices() -> None:
     for row in PRICE_TABLE:
-        assert row.input_per_1k >= 0.0, f"{row} has negative input price"
-        assert row.output_per_1k >= 0.0, f"{row} has negative output price"
+        assert row.input_per_1m >= 0.0, f"{row} has negative input price"
+        assert row.output_per_1m >= 0.0, f"{row} has negative output price"
 
 
 def test_price_table_rows_are_frozen() -> None:
@@ -42,19 +42,19 @@ def test_price_table_rows_are_frozen() -> None:
     row = PRICE_TABLE[0]
     with pytest.raises(FrozenInstanceError):
         # Frozen dataclass — mutation raises.
-        row.input_per_1k = 999.99  # type: ignore[misc]
+        row.input_per_1m = 999.99  # type: ignore[misc]
 
 
 def test_stub_provider_is_free() -> None:
     row = lookup_price("stub")
-    assert row.input_per_1k == 0.0
-    assert row.output_per_1k == 0.0
+    assert row.input_per_1m == 0.0
+    assert row.output_per_1m == 0.0
 
 
 def test_ollama_provider_is_free() -> None:
     row = lookup_price("ollama:llama3.1:8b")
-    assert row.input_per_1k == 0.0
-    assert row.output_per_1k == 0.0
+    assert row.input_per_1m == 0.0
+    assert row.output_per_1m == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +66,8 @@ def test_lookup_exact_provider_colon_model() -> None:
     row = lookup_price("openai:gpt-4o-mini")
     assert row.provider == "openai"
     assert row.model == "gpt-4o-mini"
-    assert row.input_per_1k == pytest.approx(0.150)
-    assert row.output_per_1k == pytest.approx(0.60)
+    assert row.input_per_1m == pytest.approx(0.150)
+    assert row.output_per_1m == pytest.approx(0.60)
 
 
 def test_lookup_bare_model_name() -> None:
@@ -84,22 +84,22 @@ def test_lookup_gemini_31_pro_preview_uses_table_price() -> None:
     """The flagship 3.1 Pro Preview SKU resolves via the AI Studio rows."""
     row = lookup_price("gemini:gemini-3.1-pro-preview")
     assert row.provider == "gemini"
-    assert row.input_per_1k == pytest.approx(1.250)
-    assert row.output_per_1k == pytest.approx(10.000)
+    assert row.input_per_1m == pytest.approx(1.250)
+    assert row.output_per_1m == pytest.approx(10.000)
 
 
 def test_lookup_gemini_35_flash_table_price() -> None:
     row = lookup_price("gemini:gemini-3.5-flash")
     assert row.provider == "gemini"
-    assert row.input_per_1k == pytest.approx(0.300)
-    assert row.output_per_1k == pytest.approx(2.500)
+    assert row.input_per_1m == pytest.approx(0.300)
+    assert row.output_per_1m == pytest.approx(2.500)
 
 
 def test_lookup_gemini_31_flash_lite_table_price() -> None:
     row = lookup_price("gemini:gemini-3.1-flash-lite")
     assert row.provider == "gemini"
-    assert row.input_per_1k == pytest.approx(0.075)
-    assert row.output_per_1k == pytest.approx(0.300)
+    assert row.input_per_1m == pytest.approx(0.075)
+    assert row.output_per_1m == pytest.approx(0.300)
 
 
 def test_lookup_gemini_heuristic_routes_to_gemini_provider() -> None:
@@ -107,7 +107,7 @@ def test_lookup_gemini_heuristic_routes_to_gemini_provider() -> None:
     row = lookup_price("gemini-future-99")
     assert row.provider == "gemini"
     # Unknown specific model -> fallback rate is positive.
-    assert row.input_per_1k > 0
+    assert row.input_per_1m > 0
 
 
 def test_price_table_has_six_gemini_rows() -> None:
@@ -128,26 +128,26 @@ def test_lookup_gpt_prefix_routes_to_openai() -> None:
     row = lookup_price("gpt-future-7")
     assert row.provider == "openai"
     # Unknown specific model -> fallback rate is positive.
-    assert row.input_per_1k > 0
+    assert row.input_per_1m > 0
 
 
 def test_lookup_unknown_model_uses_documented_default() -> None:
     row = lookup_price("totally-unknown-model")
     assert row.provider == "unknown"
     # Documented as non-zero default.
-    assert row.input_per_1k > 0
-    assert row.output_per_1k > 0
+    assert row.input_per_1m > 0
+    assert row.output_per_1m > 0
 
 
 def test_lookup_empty_string_returns_fallback() -> None:
     row = lookup_price("")
-    assert row.input_per_1k > 0
+    assert row.input_per_1m > 0
 
 
 def test_lookup_unknown_provider_with_colon() -> None:
     row = lookup_price("madeupcorp:cool-model-7")
     assert row.provider == "madeupcorp"
-    assert row.input_per_1k > 0
+    assert row.input_per_1m > 0
 
 
 def test_lookup_returns_pricerow_instance() -> None:

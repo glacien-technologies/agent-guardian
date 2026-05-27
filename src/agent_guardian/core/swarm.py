@@ -709,11 +709,18 @@ def _variance(values: list[int]) -> float:
 
 
 def _cost_for(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Apply the per-1k input/output rate from :func:`lookup_price`."""
+    """Apply the per-1M input/output rate from :func:`lookup_price`.
+
+    Rates in :data:`agent_guardian.cost.PRICE_TABLE` are USD per one
+    million tokens — divide by ``1_000_000`` to convert raw token counts
+    to dollars.
+    """
     if input_tokens <= 0 and output_tokens <= 0:
         return 0.0
     row = lookup_price(model)
-    return (input_tokens / 1000.0) * row.input_per_1k + (output_tokens / 1000.0) * row.output_per_1k
+    return (input_tokens / 1_000_000.0) * row.input_per_1m + (
+        output_tokens / 1_000_000.0
+    ) * row.output_per_1m
 
 
 def _compute_cost_usd(

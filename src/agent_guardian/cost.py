@@ -7,10 +7,11 @@ per-provider price table and a deterministic estimator so the CLI can
 print a pre-flight USD figure before any tokens are spent.
 
 The price table is **frozen as of 2026-05-27** and reflects the public
-list prices for each provider's tier. Unknown models fall back to a
-documented default rate that errs on the high side so the operator does
-not under-estimate. Gemini list prices should be re-verified at
-https://ai.google.dev/pricing before any decision relies on them.
+list prices for each provider's tier, expressed as **USD per one
+million tokens**. Unknown models fall back to a documented default rate
+that errs on the high side so the operator does not under-estimate.
+Gemini list prices should be re-verified at https://ai.google.dev/pricing
+before any decision relies on them.
 
 The estimator splits the 2M-token budget across three roles:
 
@@ -40,24 +41,28 @@ PRICE_TABLE_AS_OF = "2026-05-27"
 
 # Fallback rate used when an unknown model is requested. Documented in
 # ``lookup_price`` — kept deliberately above the typical mid-tier rate so
-# operators are warned of cost rather than surprised by it.
-_FALLBACK_INPUT_PER_1K = 3.00
-_FALLBACK_OUTPUT_PER_1K = 15.00
+# operators are warned of cost rather than surprised by it. Units are
+# **USD per one million tokens** (matches the field-name convention
+# below). Pre-2026.05 the table values were calibrated as per-1M but
+# the field name and arithmetic both said per-1k, causing a silent
+# 1000x cost over-estimate (this comment is the post-fix note).
+_FALLBACK_INPUT_PER_1M = 3.00
+_FALLBACK_OUTPUT_PER_1M = 15.00
 
 
 @dataclass(frozen=True)
 class PriceRow:
     """One row in the per-provider price table.
 
-    All prices are USD per 1000 tokens. ``model="*"`` matches every model
-    for that provider — used for free / local providers where the price is
-    always zero (Ollama, the stub LLM).
+    All prices are **USD per one million tokens**. ``model="*"`` matches
+    every model for that provider — used for free / local providers
+    where the price is always zero (Ollama, the stub LLM).
     """
 
     provider: str
     model: str
-    input_per_1k: float
-    output_per_1k: float
+    input_per_1m: float
+    output_per_1m: float
 
 
 PRICE_TABLE: tuple[PriceRow, ...] = (
@@ -74,9 +79,10 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     # Bedrock — pass-through Anthropic Claude pricing.
     PriceRow("bedrock", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("bedrock", "claude-sonnet-4-6", 3.00, 15.00),
-    # Google Gemini — AI Studio "Standard" tier list prices, USD / 1k tokens.
-    # Verified 2026-05-27 against https://ai.google.dev/pricing — re-check
-    # before relying on these numbers; the Gemini SKU lineup moves quickly.
+    # Google Gemini — AI Studio "Standard" tier list prices, USD per
+    # one million tokens. Verified 2026-05-27 against
+    # https://ai.google.dev/pricing — re-check before relying on these
+    # numbers; the Gemini SKU lineup moves quickly.
     PriceRow("gemini", "gemini-3.1-pro-preview", 1.250, 10.000),
     PriceRow("gemini", "gemini-3.5-flash", 0.300, 2.500),
     PriceRow("gemini", "gemini-3.1-flash-lite", 0.075, 0.300),
@@ -109,7 +115,7 @@ def lookup_price(model_spec: str) -> PriceRow:
     5. Fallback row with the documented default rate.
     """
     if not model_spec:
-        return PriceRow("unknown", model_spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+        return PriceRow("unknown", model_spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
 
     if ":" in model_spec:
         provider, _, model = model_spec.partition(":")
@@ -126,8 +132,8 @@ def lookup_price(model_spec: str) -> PriceRow:
         return PriceRow(
             provider,
             model,
-            _FALLBACK_INPUT_PER_1K,
-            _FALLBACK_OUTPUT_PER_1K,
+            _FALLBACK_INPUT_PER_1M,
+            _FALLBACK_OUTPUT_PER_1M,
         )
 
     spec = model_spec.lower()
@@ -144,16 +150,16 @@ def lookup_price(model_spec: str) -> PriceRow:
 
     # Heuristic prefix routing.
     if spec.startswith("gpt-"):
-        return PriceRow("openai", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+        return PriceRow("openai", spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
     if spec.startswith("claude-"):
-        return PriceRow("anthropic", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+        return PriceRow("anthropic", spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
     if spec.startswith("gemini-"):
         # AI Studio is the default Gemini surface for new users. Vertex
         # users typically use the ``vertex:`` provider prefix explicitly.
-        return PriceRow("gemini", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+        return PriceRow("gemini", spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
 
     # Last resort — return a row with the fallback default rate.
-    return PriceRow("unknown", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+    return PriceRow("unknown", spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
 
 
 def estimate_scan_cost(
@@ -173,7 +179,7 @@ def estimate_scan_cost(
     * Remainder folds into the commander slice.
 
     Each slice is split 50/50 between input and output tokens. The
-    estimator multiplies through the per-1k price for the matching model
+    estimator multiplies through the per-1M price for the matching model
     and sums to a single dollar figure. Returns ``0.0`` for free /
     local-only model mixes (Ollama, stub).
 
@@ -197,12 +203,13 @@ def estimate_scan_cost(
         if tokens <= 0:
             return 0.0
         row = lookup_price(model)
-        # 50/50 input/output split.
+        # 50/50 input/output split. Rates are USD per 1M tokens (see the
+        # ``PriceRow`` docstring) — divide by 1_000_000 to convert.
         input_tokens = tokens // 2
         output_tokens = tokens - input_tokens
-        return (input_tokens / 1000.0) * row.input_per_1k + (
-            output_tokens / 1000.0
-        ) * row.output_per_1k
+        return (input_tokens / 1_000_000.0) * row.input_per_1m + (
+            output_tokens / 1_000_000.0
+        ) * row.output_per_1m
 
     total = (
         _cost(commander_model, commander_tokens)
