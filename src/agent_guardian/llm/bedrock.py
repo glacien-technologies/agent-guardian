@@ -27,21 +27,6 @@ from typing import Any
 
 import httpx
 
-# botocore is an optional dependency (``[aws]`` extra) and ships no
-# PEP-561 stubs. The mypy override in ``pyproject.toml`` silences
-# both ``import-untyped`` (when installed) and ``import-not-found``
-# (when absent — e.g. the pre-commit mypy isolated venv); the call
-# surface we use (SigV4Auth.add_auth, AWSRequest, BotocoreSession) is
-# stable and tiny so the dynamic typing is an acceptable trade-off.
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.exceptions import (
-    BotoCoreError,
-    NoCredentialsError,
-    ProfileNotFound,
-)
-from botocore.session import Session as BotocoreSession
-
 from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.errors import (
     LLMAuthError,
@@ -52,6 +37,31 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+
+# botocore is an optional dependency (``[aws]`` extra) used only by
+# the live ``BedrockClient`` for SigV4 signing + credential resolution.
+# We import it lazily so the pure ``build_bedrock_payload`` /
+# ``map_bedrock_response`` helpers (and the module itself, which is
+# unconditionally re-exported from ``agent_guardian.llm``) work without
+# the extra installed. The mypy override in ``pyproject.toml`` silences
+# the dynamic-typing noise.
+_BOTOCORE_IMPORT_ERROR: Exception | None
+try:  # pragma: no cover — import guard
+    from botocore.auth import SigV4Auth
+    from botocore.awsrequest import AWSRequest
+    from botocore.exceptions import (
+        BotoCoreError,
+        NoCredentialsError,
+        ProfileNotFound,
+    )
+    from botocore.session import Session as BotocoreSession
+
+    _BOTOCORE_AVAILABLE = True
+    _BOTOCORE_IMPORT_ERROR = None
+except ImportError as _exc:  # pragma: no cover — import guard
+    _BOTOCORE_AVAILABLE = False
+    _BOTOCORE_IMPORT_ERROR = _exc
+
 
 __all__ = [
     "BEDROCK_HOST_TEMPLATE",
@@ -239,6 +249,12 @@ class BedrockClient(BaseLLM):
         base_url: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        if not _BOTOCORE_AVAILABLE:
+            raise LLMAuthError(
+                "bedrock: botocore is not installed. Install the AWS extra: "
+                "'pip install agent-guardian[aws]' or 'uv sync --extra aws'. "
+                f"(import error: {_BOTOCORE_IMPORT_ERROR})"
+            )
         resolved_region = (
             region
             or os.environ.get("AWS_REGION")

@@ -38,7 +38,10 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install ${{ matrix.python-version }}
-      - run: uv sync --extra dev
+      # ``--extra aws`` pulls in botocore so the Bedrock provider tests
+      # (SigV4 signing, error mapping) can construct ``BedrockClient``.
+      # Without it the test module errors at import time.
+      - run: uv sync --extra dev --extra aws
       - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
       - uses: codecov/codecov-action@v5
         if: matrix.python-version == '3.11'
