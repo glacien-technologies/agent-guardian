@@ -64,7 +64,13 @@ __all__ = [
 _LOG = logging.getLogger(__name__)
 
 EmbedderKind = Literal["sentence-transformers", "hash-fallback", "none"]
-RecordType = Literal["finding", "reflection", "attempted_seed", "fingerprint"]
+RecordType = Literal[
+    "finding",
+    "reflection",
+    "attempted_seed",
+    "fingerprint",
+    "agent_skipped",
+]
 
 _HASH_EMBED_DIM = 128
 
@@ -206,6 +212,11 @@ class SharedMemory:
         self._attempted_seeds: dict[AsiCategory, set[str]] = {a: set() for a in AsiCategory}
         self._reflections_by_agent: dict[str, list[str]] = {}
         self._fingerprint: TargetFingerprint | None = None
+        # Agents skipped by the swarm commander's applicability gate. Each
+        # entry is the persisted payload (``agent``, ``asi``, ``reason``)
+        # so coverage tooling can answer "which agents did the swarm
+        # bypass and why?" without replaying the JSONL again.
+        self._agent_skipped: list[dict[str, Any]] = []
 
         # Vector index — lazy.
         self._vectors: list[list[float]] = []
@@ -275,6 +286,14 @@ class SharedMemory:
                 self._fingerprint = TargetFingerprint.model_validate(record.payload)
             except Exception as exc:
                 _LOG.warning("Skipping invalid fingerprint payload: %s", exc)
+        elif record.record_type == "agent_skipped":
+            # Defensive validation — at minimum the payload must include an
+            # ``agent`` key. Other fields are surfaced as-is to keep the
+            # schema additive (operators can extend the payload with extra
+            # diagnostic context without an in-process schema migration).
+            skipped_agent = record.payload.get("agent")
+            if isinstance(skipped_agent, str) and skipped_agent:
+                self._agent_skipped.append(dict(record.payload))
 
     @classmethod
     def restore(
@@ -390,6 +409,42 @@ class SharedMemory:
             self._attempted_seeds[asi].add(seed_id)
             await asyncio.to_thread(self._write_stats_snapshot_sync)
 
+    async def write_agent_skipped(
+        self,
+        *,
+        agent: str,
+        asi: AsiCategory | None,
+        reason: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist that the swarm bypassed an ASI agent for this fingerprint.
+
+        The live :class:`SwarmEvent` ``kind="agent_skipped"`` is ephemeral
+        (it goes only to the optional observer). This durable record means
+        post-scan tooling can answer "which agents were skipped and why?"
+        without replaying observer events that were never captured.
+        Implements IMPORTANT #5 in the 14-flaw inventory.
+        """
+        if not agent:
+            raise ValueError("agent must be non-empty")
+        payload: dict[str, Any] = {
+            "agent": agent,
+            "asi": asi.value if asi is not None else None,
+            "reason": reason,
+        }
+        if extra:
+            payload.update(extra)
+        record = MemoryRecord(
+            record_type="agent_skipped",
+            scan_id=self.scan_id,
+            timestamp=_utcnow(),
+            payload=payload,
+        )
+        async with self._lock:
+            await self._write_record(record)
+            self._agent_skipped.append(dict(payload))
+            await asyncio.to_thread(self._write_stats_snapshot_sync)
+
     async def set_target_fingerprint(self, fingerprint: TargetFingerprint) -> None:
         """Set (or replace) the target fingerprint.
 
@@ -426,6 +481,10 @@ class SharedMemory:
 
     def all_findings(self) -> tuple[Finding, ...]:
         return tuple(self._all_findings)
+
+    def skipped_agents(self) -> tuple[dict[str, Any], ...]:
+        """Return the durable record of agents the swarm bypassed."""
+        return tuple(self._agent_skipped)
 
     def stats(self) -> MemoryStats:
         return MemoryStats(

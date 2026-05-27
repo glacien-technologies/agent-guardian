@@ -379,15 +379,33 @@ class SwarmCommander:
                 rng=random.Random(self.rng_seed + len(agents)),
             )
             if not agent.is_applicable(fingerprint):
+                skipped_name = agent.name or type(agent).__name__
+                reason = "not applicable for fingerprint"
                 self._emit(
                     SwarmEvent(
                         kind="agent_skipped",
                         timestamp=_utcnow(),
-                        agent=agent.name or type(agent).__name__,
+                        agent=skipped_name,
                         asi=agent.asi_category,
-                        payload={"reason": "not applicable for fingerprint"},
+                        payload={"reason": reason},
                     )
                 )
+                # Durable record so post-scan tooling can answer "which
+                # agents were skipped and why?" without observing the live
+                # event stream. IMPORTANT #5 (PRD §4.4 step 2 forensics).
+                try:
+                    await self.memory.write_agent_skipped(
+                        agent=skipped_name,
+                        asi=agent.asi_category,
+                        reason=reason,
+                    )
+                except Exception as exc:  # pragma: no cover — defensive
+                    _LOG.warning(
+                        "failed to persist agent_skipped for %s: %s: %s",
+                        skipped_name,
+                        type(exc).__name__,
+                        exc,
+                    )
                 continue
             agents.append(agent)
         # Respect max_parallel_agents (10 is the natural cap; lower values

@@ -349,6 +349,16 @@ async def test_swarm_skips_inapplicable_agents(
     assert "memory-poison-agent" in skipped_agents
     assert "a2a-agent" in skipped_agents
 
+    # IMPORTANT #5: every agent_skipped event must also be persisted to
+    # shared memory so post-scan coverage tooling sees the same list
+    # without observing the live event stream.
+    persisted = {entry["agent"] for entry in fresh_memory.skipped_agents()}
+    assert skipped_agents <= persisted, "every live agent_skipped event must have a memory record"
+    # Each record carries a reason and the ASI category enum value.
+    for entry in fresh_memory.skipped_agents():
+        assert entry["reason"]
+        assert entry["asi"] is None or isinstance(entry["asi"], str)
+
 
 @pytest.mark.asyncio
 async def test_swarm_one_liner_demo_pattern(

@@ -209,6 +209,7 @@ def test_emit_json_includes_coverage_block_empty_when_no_memory(tmp_path: Path) 
         "probes_attempted": [],
         "attacker_refused_turns": 0,
         "attacker_refusal_rate": 0.0,
+        "skipped_agents": [],
     }
 
 

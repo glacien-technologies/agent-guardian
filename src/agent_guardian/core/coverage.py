@@ -54,6 +54,7 @@ def _empty_coverage() -> dict[str, Any]:
         "probes_attempted": [],
         "attacker_refused_turns": 0,
         "attacker_refusal_rate": 0.0,
+        "skipped_agents": [],
     }
 
 
@@ -94,6 +95,7 @@ def compute_coverage_from_memory(
     probes_attempted: set[str] = set()
     refused_turns = 0
     attempts = 0
+    skipped_agents: list[dict[str, Any]] = []
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -108,7 +110,22 @@ def compute_coverage_from_memory(
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(rec, dict) or rec.get("record_type") != "reflection":
+        if not isinstance(rec, dict):
+            continue
+        # Pluck agent_skipped records out into their own facet — they're
+        # not reflections and shouldn't be folded into attempt counts.
+        if rec.get("record_type") == "agent_skipped":
+            payload = rec.get("payload")
+            if isinstance(payload, dict):
+                skipped_agents.append(
+                    {
+                        "agent": str(payload.get("agent", "")),
+                        "asi": payload.get("asi"),
+                        "reason": str(payload.get("reason", "")),
+                    }
+                )
+            continue
+        if rec.get("record_type") != "reflection":
             continue
         payload = rec.get("payload")
         if not isinstance(payload, dict):
@@ -152,6 +169,16 @@ def compute_coverage_from_memory(
 
     refusal_rate = refused_turns / attempts if attempts else 0.0
 
+    # Sort the skipped-agent rollup for stable JSON output. Multiple entries
+    # for the same agent shouldn't happen today but we deduplicate by name
+    # for safety in case a future code path retries the applicability gate.
+    skipped_dedup: dict[str, dict[str, Any]] = {}
+    for entry in skipped_agents:
+        key = entry.get("agent") or ""
+        if key and key not in skipped_dedup:
+            skipped_dedup[key] = entry
+    sorted_skipped = [skipped_dedup[k] for k in sorted(skipped_dedup)]
+
     return {
         "attempts_total": attempts,
         "asi_categories": sorted(asi),
@@ -161,4 +188,5 @@ def compute_coverage_from_memory(
         "probes_attempted": sorted(probes_attempted),
         "attacker_refused_turns": refused_turns,
         "attacker_refusal_rate": round(refusal_rate, 4),
+        "skipped_agents": sorted_skipped,
     }
