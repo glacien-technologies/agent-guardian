@@ -1,4 +1,4 @@
-"""AgentGuardian CLI — production command surface (PRD §8, M10).
+"""AgentGuardian CLI -- production command surface (PRD §8, M10).
 
 The CLI is the primary user-facing way to drive a swarm scan. The full
 command set lands here in M10; later milestones flesh out individual
@@ -8,7 +8,7 @@ PDF output and signed-evidence ``verify``).
 Design points worth knowing:
 
 * The CLI is a thin wrapper around the library API. Anything the CLI
-  can do is also reachable from Python — :func:`build_llm`,
+  can do is also reachable from Python -- :func:`build_llm`,
   :func:`build_target_adapter`, and :func:`build_swarm` are the wedge
   the CLI uses, and any of them is importable for power users.
 * ``--model stub`` is the universal safe default. Every command that
@@ -16,7 +16,7 @@ Design points worth knowing:
   users) can run the whole pipeline without API keys.
 * The first-run ethical-use banner (PRD §15.6) is printed once per
   user and remembered in ``~/.agentguardian/state.json``. We never
-  inspect the CI environment to suppress it — the state file is
+  inspect the CI environment to suppress it -- the state file is
   sufficient.
 """
 
@@ -80,7 +80,7 @@ EXIT_USER_INTERRUPT = 130
 
 
 # ---------------------------------------------------------------------------
-# Ordered ASI agent slate — single source of truth for ``list-agents`` etc.
+# Ordered ASI agent slate -- single source of truth for ``list-agents`` etc.
 # ---------------------------------------------------------------------------
 
 
@@ -137,16 +137,16 @@ def _read_state() -> dict[str, Any]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover — defensive
+    except (OSError, json.JSONDecodeError) as exc:  # pragma: no cover -- defensive
         _LOG.warning(
-            "cli: could not read state file %s (%s) — starting with empty state",
+            "cli: could not read state file %s (%s) -- starting with empty state",
             path,
             exc,
         )
         return {}
-    if not isinstance(data, dict):  # pragma: no cover — defensive
+    if not isinstance(data, dict):  # pragma: no cover -- defensive
         _LOG.warning(
-            "cli: state file %s is not a JSON object (got %s) — discarding",
+            "cli: state file %s is not a JSON object (got %s) -- discarding",
             path,
             type(data).__name__,
         )
@@ -173,7 +173,7 @@ def _try_load_dotenv() -> None:
     Project-local only by design: we look in ``Path.cwd()`` (not ``$HOME``
     or arbitrary ancestors) so users running ``agent-guardian`` against
     different projects don't accidentally leak API keys across projects.
-    Existing environment variables are never overridden — real shell exports
+    Existing environment variables are never overridden -- real shell exports
     always win.
 
     The lookup is non-fatal: if python-dotenv is not installed (it's in the
@@ -184,7 +184,7 @@ def _try_load_dotenv() -> None:
     try:
         from dotenv import load_dotenv
     except ImportError as exc:
-        _LOG.debug("cli: python-dotenv not installed (%s) — skipping .env auto-load", exc)
+        _LOG.debug("cli: python-dotenv not installed (%s) -- skipping .env auto-load", exc)
         return
     cwd = Path.cwd()
     for candidate in (cwd / ".env", cwd / ".env.local"):
@@ -201,7 +201,7 @@ def _show_ethical_banner_once() -> None:
     typer.echo(_BANNER)
     state["ethical_use_acknowledged"] = True
     state["ethical_use_acknowledged_at"] = datetime.now(tz=timezone.utc).isoformat()
-    # Best-effort — a read-only home shouldn't break the scan.
+    # Best-effort -- a read-only home shouldn't break the scan.
     with contextlib.suppress(OSError):
         _write_state(state)
 
@@ -222,11 +222,11 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
     * ``"anthropic:<model>"`` / heuristic ``"claude-*"`` → :class:`AnthropicClient`.
     * ``"gemini:<model>"`` / heuristic ``"gemini-*"`` → :class:`GeminiClient`
       (Google AI Studio API; see :mod:`agent_guardian.llm.gemini`).
-    * ``"ollama:<model>"`` → :class:`OllamaClient` (local — no key).
+    * ``"ollama:<model>"`` → :class:`OllamaClient` (local -- no key).
     * ``"bedrock:<bedrock-model-id>"`` → :class:`BedrockClient`. No
       heuristic prefix is supported (Bedrock IDs all start with
       ``anthropic.`` / ``amazon.`` / etc., so the ``bedrock:`` prefix
-      is mandatory). Credentials come from the standard AWS chain — no
+      is mandatory). Credentials come from the standard AWS chain -- no
       ``--api-key`` is consulted. Requires the ``[aws]`` extra.
 
     The role string is used only in error messages so the user knows
@@ -291,7 +291,7 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
         return GeminiClient(api_key=api_key)
     if provider == "bedrock":
         # Bedrock uses the AWS credential chain (env vars > ~/.aws/credentials
-        # > IAM role). It deliberately does NOT consult ``env_api_key`` —
+        # > IAM role). It deliberately does NOT consult ``env_api_key`` --
         # there is no such thing as a Bedrock API key.
         try:
             from agent_guardian.llm.bedrock import BedrockClient
@@ -339,18 +339,18 @@ def build_target_adapter(
     """Build the right :class:`TargetAdapter` from the four CLI modes.
 
     Exactly one of ``target`` / ``system_prompt_path`` / ``endpoint`` /
-    ``framework`` must be set. ``framework`` is a placeholder today — it
+    ``framework`` must be set. ``framework`` is a placeholder today -- it
     raises until M11 ships framework-mode auto-discovery.
     """
     set_modes = [bool(system_prompt_path), bool(target), bool(endpoint), bool(framework)]
     if sum(set_modes) == 0:
         raise typer.BadParameter(
-            "scan requires a target — pass a dotted path, --system-prompt PATH, "
+            "scan requires a target -- pass a dotted path, --system-prompt PATH, "
             "--endpoint URL, or --framework KIND."
         )
     if sum(set_modes) > 1:
         raise typer.BadParameter(
-            "scan target modes are mutually exclusive — choose exactly one of "
+            "scan target modes are mutually exclusive -- choose exactly one of "
             "target / --system-prompt / --endpoint / --framework."
         )
     if system_prompt_path is not None:
@@ -389,7 +389,7 @@ def _render_scan(scan: Scan, output_format: str) -> str:
     if output_format not in _TEXT_FORMATS:
         raise typer.BadParameter(
             f"unknown output format '{output_format}' "
-            f"— choose one of: {', '.join(sorted(_ALL_FORMATS))}"
+            f"-- choose one of: {', '.join(sorted(_ALL_FORMATS))}"
         )
     if output_format == "json":
         from agent_guardian.reports.json_report import emit_json
@@ -418,7 +418,7 @@ def _write_report(scan: Scan, output_format: str, path: Path) -> None:
     if output_format not in _ALL_FORMATS:
         raise typer.BadParameter(
             f"unknown output format '{output_format}' "
-            f"— choose one of: {', '.join(sorted(_ALL_FORMATS))}"
+            f"-- choose one of: {', '.join(sorted(_ALL_FORMATS))}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     if output_format == "json":
@@ -514,13 +514,13 @@ def doctor() -> None:
     else:
         typer.echo("llm keys detected: none (use --model stub for offline scans)")
 
-    # Sandbox readiness — try to import.
+    # Sandbox readiness -- try to import.
     try:
         from agent_guardian.core.sandbox import Sandbox
 
         _ = Sandbox
         typer.echo("sandbox: importable")
-    except Exception as exc:  # pragma: no cover — defensive
+    except Exception as exc:  # pragma: no cover -- defensive
         _LOG.warning("doctor: sandbox import failed: %s: %s", type(exc).__name__, exc)
         typer.echo(f"sandbox: import failed ({type(exc).__name__})")
 
@@ -556,7 +556,7 @@ def list_probes(
             asi_filter = AsiCategory(asi)
         except ValueError as exc:
             raise typer.BadParameter(
-                f"unknown ASI category '{asi}' — expected one of "
+                f"unknown ASI category '{asi}' -- expected one of "
                 f"{', '.join(c.value for c in AsiCategory)}."
             ) from exc
         probes = [p for p in probes if p.asi == asi_filter]
@@ -576,7 +576,7 @@ def badge(
     score: int = typer.Argument(..., min=0, max=100, help="AIVSS score (0-100)."),
     svg: bool = typer.Option(False, "--svg", help="Emit an SVG badge."),
 ) -> None:
-    """Emit an AIVSS badge — text by default, SVG with ``--svg``."""
+    """Emit an AIVSS badge -- text by default, SVG with ``--svg``."""
     band = band_for_score(score)
     if svg:
         typer.echo(_badge_svg(score), nl=False)
@@ -658,7 +658,7 @@ def verify(path: Path = typer.Argument(..., help="Path to a signed JSON report."
     suffix = path.suffix.lower()
     if suffix != ".json":
         typer.echo(
-            f"unsupported file type '{suffix}' — verify currently accepts .json reports. "
+            f"unsupported file type '{suffix}' -- verify currently accepts .json reports. "
             f"PDFs ship a signed JSON sidecar at <name>.json.",
             err=True,
         )
@@ -725,7 +725,7 @@ def publish(
                 )
                 raise typer.Exit(code=EXIT_CONFIG)
 
-    # 2. Verify signatures (M13). We only allow publishing what's signed —
+    # 2. Verify signatures (M13). We only allow publishing what's signed --
     #    the leaderboard's integrity story depends on it.
     from agent_guardian.reports.json_report import verify_signatures
 
@@ -737,12 +737,12 @@ def publish(
         raise typer.Exit(code=EXIT_CONFIG) from None
 
     if not isinstance(payload, dict):
-        typer.echo("scan JSON is not a JSON object — refusing to publish.", err=True)
+        typer.echo("scan JSON is not a JSON object -- refusing to publish.", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
 
     if "signatures" not in payload:
         typer.echo(
-            "scan is not signed — refusing to publish. Re-emit the report "
+            "scan is not signed -- refusing to publish. Re-emit the report "
             "with the JSON emitter (which signs by default).",
             err=True,
         )
@@ -751,7 +751,7 @@ def publish(
     verify_result = verify_signatures(payload)
     if not verify_result.ok:
         typer.echo(
-            "signature verification failed — refusing to publish a possibly "
+            "signature verification failed -- refusing to publish a possibly "
             "tampered scan. Details:",
             err=True,
         )
@@ -793,34 +793,155 @@ def publish(
     typer.echo(f"redacted payload written to: {output}")
 
 
+@telemetry_app.command("essential")
+def telemetry_essential() -> None:
+    """Switch to ESSENTIAL tier -- operational counts only (the default).
+
+    Sends agents fired, attempts, successes, threats captured, AIVSS,
+    duration, crash status, and an anonymous install_id. Does NOT
+    send adapter, Python version, OS, or arch.
+    """
+    from agent_guardian.telemetry.consent import ConsentState, set_consent
+
+    set_consent(ConsentState.ESSENTIAL)
+    typer.echo(
+        "telemetry: essential tier active. Operational counts only -- "
+        "adapter / Python / OS / arch NOT collected."
+    )
+
+
+@telemetry_app.command("extended")
+def telemetry_extended() -> None:
+    """Upgrade to EXTENDED tier -- essential counts PLUS environment fingerprint.
+
+    Adds adapter name, Python version, OS family, and CPU arch to
+    every event. Helps the community dashboard populate its
+    compatibility-matrix and per-framework cells. Revoke with
+    ``agent-guardian telemetry essential`` or ``telemetry disable``.
+    """
+    from datetime import datetime, timezone
+
+    from agent_guardian.telemetry.client import emit
+    from agent_guardian.telemetry.consent import ConsentState, set_consent
+    from agent_guardian.telemetry.events import InstallEvent
+    from agent_guardian.telemetry.install_id import get_install_id
+    from agent_guardian.telemetry.prompt import _arch, _os_family
+
+    set_consent(ConsentState.EXTENDED)
+    try:
+        emit(
+            InstallEvent(
+                install_id=get_install_id(),
+                agent_version=__version__,
+                python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
+                os_family=_os_family(),
+                arch=_arch(),
+                opted_in_at=datetime.now(timezone.utc),
+            )
+        )
+    except Exception as exc:  # pragma: no cover -- defensive
+        _LOG.warning(
+            "telemetry extended: failed to emit InstallEvent (%s: %s) -- local state still saved",
+            type(exc).__name__,
+            exc,
+        )
+    typer.echo(
+        "telemetry: extended tier active. Adapter / Python / OS / arch will be "
+        "included in events. Revoke with `agent-guardian telemetry essential`."
+    )
+
+
 @telemetry_app.command("enable")
 def telemetry_enable() -> None:
-    """Enable opt-in usage telemetry."""
-    state = _read_state()
-    state["telemetry_enabled"] = True
-    _write_state(state)
-    typer.echo("telemetry enabled.")
+    """Legacy alias for `telemetry extended` (v1.0rc1 compat)."""
+    telemetry_extended()
 
 
 @telemetry_app.command("disable")
 def telemetry_disable() -> None:
-    """Disable opt-in usage telemetry."""
-    state = _read_state()
-    state["telemetry_enabled"] = False
-    _write_state(state)
-    typer.echo("telemetry disabled.")
+    """Disable telemetry. Emits a ``forget`` event so the collector drops your install_id."""
+    from datetime import datetime, timezone
+
+    from agent_guardian.telemetry.client import emit
+    from agent_guardian.telemetry.consent import ConsentState, set_consent
+    from agent_guardian.telemetry.events import ForgetEvent
+    from agent_guardian.telemetry.install_id import get_install_id
+
+    try:
+        emit(
+            ForgetEvent(
+                install_id=get_install_id(),
+                opted_out_at=datetime.now(timezone.utc),
+            )
+        )
+    except Exception as exc:  # pragma: no cover -- defensive
+        _LOG.warning(
+            "telemetry disable: failed to emit ForgetEvent (%s: %s) -- local state still cleared",
+            type(exc).__name__,
+            exc,
+        )
+    set_consent(ConsentState.OPTED_OUT)
+    typer.echo("telemetry disabled. No further events will be sent.")
 
 
 @telemetry_app.command("status")
 def telemetry_status() -> None:
-    """Show the current telemetry opt-in state."""
-    state = _read_state()
-    enabled = bool(state.get("telemetry_enabled", False))
-    typer.echo(f"telemetry: {'enabled' if enabled else 'disabled'}")
+    """Show the current telemetry tier + local buffer depth."""
+    from agent_guardian.telemetry.consent import consent_level, get_consent
+    from agent_guardian.telemetry.install_id import get_install_id, install_id_path
+    from agent_guardian.telemetry.local import LocalEventBuffer
+
+    state = get_consent()
+    level = consent_level()
+    typer.echo(f"telemetry state:    {state.value}")
+    typer.echo(f"active tier:        {level}")
+    if level == "off":
+        typer.echo("(no events collected; run `agent-guardian telemetry essential` to re-enable)")
+        return
+    if level == "essential":
+        typer.echo(
+            "(operational counts only -- agents, attempts, successes, threats, AIVSS; "
+            "no adapter / Python / OS / arch)"
+        )
+    else:  # extended
+        typer.echo(
+            "(essential counts + environment fingerprint: adapter, Python version, OS, arch)"
+        )
+    typer.echo(f"install_id:         {get_install_id()}")
+    typer.echo(f"install_id file:    {install_id_path()}")
+    typer.echo(f"pending events:     {LocalEventBuffer().queue_depth()}")
+
+
+@telemetry_app.command("reset")
+def telemetry_reset() -> None:
+    """Clear consent + delete install_id + purge pending events. Re-asks on next scan."""
+    from agent_guardian.telemetry.consent import ConsentState, set_consent
+    from agent_guardian.telemetry.install_id import reset_install_id
+    from agent_guardian.telemetry.local import LocalEventBuffer
+
+    purged = LocalEventBuffer().purge_all()
+    reset_install_id()
+    set_consent(ConsentState.NOT_PROMPTED)
+    typer.echo(
+        f"telemetry reset. {purged} pending event(s) purged. The opt-in prompt will "
+        "re-fire on your next interactive scan."
+    )
+
+
+@telemetry_app.command("show")
+def telemetry_show() -> None:
+    """Print the full list of fields telemetry would send if enabled.
+
+    Per Standard §9.4 -- telemetry transparency commitments -- the
+    field list is published so users can audit what gets sent.
+    """
+    from agent_guardian.telemetry.prompt import PROMPT_TEXT
+
+    typer.echo(PROMPT_TEXT)
 
 
 # ---------------------------------------------------------------------------
-# scan command — the big one
+# scan command -- the big one
 # ---------------------------------------------------------------------------
 
 
@@ -828,16 +949,16 @@ def telemetry_status() -> None:
 def scan(
     target: str | None = typer.Argument(
         None,
-        help="Dotted path or file:attr — e.g. 'my_agent:run'. Mutually exclusive with --system-prompt / --endpoint / --framework.",
+        help="Dotted path or file:attr -- e.g. 'my_agent:run'. Mutually exclusive with --system-prompt / --endpoint / --framework.",
     ),
     system_prompt: Path | None = typer.Option(
-        None, "--system-prompt", help="Mode A — path to a system prompt file."
+        None, "--system-prompt", help="Mode A -- path to a system prompt file."
     ),
     endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Mode C — hosted HTTP endpoint URL."
+        None, "--endpoint", help="Mode C -- hosted HTTP endpoint URL."
     ),
     framework: str | None = typer.Option(
-        None, "--framework", help="Mode D — framework kind (langgraph, crewai, …)."
+        None, "--framework", help="Mode D -- framework kind (langgraph, crewai, …)."
     ),
     model: str = typer.Option(
         "stub",
@@ -857,7 +978,7 @@ def scan(
     evaluator_model: str | None = typer.Option(
         None, "--evaluator-model", help="Override evaluator LLM model."
     ),
-    tier: str | None = typer.Option(None, "--tier", help="Force tier — one of T1, T2, T3, T4."),
+    tier: str | None = typer.Option(None, "--tier", help="Force tier -- one of T1, T2, T3, T4."),
     budget_usd: float | None = typer.Option(
         None, "--budget-usd", help="Cap; abort if the estimate exceeds this."
     ),
@@ -934,7 +1055,7 @@ async def _run_scan(
     seed: int,
     goal: str | None = None,
 ) -> int:
-    # 1. Config layer — file + defaults.
+    # 1. Config layer -- file + defaults.
     try:
         cfg: Config = load_config(config_path)
     except Exception as exc:
@@ -946,7 +1067,7 @@ async def _run_scan(
     eff_attacker = attacker_model or model or cfg.swarm.attacker_model
     eff_evaluator = evaluator_model or model or cfg.swarm.evaluator_model
 
-    # 3. Ethical banner (PRD §15.6) — first run only.
+    # 3. Ethical banner (PRD §15.6) -- first run only.
     _show_ethical_banner_once()
 
     # 4. Cost estimate.
@@ -970,7 +1091,7 @@ async def _run_scan(
         try:
             tier_override = Tier(tier)
         except ValueError:
-            typer.echo(f"unknown tier '{tier}' — must be T1, T2, T3, or T4.", err=True)
+            typer.echo(f"unknown tier '{tier}' -- must be T1, T2, T3, or T4.", err=True)
             return EXIT_CONFIG
 
     # 6. Build LLMs + target.
@@ -1027,7 +1148,7 @@ async def _run_scan(
         rng_seed=seed,
     )
 
-    # 8. Run — optionally with TUI.
+    # 8. Run -- optionally with TUI.
     try:
         if no_tui:
             scan_result = await swarm.run()
@@ -1050,6 +1171,19 @@ async def _run_scan(
         return EXIT_LLM_PROVIDER
     finally:
         await adapter.aclose()
+
+    # First-scan telemetry notice -- non-blocking, prints to stderr.
+    # Fires at most once per install; subsequent scans are silent.
+    try:
+        from agent_guardian.telemetry.prompt import maybe_show_first_scan_notice
+
+        maybe_show_first_scan_notice()
+    except Exception as exc:  # pragma: no cover -- defensive
+        _LOG.debug(
+            "telemetry: first-scan notice failed (%s: %s) -- scan result unaffected",
+            type(exc).__name__,
+            exc,
+        )
 
     # 9. Render + persist report.
     if output_path is None:
@@ -1110,7 +1244,7 @@ def main(
         help="Show version and exit.",
     ),
 ) -> None:
-    """AgentGuardian Open — eleven-agent adversarial swarm CLI."""
+    """AgentGuardian Open -- eleven-agent adversarial swarm CLI."""
     # Wire centralised logging FIRST so .env loading + every sub-command
     # see structured logs. Default level is INFO; operators bump to DEBUG
     # via AGENT_GUARDIAN_LOG_LEVEL=DEBUG when they need the full review

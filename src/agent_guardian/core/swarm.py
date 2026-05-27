@@ -1,4 +1,4 @@
-"""Swarm Commander — Layer-3 orchestrator (PRD §4.1, M8).
+"""Swarm Commander -- Layer-3 orchestrator (PRD §4.1, M8).
 
 The :class:`SwarmCommander` glues the M1-M7 layers into a single end-to-end
 adversarial scan:
@@ -16,7 +16,7 @@ adversarial scan:
 4. **Checkpoint loop (Phase 4).** Every interval compute provisional AIVSS
    from current memory findings, push it onto a rolling window of 3, and
    decide CONTINUE / EARLY_STOP / RE_TASK / ESCALATE_JUDGE. Only
-   ``EARLY_STOP`` affects execution today — the other two emit events but
+   ``EARLY_STOP`` affects execution today -- the other two emit events but
    continue normally (real re-tasking lands in v1.1).
 5. **Budget donation (Phase 5).** When an agent finishes, its
    ``tokens_remaining`` is donated to the ASI category with the fewest
@@ -26,7 +26,7 @@ adversarial scan:
    with an empty probe list (the M2 vacuous-case path), emit
    ``scan_done``, and return the :class:`Scan`.
 
-The observer callback fires synchronously for each :class:`SwarmEvent` —
+The observer callback fires synchronously for each :class:`SwarmEvent` --
 it must not block. The swarm runs entirely in asyncio; production
 consumers should enqueue events for off-thread delivery (e.g. into an
 asyncio queue feeding an SSE endpoint).
@@ -92,7 +92,7 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
-# The ten ASI specialist agent classes — order matches PRD §3 / ASI01..ASI10.
+# The ten ASI specialist agent classes -- order matches PRD §3 / ASI01..ASI10.
 _ASI_AGENT_CLASSES: tuple[type[AsiAgent], ...] = (
     GoalHijackAgent,  # ASI01
     ToolAbuseAgent,  # ASI02
@@ -107,7 +107,7 @@ _ASI_AGENT_CLASSES: tuple[type[AsiAgent], ...] = (
 )
 
 
-# Spec §6.1 — Commander goal-decomposition system prompt. Verbatim from the
+# Spec §6.1 -- Commander goal-decomposition system prompt. Verbatim from the
 # design-spec. The Commander LLM emits a SwarmBrief JSON object listing
 # per-agent sub-goals, hypotheses, priority weights, and the number of
 # goal-specific scenarios each agent should synthesise downstream.
@@ -227,7 +227,7 @@ class SwarmEvent:
 
     M12 consumes these to drive live dashboard SSE; the M10 CLI uses them
     for terminal progress rendering. The callback is invoked synchronously
-    — it must not block.
+    -- it must not block.
     """
 
     kind: EventKind
@@ -261,7 +261,7 @@ class SwarmCommander:
                                memory=..., observer=...)
         scan: Scan = await swarm.run()
 
-    The instance is single-shot — call :meth:`run` exactly once. The
+    The instance is single-shot -- call :meth:`run` exactly once. The
     observer callback (optional) fires once per :class:`SwarmEvent` and
     must not block.
     """
@@ -283,9 +283,9 @@ class SwarmCommander:
         # Wrap each LLM client in a usage-tracking decorator so the per-role
         # tokens consumed during the scan are observable for cost rollup in
         # :meth:`_phase_finalise`. Cooperates with the per-agent wrappers in
-        # :class:`AsiAgent.__init__` — if a counter is already wrapped, the
+        # :class:`AsiAgent.__init__` -- if a counter is already wrapped, the
         # agents detect and reuse it instead of double-counting (PRD §8.1
-        # — IMPORTANT #3).
+        # -- IMPORTANT #3).
         self._commander_usage = UsageCounter()
         # Per-agent wrappers around attacker / evaluator land in
         # :class:`AsiAgent.__init__` so each agent gets its own counter for
@@ -293,7 +293,7 @@ class SwarmCommander:
         # clients through unchanged here.
         self.attacker_llm: BaseLLM = attacker_llm
         self.evaluator_llm: BaseLLM = evaluator_llm
-        # Commander LLM defaults to the attacker LLM today — the M9
+        # Commander LLM defaults to the attacker LLM today -- the M9
         # checkpoint logic will use it once LLM-driven re-tasking lands.
         raw_commander = commander_llm if commander_llm is not None else attacker_llm
         self.commander_llm: BaseLLM = (
@@ -311,7 +311,7 @@ class SwarmCommander:
         self.rng_seed = rng_seed
         self._rng = random.Random(rng_seed)
 
-        # Runtime state — populated by phase methods.
+        # Runtime state -- populated by phase methods.
         self._start_time: float = 0.0
         self._fingerprint: TargetFingerprint | None = None
         self._aivss_window: list[int] = []
@@ -321,7 +321,7 @@ class SwarmCommander:
         self._cancel_event = asyncio.Event()
         self._agent_reports: list[AgentReport] = []
         self._has_run = False
-        # Spec §6 — populated by :meth:`_phase_decompose_with_llm` between
+        # Spec §6 -- populated by :meth:`_phase_decompose_with_llm` between
         # recon and agent instantiation. ``None`` when no target_goal was
         # supplied or the Commander LLM declined / failed.
         self._swarm_brief: SwarmBrief | None = None
@@ -354,22 +354,22 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     async def _run_inner(self) -> Scan:
-        # Phase 1 — recon.
+        # Phase 1 -- recon.
         await self._phase_recon()
-        # Spec §6 — Commander goal-decomposition. Skipped when no
+        # Spec §6 -- Commander goal-decomposition. Skipped when no
         # target_goal was supplied or the Commander LLM is not configured.
         # On parse / call failure, falls back to a uniform brief so the
         # standard seed pass still benefits from priority weighting.
         await self._phase_decompose_with_llm()
-        # Phase 2 — decompose into per-ASI agents.
+        # Phase 2 -- decompose into per-ASI agents.
         agents = await self._phase_decompose(self._fingerprint)
-        # Phase 3 + 4 — parallel launch with concurrent checkpoint loop.
+        # Phase 3 + 4 -- parallel launch with concurrent checkpoint loop.
         await self._phase_parallel(agents)
-        # Phase 6 — finalise.
+        # Phase 6 -- finalise.
         return await self._phase_finalise()
 
     # ------------------------------------------------------------------
-    # Phase 1 — Recon
+    # Phase 1 -- Recon
     # ------------------------------------------------------------------
 
     async def _phase_recon(self) -> None:
@@ -401,12 +401,12 @@ class SwarmCommander:
             )
         except asyncio.TimeoutError:
             _LOG.warning(
-                "recon timed out after %.1fs — using minimal fingerprint",
+                "recon timed out after %.1fs -- using minimal fingerprint",
                 self.config.recon_wall_seconds,
             )
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover -- defensive
             _LOG.warning(
-                "recon failed (%s: %s) — using minimal fingerprint",
+                "recon failed (%s: %s) -- using minimal fingerprint",
                 type(exc).__name__,
                 exc,
             )
@@ -440,7 +440,7 @@ class SwarmCommander:
         )
 
     # ------------------------------------------------------------------
-    # Spec §6 — Commander goal-decomposition (LLM)
+    # Spec §6 -- Commander goal-decomposition (LLM)
     # ------------------------------------------------------------------
 
     async def _phase_decompose_with_llm(self) -> None:
@@ -449,8 +449,8 @@ class SwarmCommander:
         Runs after :meth:`_phase_recon` so the Commander sees the refined
         fingerprint. Skips silently when:
 
-        * ``config.target_goal`` is None — operator did not supply a goal;
-        * ``commander_llm`` is None — some test rigs construct without one.
+        * ``config.target_goal`` is None -- operator did not supply a goal;
+        * ``commander_llm`` is None -- some test rigs construct without one.
 
         On Commander LLM failure or unparseable JSON, falls back to a
         uniform brief (every agent gets ``priority_weight=0.5,
@@ -460,7 +460,7 @@ class SwarmCommander:
         if self.config.target_goal is None:
             _LOG.debug("phase commander-decompose: skipped (no target_goal supplied)")
             return
-        if self.commander_llm is None:  # pragma: no cover — defensive
+        if self.commander_llm is None:  # pragma: no cover -- defensive
             _LOG.debug("phase commander-decompose: skipped (commander_llm is None)")
             return
         _LOG.info(
@@ -492,7 +492,7 @@ class SwarmCommander:
             )
         except Exception as exc:
             _LOG.warning(
-                "commander goal-decomposition LLM call failed: %s: %s — "
+                "commander goal-decomposition LLM call failed: %s: %s -- "
                 "falling back to uniform brief",
                 type(exc).__name__,
                 exc,
@@ -503,7 +503,7 @@ class SwarmCommander:
         brief = _parse_swarm_brief(resp.text, scan_id=self.config.scan_id)
         if brief is None:
             _LOG.warning(
-                "commander returned malformed swarm-brief JSON — falling back to uniform brief"
+                "commander returned malformed swarm-brief JSON -- falling back to uniform brief"
             )
             self._swarm_brief = self._uniform_brief()
             return
@@ -525,9 +525,9 @@ class SwarmCommander:
         for cat in AsiCategory:
             try:
                 snapshot[cat.value] = len(self.memory.findings_by_asi(cat))
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.debug(
-                    "asi coverage snapshot: findings_by_asi(%s) raised %s: %s — assuming 0",
+                    "asi coverage snapshot: findings_by_asi(%s) raised %s: %s -- assuming 0",
                     cat.value,
                     type(exc).__name__,
                     exc,
@@ -566,15 +566,15 @@ class SwarmCommander:
         """Synthesise a defensive zero-surface fingerprint when recon fails.
 
         We trust :meth:`TargetAdapter.fingerprint` to return a valid value
-        — every adapter sets ``_fingerprint`` in ``__init__``. If that too
+        -- every adapter sets ``_fingerprint`` in ``__init__``. If that too
         is missing (a malformed adapter), we fabricate an all-false stub
         so downstream code never sees ``None``.
         """
         try:
             return self.target.fingerprint()
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover -- defensive
             _LOG.warning(
-                "minimal fingerprint: target.fingerprint() raised %s: %s — "
+                "minimal fingerprint: target.fingerprint() raised %s: %s -- "
                 "synthesising all-false stub",
                 type(exc).__name__,
                 exc,
@@ -586,7 +586,7 @@ class SwarmCommander:
             )
 
     # ------------------------------------------------------------------
-    # Phase 2 — Decompose
+    # Phase 2 -- Decompose
     # ------------------------------------------------------------------
 
     async def _phase_decompose(self, fingerprint: TargetFingerprint | None) -> list[AsiAgent]:
@@ -659,7 +659,7 @@ class SwarmCommander:
                         asi=agent.asi_category,
                         reason=reason,
                     )
-                except Exception as exc:  # pragma: no cover — defensive
+                except Exception as exc:  # pragma: no cover -- defensive
                     _LOG.warning(
                         "failed to persist agent_skipped for %s: %s: %s",
                         skipped_name,
@@ -680,12 +680,12 @@ class SwarmCommander:
         return capped
 
     # ------------------------------------------------------------------
-    # Phase 3 + 4 — Parallel launch with concurrent checkpoint
+    # Phase 3 + 4 -- Parallel launch with concurrent checkpoint
     # ------------------------------------------------------------------
 
     async def _phase_parallel(self, agents: list[AsiAgent]) -> None:
-        if not agents:  # pragma: no cover — defensive: decompose returns at least one
-            _LOG.info("phase parallel: no applicable agents — skipping")
+        if not agents:  # pragma: no cover -- defensive: decompose returns at least one
+            _LOG.info("phase parallel: no applicable agents -- skipping")
             return
 
         _LOG.info(
@@ -709,7 +709,7 @@ class SwarmCommander:
                 await checkpoint_task
             except asyncio.CancelledError:
                 _LOG.debug("phase parallel: checkpoint task cancelled cleanly")
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.warning(
                     "phase parallel: checkpoint task raised on shutdown (%s: %s)",
                     type(exc).__name__,
@@ -735,8 +735,8 @@ class SwarmCommander:
                         self._run_agent_with_observer(agent),
                         name=agent.name or type(agent).__name__,
                     )
-        except BaseException as exc:  # pragma: no cover — defensive
-            # ExceptionGroup on TaskGroup failure — log but don't propagate;
+        except BaseException as exc:  # pragma: no cover -- defensive
+            # ExceptionGroup on TaskGroup failure -- log but don't propagate;
             # finalisation still needs to emit a Scan.
             _LOG.warning("TaskGroup raised %s: %s", type(exc).__name__, exc)
 
@@ -803,14 +803,14 @@ class SwarmCommander:
                 },
             )
         )
-        # Phase 5 — donate this agent's leftover tokens to the lowest-coverage
+        # Phase 5 -- donate this agent's leftover tokens to the lowest-coverage
         # ASI category. We surface the donation as event metadata; concrete
         # budget rewiring is a future-milestone refinement.
         self._donate_budget(agent)
         return report
 
     # ------------------------------------------------------------------
-    # Phase 4 — Checkpoint loop
+    # Phase 4 -- Checkpoint loop
     # ------------------------------------------------------------------
 
     async def _checkpoint_loop(self) -> None:
@@ -833,7 +833,7 @@ class SwarmCommander:
                 )
                 if decision is CheckpointDecision.EARLY_STOP:
                     _LOG.info(
-                        "checkpoint: EARLY_STOP triggered — cancel signal set; "
+                        "checkpoint: EARLY_STOP triggered -- cancel signal set; "
                         "in-flight agents will exit at their next turn boundary, "
                         "agents not yet started will skip immediately"
                     )
@@ -870,7 +870,7 @@ class SwarmCommander:
         no_recent_findings = (
             now - self._last_finding_seen_at
         ) >= self.config.checkpoint_interval_seconds
-        if (  # pragma: no cover — early_stop branch exercised in live runs only
+        if (  # pragma: no cover -- early_stop branch exercised in live runs only
             variance < self.config.early_stop_variance_threshold and no_recent_findings
         ):
             _LOG.info(
@@ -882,7 +882,7 @@ class SwarmCommander:
                 current_findings,
             )
             return CheckpointDecision.EARLY_STOP
-        _LOG.info(  # pragma: no cover — continue-with-data branch exercised in live runs only
+        _LOG.info(  # pragma: no cover -- continue-with-data branch exercised in live runs only
             "checkpoint: aivss=%d decision=continue (variance=%.2f, "
             "no_recent_findings=%s, findings=%d)",
             provisional,
@@ -895,7 +895,7 @@ class SwarmCommander:
     def _compute_provisional_aivss(self) -> int:
         """Score the current findings as if the scan finished now.
 
-        Empty ``probes`` is fine — :func:`compute_aivss` handles the
+        Empty ``probes`` is fine -- :func:`compute_aivss` handles the
         vacuous case (every ASI score defaults to 100).
         """
         findings = self.memory.all_findings()
@@ -904,7 +904,7 @@ class SwarmCommander:
         return result.score
 
     # ------------------------------------------------------------------
-    # Phase 5 — Budget donation
+    # Phase 5 -- Budget donation
     # ------------------------------------------------------------------
 
     def _donate_budget(self, completed: AsiAgent) -> None:
@@ -918,7 +918,7 @@ class SwarmCommander:
         remaining = max(0, completed.budget.tokens_remaining)
         if remaining <= 0:
             _LOG.debug(
-                "budget donate: %s exhausted its tokens — no donation",
+                "budget donate: %s exhausted its tokens -- no donation",
                 completed.name or type(completed).__name__,
             )
             return
@@ -936,7 +936,7 @@ class SwarmCommander:
         )
 
     # ------------------------------------------------------------------
-    # Phase 6 — Finalisation
+    # Phase 6 -- Finalisation
     # ------------------------------------------------------------------
 
     async def _phase_finalise(self) -> Scan:
@@ -952,7 +952,7 @@ class SwarmCommander:
         fingerprint = self._fingerprint or self._minimal_fingerprint()
         # Sub-score keys are already plain strings in AivssResult.sub_scores.
         sub_scores = dict(result.sub_scores)
-        # asi_scores key is AsiCategory enum — Scan accepts it directly.
+        # asi_scores key is AsiCategory enum -- Scan accepts it directly.
         asi_scores = dict(result.asi_scores)
 
         # Aggregate real per-role token spend across every agent report (the
@@ -1030,7 +1030,84 @@ class SwarmCommander:
             cost_usd,
             tokens_total,
         )
+        # Telemetry -- best-effort, only fires when the user has opted in.
+        # No-op for opted-out users; no impact on Scan ever.
+        self._maybe_emit_telemetry(scan, duration)
         return scan
+
+    def _maybe_emit_telemetry(self, scan: Scan, duration: float) -> None:
+        """Fire a ScanCompletedEvent unless the user has OPTED_OUT.
+
+        Per v1.0+ policy: telemetry is essential-tier ON by default.
+        Only environment-fingerprint fields (adapter, python_version,
+        os_family, arch) are gated behind the EXTENDED tier; the
+        operational counts (agents_count, attempts_count,
+        successes_count, findings, AIVSS) always go out.
+
+        Any telemetry failure is swallowed -- never affects the scan.
+        """
+        try:
+            import platform
+            import sys
+            from datetime import datetime, timezone
+
+            from agent_guardian.telemetry.client import emit
+            from agent_guardian.telemetry.consent import is_extended, is_opted_in
+            from agent_guardian.telemetry.events import ScanCompletedEvent
+            from agent_guardian.telemetry.install_id import get_install_id
+
+            if not is_opted_in():
+                return
+            sev = scan.findings_summary()
+            # Derive the operational counts from the agent reports --
+            # the user explicitly asked for these to be on by default.
+            agents_count = len(self._agent_reports)
+            attempts_count = sum(int(r.turns or 0) for r in self._agent_reports)
+            findings_total = len(scan.findings)
+            # successes_count = attempts where the target defended --
+            # i.e. judged-turn count minus finding count. Clamped to >= 0
+            # in case findings span multiple attempts in some future code
+            # path where the relationship inverts.
+            successes_count = max(0, attempts_count - findings_total)
+            now = datetime.now(timezone.utc)
+            extended_on = is_extended()
+            event = ScanCompletedEvent(
+                install_id=get_install_id(),
+                scan_id=scan.id[:64],
+                # --- always-on essential counts ---
+                aivss=scan.aivss,
+                band=scan.band.value,
+                tier=_tier_to_telem(scan.tier),
+                duration_seconds=max(0.0, duration),
+                terminated_by="success",
+                agents_count=agents_count,
+                attempts_count=attempts_count,
+                successes_count=successes_count,
+                findings_total=findings_total,
+                findings_critical=sev.get("critical", 0),
+                findings_high=sev.get("high", 0),
+                findings_medium=sev.get("medium", 0),
+                findings_low=sev.get("low", 0),
+                agent_version=__version__,
+                started_at=now,
+                completed_at=now,
+                # --- extended-only environment fingerprint ---
+                adapter=scan.target_mode if extended_on else None,
+                target_mode=scan.target_mode if extended_on else None,
+                python_version=(
+                    f"{sys.version_info.major}.{sys.version_info.minor}" if extended_on else None
+                ),
+                os_family=_os_family_telem(platform.system()) if extended_on else None,
+                arch=_arch_telem(platform.machine()) if extended_on else None,
+            )
+            emit(event)
+        except Exception as exc:
+            # Never let telemetry break the scan. Log and move on.
+            _LOG.debug(
+                "telemetry: failed to emit ScanCompletedEvent (%s: %s) -- scan result unaffected",
+                type(exc).__name__,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1052,6 +1129,45 @@ class SwarmCommander:
             _LOG.warning("observer raised %s: %s", type(exc).__name__, exc)
 
 
+# ---------------------------------------------------------------------------
+# Telemetry value mappers -- module-level helpers used by
+# SwarmCommander._maybe_emit_telemetry. Module-level so they're trivially
+# unit-testable in isolation.
+# ---------------------------------------------------------------------------
+
+
+def _tier_to_telem(tier: Tier) -> Literal["T1", "T2", "T3", "T4"]:
+    """Map the Tier enum to the telemetry-event 4-letter code."""
+    return cast(
+        Literal["T1", "T2", "T3", "T4"],
+        {
+            Tier.T1_CRITICAL: "T1",
+            Tier.T2_HIGH: "T2",
+            Tier.T3_STANDARD: "T3",
+            Tier.T4_LOW: "T4",
+        }[tier],
+    )
+
+
+def _os_family_telem(sysname: str) -> Literal["Linux", "Darwin", "Windows"]:
+    if sysname in ("Linux", "Darwin", "Windows"):
+        return cast(Literal["Linux", "Darwin", "Windows"], sysname)
+    return "Linux"
+
+
+def _arch_telem(machine: str) -> Literal["x86_64", "arm64", "aarch64", "i686"]:
+    m = machine.lower()
+    if m in ("x86_64", "amd64"):
+        return "x86_64"
+    if m == "arm64":
+        return "arm64"
+    if m == "aarch64":
+        return "aarch64"
+    if m in ("i686", "i386"):
+        return "i686"
+    return "x86_64"
+
+
 def _variance(values: list[int]) -> float:
     """Naïve sample variance (N denominator) over a small int window."""
     if not values:
@@ -1064,7 +1180,7 @@ def _cost_for(model: str, input_tokens: int, output_tokens: int) -> float:
     """Apply the per-1M input/output rate from :func:`lookup_price`.
 
     Rates in :data:`agent_guardian.cost.PRICE_TABLE` are USD per one
-    million tokens — divide by ``1_000_000`` to convert raw token counts
+    million tokens -- divide by ``1_000_000`` to convert raw token counts
     to dollars.
     """
     if input_tokens <= 0 and output_tokens <= 0:
@@ -1090,7 +1206,7 @@ def _compute_cost_usd(
     """Sum the per-role token-cost rollup into a USD figure.
 
     Each role looks up its own price row (the three roles can run on
-    different models). Returns a value rounded to 4 decimal places —
+    different models). Returns a value rounded to 4 decimal places --
     swarm-level numbers below $0.0001 are not meaningful for operators.
     """
     total = (
@@ -1104,7 +1220,7 @@ def _compute_cost_usd(
 def _fingerprint_to_json(fp: TargetFingerprint) -> str:
     """Serialize a :class:`TargetFingerprint` to compact JSON for prompts.
 
-    Only the operationally relevant evidence-backed fields are emitted —
+    Only the operationally relevant evidence-backed fields are emitted --
     enough for the Commander to weight per-agent priorities without leaking
     framework-internal tokens.
     """
@@ -1131,7 +1247,7 @@ def _parse_swarm_brief(text: str, *, scan_id: str) -> SwarmBrief | None:
     """Best-effort parse of the Commander LLM's JSON response.
 
     Strips common wrapping (markdown code fences, prose prefaces). Returns
-    None on any parse / validation failure — the caller falls back to a
+    None on any parse / validation failure -- the caller falls back to a
     uniform brief.
     """
     stripped = text.strip()

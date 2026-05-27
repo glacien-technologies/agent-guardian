@@ -1,0 +1,443 @@
+{#
+  Public community analytics dashboard — agentguardian.ai/analytics.
+
+  Renders the day-1 minimum-viable shape from the analytics PRD §3.1:
+  4 hero numbers, the AIVSS distribution histogram (the differentiator),
+  3 supporting cells (per-ASI breakdown, adapter mix, Python×OS matrix),
+  the real-time scan ticker.
+
+  Self-contained chrome — reuses the colors_and_type.css design tokens
+  shipped for the coverage page so the visual language is consistent.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>{{ page_title|default("Community Analytics") }} · AgentGuardian Open</title>
+<link rel="stylesheet" href="/static/colors_and_type.css" />
+<style>
+  /* Inline analytics styles — small enough to not warrant a third
+     CSS file and easier to evolve without breaking the coverage page. */
+  body {
+    background:
+      radial-gradient(900px 600px at 100% -200px, rgba(139,92,246,0.05), transparent 60%),
+      var(--bg);
+    min-height: 100vh;
+  }
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(251, 250, 248, 0.88);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar__row {
+    max-width: 1480px; margin: 0 auto;
+    padding: 14px 32px;
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
+  .brand__mark { width: 26px; height: 26px; color: var(--ink); }
+  .brand__name {
+    font-family: var(--f-serif); font-size: 18px; letter-spacing: -0.01em; font-weight: 500;
+    color: var(--ink);
+  }
+  .brand__name em { font-style: italic; color: var(--accent-700); font-weight: 400; }
+
+  .window-tabs { display: inline-flex; gap: 4px; }
+  .window-tabs a {
+    padding: 6px 12px; border-radius: 999px;
+    font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.06em;
+    color: var(--ink-3); border: 1px solid var(--line); background: var(--bg);
+  }
+  .window-tabs a.is-active {
+    color: white; background: var(--ink); border-color: var(--ink);
+  }
+
+  .page {
+    max-width: 1480px; margin: 0 auto;
+    padding: 32px;
+    display: flex; flex-direction: column; gap: 32px;
+  }
+
+  /* Hero — 4 big numbers above the fold */
+  .hero {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 18px; overflow: hidden;
+  }
+  .hero__tile {
+    background: var(--surface);
+    padding: 28px 24px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .hero__num {
+    font-family: var(--f-serif); font-weight: 500;
+    font-size: 56px; line-height: 1; letter-spacing: -0.03em;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .hero__num--small { font-size: 36px; }
+  .hero__lab {
+    font-family: var(--f-mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink-3);
+  }
+  .hero__sub { font-size: 13px; color: var(--ink-4); }
+  .hero__suppressed {
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--ink-4); padding-top: 8px;
+  }
+
+  /* Histogram — the headline visual */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 24px 28px;
+  }
+  .card__head {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .card__title {
+    font-family: var(--f-serif); font-weight: 500;
+    font-size: 26px; line-height: 1.1; letter-spacing: -0.02em;
+    color: var(--ink); margin: 0;
+  }
+  .card__title em { font-style: italic; color: var(--accent-700); }
+  .card__lede {
+    font-family: var(--f-mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.10em;
+    color: var(--ink-3);
+  }
+
+  .histogram {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 4px;
+    align-items: end;
+    height: 240px;
+    padding: 16px 8px 0;
+  }
+  .histogram__bar {
+    display: flex; flex-direction: column-reverse; align-items: stretch;
+    text-align: center;
+    min-height: 4px;
+    border-radius: 8px 8px 0 0;
+    position: relative;
+    transition: filter 140ms var(--ease);
+  }
+  .histogram__bar:hover { filter: brightness(1.1); }
+  .histogram__bar--exc  { background: #d1fae5; }
+  .histogram__bar--good { background: var(--accent-100); }
+  .histogram__bar--attn { background: #ffedd5; }
+  .histogram__bar--fail { background: #fee2e2; }
+  .histogram__count {
+    font-family: var(--f-mono); font-size: 10px;
+    color: var(--ink-2);
+    padding-top: 4px;
+  }
+  .histogram__axis {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    font-family: var(--f-mono); font-size: 10px;
+    color: var(--ink-3);
+    text-align: center;
+    padding: 6px 8px 0;
+    border-top: 1px solid var(--line);
+    margin-top: 6px;
+  }
+  .histogram__empty {
+    text-align: center;
+    padding: 80px 0;
+    font-family: var(--f-mono); font-size: 12px;
+    color: var(--ink-4);
+  }
+
+  /* Supporting tables */
+  .table { width: 100%; border-collapse: collapse; }
+  .table th, .table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .table tbody tr:last-child td { border-bottom: 0; }
+  .table th {
+    font-family: var(--f-mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink-3); font-weight: 500;
+  }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Ticker */
+  .ticker { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+  .ticker__row {
+    display: grid;
+    grid-template-columns: 60px 1fr 100px;
+    gap: 12px; align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--f-mono); font-size: 12px;
+  }
+  .ticker__row:last-child { border-bottom: 0; }
+  .ticker__score {
+    font-family: var(--f-serif); font-size: 24px; font-weight: 500;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .ticker__pill {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-family: var(--f-mono); font-size: 10px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    border: 1px solid currentColor;
+  }
+  .ticker__pill--EXCELLENT { color: #14532d; background: #d1fae5; }
+  .ticker__pill--GOOD { color: #5b21b6; background: var(--accent-100); }
+  .ticker__pill--WARNING { color: #9a3412; background: #ffedd5; }
+  .ticker__pill--POOR { color: #b91c1c; background: #fee2e2; }
+  .ticker__pill--CRITICAL { color: #b91c1c; background: #fee2e2; }
+  .ticker__adapter { color: var(--ink-3); }
+
+  /* k-anonymity notice */
+  .k-notice {
+    font-family: var(--f-mono); font-size: 11px;
+    color: var(--ink-4);
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  /* Privacy footer */
+  .privacy-foot {
+    text-align: center;
+    padding: 24px 0;
+    font-family: var(--f-mono); font-size: 11px;
+    color: var(--ink-3);
+  }
+  .privacy-foot a { color: var(--accent-700); text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar__row">
+    <a class="brand" href="/">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          <path d="M3 16 H29 M16 3 a17 17 0 0 1 0 26 M16 3 a17 17 0 0 0 0 26" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          <circle cx="22.5" cy="9" r="2.4" fill="#8B5CF6"></circle>
+        </svg>
+      </span>
+      <span class="brand__name">AgentGuardian <em>Open</em> · Community Analytics</span>
+    </a>
+    <nav class="window-tabs">
+      {% for code, label in [("24h","24h"), ("7d","7d"), ("30d","30d"), ("365d","365d"), ("all","all-time")] %}
+      <a href="?window={{ code }}" class="{% if window == code %}is-active{% endif %}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- HERO: the 4 numbers -->
+  <section class="hero">
+    <div class="hero__tile">
+      <span class="hero__num">{{ "{:,}".format(hero.total_scans) }}</span>
+      <span class="hero__lab">Total scans</span>
+      <span class="hero__sub">{{ window_label|lower }}</span>
+    </div>
+    <div class="hero__tile">
+      {% if hero.median_aivss is not none %}
+      <span class="hero__num">{{ hero.median_aivss }}</span>
+      <span class="hero__lab">Median AIVSS</span>
+      <span class="hero__sub">community-wide (0–100)</span>
+      {% else %}
+      <span class="hero__num hero__num--small">—</span>
+      <span class="hero__lab">Median AIVSS</span>
+      <span class="hero__suppressed">below k≥50 threshold</span>
+      {% endif %}
+    </div>
+    <div class="hero__tile">
+      {% if hero.crash_free_rate_pct is not none %}
+      <span class="hero__num">{{ "%.2f"|format(hero.crash_free_rate_pct) }}<span style="font-size:24px;color:var(--ink-3)">%</span></span>
+      <span class="hero__lab">Crash-free scans</span>
+      <span class="hero__sub">target ≥ 99.5%</span>
+      {% else %}
+      <span class="hero__num hero__num--small">—</span>
+      <span class="hero__lab">Crash-free scans</span>
+      <span class="hero__suppressed">below k≥50 threshold</span>
+      {% endif %}
+    </div>
+    <div class="hero__tile">
+      <span class="hero__num">{{ "{:,}".format(hero.monthly_active_installs) }}</span>
+      <span class="hero__lab">Monthly active installs</span>
+      <span class="hero__sub">opted-in telemetry</span>
+    </div>
+  </section>
+
+  <!-- HISTOGRAM: the differentiator -->
+  <section class="card">
+    <div class="card__head">
+      <div>
+        <h2 class="card__title">AIVSS <em>distribution</em></h2>
+        <p class="card__lede">Where the community is scoring · 10-pt buckets · higher = more secure</p>
+      </div>
+    </div>
+    {% if histogram %}
+    <div class="histogram">
+      {% for b in histogram %}
+        {% set band_class = "exc" if b.lower >= 90 else ("good" if b.lower >= 80 else ("attn" if b.lower >= 60 else "fail")) %}
+        {% set pct_of_max = (b.percent / max_bucket_pct * 100) if max_bucket_pct > 0 else 0 %}
+        <div class="histogram__bar histogram__bar--{{ band_class }}" style="height: {{ pct_of_max if pct_of_max > 0 else 4 }}%">
+          <span class="histogram__count">{{ "%.1f"|format(b.percent) }}%</span>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="histogram__axis">
+      {% for b in histogram %}<span>{{ b.lower }}–{{ b.upper }}</span>{% endfor %}
+    </div>
+    {% else %}
+    <div class="histogram__empty">
+      Not enough data yet to publish a distribution.<br>
+      Bucket needs ≥ 50 distinct opted-in installs · check back as adoption grows.
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- 3-col supporting grid -->
+  <section style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px">
+
+    <!-- Per-ASI breakdown -->
+    <div class="card">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title" style="font-size:20px">Per-ASI <em>failure mix</em></h2>
+          <p class="card__lede">OWASP Agentic Top 10 · approximate weighted attribution</p>
+        </div>
+      </div>
+      {% if asi %}
+      <table class="table">
+        <thead>
+          <tr><th>ASI</th><th>Category</th><th class="num">Failure rate</th></tr>
+        </thead>
+        <tbody>
+          {% for r in asi %}
+          <tr>
+            <td><strong>{{ r.asi }}</strong></td>
+            <td>{{ r.label }}</td>
+            <td class="num">{{ "%.2f"|format(r.failure_rate_pct) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="hero__suppressed">Below k≥50 threshold — not yet published.</p>
+      {% endif %}
+    </div>
+
+    <!-- Adapter mix -->
+    <div class="card">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title" style="font-size:20px">Adapter <em>mix</em></h2>
+          <p class="card__lede">Which agent frameworks are being tested</p>
+        </div>
+      </div>
+      {% if adapters %}
+      <table class="table">
+        <thead>
+          <tr><th>Adapter</th><th class="num">Scans</th><th class="num">Share</th><th class="num">Median</th></tr>
+        </thead>
+        <tbody>
+          {% for r in adapters %}
+          <tr>
+            <td>{{ r.adapter }}</td>
+            <td class="num">{{ "{:,}".format(r.scans) }}</td>
+            <td class="num">{{ "%.1f"|format(r.percent) }}%</td>
+            <td class="num">{{ r.median_aivss if r.median_aivss is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="hero__suppressed">Each adapter row needs ≥ 50 distinct installs before publication — not yet there.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Python × OS + Ticker -->
+  <section style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div class="card">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title" style="font-size:20px">Python <em>×</em> OS</h2>
+          <p class="card__lede">Compatibility matrix · k≥50 per cell</p>
+        </div>
+      </div>
+      {% if py_os %}
+      <table class="table">
+        <thead>
+          <tr><th>Python</th><th>OS</th><th class="num">Scans</th></tr>
+        </thead>
+        <tbody>
+          {% for c in py_os %}
+          <tr>
+            <td>{{ c.python }}</td>
+            <td>{{ c.os }}</td>
+            <td class="num">{{ "{:,}".format(c.scans) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="hero__suppressed">No cell yet has ≥ 50 distinct installs.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title" style="font-size:20px">Recent <em>scans</em></h2>
+          <p class="card__lede">Last 5 completed · live (refresh to update)</p>
+        </div>
+      </div>
+      {% if recent %}
+      <div class="ticker">
+        {% for r in recent %}
+        <div class="ticker__row">
+          <span class="ticker__score">{{ r.aivss }}</span>
+          <span><span class="ticker__pill ticker__pill--{{ r.band }}">{{ r.band }}</span></span>
+          <span class="ticker__adapter">{{ r.adapter }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="hero__suppressed">No scans recorded yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <p class="k-notice">
+    Every cell on this page enforces k ≥ 50 distinct install_ids before publication.
+    Aggregates that don't yet meet the threshold are suppressed (shown as “—”).
+    Telemetry is opt-in only — see the <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/docs/telemetry/index.md" style="color:var(--accent-700)">telemetry transparency docs</a>.
+    Total events received in this store: <strong>{{ "{:,}".format(total_in_store) }}</strong>.
+  </p>
+
+  <p class="privacy-foot">
+    <strong>AgentGuardian Open</strong> · Community analytics ·
+    Source: <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/server/analytics/aggregator.py">aggregator.py</a> ·
+    Schema: <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/telemetry/events.py">events.py</a> ·
+    Built from opted-in user telemetry · k≥50 enforced
+  </p>
+
+</main>
+
+</body>
+</html>

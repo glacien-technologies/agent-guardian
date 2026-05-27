@@ -381,24 +381,32 @@ def test_publish_truncates_oversize_finding_summary(runner: CliRunner, tmp_path:
 
 
 def test_telemetry_status_disabled_by_default(runner: CliRunner) -> None:
+    """Fresh install reports NOT_PROMPTED (the default consent state)."""
     result = runner.invoke(app, ["telemetry", "status"])
     assert result.exit_code == 0
-    assert "disabled" in result.stdout
+    # New status output is "telemetry state: not_prompted" + hint line.
+    assert "not_prompted" in result.stdout
+    assert "opted in" in result.stdout.lower() or "not_prompted" in result.stdout
 
 
 def test_telemetry_enable_then_status(runner: CliRunner) -> None:
+    """`enable` (legacy alias of `extended`) upgrades to EXTENDED tier."""
     result = runner.invoke(app, ["telemetry", "enable"])
     assert result.exit_code == 0
+    # The new wording reflects the tier upgrade, not "enabled".
+    assert "extended" in result.stdout.lower()
     result = runner.invoke(app, ["telemetry", "status"])
-    assert "enabled" in result.stdout
+    assert "extended" in result.stdout
 
 
 def test_telemetry_disable(runner: CliRunner) -> None:
+    """`disable` transitions OPTED_IN → OPTED_OUT and surfaces in status."""
     runner.invoke(app, ["telemetry", "enable"])
     result = runner.invoke(app, ["telemetry", "disable"])
     assert result.exit_code == 0
+    assert "disabled" in result.stdout.lower()
     result = runner.invoke(app, ["telemetry", "status"])
-    assert "disabled" in result.stdout
+    assert "opted_out" in result.stdout
 
 
 # ---------------------------------------------------------------------------

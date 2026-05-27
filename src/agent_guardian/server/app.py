@@ -12,7 +12,7 @@ Boot sequence
 * The eight route modules in :mod:`agent_guardian.server.routes` are
   imported and their ``router`` objects registered.
 * The Jinja2 template environment is configured to read from
-  ``server/templates/`` and given two globals — ``version`` and a tiny
+  ``server/templates/`` and given two globals -- ``version`` and a tiny
   helper ``url_for`` substitute we use to keep templates portable.
 * ``server/static/`` is mounted at ``/static``.
 * A :class:`ScanStore` is stashed on ``app.state.scan_store`` so
@@ -56,24 +56,25 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         openapi_url=None,
     )
 
-    # Templates — exposed both on app.state for handlers and stamped
+    # Templates -- exposed both on app.state for handlers and stamped
     # with two globals every page expects.
     templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
     templates.env.globals["version"] = __version__
     app.state.templates = templates
 
-    # Static mount. The directory always exists in the wheel — we
+    # Static mount. The directory always exists in the wheel -- we
     # create it eagerly in dev to keep mypy / type-checkers happy.
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-    # Scan store — either injected for tests or default-ed.
+    # Scan store -- either injected for tests or default-ed.
     app.state.scan_store = scan_store if scan_store is not None else ScanStore()
 
-    # Routes — import here so the factory is the single entry point.
+    # Routes -- import here so the factory is the single entry point.
     from agent_guardian.server.routes import (
         about,
         aivss,
+        analytics,
         coverage,
         events,
         export,
@@ -94,5 +95,6 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     app.include_router(about.router)
     app.include_router(events.router)
     app.include_router(coverage.router)
+    app.include_router(analytics.router)
 
     return app
