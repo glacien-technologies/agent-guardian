@@ -14,7 +14,7 @@
     "ASI10": 100.0
   },
   "band": "EXCELLENT",
-  "cost_usd": 0.0207,
+  "cost_usd": 0.0231,
   "coverage": {
     "agents": {
       "cascade-agent": 5,
@@ -122,8 +122,8 @@
       "tap": 12
     }
   },
-  "created_at": "2026-05-27T14:51:35.237044+08:00",
-  "duration_seconds": 224.96638391609304,
+  "created_at": "2026-05-27T15:01:15.833934+08:00",
+  "duration_seconds": 330.80209504207596,
   "findings": [],
   "findings_summary": {
     "critical": 0,
@@ -133,20 +133,20 @@
   },
   "package_version": "1.0.0rc1",
   "probe_library_version": "0.0.0-placeholder",
-  "scan_id": "runner-064750",
+  "scan_id": "runner-065544",
   "schema": "agentguardian-scan-v1",
   "signatures": {
     "ed25519": {
       "algorithm": "Ed25519",
       "public_key_b32": "QC5XSSJAYYEXA4C7VVZ6YGC37ONPDISNJMVI6Q63BHK6I55FFQUA",
-      "signature": "yizB8CXqWvVKTuXFH/H2GsdXmRHt5PFLYlnapdtzguyDteaV6Cj0CpQxPbI7sBn3NoU3Lr0zJqLlyPnmZOWtDQ==",
+      "signature": "AHIkyiSHDZcA3f0Em8NGXS8UWWtvSigWT2yIlbeutdsKVDk8CAzAgLNxYzVQ9nbG1DazcPemtGLmsN8rtrVtBQ==",
       "version": "ag-sig-v1"
     },
     "hmac_sha256": {
       "algorithm": "HMAC-SHA256",
       "iterations": 600000,
-      "salt": "9s2/a5HSYrSW3o2FGLl4BQ==",
-      "signature": "ZUe9rbL11qVU8m7sfyZjTapdzxA1zGePfDzVfB7pODc=",
+      "salt": "M1UD1UIeQLkkGb80DvyI9g==",
+      "signature": "SKBoHJfYnS7kt+EyIqIqojf3CISSKe7ZrCtyuVSDtgk=",
       "version": "ag-sig-v1"
     }
   },
@@ -160,8 +160,8 @@
   },
   "target": {
     "mode": "code",
-    "ref": "examples.langgraph.simple_chatbot:run"
+    "ref": "examples.openai_agents.support_with_tool:run"
   },
-  "tier": "T4",
-  "tokens_total": 32103
+  "tier": "T3",
+  "tokens_total": 38555
 }
