@@ -63,6 +63,7 @@ aws = [
 docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.24",
 ]
 # ``examples`` carries every dep used by the demo target agents under
 # ``examples/`` (LangGraph + OpenAI Agents SDK trios). They are strictly
@@ -153,6 +154,16 @@ exclude = ["tests/"]
 # both cases produce noise we silence here once for the whole project.
 [[tool.mypy.overrides]]
 module = ["botocore.*"]
+ignore_missing_imports = true
+
+# sentence_transformers + numpy are optional via the ``[full]`` extra
+# (used by the FAISS-backed scenario dedupe in
+# :mod:`agent_guardian.agents.base` and the vector-search path in
+# :mod:`agent_guardian.core.memory`). The imports live inside
+# ``try/except ImportError`` blocks at runtime; mypy doesn't model the
+# conditional install, so we silence the missing-stub noise here once.
+[[tool.mypy.overrides]]
+module = ["sentence_transformers", "numpy"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
