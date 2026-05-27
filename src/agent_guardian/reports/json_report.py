@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from agent_guardian.core.coverage import compute_coverage_from_memory
 from agent_guardian.core.redact import PiiRedactor
 from agent_guardian.crypto.ed25519_sig import (
     Ed25519SignatureBlock,
@@ -90,8 +91,17 @@ def emit_json(
     sign: bool = True,
     secret: str | None = None,
     keys_dir: Path | None = None,
+    memory_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Build the ``agentguardian-scan-v1`` payload for a :class:`Scan`."""
+    """Build the ``agentguardian-scan-v1`` payload for a :class:`Scan`.
+
+    The ``coverage`` block is reconstructed from the scan's on-disk
+    ``memory.jsonl`` (under ``~/.agentguardian/scans/<scan_id>/`` by
+    default). When no memory file exists (e.g. a hand-constructed Scan
+    in a unit test) the coverage block has the canonical empty shape so
+    the schema is stable.
+    """
+    coverage = compute_coverage_from_memory(scan, root_dir=memory_root)
     payload: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "scan_id": scan.id,
@@ -105,6 +115,7 @@ def emit_json(
         "sub_scores": dict(scan.sub_scores),
         "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
         "findings_summary": scan.findings_summary(),
+        "coverage": coverage,
         "findings": [_finding_to_dict(f, redact_pii) for f in scan.findings],
         "duration_seconds": scan.duration_seconds,
         "cost_usd": scan.cost_usd,
@@ -126,6 +137,7 @@ def write_json(
     indent: int = 2,
     secret: str | None = None,
     keys_dir: Path | None = None,
+    memory_root: Path | None = None,
 ) -> None:
     """Render :func:`emit_json` to ``path`` (UTF-8, sorted keys)."""
     payload = emit_json(
@@ -134,6 +146,7 @@ def write_json(
         sign=sign,
         secret=secret,
         keys_dir=keys_dir,
+        memory_root=memory_root,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

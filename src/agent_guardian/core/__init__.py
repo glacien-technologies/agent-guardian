@@ -5,6 +5,10 @@ from agent_guardian.core.budget import (
     BudgetController,
     BudgetSlice,
 )
+from agent_guardian.core.coverage import (
+    compute_coverage_from_memory,
+    default_memory_path,
+)
 from agent_guardian.core.scoring import (
     AIVSS_FORMULA_VERSION,
     SEVERITY_WEIGHTS,
@@ -33,6 +37,8 @@ __all__ = [
     "apply_penalty",
     "asi_score",
     "compute_aivss",
+    "compute_coverage_from_memory",
+    "default_memory_path",
     "detect_tier",
     "fail_rate",
     "pass_rate",

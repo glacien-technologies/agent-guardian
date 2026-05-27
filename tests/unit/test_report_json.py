@@ -39,6 +39,7 @@ def test_emit_json_has_expected_top_level_keys() -> None:
         "sub_scores",
         "asi_scores",
         "findings_summary",
+        "coverage",
         "findings",
         "duration_seconds",
         "cost_usd",
@@ -140,4 +141,187 @@ def test_canonical_json_is_stable_across_runs() -> None:
 def test_verify_signatures_accepts_in_memory_dict(tmp_path: Path) -> None:
     payload = emit_json(make_scan())
     result = verify_signatures(payload)
+    assert result.ok
+
+
+# ----------------------------------------------------------------------
+# Coverage block (M13 follow-up) — populated from memory.jsonl
+# ----------------------------------------------------------------------
+
+
+def _write_memory_jsonl(memory_root: Path, scan_id: str, records: list[dict]) -> Path:
+    """Helper: write JSONL records to the canonical scan-memory path."""
+    scan_dir = memory_root / scan_id
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    path = scan_dir / "memory.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec) + "\n")
+    return path
+
+
+def _make_reflection_record(
+    scan_id: str,
+    *,
+    agent: str,
+    asi_category: str,
+    mitre: list[str],
+    csa: str,
+    turn: int = 1,
+) -> dict:
+    content = json.dumps(
+        {
+            "agent": agent,
+            "asi_category": asi_category,
+            "mitre_techniques": mitre,
+            "csa_category": csa,
+            "turn": turn,
+            "strategy": "pair",
+            "prompt": "test prompt",
+            "rationale": "",
+            "target_response": "test response",
+            "verdict": "pass",
+            "confidence": 0.5,
+            "reasoning": "ok",
+            "strategy_metadata": {},
+            "seed_id": None,
+        }
+    )
+    return {
+        "record_type": "reflection",
+        "scan_id": scan_id,
+        "timestamp": "2026-05-27T00:00:00+00:00",
+        "payload": {"agent": agent, "content": content},
+    }
+
+
+def test_emit_json_includes_coverage_block_empty_when_no_memory(tmp_path: Path) -> None:
+    scan = make_scan()
+    payload = emit_json(scan, memory_root=tmp_path)
+    cov = payload["coverage"]
+    assert cov == {
+        "attempts_total": 0,
+        "asi_categories": [],
+        "mitre_techniques": [],
+        "csa_categories": [],
+        "agents": {},
+    }
+
+
+def test_coverage_attempts_total_matches_reflection_count(tmp_path: Path) -> None:
+    scan = make_scan()
+    _write_memory_jsonl(
+        tmp_path,
+        scan.id,
+        [
+            _make_reflection_record(
+                scan.id,
+                agent="goal-hijack-agent",
+                asi_category="ASI01",
+                mitre=["AML.T0054"],
+                csa="goal_instruction_manipulation",
+                turn=1,
+            ),
+            _make_reflection_record(
+                scan.id,
+                agent="goal-hijack-agent",
+                asi_category="ASI01",
+                mitre=["AML.T0054"],
+                csa="goal_instruction_manipulation",
+                turn=2,
+            ),
+            _make_reflection_record(
+                scan.id,
+                agent="tool-abuse-agent",
+                asi_category="ASI02",
+                mitre=["AML.T0040"],
+                csa="authorization_control_hijacking",
+                turn=1,
+            ),
+        ],
+    )
+    payload = emit_json(scan, memory_root=tmp_path)
+    cov = payload["coverage"]
+    assert cov["attempts_total"] == 3
+    assert cov["asi_categories"] == ["ASI01", "ASI02"]
+    assert cov["mitre_techniques"] == ["AML.T0040", "AML.T0054"]
+    assert cov["csa_categories"] == [
+        "authorization_control_hijacking",
+        "goal_instruction_manipulation",
+    ]
+    assert cov["agents"] == {"goal-hijack-agent": 2, "tool-abuse-agent": 1}
+
+
+def test_coverage_skips_non_reflection_records(tmp_path: Path) -> None:
+    """Findings, fingerprints, attempted_seeds must not inflate attempts."""
+    scan = make_scan()
+    _write_memory_jsonl(
+        tmp_path,
+        scan.id,
+        [
+            {
+                "record_type": "fingerprint",
+                "scan_id": scan.id,
+                "timestamp": "2026-05-27T00:00:00+00:00",
+                "payload": {"mode": "prompt", "ref": "x"},
+            },
+            {
+                "record_type": "attempted_seed",
+                "scan_id": scan.id,
+                "timestamp": "2026-05-27T00:00:00+00:00",
+                "payload": {"asi": "ASI01", "seed_id": "seed-1"},
+            },
+            _make_reflection_record(
+                scan.id,
+                agent="goal-hijack-agent",
+                asi_category="ASI01",
+                mitre=["AML.T0054"],
+                csa="goal_instruction_manipulation",
+            ),
+        ],
+    )
+    payload = emit_json(scan, memory_root=tmp_path)
+    assert payload["coverage"]["attempts_total"] == 1
+
+
+def test_coverage_tolerates_malformed_lines(tmp_path: Path) -> None:
+    """A garbled line in memory.jsonl must not bring down report emission."""
+    scan = make_scan()
+    path = tmp_path / scan.id / "memory.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    good = _make_reflection_record(
+        scan.id,
+        agent="cascade-agent",
+        asi_category="ASI03",
+        mitre=["AML.T0042"],
+        csa="cascading_trust_failure_in_inter_agent_systems",
+    )
+    path.write_text(
+        "not-json\n" + json.dumps(good) + "\n{partial: broken\n",
+        encoding="utf-8",
+    )
+    payload = emit_json(scan, memory_root=tmp_path)
+    assert payload["coverage"]["attempts_total"] == 1
+    assert payload["coverage"]["asi_categories"] == ["ASI03"]
+
+
+def test_emit_json_with_coverage_still_signs_and_verifies(tmp_path: Path) -> None:
+    """Adding coverage must not break the signature flow."""
+    scan = make_scan()
+    _write_memory_jsonl(
+        tmp_path,
+        scan.id,
+        [
+            _make_reflection_record(
+                scan.id,
+                agent="drift-agent",
+                asi_category="ASI10",
+                mitre=["AML.T0051"],
+                csa="hallucination_exploitation",
+            ),
+        ],
+    )
+    path = tmp_path / "report.json"
+    write_json(scan, path, memory_root=tmp_path)
+    result = verify_signatures(path)
     assert result.ok
