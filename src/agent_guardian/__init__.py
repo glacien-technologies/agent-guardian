@@ -134,6 +134,11 @@ from agent_guardian.models.severity import (
     band_for_score,
     colour_for_band,
 )
+from agent_guardian.models.swarm_brief import (
+    AgentBrief,
+    SubGoal,
+    SwarmBrief,
+)
 from agent_guardian.models.tier import ObservedSurface, Tier
 from agent_guardian.probes.loader import (
     PROBE_CORPUS_VERSION,
@@ -184,6 +189,7 @@ __all__ = [
     "SIGNATURE_VERSION",
     "A2AAgent",
     "ADKAdapter",
+    "AgentBrief",
     "AgentBudget",
     "AgentOrigin",
     "AgentReport",
@@ -266,7 +272,9 @@ __all__ = [
     "StrategyResult",
     "StubLLM",
     "StubScript",
+    "SubGoal",
     "SupplyChainAgent",
+    "SwarmBrief",
     "SwarmCommander",
     "SwarmConfig",
     "SwarmEvent",

@@ -346,6 +346,12 @@ class AsiAgent(ABC):
             model=evaluator_model,
             rubric=self.judge_rubric(),
         )
+        # Spec §6 — optional per-agent brief attached by SwarmCommander
+        # after Commander goal-decomposition. None means the standard
+        # seed pass runs without a goal-specific overlay. See
+        # :meth:`generate_goal_specific_scenarios` (spec §8).
+        # Forward reference to avoid an import cycle with models.swarm_brief.
+        self._brief: Any = None
 
     # ------------------------------------------------------------------
     # Subclass hooks

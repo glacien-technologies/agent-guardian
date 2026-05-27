@@ -858,6 +858,15 @@ def scan(
         None, "--config", help="Override the default config file location."
     ),
     seed: int = typer.Option(0, "--seed", help="RNG seed for determinism."),
+    goal: str | None = typer.Option(
+        None,
+        "--goal",
+        help=(
+            "Operator's natural-language attack goal (spec §6). When set, the "
+            "Commander LLM decomposes it into per-agent briefs and the swarm "
+            "synthesises goal-specific scenarios on top of the standard pass."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     try:
@@ -879,6 +888,7 @@ def scan(
                 no_tui=no_tui,
                 config_path=config_path,
                 seed=seed,
+                goal=goal,
             )
         )
     except KeyboardInterrupt:
@@ -905,6 +915,7 @@ async def _run_scan(
     no_tui: bool,
     config_path: Path | None,
     seed: int,
+    goal: str | None = None,
 ) -> int:
     # 1. Config layer — file + defaults.
     try:
@@ -982,6 +993,7 @@ async def _run_scan(
         total_tokens=cfg.swarm.budget.max_total_tokens,
         max_parallel_agents=min(10, cfg.swarm.max_parallel_agents),
         tier_override=tier_override,
+        target_goal=goal,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
         # recon_wall_seconds intentionally left at the SwarmConfig default (90s);
