@@ -294,10 +294,11 @@ class SwarmCommander:
             budget=AgentBudget(
                 tokens_remaining=50_000,
                 wall_seconds_remaining=self.config.recon_wall_seconds,
-                # 6 probes after CC-2: original 3 (tools, memory, refusal-style)
-                # + 3 OWASP-aligned (external-systems, multi-agent, cross-session-data).
+                # 7 probes after spec §7.1: original 3 (tools, memory,
+                # refusal-style) + 3 OWASP-aligned (external-systems,
+                # multi-agent, cross-session-data) + goal/scope-restatement.
                 # If recon's probe count changes again, bump this cap to match.
-                max_turns=6,
+                max_turns=7,
             ),
         )
         recon_report: AgentReport | None = None

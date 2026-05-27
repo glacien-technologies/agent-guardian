@@ -12,7 +12,7 @@ from agent_guardian.agents.recon import ReconAgent
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.llm.stub import StubLLM, StubScript
 
-_RECON_PROBE_COUNT = 6  # CC-2: 3 original + 3 OWASP-2026 signal probes
+_RECON_PROBE_COUNT = 7  # spec §7.1: 3 original + 3 OWASP-2026 + goal/scope-restatement
 
 
 def _make_target_with_tool_inventory_response() -> StubLLM:
@@ -41,6 +41,11 @@ def _make_target_with_tool_inventory_response() -> StubLLM:
         .respond_to(
             "user-specific data",
             "I remember user contacts, calendar entries, and persist preferences across sessions.",
+        )
+        .respond_to(
+            "purpose",
+            "My purpose is to assist with customer support; I should not provide medical, "
+            "legal, or financial advice.",
         )
         .default("ok")
         .build()
@@ -123,7 +128,7 @@ async def test_recon_persists_each_probe_as_reflection(
     await agent.run(target, memory)
 
     reflections = memory.reflections_for("recon-agent")
-    # The agent issues all 6 probes; each writes one reflection.
+    # The agent issues all 7 probes; each writes one reflection.
     assert len(reflections) == _RECON_PROBE_COUNT
     parsed = [json.loads(c) for c in reflections]
     names = {p["probe_name"] for p in parsed}
@@ -134,6 +139,7 @@ async def test_recon_persists_each_probe_as_reflection(
         "external-systems-probe",
         "multi-agent-probe",
         "cross-session-data-probe",
+        "goal-scope-restatement-probe",
     }
     # Every record must carry the actual prompt and the target's response.
     for rec in parsed:
