@@ -1,21 +1,57 @@
 """AWS Bedrock Converse API client (PRD §14.3).
 
-.. note::
-   Full SigV4 signing lands in M9. For M3 we ship the request-builder and
-   response-mapper as pure functions (testable without auth) and
-   :meth:`BedrockClient.complete` raises :class:`NotImplementedError` with a
-   clear message pointing operators at the upcoming M9 work.
+This module ships the production Bedrock provider. The client is built from
+three layers:
 
-This split lets every downstream consumer code against :class:`BedrockClient`
-from day one, while the auth layer matures.
+1. The pure :func:`build_bedrock_payload` / :func:`map_bedrock_response`
+   helpers — request/response shaping, no I/O, fully unit-testable. These
+   landed in M3 and have not changed.
+2. SigV4 signing via :mod:`botocore` (the lean credential-chain + signer
+   subset of boto3 — see the ``[aws]`` extra in ``pyproject.toml``).
+3. HTTP transport via our existing :class:`httpx.AsyncClient`, which the
+   rest of the framework already owns (retry-with-backoff, sandbox, and
+   the per-provider concurrency semaphore live on :class:`BaseLLM`).
+
+We deliberately do **not** depend on the full ``boto3`` SDK or
+``aioboto3``: botocore's request signer is everything we need, and its
+SDK-style client would mean second-guessing the asyncio transport we
+already manage. Credentials are resolved through the standard AWS chain
+at construction time so misconfiguration fails fast.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
+import httpx
+
+# botocore is an optional dependency (``[aws]`` extra) and ships no
+# PEP-561 stubs. The mypy override in ``pyproject.toml`` silences
+# both ``import-untyped`` (when installed) and ``import-not-found``
+# (when absent — e.g. the pre-commit mypy isolated venv); the call
+# surface we use (SigV4Auth.add_auth, AWSRequest, BotocoreSession) is
+# stable and tiny so the dynamic typing is an acceptable trade-off.
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.exceptions import (
+    BotoCoreError,
+    NoCredentialsError,
+    ProfileNotFound,
+)
+from botocore.session import Session as BotocoreSession
+
 from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse, LLMUsage
-from agent_guardian.llm.errors import LLMResponseFormatError
+from agent_guardian.llm.errors import (
+    LLMAuthError,
+    LLMPermanentError,
+    LLMRateLimitError,
+    LLMResponseFormatError,
+    LLMTimeoutError,
+    LLMTransientError,
+)
+from agent_guardian.llm.retry import with_backoff
 
 __all__ = [
     "BEDROCK_HOST_TEMPLATE",
@@ -34,12 +70,22 @@ _FINISH_REASON_MAP = {
     "guardrail_intervened": "content_filter",
 }
 
+# Bedrock returns its error taxonomy in the response body under one of
+# ``__type`` / ``message`` / ``Message`` fields. We map the canonical
+# names to our provider-agnostic exception hierarchy. Any name not in
+# this table falls back to the HTTP-status heuristic in
+# ``_raise_for_bedrock_status``.
+_ACCESS_DENIED_HINT = (
+    "Bedrock model access not enabled. Visit "
+    "https://console.aws.amazon.com/bedrock/home -> Model access and "
+    "request the Anthropic Claude family for your region."
+)
+
 
 def build_bedrock_payload(request: LLMRequest) -> dict[str, Any]:
     """Convert an :class:`LLMRequest` into a Bedrock Converse request body.
 
-    Pure function — no AWS auth, no I/O. Exposed for direct unit-testing
-    until SigV4 lands in M9.
+    Pure function — no AWS auth, no I/O. Exposed for direct unit-testing.
     """
     system_parts: list[dict[str, Any]] = []
     messages: list[dict[str, Any]] = []
@@ -66,7 +112,7 @@ def build_bedrock_payload(request: LLMRequest) -> dict[str, Any]:
 def map_bedrock_response(model: str, data: dict[str, Any]) -> LLMResponse:
     """Map a Bedrock Converse response payload to :class:`LLMResponse`.
 
-    Pure function — exposed for direct unit-testing until SigV4 lands in M9.
+    Pure function — exposed for direct unit-testing.
     """
     try:
         message = data["output"]["message"]
@@ -93,24 +139,197 @@ def map_bedrock_response(model: str, data: dict[str, Any]) -> LLMResponse:
     )
 
 
-class BedrockClient(BaseLLM):
-    """AWS Bedrock Converse provider client.
+def _extract_bedrock_error(resp: httpx.Response) -> tuple[str, str]:
+    """Return ``(error_code, message)`` from a Bedrock error response.
 
-    Authentication lands in M9 — see module docstring.
+    Bedrock surfaces typed errors in the response body via the
+    ``__type`` field (sometimes namespaced as ``com.amazon.coral.service#X``).
+    Falls back to the raw status line if the body is not JSON.
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return ("", resp.text or "")
+    if not isinstance(body, dict):
+        return ("", str(body))
+    raw_type = body.get("__type") or body.get("code") or ""
+    # ``com.amazon.coral.service#AccessDeniedException`` -> ``AccessDeniedException``
+    if isinstance(raw_type, str) and "#" in raw_type:
+        raw_type = raw_type.split("#", 1)[1]
+    message = body.get("message") or body.get("Message") or body.get("errorMessage") or ""
+    return (str(raw_type), str(message))
+
+
+def _raise_for_bedrock_status(resp: httpx.Response) -> None:
+    """Map a Bedrock HTTP response to our error hierarchy.
+
+    Bedrock returns its typed error codes in the response body (see
+    :func:`_extract_bedrock_error`) and uses a few different HTTP status
+    codes for the same logical condition (``AccessDeniedException`` ships
+    as 400 in some regions, 403 in others). We prefer the body-level
+    type when present and fall back to the HTTP status otherwise.
+    """
+    if resp.status_code < 400:
+        return
+
+    code, message = _extract_bedrock_error(resp)
+    detail = f"{code}: {message}" if code else f"{resp.status_code} {resp.text}"
+
+    # Body-level typed errors take precedence.
+    if code == "AccessDeniedException":
+        raise LLMAuthError(f"bedrock: {_ACCESS_DENIED_HINT} ({message})")
+    if code in ("ThrottlingException", "TooManyRequestsException", "ServiceQuotaExceededException"):
+        retry_after_hdr = resp.headers.get("retry-after")
+        retry_after: float | None = None
+        if retry_after_hdr is not None:
+            try:
+                retry_after = float(retry_after_hdr)
+            except ValueError:
+                retry_after = None
+        raise LLMRateLimitError(f"bedrock: rate limited ({detail})", retry_after=retry_after)
+    if code == "ValidationException":
+        raise LLMPermanentError(f"bedrock: validation failed: {detail}")
+    if code == "ModelTimeoutException":
+        raise LLMTimeoutError(f"bedrock: model timeout: {detail}")
+    if code in (
+        "ServiceUnavailableException",
+        "ModelStreamErrorException",
+        "InternalServerException",
+    ):
+        raise LLMTransientError(f"bedrock: transient: {detail}")
+    if code == "ResourceNotFoundException":
+        raise LLMPermanentError(f"bedrock: model not found: {detail}")
+    if code in (
+        "UnrecognizedClientException",
+        "InvalidSignatureException",
+        "ExpiredTokenException",
+    ):
+        raise LLMAuthError(f"bedrock: credential rejected: {detail}")
+
+    # HTTP-status fallback for un-typed errors.
+    if resp.status_code in (401, 403):
+        raise LLMAuthError(f"bedrock: auth failed: {detail}")
+    if resp.status_code == 429:
+        raise LLMRateLimitError(f"bedrock: rate limited: {detail}")
+    if resp.status_code == 408 or resp.status_code >= 500:
+        raise LLMTransientError(f"bedrock: transient {resp.status_code}: {detail}")
+    raise LLMPermanentError(f"bedrock: {resp.status_code} {detail}")
+
+
+class BedrockClient(BaseLLM):
+    """AWS Bedrock Converse API provider client.
+
+    Authentication uses the standard AWS credential chain (env vars,
+    ``~/.aws/credentials``, IAM role, container creds, …) via
+    :mod:`botocore`. Credentials are resolved at construction so a
+    misconfigured operator gets a clear error before any scan tokens
+    are spent.
     """
 
     provider = "bedrock"
     default_max_concurrency = 5
 
-    def __init__(self, *, region: str = "us-east-1", **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.region = region
+    def __init__(
+        self,
+        *,
+        region: str | None = None,
+        profile: str | None = None,
+        timeout_seconds: float = 60.0,
+        max_concurrency: int | None = None,
+        base_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        resolved_region = (
+            region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
+        resolved_base_url = (
+            base_url or f"https://{BEDROCK_HOST_TEMPLATE.format(region=resolved_region)}"
+        )
+        # ``api_key`` is unused for SigV4 — credentials come from the chain.
+        super().__init__(
+            api_key="",
+            base_url=resolved_base_url,
+            timeout_seconds=timeout_seconds,
+            max_concurrency=max_concurrency,
+            client=client,
+        )
+        self.region = resolved_region
+        self._profile = profile
+
+        try:
+            self._botocore_session = BotocoreSession(profile=profile)
+        except ProfileNotFound as exc:
+            raise LLMAuthError(f"bedrock: AWS profile not found: {exc}") from exc
+
+        # Override the region on the session so AWS_REGION env semantics
+        # match what botocore would see for any downstream signer call.
+        self._botocore_session.set_config_variable("region", resolved_region)
+
+        try:
+            self._credentials = self._botocore_session.get_credentials()
+        except (NoCredentialsError, BotoCoreError) as exc:
+            raise LLMAuthError(f"bedrock: AWS credential resolution failed: {exc}") from exc
+
+        if self._credentials is None:
+            raise LLMAuthError(
+                "bedrock: no AWS credentials found. Set AWS_ACCESS_KEY_ID + "
+                "AWS_SECRET_ACCESS_KEY in the environment, configure "
+                "~/.aws/credentials, or run from an IAM-role-enabled host."
+            )
+        self._signer = SigV4Auth(self._credentials, "bedrock", resolved_region)
 
     def host(self) -> str:
         return BEDROCK_HOST_TEMPLATE.format(region=self.region)
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
-        raise NotImplementedError(
-            "Bedrock SigV4 authentication lands in M9. Use StubLLM in tests, "
-            "OpenAIClient / AnthropicClient / OllamaClient in development."
+    def _build_signed_headers(self, url: str, body_json: str) -> dict[str, str]:
+        """Sign the request body for ``url`` and return the headers to send.
+
+        Builds a fresh :class:`AWSRequest` per call so the SigV4 timestamp
+        (``X-Amz-Date``) is current — Bedrock rejects signatures more
+        than ~15 minutes old.
+
+        Credential refresh happens lazily inside ``add_auth`` (for SSO,
+        web-identity, container, and IMDS providers). Any failure during
+        that refresh — most commonly an expired SSO token — surfaces as
+        a botocore exception we re-raise as :class:`LLMAuthError` so the
+        rest of the framework sees a stable error type.
+        """
+        aws_request = AWSRequest(
+            method="POST",
+            url=url,
+            data=body_json,
+            headers={"Content-Type": "application/json"},
         )
+        try:
+            self._signer.add_auth(aws_request)
+        except (NoCredentialsError, BotoCoreError) as exc:
+            raise LLMAuthError(f"bedrock: AWS credential refresh failed: {exc}") from exc
+        # ``aws_request.headers`` is a botocore HTTPHeaders mapping; httpx
+        # accepts any Mapping[str, str] so we coerce to a plain dict.
+        return {str(k): str(v) for k, v in aws_request.headers.items()}
+
+    async def _send(self, request: LLMRequest) -> LLMResponse:
+        body = build_bedrock_payload(request)
+        body_json = json.dumps(body)
+        url = f"{(self.base_url or '').rstrip('/')}/model/{request.model}/converse"
+        headers = self._build_signed_headers(url, body_json)
+        try:
+            resp = await self._client.post(url, content=body_json, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise LLMTimeoutError(f"bedrock: timeout: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise LLMTransientError(f"bedrock: network error: {exc}") from exc
+        _raise_for_bedrock_status(resp)
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise LLMResponseFormatError(f"bedrock: invalid JSON: {exc}") from exc
+        response = map_bedrock_response(request.model, data)
+        return response
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        async with self._semaphore:
+            return await with_backoff(lambda: self._send(request))

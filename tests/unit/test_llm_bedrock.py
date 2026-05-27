@@ -1,16 +1,43 @@
-"""Tests for Bedrock request/response shaping (auth lands in M9)."""
+"""Tests for the production Bedrock client (SigV4 + Converse).
+
+The pure ``build_bedrock_payload`` / ``map_bedrock_response`` helpers are
+exercised standalone; the live client surface uses ``respx`` to intercept
+the signed POST so we can assert on the SigV4 headers and error mapping
+without touching AWS.
+
+Every test sets fake AWS credentials via ``monkeypatch.setenv`` because
+``BedrockClient.__init__`` resolves credentials eagerly — the contract
+is "fail fast at construction" so misconfigured operators don't burn
+the cost-estimate countdown only to crash on the first request.
+"""
 
 from __future__ import annotations
 
+import re
+
 import pytest
+import respx
+from httpx import Response
 
 from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.llm.bedrock import (
+    BEDROCK_HOST_TEMPLATE,
     BedrockClient,
     build_bedrock_payload,
     map_bedrock_response,
 )
-from agent_guardian.llm.errors import LLMResponseFormatError
+from agent_guardian.llm.errors import (
+    LLMAuthError,
+    LLMPermanentError,
+    LLMRateLimitError,
+    LLMResponseFormatError,
+    LLMTimeoutError,
+    LLMTransientError,
+)
+
+# ---------------------------------------------------------------------------
+# Pure-function tests — unchanged from M3.
+# ---------------------------------------------------------------------------
 
 
 def test_build_bedrock_payload_simple() -> None:
@@ -117,18 +144,353 @@ def test_map_bedrock_response_malformed_raises() -> None:
         map_bedrock_response("m", {"unexpected": "shape"})
 
 
-async def test_bedrock_client_complete_raises_not_implemented() -> None:
-    client = BedrockClient(region="us-west-2")
-    with pytest.raises(NotImplementedError, match="M9"):
+# ---------------------------------------------------------------------------
+# Live client tests — SigV4 + Converse, mocked via respx.
+# ---------------------------------------------------------------------------
+
+
+# Fake but well-formed AWS credentials. ``AKIA...`` is the conventional
+# 20-char access-key shape; the secret is 40 chars. botocore validates
+# shape, not authenticity.
+_FAKE_AKID = "AKIATESTTESTTESTTEST"
+_FAKE_SECRET = "test/secret/key/for/unit/tests/0123456789"  # 40 chars
+
+
+@pytest.fixture
+def _fake_aws_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plant fake AWS credentials in the environment for the duration of a test."""
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", _FAKE_AKID)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", _FAKE_SECRET)
+    monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    # Make sure botocore doesn't read the user's ~/.aws/credentials and
+    # discover a real SSO profile — point AWS_SHARED_CREDENTIALS_FILE at
+    # a path that doesn't exist (botocore tolerates the absence cleanly).
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+
+
+def _converse_url(region: str = "us-east-1", model: str = "anthropic.claude-haiku-4-5-v1:0") -> str:
+    return f"https://{BEDROCK_HOST_TEMPLATE.format(region=region)}/model/{model}/converse"
+
+
+def _converse_url_re(region: str = "us-east-1") -> re.Pattern[str]:
+    # Bedrock model IDs have dots, colons and slashes — escape the host but
+    # accept any model path so individual tests can pick whichever ID they want.
+    host = re.escape(BEDROCK_HOST_TEMPLATE.format(region=region))
+    return re.compile(rf"https://{host}/model/.+/converse")
+
+
+def _happy_response() -> Response:
+    return Response(
+        200,
+        json={
+            "output": {"message": {"role": "assistant", "content": [{"text": "ack"}]}},
+            "usage": {"inputTokens": 3, "outputTokens": 1, "totalTokens": 4},
+            "stopReason": "end_turn",
+        },
+    )
+
+
+@respx.mock
+async def test_bedrock_complete_happy_path(_fake_aws_env: None) -> None:
+    route = respx.post(_converse_url_re()).mock(return_value=_happy_response())
+    client = BedrockClient(region="us-east-1")
+    try:
+        resp = await client.complete(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hi")],
+                model="anthropic.claude-haiku-4-5-v1:0",
+            )
+        )
+        assert resp.text == "ack"
+        assert resp.provider == "bedrock"
+        assert resp.model == "anthropic.claude-haiku-4-5-v1:0"
+        assert resp.usage.total_tokens == 4
+        assert route.called
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_complete_signs_request(_fake_aws_env: None) -> None:
+    """SigV4 headers must be present on the outbound request."""
+    route = respx.post(_converse_url_re()).mock(return_value=_happy_response())
+    client = BedrockClient(region="us-east-1")
+    try:
         await client.complete(
             LLMRequest(
                 messages=[LLMMessage(role="user", content="hi")],
-                model="m",
+                model="anthropic.claude-haiku-4-5-v1:0",
             )
         )
-    await client.aclose()
+        sent = route.calls.last.request
+        # SigV4 always sets these.
+        assert "X-Amz-Date" in sent.headers
+        auth = sent.headers["Authorization"]
+        assert auth.startswith("AWS4-HMAC-SHA256")
+        assert "Credential=" in auth
+        assert "/us-east-1/bedrock/aws4_request" in auth
+        assert "SignedHeaders=" in auth
+        assert "Signature=" in auth
+        assert _FAKE_AKID in auth
+    finally:
+        await client.aclose()
 
 
-def test_bedrock_client_host_template() -> None:
+@respx.mock
+async def test_bedrock_access_denied_maps_to_auth_error(_fake_aws_env: None) -> None:
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            403,
+            json={
+                "__type": "com.amazon.coral.service#AccessDeniedException",
+                "message": "You don't have access to the model.",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMAuthError) as exc_info:
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+        # The operator hint must mention the Bedrock console URL so users
+        # know exactly where to click.
+        assert "Model access" in str(exc_info.value)
+        assert "console.aws.amazon.com/bedrock" in str(exc_info.value)
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_throttling_maps_to_rate_limit(_fake_aws_env: None) -> None:
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            429,
+            headers={"retry-after": "0"},
+            json={
+                "__type": "ThrottlingException",
+                "message": "Rate exceeded",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMRateLimitError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_validation_exception_maps_to_permanent(_fake_aws_env: None) -> None:
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            400,
+            json={
+                "__type": "ValidationException",
+                "message": "Invalid model parameters",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMPermanentError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_model_timeout_maps_to_timeout(
+    _fake_aws_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ModelTimeoutException maps to LLMTimeoutError which the retry loop
+    # treats as transient — patch compute_delay so the test doesn't pay
+    # the ~60s exponential-backoff total.
+    from agent_guardian.llm import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod, "compute_delay", lambda *_args, **_kwargs: 0.0)
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            408,
+            json={
+                "__type": "ModelTimeoutException",
+                "message": "Model took too long",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_service_unavailable_is_transient(
+    _fake_aws_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two retries then succeed — proves the retry loop reaches the success path.
+    # ``compute_delay`` is patched to zero so the test doesn't pay the real
+    # exponential-backoff cost (~60s across 6 attempts).
+    from agent_guardian.llm import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod, "compute_delay", lambda *_args, **_kwargs: 0.0)
+    respx.post(_converse_url_re()).mock(
+        side_effect=[
+            Response(
+                503,
+                json={
+                    "__type": "ServiceUnavailableException",
+                    "message": "try later",
+                },
+            ),
+            _happy_response(),
+        ]
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        resp = await client.complete(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hi")],
+                model="anthropic.claude-haiku-4-5-v1:0",
+            )
+        )
+        assert resp.text == "ack"
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_transient_then_raises_after_retries(
+    _fake_aws_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent_guardian.llm import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod, "compute_delay", lambda *_args, **_kwargs: 0.0)
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            500,
+            json={"__type": "InternalServerException", "message": "boom"},
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMTransientError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+def test_bedrock_missing_credentials_raises_at_construction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """No env creds + empty profile chain -> LLMAuthError at __init__."""
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    # Disable IMDS so we don't accidentally hit a real EC2 metadata service.
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+
+    with pytest.raises(LLMAuthError) as exc_info:
+        BedrockClient(region="us-east-1")
+    # The hint must name at least one of the standard fix paths.
+    msg = str(exc_info.value)
+    assert "AWS_ACCESS_KEY_ID" in msg or "credential" in msg.lower()
+
+
+def test_bedrock_region_resolves_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", _FAKE_AKID)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", _FAKE_SECRET)
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+
+    client = BedrockClient()
+    try:
+        assert client.region == "eu-west-2"
+        assert "eu-west-2" in client.base_url
+        assert client.host() == "bedrock-runtime.eu-west-2.amazonaws.com"
+    finally:
+        # No async call ran; calling aclose synchronously closes the httpx client.
+        import asyncio
+
+        asyncio.run(client.aclose())
+
+
+def test_bedrock_host_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", _FAKE_AKID)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", _FAKE_SECRET)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
     client = BedrockClient(region="ap-southeast-2")
-    assert client.host() == "bedrock-runtime.ap-southeast-2.amazonaws.com"
+    try:
+        assert client.host() == "bedrock-runtime.ap-southeast-2.amazonaws.com"
+    finally:
+        import asyncio
+
+        asyncio.run(client.aclose())
+
+
+@respx.mock
+async def test_bedrock_explicit_region_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", _FAKE_AKID)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", _FAKE_SECRET)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+    route = respx.post(_converse_url_re("ap-south-1")).mock(return_value=_happy_response())
+    client = BedrockClient(region="ap-south-1")
+    try:
+        await client.complete(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hi")],
+                model="anthropic.claude-haiku-4-5-v1:0",
+            )
+        )
+        sent = route.calls.last.request
+        # The signing region must match the constructor-supplied region.
+        assert "/ap-south-1/bedrock/" in sent.headers["Authorization"]
+    finally:
+        await client.aclose()
+
+
+def test_bedrock_profile_not_found_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown profile must surface as LLMAuthError, not a botocore error."""
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-creds")
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+    with pytest.raises(LLMAuthError):
+        BedrockClient(region="us-east-1", profile="this-profile-does-not-exist")

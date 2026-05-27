@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -46,6 +47,7 @@ from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
     GeminiClient,
+    LLMAuthError,
     LLMError,
     OllamaClient,
     OpenAIClient,
@@ -205,6 +207,11 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
     * ``"gemini:<model>"`` / heuristic ``"gemini-*"`` → :class:`GeminiClient`
       (Google AI Studio API; see :mod:`agent_guardian.llm.gemini`).
     * ``"ollama:<model>"`` → :class:`OllamaClient` (local — no key).
+    * ``"bedrock:<bedrock-model-id>"`` → :class:`BedrockClient`. No
+      heuristic prefix is supported (Bedrock IDs all start with
+      ``anthropic.`` / ``amazon.`` / etc., so the ``bedrock:`` prefix
+      is mandatory). Credentials come from the standard AWS chain — no
+      ``--api-key`` is consulted. Requires the ``[aws]`` extra.
 
     The role string is used only in error messages so the user knows
     which LLM slot misconfigured.
@@ -266,6 +273,25 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
                 f"Set AGENT_GUARDIAN_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY."
             )
         return GeminiClient(api_key=api_key)
+    if provider == "bedrock":
+        # Bedrock uses the AWS credential chain (env vars > ~/.aws/credentials
+        # > IAM role). It deliberately does NOT consult ``env_api_key`` —
+        # there is no such thing as a Bedrock API key.
+        try:
+            from agent_guardian.llm.bedrock import BedrockClient
+        except ImportError as exc:
+            raise typer.BadParameter(
+                f"Bedrock requested for {role} but the AWS extra is not installed. "
+                f"Install with: pip install 'agent-guardian[aws]' "
+                f"(import error: {exc})"
+            ) from exc
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        try:
+            return BedrockClient(region=region)
+        except LLMAuthError as exc:
+            raise typer.BadParameter(
+                f"Bedrock requested for {role} but credentials are missing: {exc}"
+            ) from exc
     raise typer.BadParameter(
         f"Unknown provider '{provider}' for model spec '{spec}' (role={role})."
     )
@@ -796,7 +822,15 @@ def scan(
     framework: str | None = typer.Option(
         None, "--framework", help="Mode D — framework kind (langgraph, crewai, …)."
     ),
-    model: str = typer.Option("stub", "--model", help="LLM model spec (default: stub)."),
+    model: str = typer.Option(
+        "stub",
+        "--model",
+        help=(
+            "LLM model spec (default: stub). Examples: 'stub', 'openai:gpt-4o', "
+            "'anthropic:claude-haiku-4-5', 'gemini:gemini-2.5-flash', "
+            "'ollama:llama3.1', 'bedrock:us.anthropic.claude-haiku-4-5-v1:0'."
+        ),
+    ),
     commander_model: str | None = typer.Option(
         None, "--commander-model", help="Override commander LLM model."
     ),

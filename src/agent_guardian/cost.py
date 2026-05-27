@@ -76,9 +76,29 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("anthropic", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("anthropic", "claude-sonnet-4-6", 3.00, 15.00),
     PriceRow("anthropic", "claude-opus-4-7", 15.00, 75.00),
-    # Bedrock — pass-through Anthropic Claude pricing.
+    # Bedrock — Anthropic Claude models. Bedrock list prices on
+    # on-demand throughput match the direct Anthropic per-token rates
+    # (billed via AWS invoice instead of Anthropic). Verified 2026-05-27
+    # against https://aws.amazon.com/bedrock/pricing/ in us-east-1; other
+    # regions price the same on-demand. The full Bedrock model ID
+    # (with version suffix + colon-zero ARN tail) is what the Converse
+    # API expects, so we list the canonical IDs verbatim.
     PriceRow("bedrock", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("bedrock", "claude-sonnet-4-6", 3.00, 15.00),
+    PriceRow("bedrock", "anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
+    PriceRow("bedrock", "anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
+    # Cross-region inference profiles (``us.``, ``eu.``, ``apac.`` prefixes)
+    # route the same model with the same per-token price — Bedrock charges
+    # routing, not regional egress.
+    PriceRow("bedrock", "us.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
+    PriceRow("bedrock", "us.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
+    PriceRow("bedrock", "eu.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
+    PriceRow("bedrock", "eu.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
+    PriceRow("bedrock", "apac.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
+    PriceRow("bedrock", "apac.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
+    # Catch-all for any other Bedrock model ID (priced at the Sonnet
+    # default so estimates err on the conservative side).
+    PriceRow("bedrock", "*", 3.00, 15.00),
     # Google Gemini — AI Studio "Standard" tier list prices, USD per
     # one million tokens. Verified 2026-05-27 against
     # https://ai.google.dev/pricing — re-check before relying on these
