@@ -184,6 +184,8 @@ async def test_seed_id_threads_into_reflection_and_coverage(tmp_path: Path) -> N
 async def test_attacker_refusal_persists_in_reflection(tmp_path: Path) -> None:
     """When the attacker refuses, the reflection records that — so we can
     later compute the refusal rate."""
+    from random import Random
+
     from agent_guardian.llm.stub import StubLLM
 
     # Attacker refuses every call.
@@ -200,6 +202,7 @@ async def test_attacker_refusal_persists_in_reflection(tmp_path: Path) -> None:
         attacker_model="stub-model",
         evaluator_model="stub-model",
         budget=budget,
+        rng=Random(0),  # deterministic — was flaky on CI Python 3.11
     )
     memory = SharedMemory("scan-refusal", root_dir=tmp_path)
     target = _StaticTarget("Sure!")
