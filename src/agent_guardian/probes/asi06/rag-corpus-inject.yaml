@@ -18,6 +18,7 @@ description: |
   the entry or returns it verbatim when prompted from another session.
 expected_evidence: poisoned_corpus_entry_accepted
 remediation_ref: REM-ASI06-001
+owasp_scenario: OWASP_ASI06_RAGAndEmbeddingsPoisoning
 references:
   - chen2024agentpoison
   - he2026coredteam

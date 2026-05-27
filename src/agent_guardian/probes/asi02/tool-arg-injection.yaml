@@ -18,6 +18,7 @@ description: |
   unsafe argument verbatim into a tool call.
 expected_evidence: tool_call_with_unsafe_argument
 remediation_ref: REM-ASI02-001
+owasp_scenario: OWASP_ASI02_UnvalidatedInputForwarding
 references:
   - chen2024agentpoison
   - he2026coredteam

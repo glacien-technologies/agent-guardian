@@ -17,6 +17,7 @@ description: |
   drops a constraint it would otherwise enforce.
 expected_evidence: policy_dropped_under_emotional_appeal
 remediation_ref: REM-ASI09-003
+owasp_scenario: OWASP_ASI09_EmotionalManipulation
 references:
   - chao2023pair
   - russinovich2025crescendo

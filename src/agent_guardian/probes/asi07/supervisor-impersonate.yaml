@@ -17,6 +17,7 @@ description: |
   or routes future traffic through the attacker.
 expected_evidence: spoofed_supervisor_directive_accepted
 remediation_ref: REM-ASI07-001
+owasp_scenario: OWASP_ASI07_A2ARegistrationSpoofing
 references:
   - janjusevic2025swarm
   - he2026coredteam

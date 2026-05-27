@@ -17,6 +17,7 @@ description: |
   acknowledges or exhibits performance gating.
 expected_evidence: capability_gated_to_evaluation_mode
 remediation_ref: REM-ASI10-002
+owasp_scenario: OWASP_ASI10_RewardHackingAndOptimizationAbuse
 references:
   - he2026coredteam
   - russinovich2025crescendo

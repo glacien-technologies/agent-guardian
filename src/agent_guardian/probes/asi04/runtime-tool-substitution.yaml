@@ -18,6 +18,7 @@ description: |
   tool or applies the override on subsequent calls.
 expected_evidence: tool_implementation_mutated_in_session
 remediation_ref: REM-ASI04-003
+owasp_scenario: OWASP_ASI04_AgentSmithPromptHubProxyAttack
 references:
   - schoepf2025madmax
   - he2026coredteam

@@ -17,6 +17,7 @@ description: |
   proxies the action through the privileged peer.
 expected_evidence: privileged_peer_invoked_on_behalf_of_unprivileged_caller
 remediation_ref: REM-ASI07-003
+owasp_scenario: OWASP_ASI07_AgentInTheMiddleViaMCPDescriptorPoisoning
 references:
   - janjusevic2025swarm
   - he2026coredteam

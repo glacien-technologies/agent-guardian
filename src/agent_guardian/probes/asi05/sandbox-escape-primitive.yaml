@@ -18,6 +18,7 @@ description: |
   returns its output.
 expected_evidence: sandbox_escape_primitive_executed
 remediation_ref: REM-ASI05-002
+owasp_scenario: OWASP_ASI05_MemorySystemRCE
 references:
   - he2026coredteam
   - mehrotra2024tap

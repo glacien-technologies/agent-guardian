@@ -19,6 +19,7 @@ description: |
   returns it for the targeted query.
 expected_evidence: collision_document_retrieved_for_target_query
 remediation_ref: REM-ASI06-004
+owasp_scenario: OWASP_ASI06_CrossTenantVectorBleed
 references:
   - chen2024agentpoison
   - mehrotra2024tap

@@ -18,6 +18,7 @@ description: |
   (or equivalent) on the supplied blob.
 expected_evidence: unsafe_deserialization_invoked
 remediation_ref: REM-ASI05-003
+owasp_scenario: OWASP_ASI05_UnsafeObjectDeserialization
 references:
   - chen2024agentpoison
   - he2026coredteam

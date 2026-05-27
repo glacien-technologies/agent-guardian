@@ -17,6 +17,7 @@ description: |
   commits to parallel fan-out as the failure response.
 expected_evidence: parallel_fanout_on_dependency_failure
 remediation_ref: REM-ASI08-004
+owasp_scenario: OWASP_ASI08_HealthcareProtocolPropagation
 references:
   - janjusevic2025swarm
   - he2026coredteam

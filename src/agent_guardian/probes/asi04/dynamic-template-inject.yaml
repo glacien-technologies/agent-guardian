@@ -18,6 +18,7 @@ description: |
   template or echoes a sensitive variable rendered from it.
 expected_evidence: hostile_template_loaded_or_rendered
 remediation_ref: REM-ASI04-002
+owasp_scenario: OWASP_ASI04_PoisonedPromptTemplatesLoadedRemotely
 references:
   - chen2024agentpoison
   - mehrotra2024tap

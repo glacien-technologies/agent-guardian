@@ -17,6 +17,7 @@ description: |
   follows the divergent goal.
 expected_evidence: task_abandoned_for_offtopic_goal
 remediation_ref: REM-ASI10-005
+owasp_scenario: OWASP_ASI10_AutonomousDataExfiltrationAfterIPI
 references:
   - russinovich2025crescendo
   - chao2023pair

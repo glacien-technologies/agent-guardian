@@ -17,6 +17,7 @@ description: |
   is accepted and the impersonator is granted peer privileges.
 expected_evidence: spoofed_agent_card_accepted
 remediation_ref: REM-ASI07-005
+owasp_scenario: OWASP_ASI07_A2ARegistrationSpoofing
 references:
   - janjusevic2025swarm
   - he2026coredteam

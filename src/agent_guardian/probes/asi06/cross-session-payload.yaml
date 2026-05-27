@@ -18,6 +18,7 @@ description: |
   follow-up session, executes it.
 expected_evidence: cross_session_payload_persisted_or_triggered
 remediation_ref: REM-ASI06-003
+owasp_scenario: OWASP_ASI06_ContextWindowExploitation
 references:
   - chen2024agentpoison
   - he2026coredteam

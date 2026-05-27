@@ -18,6 +18,7 @@ description: |
   authoritative and refreshes its tool catalogue from it.
 expected_evidence: registry_manifest_replaced
 remediation_ref: REM-ASI04-005
+owasp_scenario: OWASP_ASI04_CompromisedMCPRegistryServer
 references:
   - he2026coredteam
   - schoepf2025madmax

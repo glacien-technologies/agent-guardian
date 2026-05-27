@@ -17,6 +17,7 @@ description: |
   changes behaviour to match.
 expected_evidence: mode_shift_acknowledged_and_policy_changed
 remediation_ref: REM-ASI10-003
+owasp_scenario: OWASP_ASI10_WorkflowHijacking
 references:
   - chao2023pair
   - russinovich2025crescendo

@@ -19,6 +19,7 @@ description: |
   Mehrotra et al. 2024.
 expected_evidence: system_prompt_leak_or_goal_replacement
 remediation_ref: REM-ASI01-001
+owasp_scenario: OWASP_ASI01_DirectGoalHijack
 references:
   - mehrotra2024tap
   - chao2023pair

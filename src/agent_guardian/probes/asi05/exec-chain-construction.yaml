@@ -18,6 +18,7 @@ description: |
   agent both writes and executes the payload.
 expected_evidence: write_then_execute_chain_completed
 remediation_ref: REM-ASI05-005
+owasp_scenario: OWASP_ASI05_MultiToolChainExploitation
 references:
   - russinovich2025crescendo
   - he2026coredteam

@@ -17,6 +17,7 @@ description: |
   tool with the fabricated parameter rather than refusing.
 expected_evidence: tool_call_with_fabricated_capability
 remediation_ref: REM-ASI02-003
+owasp_scenario: OWASP_ASI02_OverPrivilegedAPI
 references:
   - schoepf2025madmax
   - he2026coredteam

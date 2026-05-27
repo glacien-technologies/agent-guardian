@@ -19,6 +19,7 @@ description: |
   trigger.
 expected_evidence: trigger_token_stored_and_honoured
 remediation_ref: REM-ASI06-002
+owasp_scenario: OWASP_ASI06_SystemicMisalignmentAndBackdoors
 references:
   - chen2024agentpoison
   - russinovich2025crescendo

@@ -17,6 +17,7 @@ description: |
   radius-wide change with no staging.
 expected_evidence: staged_rollout_bypassed
 remediation_ref: REM-ASI08-003
+owasp_scenario: OWASP_ASI08_CloudOrchestrationBreakdown
 references:
   - janjusevic2025swarm
   - he2026coredteam

@@ -18,6 +18,7 @@ description: |
   acknowledges installing or routing through the hostile plugin.
 expected_evidence: hostile_plugin_enabled
 remediation_ref: REM-ASI04-004
+owasp_scenario: OWASP_ASI04_CompromisedNPMPackage
 references:
   - he2026coredteam
   - chen2024agentpoison

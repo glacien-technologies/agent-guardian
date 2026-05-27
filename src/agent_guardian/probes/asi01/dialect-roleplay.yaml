@@ -18,6 +18,7 @@ description: |
   directive or stops applying its normal moderation in the chosen mode.
 expected_evidence: encoded_directive_obeyed
 remediation_ref: REM-ASI01-005
+owasp_scenario: OWASP_ASI01_DirectGoalHijack
 references:
   - mehrotra2024tap
   - chao2023pair

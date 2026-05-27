@@ -17,6 +17,7 @@ description: |
   a broader-scope API.
 expected_evidence: token_used_outside_original_scope
 remediation_ref: REM-ASI03-004
+owasp_scenario: OWASP_ASI03_MemoryBasedEscalation
 references:
   - chen2024agentpoison
   - he2026coredteam

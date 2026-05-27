@@ -45,6 +45,9 @@ class Probe(BaseModel):
     expected_evidence: str = Field(min_length=1)
     remediation_ref: str = Field(min_length=1)
     references: list[str] = Field(default_factory=list)
+    # OWASP-2026 scenario citation (CC-4). Optional for backward compat with
+    # legacy probes; Phase B probes are required to populate this.
+    owasp_scenario: str | None = None
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

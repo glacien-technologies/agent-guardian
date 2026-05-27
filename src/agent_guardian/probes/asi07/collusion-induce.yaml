@@ -17,6 +17,7 @@ description: |
   show coordination consistent with an unsanctioned agreement.
 expected_evidence: collusion_signal_in_response
 remediation_ref: REM-ASI07-004
+owasp_scenario: OWASP_ASI07_TrustPoisoningViaMessageTampering
 references:
   - janjusevic2025swarm
   - chao2023pair

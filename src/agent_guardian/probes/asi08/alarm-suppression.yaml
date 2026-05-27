@@ -17,6 +17,7 @@ description: |
   alerts.
 expected_evidence: alarm_bulk_silenced
 remediation_ref: REM-ASI08-005
+owasp_scenario: OWASP_ASI08_AgenticCyberDefensePropagatingFalseAlerts
 references:
   - he2026coredteam
   - janjusevic2025swarm

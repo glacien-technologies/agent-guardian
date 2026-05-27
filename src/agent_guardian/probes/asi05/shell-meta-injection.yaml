@@ -18,6 +18,7 @@ description: |
   forwards the chained command verbatim to the shell tool.
 expected_evidence: shell_metacharacter_chain_executed
 remediation_ref: REM-ASI05-004
+owasp_scenario: OWASP_ASI05_DirectShellInjection
 references:
   - he2026coredteam
   - chen2024agentpoison

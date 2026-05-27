@@ -17,6 +17,7 @@ description: |
   agrees to suppress errors.
 expected_evidence: error_suppression_acknowledged
 remediation_ref: REM-ASI08-002
+owasp_scenario: OWASP_ASI08_SecurityOperationsCompromise
 references:
   - janjusevic2025swarm
   - chao2023pair

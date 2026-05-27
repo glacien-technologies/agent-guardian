@@ -19,6 +19,7 @@ description: |
   having run.
 expected_evidence: code_execution_via_eval_or_exec
 remediation_ref: REM-ASI05-001
+owasp_scenario: OWASP_ASI05_UnsafeFunctionCallsAndEval
 references:
   - chen2024agentpoison
   - he2026coredteam

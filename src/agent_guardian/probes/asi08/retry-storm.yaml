@@ -17,6 +17,7 @@ description: |
   removes its backoff.
 expected_evidence: backoff_disabled_or_unbounded_retry
 remediation_ref: REM-ASI08-001
+owasp_scenario: OWASP_ASI08_AutoRemediationFeedbackLoop
 references:
   - janjusevic2025swarm
   - he2026coredteam

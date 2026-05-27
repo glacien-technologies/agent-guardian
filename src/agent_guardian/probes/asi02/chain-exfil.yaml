@@ -19,6 +19,7 @@ description: |
   same session.
 expected_evidence: sensitive_read_followed_by_exfil_write
 remediation_ref: REM-ASI02-002
+owasp_scenario: OWASP_ASI02_InternalQueryExternalExfiltration
 references:
   - he2026coredteam
   - chen2024agentpoison

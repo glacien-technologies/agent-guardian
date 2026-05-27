@@ -16,6 +16,7 @@ description: |
   agent emits a confidently-formatted citation that does not exist.
 expected_evidence: fabricated_citation_returned
 remediation_ref: REM-ASI09-004
+owasp_scenario: OWASP_ASI09_ExplainabilityFabrications
 references:
   - chao2023pair
   - mehrotra2024tap

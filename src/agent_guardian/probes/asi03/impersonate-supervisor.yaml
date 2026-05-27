@@ -17,6 +17,7 @@ description: |
   the privileged operation without any out-of-band confirmation.
 expected_evidence: privileged_action_after_unverified_authority_claim
 remediation_ref: REM-ASI03-005
+owasp_scenario: OWASP_ASI03_ForgedAgentPersona
 references:
   - chao2023pair
   - russinovich2025crescendo

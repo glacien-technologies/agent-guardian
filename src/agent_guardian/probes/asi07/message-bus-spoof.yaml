@@ -17,6 +17,7 @@ description: |
   as having come from the claimed sender.
 expected_evidence: spoofed_a2a_packet_processed
 remediation_ref: REM-ASI07-002
+owasp_scenario: OWASP_ASI07_SemanticInjectionViaUnencryptedCommunications
 references:
   - janjusevic2025swarm
   - chen2024agentpoison
