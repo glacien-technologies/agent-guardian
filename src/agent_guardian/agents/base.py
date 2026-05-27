@@ -43,6 +43,7 @@ from typing import Any, ClassVar, Literal
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -136,6 +137,14 @@ class AgentReport:
 
     ``asi_category`` is ``None`` for the recon-agent (it has no category);
     every ASI-aligned agent fills it in.
+
+    ``tokens_consumed`` carries per-role token totals (``attacker`` and
+    ``evaluator`` keys plus an ``"input"``/``"output"`` rollup) captured
+    via :class:`~agent_guardian.llm.usage_tracking.UsageTrackingLLM`
+    wrappers placed around the LLM clients for the duration of
+    :meth:`AsiAgent.run`. The swarm commander aggregates these across
+    every agent in :meth:`SwarmCommander._phase_finalise` to compute
+    ``Scan.cost_usd`` and ``Scan.tokens_total``.
     """
 
     agent: str
@@ -146,6 +155,7 @@ class AgentReport:
     terminated_by: TerminationReason
     error: str | None = None
     notes: str = ""
+    tokens_consumed: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -304,14 +314,35 @@ class AsiAgent(ABC):
         budget: AgentBudget | None = None,
         rng: random.Random | None = None,
     ) -> None:
-        self.attacker_llm = attacker_llm
-        self.evaluator_llm = evaluator_llm
+        # Wrap both LLM clients in usage-tracking decorators so every
+        # ``.complete(...)`` call folds its returned :class:`LLMUsage` into
+        # a per-role counter. The counters are read in :meth:`run` to
+        # populate :attr:`AgentReport.tokens_consumed` so the swarm can
+        # compute a real ``cost_usd`` per scan (PRD §8.1 — IMPORTANT #3).
+        # Avoid double-wrapping if the caller pre-wrapped (e.g. a test
+        # that supplies its own counter).
+        self._attacker_usage = (
+            attacker_llm.counter if isinstance(attacker_llm, UsageTrackingLLM) else UsageCounter()
+        )
+        self._evaluator_usage = (
+            evaluator_llm.counter if isinstance(evaluator_llm, UsageTrackingLLM) else UsageCounter()
+        )
+        self.attacker_llm: BaseLLM = (
+            attacker_llm
+            if isinstance(attacker_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(attacker_llm, counter=self._attacker_usage)
+        )
+        self.evaluator_llm: BaseLLM = (
+            evaluator_llm
+            if isinstance(evaluator_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(evaluator_llm, counter=self._evaluator_usage)
+        )
         self.attacker_model = attacker_model
         self.evaluator_model = evaluator_model
         self.budget = budget if budget is not None else AgentBudget()
         self.rng = rng if rng is not None else random.Random()
         self.judge = Judge(
-            llm=evaluator_llm,
+            llm=self.evaluator_llm,
             model=evaluator_model,
             rubric=self.judge_rubric(),
         )
@@ -411,6 +442,7 @@ class AsiAgent(ABC):
                 duration_seconds=time.monotonic() - start,
                 terminated_by="exhausted",
                 notes="agent not applicable to this fingerprint",
+                tokens_consumed=self._snapshot_tokens(),
             )
 
         # 3. Build strategy.
@@ -434,6 +466,7 @@ class AsiAgent(ABC):
                 duration_seconds=time.monotonic() - start,
                 terminated_by="error",
                 error=f"strategy build failed: {exc}",
+                tokens_consumed=self._snapshot_tokens(),
             )
 
         # 4. Attack loop.
@@ -592,11 +625,38 @@ class AsiAgent(ABC):
             duration_seconds=time.monotonic() - start,
             terminated_by=terminated_by,
             error=error,
+            tokens_consumed=self._snapshot_tokens(),
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _snapshot_tokens(self) -> dict[str, int]:
+        """Snapshot per-role token totals for the :class:`AgentReport`.
+
+        Keys: ``attacker_input``, ``attacker_output``, ``attacker_total``,
+        ``evaluator_input``, ``evaluator_output``, ``evaluator_total``,
+        ``input`` (sum of inputs), ``output`` (sum of outputs), ``total``.
+        The swarm commander aggregates these across all agents to compute
+        ``Scan.cost_usd`` via the per-model rates in
+        :mod:`agent_guardian.cost`.
+        """
+        a = self._attacker_usage
+        e = self._evaluator_usage
+        return {
+            "attacker_input": a.prompt_tokens,
+            "attacker_output": a.completion_tokens,
+            "attacker_total": a.total_tokens,
+            "attacker_calls": a.calls,
+            "evaluator_input": e.prompt_tokens,
+            "evaluator_output": e.completion_tokens,
+            "evaluator_total": e.total_tokens,
+            "evaluator_calls": e.calls,
+            "input": a.prompt_tokens + e.prompt_tokens,
+            "output": a.completion_tokens + e.completion_tokens,
+            "total": a.total_tokens + e.total_tokens,
+        }
 
     def _build_finding(
         self,

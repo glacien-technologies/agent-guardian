@@ -20,6 +20,7 @@ from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.agents.base import AgentBudget, AgentReport
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.llm.base import BaseLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 __all__ = ["ReconAgent"]
 
@@ -103,8 +104,18 @@ class ReconAgent:
     ) -> None:
         # The attacker LLM is unused by recon today — kept on the signature
         # so the constructor matches the rest of the agent family. The swarm
-        # commander wires it in M8.
-        self._llm = attacker_llm
+        # commander wires it in M8. We still wrap it in a usage-tracking
+        # decorator for consistency with :class:`AsiAgent`; once recon grows
+        # an LLM-driven planning step (PRD §4.4 TODO) the counter is already
+        # in place.
+        self._usage = (
+            attacker_llm.counter if isinstance(attacker_llm, UsageTrackingLLM) else UsageCounter()
+        )
+        self._llm: BaseLLM = (
+            attacker_llm
+            if isinstance(attacker_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(attacker_llm, counter=self._usage)
+        )
         self._model = model
         self.budget = budget if budget is not None else AgentBudget(max_turns=len(_PROBES))
 
@@ -177,4 +188,17 @@ class ReconAgent:
             terminated_by=terminated_by,  # type: ignore[arg-type]
             error=error,
             notes=refined.notes,
+            tokens_consumed={
+                "attacker_input": self._usage.prompt_tokens,
+                "attacker_output": self._usage.completion_tokens,
+                "attacker_total": self._usage.total_tokens,
+                "attacker_calls": self._usage.calls,
+                "evaluator_input": 0,
+                "evaluator_output": 0,
+                "evaluator_total": 0,
+                "evaluator_calls": 0,
+                "input": self._usage.prompt_tokens,
+                "output": self._usage.completion_tokens,
+                "total": self._usage.total_tokens,
+            },
         )

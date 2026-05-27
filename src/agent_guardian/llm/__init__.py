@@ -39,6 +39,7 @@ from agent_guardian.llm.ollama import OllamaClient
 from agent_guardian.llm.openai import OpenAIClient
 from agent_guardian.llm.retry import compute_delay, with_backoff
 from agent_guardian.llm.stub import StubLLM, StubScript
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.llm.vertex import (
     VertexClient,
     build_vertex_payload,
@@ -65,6 +66,8 @@ __all__ = [
     "OpenAIClient",
     "StubLLM",
     "StubScript",
+    "UsageCounter",
+    "UsageTrackingLLM",
     "VertexClient",
     "build_bedrock_payload",
     "build_vertex_payload",

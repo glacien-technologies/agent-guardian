@@ -119,6 +119,7 @@ def emit_json(
         "findings": [_finding_to_dict(f, redact_pii) for f in scan.findings],
         "duration_seconds": scan.duration_seconds,
         "cost_usd": scan.cost_usd,
+        "tokens_total": scan.tokens_total,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),

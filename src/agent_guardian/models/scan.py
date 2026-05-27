@@ -32,6 +32,12 @@ class Scan(BaseModel):
     asi_scores: dict[AsiCategory, float]
     duration_seconds: float = Field(ge=0.0)
     cost_usd: float = Field(ge=0.0)
+    # Total tokens consumed (input + output) across attacker / evaluator /
+    # commander / recon LLM calls. Aggregated from per-agent counters in
+    # :meth:`SwarmCommander._phase_finalise`. Defaults to ``0`` for back-compat
+    # with hand-constructed test fixtures that pre-date the cost-tracking
+    # work (PRD §8.1 — IMPORTANT #3).
+    tokens_total: int = Field(default=0, ge=0)
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")

@@ -127,8 +127,15 @@ def _config(
     recon: float = 5.0,
     checkpoint: float = 0.5,
 ) -> SwarmConfig:
+    # All three roles pinned to the ``stub`` provider so the cost-rollup in
+    # :meth:`SwarmCommander._phase_finalise` resolves to zero. Without this
+    # the price-table fallback for the (non-stub) default model names would
+    # produce a non-zero ``cost_usd`` under the integration stub harness.
     return SwarmConfig(
         scan_id=scan_id,
+        commander_model="stub",
+        attacker_model="stub",
+        evaluator_model="stub",
         overall_wall_seconds=overall,
         recon_wall_seconds=recon,
         checkpoint_interval_seconds=checkpoint,
@@ -183,6 +190,10 @@ async def test_swarm_runs_end_to_end_against_defended_target(
     assert scan.aivss_formula_version == "aivss-v1"
     assert scan.probe_library_version == "0.0.0-placeholder"
     assert scan.cost_usd == 0.0
+    # Token counts must be visible even under the stub harness — the
+    # wrapper folds StubLLM's deterministic LLMUsage into the per-agent
+    # counters. Zero would mean the wrapper isn't being installed.
+    assert scan.tokens_total > 0, "tokens_total must reflect real usage"
 
 
 @pytest.mark.asyncio
@@ -444,6 +455,39 @@ async def test_swarm_checkpoint_decision_enum_round_trip() -> None:
     """The CheckpointDecision enum is the public contract for v1.1 wiring."""
     for value in ("continue", "early_stop", "re_task", "escalate_judge"):
         assert CheckpointDecision(value).value == value
+
+
+@pytest.mark.asyncio
+async def test_swarm_cost_usd_reflects_real_token_spend(
+    defended_target: PromptAdapter,
+    fresh_memory: SharedMemory,
+) -> None:
+    """When the swarm is configured with paid-tier model names, the
+    rollup in :func:`_compute_cost_usd` must produce a non-zero figure.
+
+    This pins the IMPORTANT #3 fix: `cost_usd` was hardcoded to 0.0
+    pre-2026.05 — any regression that re-hardcodes it will trip here.
+    """
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="swarm-cost",
+            commander_model="gemini-3.5-flash",
+            attacker_model="gemini-3.5-flash",
+            evaluator_model="gemini-3.5-flash",
+            overall_wall_seconds=30.0,
+            recon_wall_seconds=5.0,
+            checkpoint_interval_seconds=0.5,
+            max_parallel_agents=10,
+        ),
+        target=defended_target,
+        attacker_llm=_attacker_script(),
+        evaluator_llm=_pass_judge_script(),
+        memory=fresh_memory,
+        rng_seed=0,
+    )
+    scan = await swarm.run()
+    assert scan.tokens_total > 0
+    assert scan.cost_usd > 0.0, "cost_usd must reflect non-stub model rates"
 
 
 # Mypy sanity — referenced via AsyncIterator type alias to keep imports live.

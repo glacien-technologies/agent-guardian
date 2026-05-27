@@ -43,6 +43,7 @@ def test_emit_json_has_expected_top_level_keys() -> None:
         "findings",
         "duration_seconds",
         "cost_usd",
+        "tokens_total",
         "created_at",
         "signatures",
     ):

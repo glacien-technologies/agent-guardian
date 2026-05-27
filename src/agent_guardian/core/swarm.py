@@ -71,7 +71,9 @@ from agent_guardian.core.scoring import (
     compute_aivss,
 )
 from agent_guardian.core.tiering import detect_tier
+from agent_guardian.cost import lookup_price
 from agent_guardian.llm.base import BaseLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.tier import Tier
@@ -201,11 +203,32 @@ class SwarmCommander:
     ) -> None:
         self.config = config
         self.target = target
-        self.attacker_llm = attacker_llm
-        self.evaluator_llm = evaluator_llm
+        # Wrap each LLM client in a usage-tracking decorator so the per-role
+        # tokens consumed during the scan are observable for cost rollup in
+        # :meth:`_phase_finalise`. Cooperates with the per-agent wrappers in
+        # :class:`AsiAgent.__init__` — if a counter is already wrapped, the
+        # agents detect and reuse it instead of double-counting (PRD §8.1
+        # — IMPORTANT #3).
+        self._commander_usage = UsageCounter()
+        # Per-agent wrappers around attacker / evaluator land in
+        # :class:`AsiAgent.__init__` so each agent gets its own counter for
+        # the :attr:`AgentReport.tokens_consumed` breakdown. We pass the raw
+        # clients through unchanged here.
+        self.attacker_llm: BaseLLM = attacker_llm
+        self.evaluator_llm: BaseLLM = evaluator_llm
         # Commander LLM defaults to the attacker LLM today — the M9
         # checkpoint logic will use it once LLM-driven re-tasking lands.
-        self.commander_llm = commander_llm if commander_llm is not None else attacker_llm
+        raw_commander = commander_llm if commander_llm is not None else attacker_llm
+        self.commander_llm: BaseLLM = (
+            raw_commander
+            if isinstance(raw_commander, UsageTrackingLLM)
+            else UsageTrackingLLM(raw_commander, counter=self._commander_usage)
+        )
+        if isinstance(raw_commander, UsageTrackingLLM):
+            # If a wrapped client was supplied, mirror onto our counter so we
+            # still observe activity. The wrapper's counter is the source of
+            # truth; ``_commander_usage`` becomes a view.
+            self._commander_usage = raw_commander.counter
         self.memory = memory if memory is not None else SharedMemory(config.scan_id)
         self.observer = observer
         self.rng_seed = rng_seed
@@ -575,6 +598,35 @@ class SwarmCommander:
         # asi_scores key is AsiCategory enum — Scan accepts it directly.
         asi_scores = dict(result.asi_scores)
 
+        # Aggregate real per-role token spend across every agent report (the
+        # 10 ASI agents + recon-agent) plus the commander's own usage. Then
+        # apply per-model rates from :func:`lookup_price` to derive USD cost.
+        # IMPORTANT #3 (PRD §8.1).
+        attacker_in, attacker_out = 0, 0
+        evaluator_in, evaluator_out = 0, 0
+        for report in self._agent_reports:
+            tok = report.tokens_consumed or {}
+            attacker_in += int(tok.get("attacker_input", 0))
+            attacker_out += int(tok.get("attacker_output", 0))
+            evaluator_in += int(tok.get("evaluator_input", 0))
+            evaluator_out += int(tok.get("evaluator_output", 0))
+        commander_in = self._commander_usage.prompt_tokens
+        commander_out = self._commander_usage.completion_tokens
+        tokens_total = (
+            attacker_in + attacker_out + evaluator_in + evaluator_out + commander_in + commander_out
+        )
+        cost_usd = _compute_cost_usd(
+            attacker_model=self.config.attacker_model,
+            evaluator_model=self.config.evaluator_model,
+            commander_model=self.config.commander_model,
+            attacker_in=attacker_in,
+            attacker_out=attacker_out,
+            evaluator_in=evaluator_in,
+            evaluator_out=evaluator_out,
+            commander_in=commander_in,
+            commander_out=commander_out,
+        )
+
         duration = time.monotonic() - self._start_time
         scan = Scan(
             id=self.config.scan_id,
@@ -590,7 +642,8 @@ class SwarmCommander:
             findings=findings,
             asi_scores=asi_scores,
             duration_seconds=max(0.0, duration),
-            cost_usd=0.0,
+            cost_usd=cost_usd,
+            tokens_total=tokens_total,
             created_at=_utcnow(),
         )
         self._emit(
@@ -635,6 +688,40 @@ def _variance(values: list[int]) -> float:
         return 0.0
     mean = sum(values) / len(values)
     return sum((v - mean) ** 2 for v in values) / len(values)
+
+
+def _cost_for(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Apply the per-1k input/output rate from :func:`lookup_price`."""
+    if input_tokens <= 0 and output_tokens <= 0:
+        return 0.0
+    row = lookup_price(model)
+    return (input_tokens / 1000.0) * row.input_per_1k + (output_tokens / 1000.0) * row.output_per_1k
+
+
+def _compute_cost_usd(
+    *,
+    attacker_model: str,
+    evaluator_model: str,
+    commander_model: str,
+    attacker_in: int,
+    attacker_out: int,
+    evaluator_in: int,
+    evaluator_out: int,
+    commander_in: int,
+    commander_out: int,
+) -> float:
+    """Sum the per-role token-cost rollup into a USD figure.
+
+    Each role looks up its own price row (the three roles can run on
+    different models). Returns a value rounded to 4 decimal places —
+    swarm-level numbers below $0.0001 are not meaningful for operators.
+    """
+    total = (
+        _cost_for(attacker_model, attacker_in, attacker_out)
+        + _cost_for(evaluator_model, evaluator_in, evaluator_out)
+        + _cost_for(commander_model, commander_in, commander_out)
+    )
+    return round(total, 4)
 
 
 # Silence unused-import warnings: these are part of the public re-export surface.
