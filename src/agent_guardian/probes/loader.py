@@ -14,12 +14,14 @@ from pathlib import Path
 
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.probe import Probe, load_probe
+from agent_guardian.strategies.base import ProbeSeed
 
 __all__ = [
     "PROBE_CORPUS_VERSION",
     "find_corpus_root",
     "load_all_probes",
     "load_probes_for_asi",
+    "seeds_for_asi_with_provenance",
 ]
 
 
@@ -65,3 +67,29 @@ def load_probes_for_asi(asi: AsiCategory) -> list[Probe]:
     if not root.exists():
         return []
     return load_all_probes(root=root)
+
+
+def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
+    """Load every (probe_id, seed_text) pair for an ASI category as ProbeSeeds.
+
+    Each ``Probe`` in the corpus may declare multiple ``seeds``; this helper
+    emits one :class:`ProbeSeed` per ``(probe, seed_text)`` pair so the
+    strategy layer can thread per-seed probe-id provenance through to the
+    turn record. ASI and severity are pre-filled so downstream finding
+    emission doesn't have to re-load the probe.
+
+    Returns an empty list when the corpus directory is missing — callers
+    should fall back to hand-authored placeholders wrapped as ProbeSeeds.
+    """
+    out: list[ProbeSeed] = []
+    for probe in load_probes_for_asi(asi):
+        for text in probe.seeds:
+            out.append(
+                ProbeSeed(
+                    probe_id=probe.id,
+                    text=text,
+                    asi=probe.asi.value,
+                    severity=probe.severity.value,
+                )
+            )
+    return out

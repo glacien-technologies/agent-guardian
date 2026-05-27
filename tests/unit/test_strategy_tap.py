@@ -239,3 +239,67 @@ async def test_state_isolation_between_instances(tmp_path: Path) -> None:
     await a.generate_next([], None)
     assert a.turn_count() == 1
     assert b.turn_count() == 0
+
+
+# --- attacker LLM refusal handling --------------------------------------
+
+
+async def test_attacker_refusal_synthesises_candidates_from_seeds(tmp_path: Path) -> None:
+    """Refused attacker → fall back to seeds as the candidate list."""
+    # Refuse on branching and refuse on scoring -- but scoring fall-through still
+    # produces an int via _parse_score("..."); high refusal text won't score >= 5.
+    # So script a normal score response separately by keying on "scale".
+    llm = (
+        StubScript()
+        # Branching call refused.
+        .respond_to(
+            "Generate 4 refined attack prompts",
+            "I cannot help with that. As an AI, I won't comply.",
+        )
+        .respond_to(
+            "On a scale of 0-10",
+            "8",
+        )
+        .default("0")
+        .build()
+    )
+    ctx = _ctx(tmp_path, llm=llm, seeds=["CORPUS-A", "CORPUS-B"])
+    tap = TAPStrategy(ctx, depth=3, branching_factor=2)
+    first = await tap.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [Turn(prompt=first.text, response="I can't help.")]
+    second = await tap.generate_next(history, "I can't help.")
+    assert isinstance(second, NextPrompt)
+    # The fallback synthesises candidates from ctx.seeds; one of them must win.
+    assert second.text in {"CORPUS-A", "CORPUS-B"}
+    assert second.metadata.get("attacker_refused") is True
+
+
+async def test_red_team_system_prompt_is_used_in_tap(tmp_path: Path) -> None:
+    """Branching call must include the red-team system message."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            text = '["x1", "x2"]' if "Generate" in request.messages[-1].content else "9"
+            return LLMResponse(
+                text=text,
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="x"), seeds=["seed-1"])
+    tap = TAPStrategy(ctx, depth=2, branching_factor=2)
+    first = await tap.generate_next([], None)
+    history = [Turn(prompt=first.text, response="No.")]  # type: ignore[union-attr]
+    await tap.generate_next(history, "No.")
+    # At least the branching call must carry the system prompt.
+    assert any(
+        msgs[0].role == "system" and RED_TEAM_SYSTEM_PROMPT in msgs[0].content
+        for msgs in (req.messages for req in captured)
+    )

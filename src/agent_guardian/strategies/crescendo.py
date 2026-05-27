@@ -8,11 +8,16 @@ gradually escalate. The escalation level (0..100) increments by a step
 each turn unless a refusal is observed, in which case it drops by twice
 the step. Two refusals at level 0 mean we've hit a stable refusal loop
 and the strategy bows out.
+
+Every attacker-LLM call goes through :func:`attacker_complete` so the
+provider's own safety alignment receives the OWASP-Agentic-Top-10
+red-team framing. If the attacker still refuses, we fall back to the
+parent probe seed (cycled by turn count) so the target gets a real
+adversarial input rather than a forwarded refusal.
 """
 
 from __future__ import annotations
 
-from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -20,6 +25,8 @@ from agent_guardian.strategies.base import (
     StrategyDone,
     StrategyResult,
     Turn,
+    attacker_complete,
+    seed_text,
 )
 
 __all__ = ["CrescendoStrategy"]
@@ -85,30 +92,44 @@ class CrescendoStrategy(Strategy):
 
         if not history or target_response is None:
             # First turn — ask attacker for a benign opener on the same topic.
-            resp = await self.ctx.attacker_llm.complete(
-                LLMRequest(
-                    messages=[
-                        LLMMessage(
-                            role="user",
-                            content=_BENIGN_SEED_PROMPT.format(goal=self.ctx.goal),
-                        )
-                    ],
-                    model=self.ctx.attacker_model,
-                )
+            # If the attacker refuses (Gemini-style "I can't help with..."),
+            # fall back to a static seed so we still send a real adversarial
+            # probe rather than forwarding the refusal text to the target.
+            seed = self._pick_seed()
+            seed_meta = self._build_seed_metadata(seed)
+            attacker_text, refused = await attacker_complete(
+                self.ctx.attacker_llm,
+                prompt=_BENIGN_SEED_PROMPT.format(goal=self.ctx.goal),
+                model=self.ctx.attacker_model,
             )
-            text = resp.text.strip() or self.ctx.goal
+            if refused:
+                self._attacker_refused_count += 1
+                seed_meta["attacker_refused"] = True
+                seed_meta["attacker_refusal_text"] = attacker_text[:240]
+                seed_meta["attacker_refusal_count"] = self._attacker_refused_count
+                # Prefer the static seed text over the refusal text.
+                text = (
+                    seed_text(seed) if seed is not None else self._fallback_seed_text()
+                ) or self.ctx.goal
+            else:
+                text = attacker_text or (seed_text(seed) if seed is not None else self.ctx.goal)
             self._level = 0
             self._refused_last = False
             self._turn_count += 1
+            meta: dict[str, object] = {
+                "level": 0,
+                "refused_last": False,
+                **seed_meta,
+            }
             return NextPrompt(
                 text=text,
                 rationale="crescendo-level-0",
-                metadata={"level": 0, "refused_last": False},
+                metadata=meta,
             )
 
         # Subsequent turn — inspect last target response for refusal markers.
-        refused = self._is_refusal(target_response)
-        if refused:
+        refused_target = self._is_refusal(target_response)
+        if refused_target:
             prev_level = self._level
             self._level = max(0, self._level - 2 * self.escalation_step)
             # Stable refusal loop: if we were already at 0 AND refused last turn
@@ -121,28 +142,35 @@ class CrescendoStrategy(Strategy):
             self._refused_last = False
 
         prev = history[-1]
-        resp = await self.ctx.attacker_llm.complete(
-            LLMRequest(
-                messages=[
-                    LLMMessage(
-                        role="user",
-                        content=_ESCALATE_PROMPT.format(
-                            goal=self.ctx.goal,
-                            level=self._level,
-                            prev_prompt=prev.prompt,
-                            prev_response=target_response,
-                        ),
-                    )
-                ],
-                model=self.ctx.attacker_model,
-            )
+        seed_meta = self._build_seed_metadata(None)  # inherits parent probe_id
+        attacker_text, refused_attacker = await attacker_complete(
+            self.ctx.attacker_llm,
+            prompt=_ESCALATE_PROMPT.format(
+                goal=self.ctx.goal,
+                level=self._level,
+                prev_prompt=prev.prompt,
+                prev_response=target_response,
+            ),
+            model=self.ctx.attacker_model,
         )
-        text = resp.text.strip() or prev.prompt
+        if refused_attacker:
+            self._attacker_refused_count += 1
+            seed_meta["attacker_refused"] = True
+            seed_meta["attacker_refusal_text"] = attacker_text[:240]
+            seed_meta["attacker_refusal_count"] = self._attacker_refused_count
+            text = self._fallback_seed_text() or prev.prompt
+        else:
+            text = attacker_text or prev.prompt
         self._turn_count += 1
+        meta = {
+            "level": self._level,
+            "refused_last": refused_target,
+            **seed_meta,
+        }
         return NextPrompt(
             text=text,
             rationale=f"crescendo-level-{self._level}",
-            metadata={"level": self._level, "refused_last": refused},
+            metadata=meta,
         )
 
     def _is_refusal(self, text: str) -> bool:

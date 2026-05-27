@@ -86,16 +86,29 @@ def test_corpus_ids_match_filename_category() -> None:
 
 
 def test_agents_use_corpus_seeds() -> None:
-    """The GoalHijackAgent (ASI01) reads its seeds from the corpus."""
+    """The GoalHijackAgent (ASI01) reads its seeds from the corpus.
+
+    Agents return :class:`ProbeSeed` records (probe_id + text), not bare
+    strings, so coverage tooling can trace each turn back to the source
+    probe. The corpus seed *texts* must still be a subset of the agent's
+    seed texts.
+    """
     from agent_guardian.agents.goal_hijack import GoalHijackAgent
     from agent_guardian.llm.stub import StubScript
+    from agent_guardian.strategies.base import ProbeSeed
 
     llm = StubScript().default("[stub] ok").build()
     agent = GoalHijackAgent(attacker_llm=llm, evaluator_llm=llm)
     seeds = agent.seeds_for_category()
+    assert all(isinstance(s, ProbeSeed) for s in seeds)
+    seed_texts = {s.text for s in seeds}
+    seed_probe_ids = {s.probe_id for s in seeds}
     corpus_seeds: list[str] = []
+    corpus_probe_ids: set[str] = set()
     for probe in load_probes_for_asi(AsiCategory.ASI01):
         corpus_seeds.extend(probe.seeds)
-    # The agent must include every corpus seed for its category.
-    assert set(corpus_seeds).issubset(set(seeds))
+        corpus_probe_ids.add(probe.id)
+    # The agent must include every corpus seed text + probe id for its category.
+    assert set(corpus_seeds).issubset(seed_texts)
+    assert corpus_probe_ids.issubset(seed_probe_ids)
     assert len(seeds) >= len(corpus_seeds)

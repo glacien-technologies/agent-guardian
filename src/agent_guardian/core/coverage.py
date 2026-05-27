@@ -14,6 +14,13 @@ fixed keys (see ``base.py``). The roll-up reports:
 * ``mitre_techniques`` — sorted unique MITRE ATLAS techniques touched.
 * ``csa_categories`` — sorted unique CSA categories touched.
 * ``agents`` — per-agent attempt count.
+* ``probes_attempted`` — sorted unique probe ids the strategies seeded
+  from (T4 validation follow-up — was always null pre-2026.05).
+* ``attacker_refused_turns`` / ``attacker_refusal_rate`` — number and
+  fraction of turns where the attacker LLM refused to generate adversarial
+  content and the strategy fell back to a static seed. A high rate means
+  the attacker provider's safety alignment is dampening the scan; the
+  AIVSS score should be read with that in mind.
 
 The function is intentionally tolerant: malformed JSONL lines, non-reflection
 records, and unparseable reflection payloads are skipped silently rather
@@ -44,6 +51,9 @@ def _empty_coverage() -> dict[str, Any]:
         "mitre_techniques": [],
         "csa_categories": [],
         "agents": {},
+        "probes_attempted": [],
+        "attacker_refused_turns": 0,
+        "attacker_refusal_rate": 0.0,
     }
 
 
@@ -81,6 +91,8 @@ def compute_coverage_from_memory(
     mitre: set[str] = set()
     csa: set[str] = set()
     agents: dict[str, int] = {}
+    probes_attempted: set[str] = set()
+    refused_turns = 0
     attempts = 0
 
     try:
@@ -125,6 +137,13 @@ def compute_coverage_from_memory(
         csa_val = turn.get("csa_category")
         if isinstance(csa_val, str) and csa_val:
             csa.add(csa_val)
+        seed_id = turn.get("seed_id")
+        if isinstance(seed_id, str) and seed_id:
+            probes_attempted.add(seed_id)
+        if turn.get("attacker_refused"):
+            refused_turns += 1
+
+    refusal_rate = refused_turns / attempts if attempts else 0.0
 
     return {
         "attempts_total": attempts,
@@ -132,4 +151,7 @@ def compute_coverage_from_memory(
         "mitre_techniques": sorted(mitre),
         "csa_categories": sorted(csa),
         "agents": dict(sorted(agents.items())),
+        "probes_attempted": sorted(probes_attempted),
+        "attacker_refused_turns": refused_turns,
+        "attacker_refusal_rate": round(refusal_rate, 4),
     }

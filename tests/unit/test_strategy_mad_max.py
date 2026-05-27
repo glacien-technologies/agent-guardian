@@ -228,3 +228,37 @@ async def test_state_isolation(tmp_path: Path) -> None:
     await a.generate_next([], None)
     assert a.turn_count() == 1
     assert b.turn_count() == 0
+
+
+# --- attacker refusal pass-through -------------------------------------
+
+
+class _AttackerRefusedChild(Strategy):
+    """A child that always reports attacker_refused=True in its metadata."""
+
+    name = "refused-child"
+
+    async def generate_next(
+        self, history: list[Turn], target_response: str | None
+    ) -> StrategyResult:
+        self._turn_count += 1
+        return NextPrompt(
+            text="FALLBACK-PROMPT",
+            rationale="refused",
+            metadata={
+                "attacker_refused": True,
+                "attacker_refusal_text": "I cannot help.",
+                "seed_id": "ASI01-PARENT",
+            },
+        )
+
+
+async def test_mad_max_propagates_refusal_metadata(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    child = _AttackerRefusedChild(ctx)
+    mm = MadMaxStrategy(ctx, children=[child], epsilon=0.0)
+    r = await mm.generate_next([], None)
+    assert isinstance(r, NextPrompt)
+    assert r.metadata["attacker_refused"] is True
+    assert r.metadata["seed_id"] == "ASI01-PARENT"
+    assert "attacker_refusal_count" in r.metadata

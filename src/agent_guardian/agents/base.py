@@ -51,6 +51,7 @@ from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import (
     NextPrompt,
+    ProbeSeed,
     Strategy,
     StrategyContext,
     StrategyDone,
@@ -63,7 +64,32 @@ __all__ = [
     "AsiAgent",
     "Judge",
     "JudgeRubric",
+    "fallback_seeds",
 ]
+
+
+def fallback_seeds(
+    asi: AsiCategory,
+    texts: list[str],
+    *,
+    severity: Severity = Severity.HIGH,
+) -> list[ProbeSeed]:
+    """Wrap hand-authored fallback seed strings as :class:`ProbeSeed`.
+
+    Used by every concrete ASI agent for the editable-install path where
+    the bundled YAML corpus is not on disk. The synthetic probe id is
+    ``"<ASI>-fallback-<index>"`` so coverage tools can still emit a probe
+    list — just one that's clearly tagged as fallback, not corpus.
+    """
+    return [
+        ProbeSeed(
+            probe_id=f"{asi.value}-fallback-{i:02d}",
+            text=text,
+            asi=asi.value,
+            severity=severity.value,
+        )
+        for i, text in enumerate(texts, start=1)
+    ]
 
 
 TerminationReason = Literal["success", "exhausted", "refused", "budget", "error"]
@@ -295,11 +321,17 @@ class AsiAgent(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def seeds_for_category(self) -> list[str]:
-        """Return the static placeholder seeds for this agent's ASI category.
+    def seeds_for_category(self) -> list[ProbeSeed]:
+        """Return the corpus-aware seeds for this agent's ASI category.
 
-        M11 ships the real probe corpus; M7 ships small hand-authored
-        placeholders so the agent loop has something to chew on.
+        Each :class:`ProbeSeed` carries the (probe_id, text) pair so the
+        strategy layer can thread probe-corpus provenance through to the
+        turn record. Subclasses load probes via
+        :func:`agent_guardian.probes.loader.seeds_for_asi_with_provenance`
+        and append a small hand-authored fallback list (also wrapped as
+        :class:`ProbeSeed` with a synthetic probe id) so the agent loop
+        always has something to chew on even on editable installs without
+        the bundled YAML.
         """
 
     def judge_rubric(self) -> JudgeRubric:
@@ -486,10 +518,12 @@ class AsiAgent(ABC):
             # ``[full]`` extra (FAISS + sentence-transformers). Vector search
             # is not needed for forensic replay.
             strategy_name = getattr(strategy, "name", strategy.__class__.__name__)
-            seed_id = (
-                str(result.metadata.get("seed_id"))
-                if result.metadata and "seed_id" in result.metadata
-                else None
+            strat_meta = dict(result.metadata or {})
+            seed_id_val = strat_meta.get("seed_id")
+            seed_id = str(seed_id_val) if seed_id_val else None
+            attacker_refused_val = bool(strat_meta.get("attacker_refused", False))
+            attacker_refusal_text_val = (
+                str(strat_meta.get("attacker_refusal_text", "")) if attacker_refused_val else ""
             )
             turn_record = {
                 "agent": self.name or type(self).__name__,
@@ -504,8 +538,10 @@ class AsiAgent(ABC):
                 "verdict": verdict.verdict,
                 "confidence": verdict.confidence,
                 "reasoning": verdict.reasoning,
-                "strategy_metadata": dict(result.metadata or {}),
+                "strategy_metadata": strat_meta,
                 "seed_id": seed_id,
+                "attacker_refused": attacker_refused_val,
+                "attacker_refusal_text": attacker_refusal_text_val,
             }
             try:
                 await memory.write_reflection(

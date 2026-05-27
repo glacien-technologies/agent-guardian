@@ -7,6 +7,12 @@ The attacker LLM critiques its own previous attempt given the target's
 response, then rewrites the attack to be more effective. We keep a
 "best attempt so far" pointer in case the M7 agent layer wants to return
 to the best critique state.
+
+Every attacker LLM call is wrapped in :func:`attacker_complete` so the
+provider's safety alignment sees a sanctioned-research framing. If the
+attacker refuses, we synthesise a ``{"critique": ..., "rewrite": <seed>}``
+payload from the parent probe so the strategy keeps moving on a real
+adversarial input rather than forwarding the refusal text.
 """
 
 from __future__ import annotations
@@ -15,7 +21,6 @@ import json
 import re
 from typing import Any
 
-from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -23,6 +28,8 @@ from agent_guardian.strategies.base import (
     StrategyDone,
     StrategyResult,
     Turn,
+    attacker_complete,
+    seed_text,
 )
 
 __all__ = ["PAIRStrategy"]
@@ -63,14 +70,16 @@ class PAIRStrategy(Strategy):
 
         # First turn — seed.
         if not history or target_response is None:
-            if not self.ctx.seeds:
+            seed = self._pick_seed()
+            if seed is None:
                 return StrategyDone(reason="exhausted")
-            seed = self.ctx.rng.choice(self.ctx.seeds)
             self._turn_count += 1
+            meta: dict[str, object] = {"critique_count": 0}
+            meta.update(self._build_seed_metadata(seed))
             return NextPrompt(
-                text=seed,
+                text=seed_text(seed),
                 rationale="pair-initial",
-                metadata={"critique_count": 0},
+                metadata=meta,
             )
 
         prev = history[-1]
@@ -79,27 +88,45 @@ class PAIRStrategy(Strategy):
             prev_prompt=prev.prompt,
             prev_response=target_response,
         )
-        resp = await self.ctx.attacker_llm.complete(
-            LLMRequest(
-                messages=[LLMMessage(role="user", content=refine_text)],
-                model=self.ctx.attacker_model,
-            )
+        attacker_text, refused = await attacker_complete(
+            self.ctx.attacker_llm,
+            prompt=refine_text,
+            model=self.ctx.attacker_model,
         )
-        critique, rewrite = _parse_critique_payload(resp.text)
-        # If parse failed and we couldn't recover any rewrite, fall back to
-        # the raw response text — the strategy continues, garbage in / garbage
-        # out, and the M7 agent layer will surface that on judge verdict.
-        text = rewrite.strip() or resp.text.strip() or prev.prompt
+        if refused:
+            self._attacker_refused_count += 1
+            # Synthesise a critique payload so the loop keeps moving on a
+            # real probe instead of forwarding the attacker's refusal text.
+            critique = (
+                "previous attempt blocked by attacker LLM refusal; falling back to corpus seed"
+            )
+            rewrite = self._fallback_seed_text() or prev.prompt
+            text = rewrite
+            refusal_text: str | None = attacker_text[:240]
+        else:
+            critique, rewrite = _parse_critique_payload(attacker_text)
+            # If parse failed and we couldn't recover any rewrite, fall back
+            # to the raw response text — the strategy continues, garbage in /
+            # garbage out, and the M7 agent layer will surface that on judge
+            # verdict.
+            text = rewrite.strip() or attacker_text.strip() or prev.prompt
+            refusal_text = None
 
         self._critique_count += 1
         self._turn_count += 1
+        meta = {
+            "critique": critique,
+            "critique_count": self._critique_count,
+        }
+        meta.update(self._build_seed_metadata(None))  # inherit parent probe id
+        if refused:
+            meta["attacker_refused"] = True
+            meta["attacker_refusal_text"] = refusal_text or ""
+            meta["attacker_refusal_count"] = self._attacker_refused_count
         return NextPrompt(
             text=text,
             rationale=f"pair-critique-{self._critique_count}",
-            metadata={
-                "critique": critique,
-                "critique_count": self._critique_count,
-            },
+            metadata=meta,
         )
 
 

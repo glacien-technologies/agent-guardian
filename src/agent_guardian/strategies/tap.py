@@ -17,6 +17,12 @@ expansion globally). At the strategy layer we do **single-branch greedy
 descent with internal branching done by the attacker LLM in one call** —
 each `generate_next` ask the attacker to produce ``branching_factor``
 refinements, scores them, and picks the highest-scored survivor.
+
+Every attacker LLM call goes through :func:`attacker_complete` so the
+red-team framing is in front of the provider's safety alignment. If the
+attacker refuses to generate refinements, we synthesise a JSON array from
+``ctx.seeds`` so the search continues on legitimate corpus probes rather
+than dead-ending on a forwarded refusal.
 """
 
 from __future__ import annotations
@@ -25,7 +31,6 @@ import json
 import re
 from typing import Any
 
-from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -33,6 +38,8 @@ from agent_guardian.strategies.base import (
     StrategyDone,
     StrategyResult,
     Turn,
+    attacker_complete,
+    seed_text,
 )
 
 __all__ = ["TAPStrategy"]
@@ -90,52 +97,62 @@ class TAPStrategy(Strategy):
 
         # First turn — seed from ctx.seeds.
         if not history or target_response is None:
-            if not self.ctx.seeds:
+            seed = self._pick_seed()
+            if seed is None:
                 return StrategyDone(reason="exhausted")
-            seed = self.ctx.rng.choice(self.ctx.seeds)
             self._turn_count += 1
+            meta: dict[str, object] = {"depth": 0, "branch": 0}
+            meta.update(self._build_seed_metadata(seed))
             return NextPrompt(
-                text=seed,
+                text=seed_text(seed),
                 rationale="tap-depth-0-seed",
-                metadata={"depth": 0, "branch": 0},
+                metadata=meta,
             )
 
         prev = history[-1]
-        # 1. Ask attacker for `branching_factor` refinements.
+        # 1. Ask attacker for `branching_factor` refinements. Wrap with the
+        # red-team system prompt and detect refusals so we can synthesise a
+        # candidate list from ctx.seeds when the attacker won't comply.
         branch_text = _BRANCH_PROMPT.format(
             goal=self.ctx.goal,
             prev_prompt=prev.prompt,
             prev_response=target_response,
             branching_factor=self.branching_factor,
         )
-        branch_resp = await self.ctx.attacker_llm.complete(
-            LLMRequest(
-                messages=[LLMMessage(role="user", content=branch_text)],
-                model=self.ctx.attacker_model,
-            )
+        attacker_text, refused = await attacker_complete(
+            self.ctx.attacker_llm,
+            prompt=branch_text,
+            model=self.ctx.attacker_model,
         )
-        candidates = _parse_candidates(branch_resp.text, self.branching_factor)
+        refusal_text = ""
+        if refused:
+            self._attacker_refused_count += 1
+            refusal_text = attacker_text[:240]
+            # Synthesise a JSON-array of candidates from the seed corpus so
+            # the search continues on legitimate probes instead of dead-ending.
+            corpus = [seed_text(s) for s in self.ctx.seeds if seed_text(s)]
+            candidates = corpus[: self.branching_factor] if corpus else []
+        else:
+            candidates = _parse_candidates(attacker_text, self.branching_factor)
         if not candidates:
             return StrategyDone(reason="refused")
 
         # 2. Apply the width prune in-strategy (caps the candidate set).
         candidates = candidates[: self.width]
 
-        # 3. Score each candidate via the attacker.
+        # 3. Score each candidate via the attacker. Scoring is not adversarial
+        # generation, so a plain complete() is acceptable — we still want a
+        # red-team framing in case the provider considers the *content* of
+        # the candidate itself disallowed.
         scored: list[tuple[int, str]] = []
         for cand in candidates:
-            score_resp = await self.ctx.attacker_llm.complete(
-                LLMRequest(
-                    messages=[
-                        LLMMessage(
-                            role="user",
-                            content=_SCORE_PROMPT.format(goal=self.ctx.goal, candidate=cand),
-                        )
-                    ],
-                    model=self.ctx.attacker_model,
-                )
+            score_text, _ = await attacker_complete(
+                self.ctx.attacker_llm,
+                prompt=_SCORE_PROMPT.format(goal=self.ctx.goal, candidate=cand),
+                model=self.ctx.attacker_model,
+                temperature=0.0,
             )
-            scored.append((_parse_score(score_resp.text), cand))
+            scored.append((_parse_score(score_text), cand))
 
         survivors = [(s, c) for s, c in scored if s >= self.score_threshold]
         if not survivors:
@@ -148,15 +165,21 @@ class TAPStrategy(Strategy):
 
         self._turn_count += 1
         depth = self._turn_count - 1
+        meta = {
+            "depth": depth,
+            "candidates_seen": len(candidates),
+            "candidates_kept": len(survivors),
+            "chosen_score": max_score,
+        }
+        meta.update(self._build_seed_metadata(None))  # inherit parent probe id
+        if refused:
+            meta["attacker_refused"] = True
+            meta["attacker_refusal_text"] = refusal_text
+            meta["attacker_refusal_count"] = self._attacker_refused_count
         return NextPrompt(
             text=chosen,
             rationale=f"tap-depth-{depth}",
-            metadata={
-                "depth": depth,
-                "candidates_seen": len(candidates),
-                "candidates_kept": len(survivors),
-                "chosen_score": max_score,
-            },
+            metadata=meta,
         )
 
 

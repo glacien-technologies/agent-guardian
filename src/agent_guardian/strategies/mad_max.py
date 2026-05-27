@@ -130,6 +130,11 @@ class MadMaxStrategy(Strategy):
         merged_meta["chosen_strategy"] = chosen.name or type(chosen).__name__
         merged_meta["chosen_key"] = chosen_key
         merged_meta["epsilon_explore"] = explore
+        # Roll up the child's attacker-refusal accounting onto the MAD-MAX
+        # turn so the agent layer's reflection record still sees it.
+        if np.metadata.get("attacker_refused"):
+            self._attacker_refused_count += 1
+            merged_meta["attacker_refusal_count"] = self._attacker_refused_count
         self._last_choice = chosen_key
         self._turn_count += 1
         return NextPrompt(

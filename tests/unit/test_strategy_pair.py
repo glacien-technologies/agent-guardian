@@ -201,3 +201,51 @@ async def test_state_isolation(tmp_path: Path) -> None:
     await a.generate_next([], None)
     assert a.turn_count() == 1
     assert b.turn_count() == 0
+
+
+# --- attacker LLM refusal handling --------------------------------------
+
+
+async def test_attacker_refusal_uses_seed_as_rewrite(tmp_path: Path) -> None:
+    """Refused attacker → critique falls back to a corpus seed."""
+    llm = StubLLM(default="I cannot generate that. I'm an AI assistant.")
+    ctx = _ctx(tmp_path, llm=llm, seeds=["FALLBACK-A", "FALLBACK-B"])
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [Turn(prompt=first.text, response="I can't.")]
+    second = await p.generate_next(history, "I can't.")
+    assert isinstance(second, NextPrompt)
+    # The text must NOT be the attacker refusal — it must be a static seed.
+    assert "I cannot" not in second.text
+    assert second.text in {"FALLBACK-A", "FALLBACK-B"}
+    assert second.metadata.get("attacker_refused") is True
+
+
+async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:
+    """PAIR critique calls must include the red-team system message."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": "r"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    history = [Turn(prompt=first.text, response="refused")]  # type: ignore[union-attr]
+    await p.generate_next(history, "refused")
+    # Critique call (the second LLM round) must include the system message.
+    assert captured, "no LLM call captured"
+    last = captured[-1]
+    assert last.messages[0].role == "system"
+    assert RED_TEAM_SYSTEM_PROMPT in last.messages[0].content

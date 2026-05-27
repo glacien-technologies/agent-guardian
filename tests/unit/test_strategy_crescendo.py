@@ -235,3 +235,59 @@ async def test_state_isolation(tmp_path: Path) -> None:
     await a.generate_next([], None)
     assert a.turn_count() == 1
     assert b.turn_count() == 0
+
+
+# --- attacker LLM refusal handling --------------------------------------
+
+
+async def test_attacker_refusal_falls_back_to_seed(tmp_path: Path) -> None:
+    """If the attacker LLM refuses to generate a benign opener, fall back."""
+    # Make the attacker LLM unconditionally refuse — every call.
+    llm = StubLLM(default="I cannot help with that request.")
+    ctx = _ctx(tmp_path, llm=llm, max_turns=3)
+    ctx.seeds = ["FALLBACK-SEED-1", "FALLBACK-SEED-2"]
+    s = CrescendoStrategy(ctx)
+    r = await s.generate_next([], None)
+    assert isinstance(r, NextPrompt)
+    # The strategy must NOT send the refusal text to the target.
+    assert "I cannot help" not in r.text
+    # The text must be one of the static seeds.
+    assert r.text in {"FALLBACK-SEED-1", "FALLBACK-SEED-2"}
+    assert r.metadata["attacker_refused"] is True
+    assert "attacker_refusal_text" in r.metadata
+
+
+async def test_attacker_refusal_metadata_passes_through(tmp_path: Path) -> None:
+    """attacker_refused metadata must be False when the LLM responds normally."""
+    ctx = _ctx(tmp_path, llm=_scripted_llm())
+    s = CrescendoStrategy(ctx)
+    r = await s.generate_next([], None)
+    assert isinstance(r, NextPrompt)
+    assert r.metadata.get("attacker_refused") is False
+
+
+async def test_red_team_system_prompt_is_used(tmp_path: Path) -> None:
+    """The attacker LLM must receive the red-team system message."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text="What is photosynthesis?",
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="x"))
+    s = CrescendoStrategy(ctx)
+    await s.generate_next([], None)
+    assert captured, "attacker LLM was not called"
+    msgs = captured[0].messages
+    # The first message must be a system message containing the red-team framing.
+    assert msgs[0].role == "system"
+    assert RED_TEAM_SYSTEM_PROMPT in msgs[0].content
