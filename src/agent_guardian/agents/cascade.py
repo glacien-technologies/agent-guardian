@@ -25,7 +25,7 @@ class CascadeAgent(AsiAgent):
     name = "cascade-agent"
     default_mitre_techniques: ClassVar[list[MitreTechnique]] = ["AML.T0034"]
     default_csa_category = CsaCategory.IMPACT_CHAIN_BLAST_RADIUS
-    default_severity = Severity.MEDIUM
+    default_severity = Severity.HIGH
     target_findings = 2
 
     def seeds_for_category(self) -> list[ProbeSeed]:

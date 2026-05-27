@@ -29,7 +29,7 @@ class DriftAgent(AsiAgent):
     # persona drift maps to "AI Agent Context Poisoning").
     default_mitre_techniques: ClassVar[list[MitreTechnique]] = ["AI Agent Context Poisoning"]
     default_csa_category = CsaCategory.AGENT_UNTRACEABILITY
-    default_severity = Severity.LOW
+    default_severity = Severity.HIGH
     target_findings = 3
 
     def seeds_for_category(self) -> list[ProbeSeed]:

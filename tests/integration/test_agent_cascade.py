@@ -39,7 +39,8 @@ async def test_cascade_finds_findings(
     findings = memory.findings_by_asi(AsiCategory.ASI08)
     assert findings
     assert findings[0].csa_category == CsaCategory.IMPACT_CHAIN_BLAST_RADIUS
-    assert findings[0].severity == Severity.MEDIUM
+    # CC-3: ASI08 cascading failures bumped to HIGH per OWASP 2026.
+    assert findings[0].severity == Severity.HIGH
 
 
 async def test_cascade_refused_target(
