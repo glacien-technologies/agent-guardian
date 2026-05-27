@@ -30,12 +30,15 @@ than raising — coverage is best-effort over whatever survived on disk.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from agent_guardian.models.scan import Scan
 
 __all__ = ["compute_coverage_from_memory", "default_memory_path"]
+
+_LOG = logging.getLogger(__name__)
 
 
 def default_memory_path(scan_id: str, root_dir: Path | None = None) -> Path:
@@ -109,18 +112,31 @@ def compute_coverage_from_memory(
 
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError as exc:
+        _LOG.warning(
+            "coverage: could not read memory file %s (%s) — returning empty coverage",
+            path,
+            exc,
+        )
         return _empty_coverage()
 
-    for raw in text.splitlines():
+    malformed_lines = 0
+    for line_no, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
             continue
         try:
             rec = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            malformed_lines += 1
+            _LOG.debug("coverage: skipping malformed JSONL line %d (%s)", line_no, exc)
             continue
         if not isinstance(rec, dict):
+            _LOG.debug(
+                "coverage: skipping non-object JSONL line %d (got %s)",
+                line_no,
+                type(rec).__name__,
+            )
             continue
         # Pluck agent_skipped records out into their own facet — they're
         # not reflections and shouldn't be folded into attempt counts.
@@ -145,9 +161,10 @@ def compute_coverage_from_memory(
             continue
         try:
             turn = json.loads(content)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             # Old-style free-text reflections aren't part of coverage —
             # we only count structured per-turn records.
+            _LOG.debug("coverage: reflection content is not structured JSON (%s); skipping", exc)
             continue
         if not isinstance(turn, dict):
             continue
@@ -207,6 +224,18 @@ def compute_coverage_from_memory(
         if key and key not in skipped_dedup:
             skipped_dedup[key] = entry
     sorted_skipped = [skipped_dedup[k] for k in sorted(skipped_dedup)]
+
+    _LOG.debug(
+        "coverage computed: attempts=%d asi_categories=%d probes_used=%d refusal_rate=%.2f "
+        "skipped_agents=%d strategies=%s (malformed_lines=%d)",
+        attempts,
+        len(asi),
+        len(probes_attempted),
+        refusal_rate,
+        len(sorted_skipped),
+        list(strategies_used),
+        malformed_lines,
+    )
 
     return {
         "attempts_total": attempts,

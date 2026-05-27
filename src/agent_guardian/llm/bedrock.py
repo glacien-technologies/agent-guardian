@@ -22,6 +22,7 @@ at construction time so misconfiguration fails fast.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -37,6 +38,8 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+
+_LOG = logging.getLogger(__name__)
 
 # botocore is an optional dependency (``[aws]`` extra) used only by
 # the live ``BedrockClient`` for SigV4 signing + credential resolution.
@@ -61,6 +64,7 @@ try:  # pragma: no cover — import guard
 except ImportError as _exc:  # pragma: no cover — import guard
     _BOTOCORE_AVAILABLE = False
     _BOTOCORE_IMPORT_ERROR = _exc
+    _LOG.debug("bedrock: botocore not installed (install via [aws] extra): %s", _exc)
 
 
 __all__ = [
@@ -158,7 +162,8 @@ def _extract_bedrock_error(resp: httpx.Response) -> tuple[str, str]:
     """
     try:
         body = resp.json()
-    except ValueError:
+    except ValueError as exc:
+        _LOG.debug("bedrock: error body is not JSON (%s); using raw text", exc)
         return ("", resp.text or "")
     if not isinstance(body, dict):
         return ("", str(body))
@@ -195,7 +200,12 @@ def _raise_for_bedrock_status(resp: httpx.Response) -> None:
             try:
                 retry_after = float(retry_after_hdr)
             except ValueError:
+                _LOG.debug(
+                    "bedrock: unparseable Retry-After header %r — backoff will use default",
+                    retry_after_hdr,
+                )
                 retry_after = None
+        _LOG.warning("bedrock rate limited (code=%s retry_after=%s)", code, retry_after)
         raise LLMRateLimitError(f"bedrock: rate limited ({detail})", retry_after=retry_after)
     if code == "ValidationException":
         raise LLMPermanentError(f"bedrock: validation failed: {detail}")
@@ -332,18 +342,36 @@ class BedrockClient(BaseLLM):
         body_json = json.dumps(body)
         url = f"{(self.base_url or '').rstrip('/')}/model/{request.model}/converse"
         headers = self._build_signed_headers(url, body_json)
+        _LOG.debug(
+            "bedrock call: model=%s region=%s n_messages=%d max_tokens=%s",
+            request.model,
+            self.region,
+            len(request.messages),
+            request.max_tokens,
+        )
         try:
             resp = await self._client.post(url, content=body_json, headers=headers)
         except httpx.TimeoutException as exc:
+            _LOG.warning("bedrock timeout: %s", exc)
             raise LLMTimeoutError(f"bedrock: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
+            _LOG.warning("bedrock network error: %s: %s", type(exc).__name__, exc)
             raise LLMTransientError(f"bedrock: network error: {exc}") from exc
         _raise_for_bedrock_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
+            _LOG.warning("bedrock invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"bedrock: invalid JSON: {exc}") from exc
         response = map_bedrock_response(request.model, data)
+        _LOG.debug(
+            "bedrock response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
+            response.text[:80],
+            response.usage.prompt_tokens,
+            response.usage.completion_tokens,
+            response.usage.total_tokens,
+            response.finish_reason,
+        )
         return response
 
     async def complete(self, request: LLMRequest) -> LLMResponse:

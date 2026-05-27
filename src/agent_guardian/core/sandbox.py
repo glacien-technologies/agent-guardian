@@ -13,7 +13,7 @@ reproducibility receipt can include the evidence.
 
 from __future__ import annotations
 
-import contextlib
+import logging
 import socket
 import threading
 from dataclasses import dataclass, field
@@ -23,6 +23,8 @@ from unittest.mock import patch
 import httpx
 
 __all__ = ["Sandbox", "SandboxPolicy", "SandboxViolation"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class SandboxViolation(Exception):
@@ -190,7 +192,12 @@ class Sandbox:
                 host = str(address[0])
                 try:
                     port = int(address[1])
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
+                    _LOG.debug(
+                        "sandbox: socket address has non-int port %r (%s) — coerced to 0",
+                        address[1],
+                        exc,
+                    )
                     port = 0
                 return host, port
             return "", 0
@@ -243,9 +250,12 @@ class Sandbox:
         # Stop in reverse order so the most-recently-applied patch unwinds first.
         while self._patches.handles:
             handle = self._patches.handles.pop()
-            with contextlib.suppress(RuntimeError):
-                # Patch already stopped; safe to ignore.
+            try:
                 handle.stop()
+            except RuntimeError as exc:
+                # Patch already stopped; benign during nested __aexit__ but
+                # still worth a DEBUG line for the review trace.
+                _LOG.debug("sandbox: patch already stopped during teardown (%s)", exc)
 
     # Synchronous context-manager fallback — useful for non-async tests.
     def __enter__(self) -> Sandbox:

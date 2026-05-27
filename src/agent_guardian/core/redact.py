@@ -9,10 +9,13 @@ limited; production users install ``agent-guardian[full]``.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 __all__ = ["PiiRedactor"]
+
+_LOG = logging.getLogger(__name__)
 
 # --- fallback regex bank ------------------------------------------------
 
@@ -62,7 +65,8 @@ _FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 def _has_presidio() -> bool:
     try:
         import presidio_analyzer  # type: ignore[import-not-found,unused-ignore]  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
+        _LOG.debug("redact: presidio not installed (%s); using regex fallback", exc)
         return False
     return True
 
@@ -99,16 +103,23 @@ class PiiRedactor:
     def _init_presidio(self) -> None:
         try:
             from presidio_analyzer import AnalyzerEngine
-        except ImportError:
+        except ImportError as exc:
+            _LOG.debug("redact: presidio import failed (%s); using regex fallback", exc)
             return
         try:
             self._analyzer = AnalyzerEngine()
             self._using_presidio = True
-        except Exception:
+            _LOG.info("redact: presidio AnalyzerEngine initialised")
+        except Exception as exc:
             # spaCy model not downloaded, or some other init failure —
-            # silently fall back to regex. Production users see this only
-            # if they installed the [full] extra but skipped `python -m spacy
-            # download en_core_web_lg`.
+            # fall back to regex with a clear warning so operators who
+            # installed the [full] extra know to download the spaCy model.
+            _LOG.warning(
+                "redact: presidio AnalyzerEngine init failed (%s: %s); "
+                "falling back to regex. Run `python -m spacy download en_core_web_lg` to fix.",
+                type(exc).__name__,
+                exc,
+            )
             self._analyzer = None
             self._using_presidio = False
 
@@ -157,7 +168,12 @@ class PiiRedactor:
         if self._using_presidio and self._analyzer is not None:
             try:
                 return self._redact_with_presidio(text)
-            except Exception:
+            except Exception as exc:
                 # presidio failed mid-call — fall back rather than crash.
+                _LOG.warning(
+                    "redact: presidio analyze raised %s: %s — falling back to regex for this text",
+                    type(exc).__name__,
+                    exc,
+                )
                 return self._redact_with_fallback(text)
         return self._redact_with_fallback(text)

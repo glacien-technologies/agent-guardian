@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 
 from agent_guardian.adapters.http_shapes import (
     agentcore_shape,
@@ -30,6 +30,8 @@ __all__ = [
     "register_shape",
 ]
 
+_LOG = logging.getLogger(__name__)
+
 
 def _register_builtins() -> None:
     for shape in (
@@ -40,9 +42,16 @@ def _register_builtins() -> None:
         agentcore_shape.SHAPE,
         generic_shape.SHAPE,
     ):
-        # Already-registered is fine for test re-imports.
-        with contextlib.suppress(ValueError):
+        # Already-registered is fine for test re-imports — log at DEBUG so
+        # the trace shows it without raising about a benign re-registration.
+        try:
             register_shape(shape)
+        except ValueError as exc:
+            _LOG.debug(
+                "http_shapes: shape %s already registered (%s) — skipping",
+                shape.name,
+                exc,
+            )
 
 
 _register_builtins()

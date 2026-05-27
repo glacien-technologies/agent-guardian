@@ -20,6 +20,7 @@ fingerprint with no provenance (IMPORTANT #4 in the 14-flaw inventory).
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -31,6 +32,8 @@ from agent_guardian.llm.base import BaseLLM
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 __all__ = ["ReconAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -224,6 +227,13 @@ class ReconAgent:
         # Seed the fingerprint from the adapter's static description.
         base = memory.target_fingerprint() or target.fingerprint()
         session_id = f"recon-{uuid.uuid4().hex[:8]}"
+        _LOG.info(
+            "recon_start: %d probes against %s (mode=%s, wall_budget=%.1fs)",
+            len(_PROBES),
+            base.ref,
+            base.mode,
+            self.budget.wall_seconds_remaining,
+        )
 
         has_tools_observed = base.has_tools
         has_memory_observed = base.has_memory
@@ -251,11 +261,22 @@ class ReconAgent:
             if not self.budget.deduct_tokens(est_tokens):
                 terminated_by = "budget"
                 break
+            _LOG.debug(
+                "recon probe %s: question=%r",
+                probe.tag,
+                probe.question[:80],
+            )
             try:
                 reply = await target.call(probe.question, session=session_id)
             except Exception as exc:
                 terminated_by = "error"
                 error = f"target.call raised {type(exc).__name__}: {exc}"
+                _LOG.warning(
+                    "recon probe %s: target.call raised %s: %s — aborting recon",
+                    probe.tag,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
             turns += 1
             self.budget.deduct_tokens(min(len(reply) // 4, self.budget.tokens_remaining))
@@ -314,6 +335,12 @@ class ReconAgent:
                 "target_response": reply,
                 "inferred_signals": inferred_signals,
             }
+            _LOG.debug(
+                "recon probe %s: response[:120]=%r signals=%s",
+                probe.tag,
+                reply[:120],
+                inferred_signals,
+            )
             try:
                 await memory.write_reflection(
                     self.name,
@@ -323,6 +350,12 @@ class ReconAgent:
             except Exception as exc:  # pragma: no cover — defensive
                 terminated_by = "error"
                 error = f"memory.write_reflection raised {type(exc).__name__}: {exc}"
+                _LOG.error(
+                    "recon probe %s: memory.write_reflection raised %s: %s — aborting recon",
+                    probe.tag,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
 
         refined = TargetFingerprint(
@@ -345,6 +378,26 @@ class ReconAgent:
         except Exception as exc:  # pragma: no cover — defensive
             terminated_by = "error"
             error = f"memory.set_target_fingerprint raised {type(exc).__name__}: {exc}"
+            _LOG.error(
+                "recon: memory.set_target_fingerprint raised %s: %s — fingerprint not persisted",
+                type(exc).__name__,
+                exc,
+            )
+
+        duration = time.monotonic() - start
+        _LOG.info(
+            "recon_done: tools=%s memory=%s pii=%s external_systems=%s multi_agent=%s cross_session=%s "
+            "(probes=%d, duration=%.1fs, terminated_by=%s)",
+            refined.has_tools,
+            refined.has_memory,
+            refined.touches_pii,
+            refined.external_systems_detected,
+            refined.multi_agent_detected,
+            refined.cross_session_data_detected,
+            turns,
+            duration,
+            terminated_by,
+        )
 
         return AgentReport(
             agent=self.name,

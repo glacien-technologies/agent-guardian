@@ -21,9 +21,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from typing import TypedDict
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_PBKDF2_ITERATIONS",
@@ -114,18 +117,29 @@ def verify_hmac(
         salt_b64 = block.get("salt")
         iterations = block.get("iterations", DEFAULT_PBKDF2_ITERATIONS)
         sig_b64 = block.get("signature")
-    except AttributeError:
+    except AttributeError as exc:
+        _LOG.warning("hmac verify: block is not a mapping (%s)", exc)
         return False
     if algorithm != HMAC_ALGORITHM or version != SIGNATURE_VERSION:
+        _LOG.warning(
+            "hmac verify: algorithm/version mismatch (got %r/%r, expect %r/%r)",
+            algorithm,
+            version,
+            HMAC_ALGORITHM,
+            SIGNATURE_VERSION,
+        )
         return False
     if not isinstance(salt_b64, str) or not isinstance(sig_b64, str):
+        _LOG.warning("hmac verify: salt / signature must be strings")
         return False
     if not isinstance(iterations, int) or iterations <= 0:
+        _LOG.warning("hmac verify: iterations must be positive int (got %r)", iterations)
         return False
     try:
         salt = base64.b64decode(salt_b64, validate=True)
         expected = base64.b64decode(sig_b64, validate=True)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        _LOG.warning("hmac verify: salt/signature decode failed: %s", exc)
         return False
     effective_secret = _resolve_secret(secret)
     key = derive_key(effective_secret, salt, iterations=iterations)

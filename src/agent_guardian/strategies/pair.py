@@ -18,6 +18,7 @@ adversarial input rather than forwarding the refusal text.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -33,6 +34,8 @@ from agent_guardian.strategies.base import (
 )
 
 __all__ = ["PAIRStrategy"]
+
+_LOG = logging.getLogger(__name__)
 
 
 _REFINE_PROMPT = (
@@ -66,16 +69,26 @@ class PAIRStrategy(Strategy):
         self, history: list[Turn], target_response: str | None
     ) -> StrategyResult:
         if self._turn_count >= self.max_critiques:
+            _LOG.debug(
+                "pair: max_critiques=%d reached — emitting StrategyDone(exhausted)",
+                self.max_critiques,
+            )
             return StrategyDone(reason="exhausted")
 
         # First turn — seed.
         if not history or target_response is None:
             seed = self._pick_seed()
             if seed is None:
+                _LOG.debug("pair: no seed available on first turn — StrategyDone(exhausted)")
                 return StrategyDone(reason="exhausted")
             self._turn_count += 1
             meta: dict[str, object] = {"critique_count": 0}
             meta.update(self._build_seed_metadata(seed))
+            _LOG.debug(
+                "pair: turn 1 seed=%s text[:60]=%r",
+                getattr(seed, "probe_id", "?"),
+                seed_text(seed)[:60],
+            )
             return NextPrompt(
                 text=seed_text(seed),
                 rationale="pair-initial",
@@ -88,6 +101,12 @@ class PAIRStrategy(Strategy):
             prev_prompt=prev.prompt,
             prev_response=target_response,
         )
+        _LOG.debug(
+            "pair: refine attempt %d/%d (history_len=%d)",
+            self._critique_count + 1,
+            self.max_critiques,
+            len(history),
+        )
         attacker_text, refused = await attacker_complete(
             self.ctx.attacker_llm,
             prompt=refine_text,
@@ -96,6 +115,10 @@ class PAIRStrategy(Strategy):
         )
         if refused:
             self._attacker_refused_count += 1
+            _LOG.debug(
+                "pair: attacker refused refinement (count=%d) — falling back to corpus seed",
+                self._attacker_refused_count,
+            )
             # Synthesise a critique payload so the loop keeps moving on a
             # real probe instead of forwarding the attacker's refusal text.
             critique = (
@@ -112,6 +135,11 @@ class PAIRStrategy(Strategy):
             # verdict.
             text = rewrite.strip() or attacker_text.strip() or prev.prompt
             refusal_text = None
+            _LOG.debug(
+                "pair: refine produced rewrite[:60]=%r (critique[:40]=%r)",
+                text[:60],
+                (critique or "")[:40],
+            )
 
         self._critique_count += 1
         self._turn_count += 1
@@ -157,5 +185,6 @@ def _parse_critique_payload(text: str) -> tuple[str, str]:
 def _try_json(text: str) -> Any:
     try:
         return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
+        _LOG.debug("pair: json parse failed (%s) on text[:60]=%r", exc, text[:60])
         return None

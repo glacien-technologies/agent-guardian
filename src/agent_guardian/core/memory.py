@@ -229,6 +229,15 @@ class SharedMemory:
         # Replay JSONL into in-memory indexes.
         if self.jsonl_path.exists():
             self._replay()
+            _LOG.info(
+                "memory: replayed scan %s (findings=%d, reflections=%d, attempted_seeds=%d)",
+                scan_id,
+                len(self._all_findings),
+                sum(len(v) for v in self._reflections_by_agent.values()),
+                sum(len(s) for s in self._attempted_seeds.values()),
+            )
+        else:
+            _LOG.debug("memory: fresh scan %s (no jsonl yet at %s)", scan_id, self.jsonl_path)
 
     # ------------------------------------------------------------------
     # Replay / restore
@@ -271,12 +280,21 @@ class SharedMemory:
             agent = str(record.payload.get("agent", ""))
             content = str(record.payload.get("content", ""))
             if not agent or not content:
+                _LOG.debug(
+                    "memory replay: dropping reflection with empty agent/content (agent=%r)",
+                    agent,
+                )
                 return
             self._reflections_by_agent.setdefault(agent, []).append(content)
         elif record.record_type == "attempted_seed":
             try:
                 asi = AsiCategory(record.payload.get("asi"))
-            except (ValueError, KeyError):
+            except (ValueError, KeyError) as exc:
+                _LOG.debug(
+                    "memory replay: dropping attempted_seed with bad asi %r (%s)",
+                    record.payload.get("asi"),
+                    exc,
+                )
                 return
             seed_id = str(record.payload.get("seed_id", ""))
             if seed_id:
@@ -360,6 +378,13 @@ class SharedMemory:
             self._all_findings.append(finding)
             self._findings_by_asi[finding.asi].append(finding)
             await asyncio.to_thread(self._write_stats_snapshot_sync)
+        _LOG.debug(
+            "memory write: finding asi=%s severity=%s probe=%s (total_findings=%d)",
+            finding.asi.value,
+            finding.severity.value,
+            finding.probe_id,
+            len(self._all_findings),
+        )
 
     async def write_reflection(
         self,
@@ -388,6 +413,12 @@ class SharedMemory:
                 self._vector_meta.append((content, agent, "reflection"))
                 self._add_to_faiss(vec)
             await asyncio.to_thread(self._write_stats_snapshot_sync)
+        _LOG.debug(
+            "memory write: reflection agent=%s payload_size=%d embed=%s",
+            agent,
+            len(content),
+            embed,
+        )
 
     async def write_attempted_seed(self, asi: AsiCategory, seed_id: str) -> None:
         """Record that an ASI agent tried a particular probe seed.

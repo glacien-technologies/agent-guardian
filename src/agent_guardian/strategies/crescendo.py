@@ -18,6 +18,8 @@ adversarial input rather than a forwarded refusal.
 
 from __future__ import annotations
 
+import logging
+
 from agent_guardian.strategies.base import (
     NextPrompt,
     Strategy,
@@ -30,6 +32,8 @@ from agent_guardian.strategies.base import (
 )
 
 __all__ = ["CrescendoStrategy"]
+
+_LOG = logging.getLogger(__name__)
 
 _DEFAULT_REFUSAL_MARKERS: tuple[str, ...] = (
     "i cannot",
@@ -108,12 +112,17 @@ class CrescendoStrategy(Strategy):
                 seed_meta["attacker_refused"] = True
                 seed_meta["attacker_refusal_text"] = attacker_text[:240]
                 seed_meta["attacker_refusal_count"] = self._attacker_refused_count
+                _LOG.debug(
+                    "crescendo: attacker refused benign opener (count=%d) — falling back to seed",
+                    self._attacker_refused_count,
+                )
                 # Prefer the static seed text over the refusal text.
                 text = (
                     seed_text(seed) if seed is not None else self._fallback_seed_text()
                 ) or self.ctx.goal
             else:
                 text = attacker_text or (seed_text(seed) if seed is not None else self.ctx.goal)
+                _LOG.debug("crescendo: turn 1 benign opener generated (text[:60]=%r)", text[:60])
             self._level = 0
             self._refused_last = False
             self._turn_count += 1
@@ -133,13 +142,25 @@ class CrescendoStrategy(Strategy):
         if refused_target:
             prev_level = self._level
             self._level = max(0, self._level - 2 * self.escalation_step)
+            _LOG.debug(
+                "crescendo: target refused — de-escalating level %d -> %d",
+                prev_level,
+                self._level,
+            )
             # Stable refusal loop: if we were already at 0 AND refused last turn
             # AND just refused again, give up.
             if self._refused_last and prev_level == 0 and self._level == 0:
+                _LOG.debug("crescendo: stable refusal loop at level 0 — StrategyDone(refused)")
                 return StrategyDone(reason="refused")
             self._refused_last = True
         else:
+            prev_level = self._level
             self._level = min(self.max_level, self._level + self.escalation_step)
+            _LOG.debug(
+                "crescendo: target did not refuse — escalating level %d -> %d",
+                prev_level,
+                self._level,
+            )
             self._refused_last = False
 
         prev = history[-1]
@@ -160,6 +181,11 @@ class CrescendoStrategy(Strategy):
             seed_meta["attacker_refused"] = True
             seed_meta["attacker_refusal_text"] = attacker_text[:240]
             seed_meta["attacker_refusal_count"] = self._attacker_refused_count
+            _LOG.debug(
+                "crescendo: attacker refused escalation (count=%d, level=%d) — falling back to seed",
+                self._attacker_refused_count,
+                self._level,
+            )
             text = self._fallback_seed_text() or prev.prompt
         else:
             text = attacker_text or prev.prompt

@@ -12,6 +12,7 @@ over per-child rolling success rate.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 
 from agent_guardian.strategies.base import (
@@ -24,6 +25,8 @@ from agent_guardian.strategies.base import (
 )
 
 __all__ = ["MadMaxStrategy"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class MadMaxStrategy(Strategy):
@@ -101,14 +104,31 @@ class MadMaxStrategy(Strategy):
         explore = self.ctx.rng.random() < self.epsilon
         if explore:
             chosen = self.ctx.rng.choice(self._active)
+            _LOG.debug(
+                "mad-max: epsilon=%.2f exploration pick=%s (active=%d)",
+                self.epsilon,
+                chosen.name or type(chosen).__name__,
+                len(self._active),
+            )
         else:
-            best_rate = max(self._success_rate(self._key_by_strategy[id(c)]) for c in self._active)
+            rates = {
+                self._key_by_strategy[id(c)]: self._success_rate(self._key_by_strategy[id(c)])
+                for c in self._active
+            }
+            best_rate = max(rates.values())
             top = [
                 c
                 for c in self._active
                 if self._success_rate(self._key_by_strategy[id(c)]) == best_rate
             ]
             chosen = self.ctx.rng.choice(top) if len(top) > 1 else top[0]
+            _LOG.debug(
+                "mad-max: greedy pick=%s (best_rate=%.2f rates=%s tied=%d)",
+                chosen.name or type(chosen).__name__,
+                best_rate,
+                rates,
+                len(top),
+            )
 
         chosen_key = self._key_by_strategy[id(chosen)]
         result = await chosen.generate_next(history, target_response)
@@ -117,7 +137,14 @@ class MadMaxStrategy(Strategy):
             # Retire this child. Try the next one immediately so the caller
             # never sees a "no progress" empty turn.
             self._active = [c for c in self._active if c is not chosen]
+            _LOG.debug(
+                "mad-max: retiring child=%s (reason=%s, remaining=%d)",
+                chosen.name or type(chosen).__name__,
+                result.reason,
+                len(self._active),
+            )
             if not self._active:
+                _LOG.debug("mad-max: all children retired — StrategyDone(exhausted)")
                 return StrategyDone(reason="exhausted")
             # Re-dispatch on the remaining pool. We don't recurse infinitely
             # because each call retires at least one child.

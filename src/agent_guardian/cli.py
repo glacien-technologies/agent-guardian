@@ -64,6 +64,8 @@ from agent_guardian.models.severity import (
 )
 from agent_guardian.models.tier import Tier
 
+_LOG = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Exit codes (PRD §8.4)
 # ---------------------------------------------------------------------------
@@ -135,9 +137,19 @@ def _read_state() -> dict[str, Any]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        _LOG.warning(
+            "cli: could not read state file %s (%s) — starting with empty state",
+            path,
+            exc,
+        )
         return {}
     if not isinstance(data, dict):
+        _LOG.warning(
+            "cli: state file %s is not a JSON object (got %s) — discarding",
+            path,
+            type(data).__name__,
+        )
         return {}
     return data
 
@@ -171,11 +183,13 @@ def _try_load_dotenv() -> None:
     """
     try:
         from dotenv import load_dotenv
-    except ImportError:
+    except ImportError as exc:
+        _LOG.debug("cli: python-dotenv not installed (%s) — skipping .env auto-load", exc)
         return
     cwd = Path.cwd()
     for candidate in (cwd / ".env", cwd / ".env.local"):
         if candidate.is_file():
+            _LOG.debug("cli: loading .env file %s", candidate)
             load_dotenv(candidate, override=False)
 
 
@@ -507,6 +521,7 @@ def doctor() -> None:
         _ = Sandbox
         typer.echo("sandbox: importable")
     except Exception as exc:  # pragma: no cover — defensive
+        _LOG.warning("doctor: sandbox import failed: %s: %s", type(exc).__name__, exc)
         typer.echo(f"sandbox: import failed ({type(exc).__name__})")
 
     # State + config locations.

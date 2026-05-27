@@ -13,6 +13,7 @@ and ``transcript_ref`` strings of each finding are passed through
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -44,6 +45,7 @@ __all__ = [
 
 SCHEMA_VERSION = "agentguardian-scan-v1"
 
+_LOG = logging.getLogger(__name__)
 
 _REDACTOR = PiiRedactor()
 
@@ -150,9 +152,14 @@ def write_json(
         memory_root=memory_root,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=indent, sort_keys=True),
-        encoding="utf-8",
+    rendered = json.dumps(payload, indent=indent, sort_keys=True)
+    path.write_text(rendered, encoding="utf-8")
+    _LOG.info(
+        "report written: format=json path=%s bytes=%d signed=%s redacted=%s",
+        path,
+        len(rendered),
+        sign,
+        redact_pii,
     )
 
 

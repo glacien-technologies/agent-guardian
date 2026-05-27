@@ -21,7 +21,7 @@ addresses, and DNSSEC use — it round-trips through copy/paste cleanly.
 from __future__ import annotations
 
 import base64
-import contextlib
+import logging
 from pathlib import Path
 from typing import TypedDict
 
@@ -30,6 +30,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from agent_guardian.crypto.hmac_sig import SIGNATURE_VERSION
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_KEYS_DIR",
@@ -86,6 +88,7 @@ def load_or_create_keypair(*, keys_dir: Path | None = None) -> Ed25519Keypair:
 
     if priv_path.is_file():
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(priv_path.read_bytes())
+        _LOG.debug("ed25519: loaded existing keypair from %s", priv_path)
     else:
         private_key = ed25519.Ed25519PrivateKey.generate()
         priv_bytes = private_key.private_bytes(
@@ -94,9 +97,16 @@ def load_or_create_keypair(*, keys_dir: Path | None = None) -> Ed25519Keypair:
             encryption_algorithm=serialization.NoEncryption(),
         )
         priv_path.write_bytes(priv_bytes)
+        _LOG.info("ed25519: generated new keypair at %s", priv_path)
         # Best-effort chmod — Windows / weird FS may reject 0o600.
-        with contextlib.suppress(OSError):
+        try:
             priv_path.chmod(0o600)
+        except OSError as exc:
+            _LOG.debug(
+                "ed25519: chmod 0600 on %s failed (%s) — non-POSIX FS likely, continuing",
+                priv_path,
+                exc,
+            )
 
     public_key = private_key.public_key()
     if not pub_path.is_file():
@@ -141,23 +151,36 @@ def verify_ed25519(
         version = block.get("version")
         pub_b32 = block.get("public_key_b32")
         sig_b64 = block.get("signature")
-    except AttributeError:
+    except AttributeError as exc:
+        _LOG.warning("ed25519 verify: block is not a mapping (%s)", exc)
         return False
     if algorithm != ED25519_ALGORITHM or version != SIGNATURE_VERSION:
+        _LOG.warning(
+            "ed25519 verify: algorithm/version mismatch (got %r/%r, expect %r/%r)",
+            algorithm,
+            version,
+            ED25519_ALGORITHM,
+            SIGNATURE_VERSION,
+        )
         return False
     if not isinstance(pub_b32, str) or not isinstance(sig_b64, str):
+        _LOG.warning("ed25519 verify: public_key_b32 / signature must be strings")
         return False
     try:
         pub_raw = _b32_decode_no_padding(pub_b32)
         sig = base64.b64decode(sig_b64, validate=True)
-    except (ValueError, TypeError, base64.binascii.Error):  # type: ignore[attr-defined]
+    except (ValueError, TypeError, base64.binascii.Error) as exc:  # type: ignore[attr-defined]
+        _LOG.warning("ed25519 verify: signature/public-key decode failed: %s", exc)
         return False
     try:
         public_key = ed25519.Ed25519PublicKey.from_public_bytes(pub_raw)
-    except ValueError:
+    except ValueError as exc:
+        _LOG.warning("ed25519 verify: malformed public key bytes: %s", exc)
         return False
     try:
         public_key.verify(sig, payload)
     except InvalidSignature:
+        _LOG.warning("ed25519 verify: signature does not match payload")
         return False
+    _LOG.debug("ed25519 verify: signature valid (payload_bytes=%d)", len(payload))
     return True

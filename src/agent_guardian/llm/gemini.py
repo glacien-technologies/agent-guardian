@@ -13,6 +13,7 @@ with a plain API key from https://aistudio.google.com/app/apikey.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -29,6 +30,8 @@ from agent_guardian.llm.errors import (
 from agent_guardian.llm.retry import with_backoff
 
 __all__ = ["GeminiClient"]
+
+_LOG = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -117,6 +120,13 @@ class GeminiClient(BaseLLM):
         params: dict[str, str] = {}
         if self.api_key:
             params["key"] = self.api_key
+        _LOG.debug(
+            "gemini call: model=%s n_messages=%d max_tokens=%s temperature=%s",
+            request.model,
+            len(request.messages),
+            request.max_tokens,
+            request.temperature,
+        )
         req = self._client.build_request(
             "POST",
             url,
@@ -127,15 +137,27 @@ class GeminiClient(BaseLLM):
         try:
             resp = await self._client.send(req)
         except httpx.TimeoutException as exc:
+            _LOG.warning("gemini timeout: %s", exc)
             raise LLMTimeoutError(f"gemini: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
+            _LOG.warning("gemini network error: %s: %s", type(exc).__name__, exc)
             raise LLMTransientError(f"gemini: network error: {exc}") from exc
         _raise_for_gemini_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
+            _LOG.warning("gemini invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"gemini: invalid JSON: {exc}") from exc
-        return self._parse_response(request.model, data)
+        parsed = self._parse_response(request.model, data)
+        _LOG.debug(
+            "gemini response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
+            parsed.text[:80],
+            parsed.usage.prompt_tokens,
+            parsed.usage.completion_tokens,
+            parsed.usage.total_tokens,
+            parsed.finish_reason,
+        )
+        return parsed
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         async with self._semaphore:
@@ -155,7 +177,12 @@ def _raise_for_gemini_status(resp: httpx.Response) -> None:
             try:
                 retry_after = float(retry_after_hdr)
             except ValueError:
+                _LOG.debug(
+                    "gemini: unparseable Retry-After header %r — backoff will use default",
+                    retry_after_hdr,
+                )
                 retry_after = None
+        _LOG.warning("gemini 429 rate limited (retry_after=%s)", retry_after)
         raise LLMRateLimitError("gemini: rate limited", retry_after=retry_after)
     if resp.status_code == 408 or resp.status_code >= 500:
         raise LLMTransientError(f"gemini: transient {resp.status_code}: {resp.text}")

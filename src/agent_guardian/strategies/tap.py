@@ -28,6 +28,7 @@ than dead-ending on a forwarded refusal.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -43,6 +44,8 @@ from agent_guardian.strategies.base import (
 )
 
 __all__ = ["TAPStrategy"]
+
+_LOG = logging.getLogger(__name__)
 
 _BRANCH_PROMPT = (
     "You are a red-team attacker generating jailbreak prompts. The goal is: {goal}.\n"
@@ -129,6 +132,10 @@ class TAPStrategy(Strategy):
         if refused:
             self._attacker_refused_count += 1
             refusal_text = attacker_text[:240]
+            _LOG.debug(
+                "tap: attacker refused branching (count=%d) — synthesising from corpus seeds",
+                self._attacker_refused_count,
+            )
             # Synthesise a JSON-array of candidates from the seed corpus so
             # the search continues on legitimate probes instead of dead-ending.
             corpus = [seed_text(s) for s in self.ctx.seeds if seed_text(s)]
@@ -136,10 +143,17 @@ class TAPStrategy(Strategy):
         else:
             candidates = _parse_candidates(attacker_text, self.branching_factor)
         if not candidates:
+            _LOG.debug("tap: zero candidates produced — StrategyDone(refused)")
             return StrategyDone(reason="refused")
 
         # 2. Apply the width prune in-strategy (caps the candidate set).
         candidates = candidates[: self.width]
+        _LOG.debug(
+            "tap: depth=%d branched %d candidates (width=%d), scoring all",
+            self._turn_count,
+            len(candidates),
+            self.width,
+        )
 
         # 3. Score each candidate via the attacker. Scoring is not adversarial
         # generation, so a plain complete() is acceptable — we still want a
@@ -159,12 +173,25 @@ class TAPStrategy(Strategy):
 
         survivors = [(s, c) for s, c in scored if s >= self.score_threshold]
         if not survivors:
+            _LOG.debug(
+                "tap: no candidate scored >=%d (scores=%s) — StrategyDone(refused)",
+                self.score_threshold,
+                [s for s, _ in scored],
+            )
             return StrategyDone(reason="refused")
 
         # 4. Pick the highest-scored survivor; tie-break with rng.choice.
         max_score = max(s for s, _ in survivors)
         top = [c for s, c in survivors if s == max_score]
         chosen = self.ctx.rng.choice(top) if len(top) > 1 else top[0]
+        _LOG.debug(
+            "tap: depth=%d chose candidate (score=%d, %d survivors of %d, %d top-tied)",
+            self._turn_count,
+            max_score,
+            len(survivors),
+            len(scored),
+            len(top),
+        )
 
         self._turn_count += 1
         depth = self._turn_count - 1
@@ -199,8 +226,8 @@ def _parse_candidates(text: str, branching_factor: int) -> list[str]:
             out = [str(item).strip() for item in loaded if str(item).strip()]
             if out:
                 return out[:branching_factor]
-    except (json.JSONDecodeError, ValueError):
-        pass
+    except (json.JSONDecodeError, ValueError) as exc:
+        _LOG.debug("tap: direct JSON parse failed (%s) — trying embedded array", exc)
 
     # Try to find a JSON array inside the text.
     match = re.search(r"\[.*\]", stripped, re.DOTALL)
@@ -211,10 +238,11 @@ def _parse_candidates(text: str, branching_factor: int) -> list[str]:
                 out = [str(item).strip() for item in loaded if str(item).strip()]
                 if out:
                     return out[:branching_factor]
-        except (json.JSONDecodeError, ValueError):
-            pass
+        except (json.JSONDecodeError, ValueError) as exc:
+            _LOG.debug("tap: embedded JSON parse failed (%s) — splitting on newlines", exc)
 
     # Fallback: split on newlines, strip leading bullets/numbers.
+    _LOG.debug("tap: falling back to newline-split candidate parser")
     lines = []
     for line in stripped.splitlines():
         cleaned = re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
@@ -230,6 +258,9 @@ def _parse_score(text: str) -> int:
         try:
             value = int(match.group(0))
         except ValueError:
+            # The match is digits-only by regex so this is truly defensive;
+            # log at DEBUG and keep scanning rather than silently dropping.
+            _LOG.debug("tap: int parse failed for matched %r", match.group(0))
             continue
         return max(0, min(10, value))
     return 0

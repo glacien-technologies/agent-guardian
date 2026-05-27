@@ -270,20 +270,32 @@ def _parse_verdict_payload(text: str) -> JudgeVerdict | None:
         return None
     try:
         confidence = float(payload.get("confidence", 0.0))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        _LOG.debug(
+            "judge: malformed confidence %r (%s) — coercing to 0.0",
+            payload.get("confidence"),
+            exc,
+        )
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
     reasoning = str(payload.get("reasoning", "")).strip() or "no reasoning provided"
     try:
         return JudgeVerdict(verdict=verdict, confidence=confidence, reasoning=reasoning)  # type: ignore[arg-type]
-    except Exception:
+    except Exception as exc:
+        _LOG.warning(
+            "judge: JudgeVerdict construction failed (%s) — verdict=%r confidence=%.2f",
+            exc,
+            verdict,
+            confidence,
+        )
         return None
 
 
 def _try_json(text: str) -> Any:
     try:
         return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
+        _LOG.debug("json parse failed (%s) on text[:60]=%r", exc, text[:60])
         return None
 
 
@@ -688,6 +700,12 @@ class AsiAgent(ABC):
         try:
             strategy = self.strategy_stack(ctx)
         except Exception as exc:  # pragma: no cover — defensive
+            _LOG.error(
+                "agent %s: strategy_stack build failed: %s: %s",
+                self.name or type(self).__name__,
+                type(exc).__name__,
+                exc,
+            )
             return AgentReport(
                 agent=self.name or type(self).__name__,
                 asi_category=self.asi_category,
@@ -700,7 +718,19 @@ class AsiAgent(ABC):
             )
 
         # 4. Attack loop.
-        session_id = f"{self.name or type(self).__name__}-{uuid.uuid4().hex[:8]}"
+        agent_name = self.name or type(self).__name__
+        session_id = f"{agent_name}-{uuid.uuid4().hex[:8]}"
+        strategy_name = getattr(strategy, "name", strategy.__class__.__name__)
+        _LOG.info(
+            "agent_start: %s (asi=%s strategy=%s seeds=%d max_turns=%d tokens=%d brief=%s)",
+            agent_name,
+            self.asi_category.value,
+            strategy_name,
+            len(combined_seeds),
+            self.budget.max_turns,
+            self.budget.tokens_remaining,
+            "yes" if brief is not None else "no",
+        )
         history: list[Turn] = []
         response: str | None = None
         findings_count = 0
@@ -722,17 +752,45 @@ class AsiAgent(ABC):
             )
             if stop:
                 terminated_by = reason
+                _LOG.debug(
+                    "agent %s: terminating early via should_terminate (reason=%s, turn=%d/%d, findings=%d, elapsed=%.1fs)",
+                    agent_name,
+                    reason,
+                    turns,
+                    self.budget.max_turns,
+                    findings_count,
+                    elapsed,
+                )
                 break
 
+            _LOG.debug(
+                "agent %s turn %d/%d: invoking strategy.generate_next (tokens_left=%d)",
+                agent_name,
+                turns + 1,
+                self.budget.max_turns,
+                self.budget.tokens_remaining,
+            )
             try:
                 result = await strategy.generate_next(history, response)
             except Exception as exc:
                 terminated_by = "error"
                 error = f"strategy.generate_next raised {type(exc).__name__}: {exc}"
+                _LOG.warning(
+                    "agent %s: strategy.generate_next raised %s: %s — terminating",
+                    agent_name,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
 
             if isinstance(result, StrategyDone):
                 terminated_by = result.reason
+                _LOG.debug(
+                    "agent %s: strategy reported done (reason=%s) at turn %d",
+                    agent_name,
+                    result.reason,
+                    turns,
+                )
                 break
 
             assert isinstance(result, NextPrompt)
@@ -740,14 +798,40 @@ class AsiAgent(ABC):
             est_tokens = max(1, len(result.text) // 4)
             if not self.budget.deduct_tokens(est_tokens):
                 terminated_by = "budget"
+                _LOG.debug(
+                    "agent %s: prompt budget exhausted (need=%d remaining=%d)",
+                    agent_name,
+                    est_tokens,
+                    self.budget.tokens_remaining,
+                )
                 break
+            _LOG.debug(
+                "agent %s turn %d: next_prompt[:80]=%r (est_tokens=%d)",
+                agent_name,
+                turns + 1,
+                result.text[:80],
+                est_tokens,
+            )
 
             try:
                 target_response = await target.call(result.text, session=session_id)
             except Exception as exc:
                 terminated_by = "error"
                 error = f"target.call raised {type(exc).__name__}: {exc}"
+                _LOG.warning(
+                    "agent %s turn %d: target.call raised %s: %s — terminating",
+                    agent_name,
+                    turns + 1,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
+            _LOG.debug(
+                "agent %s turn %d: target response[:120]=%r",
+                agent_name,
+                turns + 1,
+                target_response[:120],
+            )
 
             response_tokens = max(1, len(target_response) // 4)
             # Soft-deduct; if we run out we still record the verdict for this turn.
@@ -758,7 +842,22 @@ class AsiAgent(ABC):
             except Exception as exc:
                 terminated_by = "error"
                 error = f"judge.verdict raised {type(exc).__name__}: {exc}"
+                _LOG.warning(
+                    "agent %s turn %d: judge.verdict raised %s: %s — terminating",
+                    agent_name,
+                    turns + 1,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
+            _LOG.debug(
+                "agent %s turn %d: judge verdict=%s confidence=%.2f reasoning[:80]=%r",
+                agent_name,
+                turns + 1,
+                verdict.verdict,
+                verdict.confidence,
+                (verdict.reasoning or "")[:80],
+            )
 
             turns += 1
             history.append(
@@ -780,7 +879,6 @@ class AsiAgent(ABC):
             # semantically meaningful and real semantic recall needs the
             # ``[full]`` extra (FAISS + sentence-transformers). Vector search
             # is not needed for forensic replay.
-            strategy_name = getattr(strategy, "name", strategy.__class__.__name__)
             strat_meta = dict(result.metadata or {})
             seed_id_val = strat_meta.get("seed_id")
             seed_id = str(seed_id_val) if seed_id_val else None
@@ -788,8 +886,15 @@ class AsiAgent(ABC):
             attacker_refusal_text_val = (
                 str(strat_meta.get("attacker_refusal_text", "")) if attacker_refused_val else ""
             )
+            if attacker_refused_val:
+                _LOG.warning(
+                    "agent %s turn %d: attacker LLM refused (text[:80]=%r) — strategy fell back to seed",
+                    agent_name,
+                    turns,
+                    attacker_refusal_text_val[:80],
+                )
             turn_record = {
-                "agent": self.name or type(self).__name__,
+                "agent": agent_name,
                 "asi_category": self.asi_category.value,
                 "mitre_techniques": [str(t) for t in self.default_mitre_techniques],
                 "csa_category": self.default_csa_category.value,
@@ -808,13 +913,20 @@ class AsiAgent(ABC):
             }
             try:
                 await memory.write_reflection(
-                    self.name or type(self).__name__,
+                    agent_name,
                     json.dumps(turn_record),
                     embed=False,
                 )
             except Exception as exc:  # pragma: no cover — defensive
                 terminated_by = "error"
                 error = f"memory.write_reflection raised {type(exc).__name__}: {exc}"
+                _LOG.error(
+                    "agent %s turn %d: memory.write_reflection raised %s: %s — terminating",
+                    agent_name,
+                    turns,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
 
             # Record the seed-id so the dedup index in SharedMemory knows
@@ -830,6 +942,13 @@ class AsiAgent(ABC):
                 except Exception as exc:  # pragma: no cover — defensive
                     terminated_by = "error"
                     error = f"memory.write_attempted_seed raised {type(exc).__name__}: {exc}"
+                    _LOG.error(
+                        "agent %s turn %d: memory.write_attempted_seed raised %s: %s — terminating",
+                        agent_name,
+                        turns,
+                        type(exc).__name__,
+                        exc,
+                    )
                     break
 
             if verdict.verdict == "fail":
@@ -844,18 +963,47 @@ class AsiAgent(ABC):
                 except Exception as exc:  # pragma: no cover — defensive
                     terminated_by = "error"
                     error = f"memory.write_finding raised {type(exc).__name__}: {exc}"
+                    _LOG.error(
+                        "agent %s turn %d: memory.write_finding raised %s: %s — terminating",
+                        agent_name,
+                        turns,
+                        type(exc).__name__,
+                        exc,
+                    )
                     break
                 findings_count += 1
+                _LOG.info(
+                    "finding: agent=%s asi=%s severity=%s probe=%s confidence=%.2f turn=%d",
+                    agent_name,
+                    self.asi_category.value,
+                    self.default_severity.value,
+                    finding.probe_id,
+                    verdict.confidence,
+                    turns,
+                )
 
+        duration = time.monotonic() - start
+        tokens = self._snapshot_tokens()
+        _LOG.info(
+            "agent_done: %s asi=%s turns=%d findings=%d terminated_by=%s duration=%.1fs tokens=%d%s",
+            agent_name,
+            self.asi_category.value,
+            turns,
+            findings_count,
+            terminated_by,
+            duration,
+            tokens.get("total", 0),
+            f" error={error}" if error else "",
+        )
         return AgentReport(
             agent=self.name or type(self).__name__,
             asi_category=self.asi_category,
             findings_count=findings_count,
             turns=turns,
-            duration_seconds=time.monotonic() - start,
+            duration_seconds=duration,
             terminated_by=terminated_by,
             error=error,
-            tokens_consumed=self._snapshot_tokens(),
+            tokens_consumed=tokens,
         )
 
     # ------------------------------------------------------------------

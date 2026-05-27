@@ -31,9 +31,9 @@ recon-agent (M5) refines these signals before the scoring phase.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import importlib
 import inspect
+import logging
 import warnings
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -41,6 +41,8 @@ from typing import Any, cast
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 
 __all__ = ["CodeAdapter"]
+
+_LOG = logging.getLogger(__name__)
 
 
 _TOOL_ATTRS = ("tools", "registered_tools", "available_tools")
@@ -160,14 +162,28 @@ def _resolve_dotted_path(path: str) -> tuple[Callable[..., Any], str]:
         if inspect.isclass(next_obj) and i < len(parts) - 1:
             # If the class needs ctor args, fall through and treat the next
             # segment as a classmethod / staticmethod on the class itself.
-            with contextlib.suppress(TypeError):
+            try:
                 next_obj = next_obj()
+            except TypeError as exc:
+                _LOG.debug(
+                    "code adapter: mid-walk class %r needs ctor args (%s) — "
+                    "treating next segment as classmethod/staticmethod",
+                    next_obj,
+                    exc,
+                )
         obj = next_obj
     if inspect.isclass(obj):
-        with contextlib.suppress(TypeError):
+        try:
             # Final segment is a class with a default ctor — build an
             # instance so its ``__call__`` (or implicit ctor) is the target.
             obj = obj()
+        except TypeError as exc:
+            _LOG.debug(
+                "code adapter: terminal class %r needs ctor args (%s) — "
+                "using class itself as callable",
+                obj,
+                exc,
+            )
     if not callable(obj):
         raise TypeError(f"Dotted path {path!r} resolves to non-callable {obj!r}")
     return cast(Callable[..., Any], obj), path
@@ -178,7 +194,12 @@ def _signature_accepts_session(fn: Callable[..., Any]) -> bool:
     # instances, so we don't have to peek at ``__call__`` ourselves.
     try:
         sig = inspect.signature(fn)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        _LOG.debug(
+            "code adapter: inspect.signature(%r) failed (%s) — assuming no session parameter",
+            fn,
+            exc,
+        )
         return False
     return "session" in sig.parameters
 

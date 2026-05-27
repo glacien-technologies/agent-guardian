@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 import httpx
@@ -42,6 +43,8 @@ from agent_guardian.llm.errors import (
 from agent_guardian.llm.retry import with_backoff
 
 __all__ = ["HttpAdapter"]
+
+_LOG = logging.getLogger(__name__)
 
 # Shapes whose authentication scheme (SigV4 / OAuth2) is too heavyweight to
 # implement in M9. The build_request / extract_response_text pure functions
@@ -249,7 +252,12 @@ def _raise_for_status(resp: httpx.Response) -> None:
             try:
                 retry_after = float(retry_after_hdr)
             except ValueError:
+                _LOG.debug(
+                    "http: unparseable Retry-After header %r — backoff will use default",
+                    retry_after_hdr,
+                )
                 retry_after = None
+        _LOG.warning("http target 429 rate limited (retry_after=%s)", retry_after)
         raise LLMRateLimitError("http: rate limited", retry_after=retry_after)
     if resp.status_code == 408 or resp.status_code >= 500:
         raise LLMTransientError(f"http: transient {resp.status_code}: {body_preview}")

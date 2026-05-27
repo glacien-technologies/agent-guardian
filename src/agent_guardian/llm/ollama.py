@@ -6,6 +6,7 @@ This client is the recommended local-development backend.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -20,6 +21,8 @@ from agent_guardian.llm.errors import (
 from agent_guardian.llm.retry import with_backoff
 
 __all__ = ["OllamaClient"]
+
+_LOG = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
 
@@ -76,6 +79,13 @@ class OllamaClient(BaseLLM):
 
     async def _send(self, request: LLMRequest) -> LLMResponse:
         url = f"{(self.base_url or _DEFAULT_BASE_URL).rstrip('/')}/api/chat"
+        _LOG.debug(
+            "ollama call: model=%s n_messages=%d max_tokens=%s temperature=%s",
+            request.model,
+            len(request.messages),
+            request.max_tokens,
+            request.temperature,
+        )
         req = self._client.build_request(
             "POST",
             url,
@@ -85,15 +95,27 @@ class OllamaClient(BaseLLM):
         try:
             resp = await self._client.send(req)
         except httpx.TimeoutException as exc:
+            _LOG.warning("ollama timeout: %s", exc)
             raise LLMTimeoutError(f"ollama: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
+            _LOG.warning("ollama network error: %s: %s", type(exc).__name__, exc)
             raise LLMTransientError(f"ollama: network error: {exc}") from exc
         _raise_for_ollama_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
+            _LOG.warning("ollama invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"ollama: invalid JSON: {exc}") from exc
-        return self._parse_response(request.model, data)
+        parsed = self._parse_response(request.model, data)
+        _LOG.debug(
+            "ollama response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
+            parsed.text[:80],
+            parsed.usage.prompt_tokens,
+            parsed.usage.completion_tokens,
+            parsed.usage.total_tokens,
+            parsed.finish_reason,
+        )
+        return parsed
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         async with self._semaphore:

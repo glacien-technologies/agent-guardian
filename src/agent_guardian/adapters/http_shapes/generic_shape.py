@@ -9,11 +9,14 @@ request_template + response_jsonpath) lands with the M9 HTTP transport.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agent_guardian.adapters.http_shapes.base import HttpShape
 
 __all__ = ["SHAPE", "build_request", "extract_response_text", "walk_jsonpath"]
+
+_LOG = logging.getLogger(__name__)
 
 
 def build_request(
@@ -92,6 +95,12 @@ def walk_jsonpath(data: Any, path: str) -> Any:
             try:
                 cursor = cursor[idx]
             except IndexError:
+                _LOG.debug(
+                    "generic_shape: jsonpath %r — index %d out of range for list of len %d",
+                    path,
+                    idx,
+                    len(cursor),
+                )
                 return None
             remainder = remainder[close + 1 :]
         else:

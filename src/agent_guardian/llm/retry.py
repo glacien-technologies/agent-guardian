@@ -7,6 +7,7 @@ Used by every provider client. The RNG is injectable so unit tests can pass
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
@@ -18,6 +19,8 @@ from agent_guardian.llm.errors import (
 )
 
 __all__ = ["compute_delay", "with_backoff"]
+
+_LOG = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -84,6 +87,12 @@ async def with_backoff(
         except retry_on as exc:
             last_exc = exc
             if attempt >= max_retries:
+                _LOG.warning(
+                    "retry exhausted after %d attempts: %s: %s",
+                    attempt + 1,
+                    type(exc).__name__,
+                    exc,
+                )
                 break
             retry_after = getattr(exc, "retry_after", None)
             if isinstance(retry_after, int | float) and retry_after >= 0:
@@ -97,6 +106,14 @@ async def with_backoff(
                     max_seconds=max_seconds,
                     rng=rng,
                 )
+            _LOG.warning(
+                "retry %d/%d (%s: %s) — backoff %.2fs",
+                attempt + 1,
+                max_retries,
+                type(exc).__name__,
+                exc,
+                delay,
+            )
             await sleep(delay)
     assert last_exc is not None  # invariant: only reachable after a retryable raise
     raise last_exc

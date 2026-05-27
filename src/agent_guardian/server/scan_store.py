@@ -37,7 +37,6 @@ The on-disk layout is::
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from collections.abc import Iterable
@@ -137,14 +136,24 @@ class ScanStore:
             # materialised (i.e. someone is listening over SSE).
             queue = self._queues.get(scan_id)
             if queue is not None:
-                with contextlib.suppress(asyncio.QueueFull):
+                try:
                     queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    _LOG.warning(
+                        "scan_store: SSE queue full for %s — dropping %s event",
+                        scan_id,
+                        event.kind,
+                    )
             # Best-effort append to the on-disk JSONL.
-            with (
-                contextlib.suppress(OSError),
-                jsonl_path.open("a", encoding="utf-8") as fh,
-            ):
-                fh.write(json.dumps(event_to_payload(event)) + "\n")
+            try:
+                with jsonl_path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(event_to_payload(event)) + "\n")
+            except OSError as exc:
+                _LOG.warning(
+                    "scan_store: events.jsonl append failed for %s (%s)",
+                    scan_id,
+                    exc,
+                )
             # On scan_done, drop the running registration so subsequent
             # /scan/{id} reads fall through to the on-disk replay.
             if event.kind == "scan_done":
@@ -177,8 +186,14 @@ class ScanStore:
         self._queues[scan_id] = queue
         # Replay buffered events.
         for event in list(self._events.get(scan_id, [])):
-            with contextlib.suppress(asyncio.QueueFull):
+            try:
                 queue.put_nowait(event)
+            except asyncio.QueueFull:
+                _LOG.warning(
+                    "scan_store: SSE replay queue full for %s — dropping %s event",
+                    scan_id,
+                    event.kind,
+                )
         return queue
 
     def replay_events(self, scan_id: str) -> list[SwarmEvent]:
@@ -197,13 +212,19 @@ class ScanStore:
             return []
         out: list[dict[str, Any]] = []
         with jsonl.open("r", encoding="utf-8") as fh:
-            for line in fh:
+            for line_no, line in enumerate(fh, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     out.append(json.loads(line))
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
+                    _LOG.warning(
+                        "scan_store: malformed events.jsonl line %d for scan %s (%s)",
+                        line_no,
+                        scan_id,
+                        exc,
+                    )
                     continue
         return out
 
