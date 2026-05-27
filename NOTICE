@@ -21,4 +21,9 @@ This product bundles or depends on the following third-party software:
 - structlog (MIT / Apache-2.0)  Copyright (c) Hynek Schlawack
 - cryptography (Apache-2.0 / BSD-3-Clause)  Copyright (c) Individual contributors
 
+Bundled fonts (PDF report template):
+
+- Inter (SIL OFL 1.1)            Copyright Rasmus Andersson
+- JetBrains Mono (SIL OFL 1.1)   Copyright JetBrains s.r.o.
+
 Full license texts for every package are available via `pip-licenses` after installation.

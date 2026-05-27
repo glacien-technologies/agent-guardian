@@ -89,8 +89,10 @@ artifacts = [
   "src/agent_guardian/server/templates/*.html",
   "src/agent_guardian/server/static/*.css",
   "src/agent_guardian/server/static/*.js",
-  # M13 PDF report template (used by WeasyPrint).
+  # M13 PDF report template (used by WeasyPrint) + embedded WOFF2 fonts
+  # (Inter + JetBrains Mono, both SIL OFL — see NOTICE).
   "src/agent_guardian/reports/templates/pdf/*.jinja",
+  "src/agent_guardian/reports/templates/pdf/fonts/*.woff2",
 ]
 
 [tool.hatch.build.targets.sdist]

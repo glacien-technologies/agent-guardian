@@ -1,26 +1,52 @@
 <!DOCTYPE html>
-{# AgentGuardian PDF report template (PRD §10.2, M13).
+{# AgentGuardian PDF report template (PRD §10.2, M13 + rc1 fidelity pass).
 
    Renders the full scan layout: cover page, executive summary, AIVSS
-   sub-score table, ASI-by-ASI breakdown with findings, and footer
-   appendix. System fonts only (no bundled fonts in M13). #}
+   sub-score table, ASI-by-ASI breakdown with findings, per-finding
+   transcripts, and three appendices per PRD §10.2:
+     A — Triple-framework mapping (ASI → MITRE ATLAS → CSA)
+     B — Methodology and bibliography
+     C — Reproducibility receipt (models, seed-library version, RNG seed,
+         scan timestamp, signature fingerprints)
+
+   Inter and JetBrains Mono are embedded as WOFF2 alongside this template
+   (see ``fonts/`` directory) — WeasyPrint resolves them via the template
+   loader's base path. #}
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>AgentGuardian scan {{ scan.id }}</title>
     <style>
+      @font-face {
+        font-family: "Inter";
+        src: url("fonts/Inter-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "Inter";
+        src: url("fonts/Inter-Bold.woff2") format("woff2");
+        font-weight: 700;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("fonts/JetBrainsMono-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
       @page {
         size: Letter;
         margin: 0.75in 0.75in 1in 0.75in;
         @bottom-right {
           content: "AgentGuardian " counter(page) " / " counter(pages);
-          font-family: "Helvetica", "Arial", sans-serif;
+          font-family: "Inter", "Helvetica", "Arial", sans-serif;
           font-size: 9pt;
           color: #6b7280;
         }
         @bottom-left {
           content: "Scan {{ scan.id }}";
-          font-family: "Helvetica", "Arial", sans-serif;
+          font-family: "Inter", "Helvetica", "Arial", sans-serif;
           font-size: 9pt;
           color: #6b7280;
         }
@@ -30,7 +56,7 @@
         @bottom-right { content: ""; }
       }
       body {
-        font-family: "Helvetica", "Arial", sans-serif;
+        font-family: "Inter", -apple-system, "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif;
         color: #111827;
         line-height: 1.45;
         font-size: 10pt;
@@ -100,12 +126,44 @@
       .finding.high { border-left-color: #ef4444; }
       .finding.med { border-left-color: #f59e0b; }
       .finding.low { border-left-color: #16a34a; }
+      .findings-detail .finding-detail {
+        margin: 1em 0 1.4em;
+        padding: 0.6em 0.8em;
+        border: 1px solid #e5e7eb;
+        border-radius: 4px;
+        background: #fafafa;
+      }
+      .findings-detail .finding-meta {
+        margin: 0.4em 0 0.6em;
+        font-size: 9pt;
+      }
+      .findings-detail .finding-meta th {
+        width: 9em;
+        background: transparent;
+        color: #374151;
+        font-weight: 600;
+      }
+      .findings-detail .summary {
+        margin: 0.4em 0;
+        color: #111827;
+      }
+      .findings-detail .transcript-ref {
+        margin: 0.3em 0 0;
+        font-size: 9pt;
+        color: #374151;
+      }
+      .muted { color: #6b7280; font-style: italic; }
       footer.appendix {
         margin-top: 2em;
         font-size: 8.5pt;
-        color: #6b7280;
+        color: #374151;
       }
-      code, .mono { font-family: "Menlo", "Consolas", monospace; font-size: 9pt; }
+      footer.appendix h2 { color: #0f172a; font-size: 12pt; }
+      footer.appendix table { font-size: 8.5pt; }
+      code, pre, .mono {
+        font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+        font-size: 9pt;
+      }
     </style>
   </head>
   <body>
@@ -218,14 +276,247 @@
     </section>
     {% endfor %}
 
+    {% if scan.findings %}
+    <section class="findings-detail">
+      <h2>Finding transcripts</h2>
+      {% for f in scan.findings %}
+      <div class="finding-detail" style="page-break-inside: avoid; page-break-before: auto;">
+        <h3>{{ f.id }} &mdash; {{ f.asi.value }} / {{ f.severity.value }}</h3>
+        <table class="finding-meta">
+          <tr><th>ASI category</th><td>{{ f.asi.value }}</td></tr>
+          <tr><th>Probe ID</th><td><span class="mono">{{ f.probe_id }}</span></td></tr>
+          <tr><th>MITRE ATLAS</th><td>{{ f.mitre_atlas | join(', ') }}</td></tr>
+          <tr><th>CSA category</th><td>{{ f.csa_category.value }}</td></tr>
+          <tr><th>Severity</th><td><span class="sev-{{ f.severity.value }}">{{ f.severity.value }}</span></td></tr>
+          <tr><th>Judge confidence</th><td>{{ "%.2f" | format(f.confidence) }}</td></tr>
+          <tr><th>Attempts</th><td>{{ f.attempt_count }}</td></tr>
+        </table>
+        <p class="summary">{{ f.summary }}</p>
+        {% if f.transcript_ref %}
+        <p class="transcript-ref">Full transcript: <code>{{ f.transcript_ref }}</code></p>
+        {% else %}
+        <p class="transcript-ref muted">Transcript not stored (PII-redacted scans omit per-turn transcripts by default).</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% else %}
+    <section class="findings-detail">
+      <h2>Finding transcripts</h2>
+      <p class="muted">No findings &mdash; the target defended every attack within budget.</p>
+    </section>
+    {% endif %}
+
     <footer class="appendix">
-      <h2>Appendix A &mdash; Versioning</h2>
+      <h2>Appendix A &mdash; Triple-framework mapping</h2>
       <p>
-        Probe library: <code>{{ scan.probe_library_version }}</code>.
-        AIVSS formula: <code>{{ scan.aivss_formula_version }}</code>.
-        Package: <code>{{ scan.package_version }}</code>.
+        AgentGuardian tags every finding against three industry frameworks:
+        OWASP ASI 2026 (Top 10 for Agentic Applications), MITRE ATLAS v5.4.0
+        (Adversarial Threat Landscape for AI Systems), and the CSA Agentic AI
+        Red Teaming Guide (Huang et al., 2025-05-28). The mapping below shows
+        the primary ATLAS techniques and CSA categories each ASI bucket exercises.
       </p>
-      <h2>Appendix B &mdash; Signatures</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ASI</th>
+            <th>OWASP category</th>
+            <th>Primary MITRE ATLAS technique(s)</th>
+            <th>CSA category</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">ASI01</span></td>
+            <td>Goal Hijack</td>
+            <td><span class="mono">AML.T0051</span>, <span class="mono">AML.T0054</span></td>
+            <td>goal-instruction-manipulation</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI02</span></td>
+            <td>Tool Misuse</td>
+            <td><span class="mono">AML.T0053</span>, Publish Poisoned AI Agent Tool</td>
+            <td>authorization-control-hijacking</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI03</span></td>
+            <td>Privilege Abuse</td>
+            <td><span class="mono">AML.T0049</span>, Escape to Host</td>
+            <td>authorization-control-hijacking</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI04</span></td>
+            <td>Supply Chain</td>
+            <td><span class="mono">AML.T0010</span>, <span class="mono">AML.T0011</span></td>
+            <td>supply-chain-dependency</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI05</span></td>
+            <td>Code Execution</td>
+            <td><span class="mono">AML.T0050</span>, Escape to Host</td>
+            <td>agent-critical-system-interaction</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI06</span></td>
+            <td>Memory Poisoning</td>
+            <td><span class="mono">AML.T0070</span>, AI Agent Context Poisoning</td>
+            <td>memory-context-manipulation</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI07</span></td>
+            <td>Agent-to-Agent (A2A)</td>
+            <td><span class="mono">AML.T0048</span>, Inter-Agent Manipulation</td>
+            <td>multi-agent-exploitation</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI08</span></td>
+            <td>Cascading Failures</td>
+            <td><span class="mono">AML.T0034</span>, <span class="mono">AML.T0029</span></td>
+            <td>impact-chain-blast-radius</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI09</span></td>
+            <td>Trust Exploitation</td>
+            <td><span class="mono">AML.T0051.000</span>, <span class="mono">AML.T0052</span></td>
+            <td>checker-out-of-the-loop</td>
+          </tr>
+          <tr>
+            <td><span class="mono">ASI10</span></td>
+            <td>Rogue Agents (drift)</td>
+            <td><span class="mono">AML.T0046</span>, AI Agent Goal Drift</td>
+            <td>hallucination-exploitation</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Appendix B &mdash; Methodology and bibliography</h2>
+      <p>
+        Each of the 10 ASI specialist agents extends its seed probes
+        dynamically using four published adversarial strategies. Selection
+        is bandit-driven: AgentGuardian's strategy router keeps the
+        per-(target, ASI) success rates in shared memory and biases later
+        attempts toward strategies that succeeded earlier in the run.
+      </p>
+      <ul>
+        <li><strong>TAP</strong> &mdash; Tree of Attacks with Pruning. Tree-of-thoughts
+          jailbreak with on-topic pruning (Mehrotra et al., 2024).</li>
+        <li><strong>Crescendo</strong> &mdash; Multi-turn benign-to-harmful ramp
+          (Russinovich et al., 2025).</li>
+        <li><strong>MAD-MAX</strong> &mdash; Multi-agent adversarial dialogue with mode
+          exploitation (Schoepf et al., 2025).</li>
+        <li><strong>PAIR</strong> &mdash; Prompt Automatic Iterative Refinement; attacker
+          LLM critiques and rewrites (Chao et al., 2023).</li>
+      </ul>
+      <p>
+        The Layer-2 judge LLM evaluates each transcript against a
+        category-specific rubric and emits a structured verdict;
+        agreement with human reviewers is calibrated against the
+        evaluation harness described in Chen et al. (2024). For the full
+        bibliography and per-probe references see
+        <code>docs/arxiv-preprint.md</code>.
+      </p>
+
+      <h2>Appendix C &mdash; Reproducibility receipt</h2>
+      <p>
+        This receipt records the exact configuration that produced the
+        scan above. Re-running AgentGuardian with these inputs against
+        the same target should produce a deterministic AIVSS score
+        (modulo non-determinism in third-party LLM endpoints).
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <th>Package version</th>
+            <td><code>{{ scan.package_version }}</code></td>
+          </tr>
+          <tr>
+            <th>AIVSS formula version</th>
+            <td><code>{{ scan.aivss_formula_version }}</code></td>
+          </tr>
+          <tr>
+            <th>Probe library version</th>
+            <td><code>{{ scan.probe_library_version }}</code></td>
+          </tr>
+          <tr>
+            <th>Scan timestamp</th>
+            <td><code>{{ scan.created_at.isoformat() }}</code></td>
+          </tr>
+          <tr>
+            <th>Target mode</th>
+            <td><code>{{ scan.target_mode }}</code></td>
+          </tr>
+          <tr>
+            <th>Target ref</th>
+            <td><code>{{ scan.target_ref }}</code></td>
+          </tr>
+          <tr>
+            <th>Tier</th>
+            <td><code>{{ scan.tier.value }}</code></td>
+          </tr>
+          {# Commander / attacker / evaluator model identifiers and the RNG
+             seed are surfaced by the runtime metadata block planned for
+             v1.1. Until the Scan model carries that field they render as
+             "not recorded" — full wiring tracked in CHANGELOG. The Pydantic
+             Scan model uses ``extra="forbid"`` so a direct attribute access
+             would raise; we go through ``model_fields`` to detect a future
+             ``metadata`` field without touching the M2/M8 contract. #}
+          {% set meta = scan.metadata if ('metadata' in scan.__class__.model_fields) else None %}
+          <tr>
+            <th>Commander model</th>
+            <td>
+              {% if meta and meta.get('commander_model') %}
+                <code>{{ meta['commander_model'] }}</code>
+              {% else %}
+                <span class="muted">not recorded; see docs/operator-checklist.md (wiring lands in v1.1)</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Attacker model</th>
+            <td>
+              {% if meta and meta.get('attacker_model') %}
+                <code>{{ meta['attacker_model'] }}</code>
+              {% else %}
+                <span class="muted">not recorded; wiring lands in v1.1</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Evaluator model</th>
+            <td>
+              {% if meta and meta.get('evaluator_model') %}
+                <code>{{ meta['evaluator_model'] }}</code>
+              {% else %}
+                <span class="muted">not recorded; wiring lands in v1.1</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>RNG seed</th>
+            <td>
+              {% if meta and meta.get('rng_seed') is not none %}
+                <code>{{ meta['rng_seed'] }}</code>
+              {% else %}
+                <span class="muted">not recorded; wiring lands in v1.1</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Signature algorithm</th>
+            <td><code>Ed25519 + HMAC-SHA256</code></td>
+          </tr>
+          <tr>
+            <th>Ed25519 fingerprint (Base32)</th>
+            <td>
+              {% if meta and meta.get('ed25519_fingerprint') %}
+                <code>{{ meta['ed25519_fingerprint'] }}</code>
+              {% else %}
+                <span class="muted">verify via <code>agent-guardian verify &lt;report.json&gt;</code></span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
       <p>
         This PDF is a visualisation of the canonical JSON report. Use
         <code>agent-guardian verify &lt;report.json&gt;</code> to verify
