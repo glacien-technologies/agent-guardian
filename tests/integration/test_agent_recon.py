@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 from agent_guardian.adapters.base import TargetFingerprint
@@ -85,6 +86,35 @@ async def test_recon_terminates_under_budget_pressure(
     report = await agent.run(target, memory)
     assert report.terminated_by == "budget"
     assert report.findings_count == 0
+
+
+async def test_recon_persists_each_probe_as_reflection(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    """IMPORTANT #4: every benign probe must leave a forensic record."""
+    target_llm = _make_target_with_tool_inventory_response()
+    target = make_target(llm=target_llm)
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default="unused"), model="stub")
+    await agent.run(target, memory)
+
+    reflections = memory.reflections_for("recon-agent")
+    # The agent issues three probes; each writes one reflection.
+    assert len(reflections) == 3
+    parsed = [json.loads(c) for c in reflections]
+    names = {p["probe_name"] for p in parsed}
+    assert names == {"tool-inventory-probe", "memory-probe", "refusal-style-probe"}
+    # Every record must carry the actual prompt and the target's response.
+    for rec in parsed:
+        assert rec["event"] == "recon_probe"
+        assert rec["prompt"]
+        assert rec["target_response"]
+        assert "inferred_signals" in rec
+    # Tool-inventory probe must have surfaced ``has_tools=True`` from the
+    # canned target response.
+    tool_probe = next(p for p in parsed if p["probe_name"] == "tool-inventory-probe")
+    assert tool_probe["inferred_signals"].get("has_tools") is True
 
 
 async def test_recon_carries_existing_fingerprint_signal_forward(

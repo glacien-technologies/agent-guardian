@@ -124,6 +124,13 @@ def compute_coverage_from_memory(
             continue
         if not isinstance(turn, dict):
             continue
+        # Recon probes (IMPORTANT #4) are persisted as reflections too but
+        # they're benign fingerprint queries, not adversarial attempts.
+        # Don't count them in attempts_total / agents / strategies — they
+        # belong to a separate "recon probes" facet that downstream tools
+        # can render off of the raw JSONL.
+        if turn.get("event") == "recon_probe":
+            continue
         attempts += 1
         agent = turn.get("agent") or payload.get("agent")
         if isinstance(agent, str) and agent:
