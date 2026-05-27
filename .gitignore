@@ -65,3 +65,8 @@ Thumbs.db
 # --- Misc (defensive) ---
 node_modules/
 *.log
+
+# Scan reports — user-generated artifacts, never belong in the OSS repo.
+# Per project policy: scan output stays on the user's machine + the
+# telemetry collector (which only sees the anonymous allowlist).
+examples/reports/
