@@ -74,6 +74,7 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     from agent_guardian.server.routes import (
         about,
         aivss,
+        coverage,
         events,
         export,
         findings,
@@ -92,5 +93,6 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     app.include_router(export.router)
     app.include_router(about.router)
     app.include_router(events.router)
+    app.include_router(coverage.router)
 
     return app

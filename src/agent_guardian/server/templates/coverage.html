@@ -1,0 +1,386 @@
+{#
+  Live Dashboard - Coverage — pixel-match port of the Claude Design bundle
+  ``guarding-oss/project/Live Dashboard - Coverage.html``. This template is
+  intentionally a self-contained document (it does NOT extend base.html)
+  because the design ships its own topbar/footer chrome with the URL chip,
+  locality pill, and bespoke score-banner aesthetic. Matching the design
+  precisely means owning the <html><head> here.
+
+  Five Jegan-comment corrections from the design bundle are already baked
+  into the markup:
+   * top tabs removed (the <nav> in the design is hidden=true)
+   * "no telemetry" wording removed from the locality pill
+   * findings list shows ALL findings paginated (15 per page default)
+   * default sort is criticality descending
+   * coverage cells link to ``#findings`` so clicking jumps to the table
+#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>{{ page_title|default("Coverage") }} · AgentGuardian Open</title>
+<link rel="stylesheet" href="/static/colors_and_type.css" />
+<link rel="stylesheet" href="/static/coverage.css" />
+{% if is_running %}<meta http-equiv="refresh" content="5">{% endif %}
+</head>
+<body>
+
+<!-- ───────────── TOPBAR ───────────── -->
+<header class="topbar">
+  <div class="topbar__row">
+    <a class="brand" href="/">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          <path d="M3 16 H29 M16 3 a17 17 0 0 1 0 26 M16 3 a17 17 0 0 0 0 26" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+          <circle cx="22.5" cy="9" r="2.4" fill="#8B5CF6"></circle>
+        </svg>
+      </span>
+      <span class="brand__name">AgentGuardian <em>Open</em></span>
+    </a>
+
+    <nav class="topnav" hidden></nav>
+
+    <div class="topbar__right">
+      <div class="urlbar">
+        <span class="urlbar__lock" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+          </svg>
+        </span>
+        <span class="urlbar__t"><span class="muted">http://</span>localhost<span class="muted">:7474</span></span>
+      </div>
+      <div class="locality">
+        <span class="locality__dot"></span>
+        <span><strong>Local</strong></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ───────────── SCAN STRIP ───────────── -->
+  <section class="scan-strip">
+    <div class="scan-strip__l">
+      <span class="key">Scan&nbsp;{{ scan_id }}</span>
+      {% if is_running %}
+      <span class="key key--live"><span class="key__dot"></span>Live&nbsp;·&nbsp;{{ elapsed_label }} elapsed</span>
+      {% else %}
+      <span class="key">Done&nbsp;·&nbsp;{{ elapsed_label }} elapsed</span>
+      {% endif %}
+      {% if scan %}
+      <span class="key">Target&nbsp;<code>{{ scan.target_ref }}</code></span>
+      <span class="key">Adapter&nbsp;{{ scan.target_mode }}</span>
+      <span class="key">Tier&nbsp;{{ scan.tier.value }}</span>
+      {% endif %}
+    </div>
+    <div class="scan-strip__r">
+      <a class="btn btn--ghost" href="/scan/{{ scan_id }}">Overview</a>
+      <a class="btn btn--ghost" href="/scan/{{ scan_id }}/transcripts">Transcripts</a>
+      <a class="btn btn--primary" href="/scan/{{ scan_id }}/export">Export</a>
+    </div>
+  </section>
+
+  <!-- ───────────── SCORE BANNER ───────────── -->
+  <section class="score-banner">
+    <article class="score-hero">
+      <div class="score-hero__head">
+        <span class="eyebrow">Aivss</span>
+        <span class="score-hero__sub">tier-weighted{% if is_running %}, provisional{% endif %}</span>
+      </div>
+
+      <div class="score-hero__row">
+        <div class="score-hero__num">
+          <span>{{ aivss }}</span>
+          <span class="score-hero__band band--{{ band_class }}">{{ band_label }}</span>
+        </div>
+
+        <div class="score-hero__axis">
+          <div class="band-axis__bar">
+            <span class="band-axis__seg band-axis__seg--critical">Critical</span>
+            <span class="band-axis__seg band-axis__seg--poor">Poor</span>
+            <span class="band-axis__seg band-axis__seg--warn">Warning</span>
+            <span class="band-axis__seg band-axis__seg--good">Good</span>
+            <span class="band-axis__seg band-axis__seg--exc">Excellent</span>
+            <span class="band-axis__needle" style="left: {{ needle_pct }}%">
+              <span class="band-axis__pin"></span>
+              <span class="band-axis__val">{{ aivss }}</span>
+            </span>
+          </div>
+          <div class="band-axis__ticks">
+            <span>0</span><span>40</span><span>60</span><span>80</span><span>90</span><span>100</span>
+          </div>
+        </div>
+      </div>
+
+      <p class="score-hero__note">
+        {% if findings_total == 0 %}
+        No findings yet. The target is defending every attempt so far.
+        {% elif tile_sev.critical > 0 %}
+        {{ tile_sev.critical }} unresolved <strong>critical</strong> finding{{ "s" if tile_sev.critical != 1 }} are pulling the aggregate down.
+        {% else %}
+        {{ findings_total }} finding{{ "s" if findings_total != 1 }} recorded across {{ tile_probes_fired }} probe{{ "s" if tile_probes_fired != 1 }}.
+        {% endif %}
+        {% if is_running %}The swarm is still running &mdash; this score is provisional.{% endif %}
+      </p>
+    </article>
+
+    <aside class="score-tiles">
+      <div class="tile">
+        <span class="tile__num">{{ findings_total }}</span>
+        <span class="tile__lab">findings</span>
+        <div class="tile__row">
+          <span class="ct ct--crit">{{ tile_sev.critical }}</span><span class="ct ct--high">{{ tile_sev.high }}</span>
+          <span class="ct ct--med">{{ tile_sev.medium }}</span><span class="ct ct--low">{{ tile_sev.low }}</span>
+        </div>
+      </div>
+      <div class="tile">
+        <span class="tile__num">{{ "{:,}".format(tile_probes_fired) }}</span>
+        <span class="tile__lab">probes fired</span>
+        <span class="tile__hint">across {{ rows[0].cells|length }} ASI agents</span>
+      </div>
+      <div class="tile">
+        <span class="tile__num">{% if tile_tokens_total >= 1000 %}{{ "{:.0f}k".format(tile_tokens_total / 1000) }}{% else %}{{ tile_tokens_total }}{% endif %}</span>
+        <span class="tile__lab">tokens spent</span>
+        <span class="tile__hint">attacker + judge</span>
+      </div>
+      <div class="tile">
+        <span class="tile__num">$&thinsp;{{ "{:.2f}".format(tile_cost) }}</span>
+        <span class="tile__lab">cost</span>
+        <span class="tile__hint">USD, model-priced</span>
+      </div>
+      <div class="tile">
+        <span class="tile__num">{{ tile_agents_active }}</span>
+        <span class="tile__lab">agents active</span>
+        <span class="tile__hint">recon + 10 specialists</span>
+      </div>
+      <div class="tile">
+        <span class="tile__num">{{ tile_remaining }}</span>
+        <span class="tile__lab">{% if is_running %}remaining{% else %}duration{% endif %}</span>
+        <span class="tile__hint">{{ elapsed_label }} elapsed</span>
+      </div>
+    </aside>
+  </section>
+
+
+  <!-- ───────────── COVERAGE MATRIX ───────────── -->
+  <section class="matrix-section">
+    <header class="matrix-head">
+      <div>
+        <h2 class="matrix-title">Coverage <em>by framework</em></h2>
+        <p class="matrix-lede">Click any cell to drill into its findings &middot; 5 frameworks shown</p>
+      </div>
+      <div class="matrix-controls">
+        <div class="filter-chips">
+          <span class="chip chip--solid is-active">In scope</span>
+          <span class="chip">All 5</span>
+          <span class="chip">Critical</span>
+          <span class="chip">Failing</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="matrix-scale">
+      <span class="scale-label">Scale</span>
+      <span class="scale-chip scale-chip--exc"><span class="sw"></span>excellent&nbsp;·&nbsp;≥&nbsp;90</span>
+      <span class="scale-chip scale-chip--good"><span class="sw"></span>good&nbsp;·&nbsp;80–89</span>
+      <span class="scale-chip scale-chip--attn"><span class="sw"></span>attention&nbsp;·&nbsp;70–79</span>
+      <span class="scale-chip scale-chip--fail"><span class="sw"></span>failing&nbsp;·&nbsp;<&nbsp;70</span>
+      <span class="scale-chip scale-chip--run"><span class="sw"></span>in progress</span>
+    </div>
+
+    <div class="matrix">
+      {% for row in rows %}
+      <div class="row">
+        <div class="row__head">
+          <div class="row__code">
+            <span>{{ row.code }}</span>
+            <span class="row__badge">{{ row.badge }}</span>
+          </div>
+          <div class="row__name">{{ row.name }}</div>
+          <div class="row__meta">{{ row.meta }}</div>
+        </div>
+        <div class="row__cells {{ row.cells_class }}">
+          {% for c in row.cells %}
+          <a class="cell cell--{{ c.state }}" href="#findings">
+            <span class="cell__name">{{ c.name }}</span>
+            {% if c.sub %}<span class="cell__sub">{{ c.sub }}</span>{% endif %}
+            <span class="cell__score">{% if c.score_pct is not none %}{{ c.score_pct }}%{% else %}—{% endif %}</span>
+            <span class="cell__count">{{ c.count_label }}</span>
+            {% if c.has_warn %}<span class="cell__warn" title="critical finding in this cell"></span>{% endif %}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+
+  <!-- ───────────── ALL FINDINGS · PAGINATED ───────────── -->
+  <section class="findings-section" id="findings">
+    <header class="findings-head">
+      <div>
+        <span class="eyebrow">Findings</span>
+        <h2 class="matrix-title">All findings <em>so far.</em></h2>
+        <p class="matrix-lede">{{ findings_total }} finding{{ "s" if findings_total != 1 }} &middot; sorted by criticality by default &middot; filter to drill</p>
+      </div>
+      <div class="findings-export">
+        <a class="btn btn--ghost" href="/scan/{{ scan_id }}/export?format=sarif">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/><path d="M12 3v13M7 10l5 5 5-5"/></svg>
+          Export SARIF
+        </a>
+        <a class="btn btn--ghost" href="/scan/{{ scan_id }}/export?format=json">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/><path d="M12 3v13M7 10l5 5 5-5"/></svg>
+          Export JSON
+        </a>
+      </div>
+    </header>
+
+    <!-- toolbar -->
+    <form class="findings-toolbar" method="get" action="#findings">
+      <div class="toolbar-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="text" name="q" value="{{ q }}" placeholder="Filter by ASI, agent, probe ID, or text&hellip;" />
+      </div>
+
+      <div class="toolbar-group">
+        <span class="toolbar-label">Severity</span>
+        <div class="seg seg--sev">
+          {% set sev_choices = [("all", "All", severity_counts.all, ""),
+                                ("critical", "Critical", severity_counts.critical, "crit"),
+                                ("high", "High", severity_counts.high, "high"),
+                                ("medium", "Medium", severity_counts.medium, "med"),
+                                ("low", "Low", severity_counts.low, "low")] %}
+          {% for value, label, count, cls in sev_choices %}
+          <button type="submit" name="severity" value="{{ value }}"
+                  class="seg__item {% if cls %}seg__item--{{ cls }}{% endif %} {% if sev_active == value %}is-active{% endif %}">
+            {{ label }}<span class="seg__n">{{ count }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="toolbar-group">
+        <span class="toolbar-label">ASI</span>
+        <select class="select" name="asi" onchange="this.form.submit()">
+          <option value="" {% if not asi_filter %}selected{% endif %}>All categories</option>
+          {% for code, label in asi_categories %}
+          <option value="{{ code }}" {% if asi_filter == code %}selected{% endif %}>{{ code }} &middot; {{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="toolbar-group">
+        <span class="toolbar-label">Sort</span>
+        <select class="select" name="sort" onchange="this.form.submit()">
+          <option value="criticality" {% if sort == "criticality" %}selected{% endif %}>Criticality &darr;</option>
+          <option value="newest" {% if sort == "newest" %}selected{% endif %}>Newest first</option>
+          <option value="oldest" {% if sort == "oldest" %}selected{% endif %}>Oldest first</option>
+          <option value="asi" {% if sort == "asi" %}selected{% endif %}>By ASI</option>
+        </select>
+      </div>
+    </form>
+
+    <!-- table -->
+    {% if findings_rows %}
+    <table class="finding-table">
+      <thead>
+        <tr>
+          <th class="t-sev">Severity</th>
+          <th class="t-when">When</th>
+          <th class="t-asi">ASI</th>
+          <th class="t-summary">Finding</th>
+          <th class="t-tags">Frameworks</th>
+          <th class="t-rem">Remediation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in findings_rows %}
+        <tr class="finding finding--{{ f.severity_class }}">
+          <td class="t-sev"><span class="sev sev--{{ f.severity_class }}">{{ f.severity_label }}</span></td>
+          <td class="t-when"><span class="when-time">{{ f.when_time }}</span><span class="when-agent">{{ f.when_agent }}</span></td>
+          <td class="t-asi"><span class="asi-pill">{{ f.asi }}</span></td>
+          <td class="t-summary">{{ f.summary }}</td>
+          <td class="t-tags">
+            {% for tag, is_probe in f.tags %}
+            <span class="tag{% if is_probe %} tag--probe{% endif %}">{{ tag }}</span>
+            {% endfor %}
+          </td>
+          <td class="t-rem">
+            <a class="rem-link" href="#"><code>{{ f.remediation_id }}</code> &nearr;</a>
+            <span class="rem-hint">{{ f.remediation_hint }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="scan-strip" style="justify-content: center; padding: 32px;">
+      <span class="key">No findings match the current filter.</span>
+    </div>
+    {% endif %}
+
+    <!-- pagination -->
+    {% if filtered_total > 0 %}
+    {% set first_idx = (page - 1) * per_page + 1 %}
+    {% set last_idx = first_idx + (findings_rows|length) - 1 %}
+    <footer class="pagination">
+      <div class="pagination__count">
+        Showing <strong>{{ first_idx }}&ndash;{{ last_idx }}</strong> of <strong>{{ filtered_total }}</strong> findings
+      </div>
+
+      <nav class="pager">
+        {% set qs_base = "?severity=" ~ sev_active ~ ("&asi=" ~ asi_filter if asi_filter else "") ~ ("&q=" ~ q if q else "") ~ "&sort=" ~ sort ~ "&per_page=" ~ per_page %}
+        <a class="pager__btn pager__btn--nav" {% if page <= 1 %}aria-disabled="true" style="opacity:0.4;pointer-events:none"{% else %}href="{{ qs_base }}&page={{ page - 1 }}#findings"{% endif %} aria-label="previous">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+          Prev
+        </a>
+        {% for p in range(1, total_pages + 1) %}
+          {% if p == page %}
+            <span class="pager__page is-active" aria-current="page">{{ p }}</span>
+          {% else %}
+            <a class="pager__page" href="{{ qs_base }}&page={{ p }}#findings">{{ p }}</a>
+          {% endif %}
+        {% endfor %}
+        <a class="pager__btn pager__btn--nav" {% if page >= total_pages %}aria-disabled="true" style="opacity:0.4;pointer-events:none"{% else %}href="{{ qs_base }}&page={{ page + 1 }}#findings"{% endif %} aria-label="next">
+          Next
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </a>
+      </nav>
+
+      <form class="pagination__per" method="get" action="#findings">
+        <input type="hidden" name="severity" value="{{ sev_active }}">
+        {% if asi_filter %}<input type="hidden" name="asi" value="{{ asi_filter }}">{% endif %}
+        {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <span class="toolbar-label">Per page</span>
+        <select class="select select--small" name="per_page" onchange="this.form.submit()">
+          {% for size in [15, 25, 50, 100] %}
+          <option value="{{ size }}" {% if per_page == size %}selected{% endif %}>{{ size }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </footer>
+    {% endif %}
+  </section>
+
+
+  <!-- ───────────── FOOTER STRIP ───────────── -->
+  <footer class="page-foot">
+    <div>
+      <strong>AgentGuardian Open</strong> &middot; v{{ version }} &middot; Apache 2.0
+      {% if scan %}&middot; AIVSS formula <code>{{ scan.aivss_formula_version }}</code> &middot; probe library <code>{{ scan.probe_library_version }}</code>{% endif %}
+    </div>
+    <div>
+      <code>~/.agentguardian/scans/{{ scan_id }}/</code>
+    </div>
+  </footer>
+
+</main>
+
+</body>
+</html>
