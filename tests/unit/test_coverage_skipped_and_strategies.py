@@ -14,6 +14,7 @@ These tests pin the post-fix behaviour for IMPORTANT #5 and #6 in the
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -129,7 +130,85 @@ async def test_shared_memory_replays_skipped_records(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# IMPORTANT #6 — MAD-MAX child attribution (lands with Commit D)
+# IMPORTANT #6 — MAD-MAX child attribution
 # ---------------------------------------------------------------------------
-# The MAD-MAX attribution tests live in a separate file so the two
-# concerns commit independently. See test_coverage_strategies_used.py.
+
+
+@pytest.mark.asyncio
+async def test_coverage_attributes_mad_max_children_in_flattened_rollup(
+    tmp_path: Path,
+) -> None:
+    """``strategies_flattened`` must re-attribute mad_max picks to children.
+
+    Top-level ``strategies_used`` keeps the mixer label (operators need
+    to know how often MAD-MAX itself was active), while the flattened
+    rollup shows the effective per-strategy mix (operators need that to
+    judge attack diversity).
+    """
+    mem = SharedMemory("cov-strat", root_dir=tmp_path)
+    # 3 mad_max turns from goal-hijack-agent, child rotates tap/cresc/tap.
+    mad_max_choices = ["tap", "crescendo", "tap"]
+    for i, choice in enumerate(mad_max_choices, start=1):
+        turn = {
+            "agent": "goal-hijack-agent",
+            "asi_category": "ASI01",
+            "mitre_techniques": [],
+            "csa_category": "goal-instruction-manipulation",
+            "turn": i,
+            "strategy": "mad_max",
+            "strategy_metadata": {"chosen_strategy": choice},
+            "seed_id": None,
+            "attacker_refused": False,
+        }
+        await mem.write_reflection("goal-hijack-agent", json.dumps(turn), embed=False)
+    # 1 straight-pair turn from another agent (not MAD-MAX).
+    pair_turn = {
+        "agent": "drift-agent",
+        "asi_category": "ASI10",
+        "mitre_techniques": [],
+        "csa_category": "hallucination-exploitation",
+        "turn": 1,
+        "strategy": "pair",
+        "strategy_metadata": {},
+        "seed_id": None,
+        "attacker_refused": False,
+    }
+    await mem.write_reflection("drift-agent", json.dumps(pair_turn), embed=False)
+
+    scan = _stub_scan("cov-strat")
+    cov = compute_coverage_from_memory(scan, root_dir=tmp_path)
+
+    # Top-level keeps the mixer label.
+    assert cov["strategies_used"] == {"mad_max": 3, "pair": 1}
+    # Flattened re-attributes MAD-MAX picks to their children.
+    assert cov["strategies_flattened"] == {"tap": 2, "crescendo": 1, "pair": 1}
+
+
+@pytest.mark.asyncio
+async def test_coverage_mad_max_without_chosen_strategy_credits_mixer(
+    tmp_path: Path,
+) -> None:
+    """If a MAD-MAX turn lacks a chosen_strategy hint, the mixer keeps the credit.
+
+    Defensive: a future MAD-MAX variant that doesn't emit the hint
+    should not cause the rollup to silently drop the turn.
+    """
+    mem = SharedMemory("cov-strat-no-hint", root_dir=tmp_path)
+    turn = {
+        "agent": "goal-hijack-agent",
+        "asi_category": "ASI01",
+        "mitre_techniques": [],
+        "csa_category": "goal-instruction-manipulation",
+        "turn": 1,
+        "strategy": "mad_max",
+        "strategy_metadata": {},  # no chosen_strategy
+        "seed_id": None,
+        "attacker_refused": False,
+    }
+    await mem.write_reflection("goal-hijack-agent", json.dumps(turn), embed=False)
+
+    scan = _stub_scan("cov-strat-no-hint")
+    cov = compute_coverage_from_memory(scan, root_dir=tmp_path)
+
+    assert cov["strategies_used"] == {"mad_max": 1}
+    assert cov["strategies_flattened"] == {"mad_max": 1}

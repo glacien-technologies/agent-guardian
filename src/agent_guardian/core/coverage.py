@@ -55,6 +55,8 @@ def _empty_coverage() -> dict[str, Any]:
         "attacker_refused_turns": 0,
         "attacker_refusal_rate": 0.0,
         "skipped_agents": [],
+        "strategies_used": {},
+        "strategies_flattened": {},
     }
 
 
@@ -96,6 +98,14 @@ def compute_coverage_from_memory(
     refused_turns = 0
     attempts = 0
     skipped_agents: list[dict[str, Any]] = []
+    # IMPORTANT #6 — strategy attribution. ``strategies_used`` counts the
+    # top-level strategy as reported on each turn (``mad_max`` for the
+    # mixer itself, ``pair`` / ``tap`` / ``crescendo`` for direct picks).
+    # ``strategies_flattened`` re-attributes MAD-MAX turns to their
+    # chosen child via ``strategy_metadata.chosen_strategy`` so operators
+    # see the effective strategy mix instead of an opaque MAD-MAX bucket.
+    strategies_used: dict[str, int] = {}
+    strategies_flattened: dict[str, int] = {}
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -167,6 +177,25 @@ def compute_coverage_from_memory(
         if turn.get("attacker_refused"):
             refused_turns += 1
 
+        # Strategy attribution (IMPORTANT #6). Top-level count first.
+        strategy = turn.get("strategy")
+        if isinstance(strategy, str) and strategy:
+            strategies_used[strategy] = strategies_used.get(strategy, 0) + 1
+            # Flattened: if the top-level strategy is mad_max we follow
+            # the chosen_strategy hint to credit the actual child. For
+            # everything else the flattened bucket equals the top-level.
+            if strategy == "mad_max":
+                meta = turn.get("strategy_metadata") or {}
+                chosen = meta.get("chosen_strategy") if isinstance(meta, dict) else None
+                if isinstance(chosen, str) and chosen:
+                    strategies_flattened[chosen] = strategies_flattened.get(chosen, 0) + 1
+                else:
+                    # No chosen_strategy hint → fall back to crediting
+                    # the mad_max bucket so totals reconcile.
+                    strategies_flattened["mad_max"] = strategies_flattened.get("mad_max", 0) + 1
+            else:
+                strategies_flattened[strategy] = strategies_flattened.get(strategy, 0) + 1
+
     refusal_rate = refused_turns / attempts if attempts else 0.0
 
     # Sort the skipped-agent rollup for stable JSON output. Multiple entries
@@ -189,4 +218,6 @@ def compute_coverage_from_memory(
         "attacker_refused_turns": refused_turns,
         "attacker_refusal_rate": round(refusal_rate, 4),
         "skipped_agents": sorted_skipped,
+        "strategies_used": dict(sorted(strategies_used.items())),
+        "strategies_flattened": dict(sorted(strategies_flattened.items())),
     }
