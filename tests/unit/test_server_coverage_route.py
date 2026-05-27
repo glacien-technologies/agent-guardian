@@ -27,7 +27,10 @@ from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.models.tier import Tier
 from agent_guardian.server import ScanStore, create_app
 from agent_guardian.server.routes.coverage import (
+    _agents_active_label,
+    _band_css,
     _band_for_pct,
+    _band_label,
     _build_aivss_row,
     _build_atlas_row,
     _build_csa_row,
@@ -36,6 +39,7 @@ from agent_guardian.server.routes.coverage import (
     _filter_findings,
     _format_when,
     _paginate_findings,
+    _PseudoScan,
     _sort_findings,
 )
 
@@ -414,3 +418,78 @@ def test_coverage_route_static_assets_served(client: TestClient) -> None:
         resp = client.get(path)
         assert resp.status_code == 200, f"{path} returned {resp.status_code}"
         assert resp.headers["content-type"].startswith("text/css")
+
+
+# ---------------------------------------------------------------------------
+# Edge-case helpers — close the coverage gap
+# ---------------------------------------------------------------------------
+
+
+def test_band_css_maps_all_5_bands() -> None:
+    """All five SeverityBand values must map to a valid cell-state class."""
+    assert _band_css(SeverityBand.EXCELLENT) == "exc"
+    assert _band_css(SeverityBand.GOOD) == "good"
+    assert _band_css(SeverityBand.WARNING) == "attn"
+    assert _band_css(SeverityBand.POOR) == "fail"
+    assert _band_css(SeverityBand.CRITICAL) == "fail"
+
+
+def test_band_label_maps_all_5_bands() -> None:
+    """All five SeverityBand values must map to a human pill label."""
+    assert "Excellent" in _band_label(SeverityBand.EXCELLENT)
+    assert "Good" in _band_label(SeverityBand.GOOD)
+    assert "Warning" in _band_label(SeverityBand.WARNING)
+    assert "Poor" in _band_label(SeverityBand.POOR)
+    assert "Critical" in _band_label(SeverityBand.CRITICAL)
+
+
+def test_agents_active_label_running_vs_completed() -> None:
+    """The agents-active tile string differs by running state."""
+    coverage = {"agents": {"goal-hijack-agent": 5, "tool-abuse-agent": 3}, "skipped_agents": []}
+    scan = _make_scan("s", [])
+    # Completed scan → "2 / 11"
+    assert _agents_active_label(coverage, scan, is_running=False) == "2 / 11"
+    # Running scan with no skipped → "2 / 11"
+    assert _agents_active_label(coverage, None, is_running=True) == "2 / 11"
+    # Running with skipped → denominator reduces.
+    coverage_skip = {**coverage, "skipped_agents": [{"agent": "a2a-agent"}]}
+    assert _agents_active_label(coverage_skip, None, is_running=True) == "2 / 10"
+
+
+def test_pseudo_scan_has_id_attribute() -> None:
+    """The _PseudoScan shim used for in-flight scans must expose .id."""
+    p = _PseudoScan("scan-xyz")
+    assert p.id == "scan-xyz"
+
+
+def test_filter_invalid_severity_falls_back_silently(tmp_path: Path) -> None:
+    """An invalid severity query string is logged + ignored, not 500."""
+    findings = [_f("a", severity=Severity.HIGH)]
+    # Filter with a junk severity — should log + return everything.
+    out = _filter_findings(findings, severity="garbage", asi=None, q=None)
+    assert len(out) == 1
+
+
+def test_filter_invalid_asi_falls_back_silently(tmp_path: Path) -> None:
+    """An invalid ASI query string is logged + ignored, not 500."""
+    findings = [_f("a", asi=AsiCategory.ASI01)]
+    out = _filter_findings(findings, severity=None, asi="NOT_AN_ASI", q=None)
+    assert len(out) == 1
+
+
+def test_owasp_row_handles_missing_scan(tmp_path: Path) -> None:
+    """Building the OWASP row with scan=None (in-flight, no scan.json yet)
+    must still produce 10 cells in the 'run' state."""
+    row = _build_owasp_row(None, coverage={}, scan_done=False)
+    assert len(row.cells) == 10
+    assert all(c.state == "run" for c in row.cells)
+
+
+def test_owasp_row_completed_scan_no_attempts_defaults_to_good(tmp_path: Path) -> None:
+    """A finalised scan with no findings + no attempts on an ASI should
+    show as 'good' (target defended the unmeasured surface by default)."""
+    scan = _make_scan("s", [], aivss=100)
+    row = _build_owasp_row(scan, coverage={"agents": {}}, scan_done=True)
+    assert len(row.cells) == 10
+    # Every cell has attempts=0 so the "scan_done + 0 attempts" branch fires.
+    assert all(c.state == "good" for c in row.cells)

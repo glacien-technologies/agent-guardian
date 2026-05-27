@@ -5,8 +5,10 @@
 If you believe you have found a security vulnerability in `agent-guardian` itself, please report it privately. **Do not file a public GitHub issue.**
 
 - **Email:** `security@glacien.ai`
-- **GPG fingerprint:** `TBD` (a key will be published at https://glacien.ai/.well-known/security.asc once the project enters public beta)
+- **Public key:** [`https://glacien.ai/.well-known/security.asc`](https://glacien.ai/.well-known/security.asc) — also mirrored at the [Security Lead's GitHub profile](https://github.com/glacien-technologies). The fingerprint will be filled in here once the key is published; do not send encrypted reports until that line is no longer marked _pending_.
+  - **GPG fingerprint (Ed25519):** _pending public-beta key ceremony — see [MAINTAINERS.md](MAINTAINERS.md#active-maintainers)_
 - **Embargo:** We follow a **90-day coordinated-disclosure embargo** from the date you first report the issue. We will not publicly disclose details until the embargo expires or a fix is shipped, whichever comes first.
+- **Public log:** Every handled disclosure is recorded in [`docs/security/disclosure-history.md`](docs/security/disclosure-history.md) once the embargo lifts.
 
 When reporting, please include:
 
@@ -41,5 +43,15 @@ We strongly prefer **coordinated disclosure**. Glacien commits to:
 5. Publishing a [GitHub Security Advisory](https://github.com/glacien-technologies/agent-guardian/security/advisories) and a corresponding CVE (where applicable) once the fix ships.
 
 If the issue is being actively exploited in the wild, we may shorten the embargo and ship an emergency patch.
+
+## Hall of fame
+
+Researchers we have credited for coordinated disclosures are listed in [`docs/security/disclosure-history.md`](docs/security/disclosure-history.md#hall-of-fame). Crediting is opt-in; you may choose named, pseudonymous, or anonymous attribution.
+
+## Supply-chain integrity
+
+Every release wheel and sdist is signed via Sigstore (keyless OIDC through GitHub Actions). The publish workflow attaches the signatures, a CycloneDX SBOM, and PEP-740 attestations to the corresponding GitHub Release. See [`docs/security/reproducible-builds.md`](docs/security/reproducible-builds.md) for the byte-for-byte rebuild protocol.
+
+If your reproducibility verification fails — i.e., a wheel on PyPI does not match what you can rebuild from the tagged source — treat it as a supply-chain incident and report via this policy.
 
 Thank you for helping keep AgentGuardian and its users safe.

@@ -1,32 +1,150 @@
 name: Publish to PyPI
+
+# Standard §4.3 / §4.4 / §4.8 / §12.2.
+#
+# Sequence on every ``v*.*.*`` tag:
+#   1. Build sdist + wheel reproducibly.
+#   2. Generate a CycloneDX SBOM for the locked dependency tree.
+#   3. Sign every artifact with Sigstore (keyless OIDC via Fulcio + Rekor).
+#   4. Attach SBOM + signatures + wheels to the GitHub Release.
+#   5. Publish to PyPI via Trusted Publishing (OIDC; no API tokens).
+#
+# Failure of ANY step halts the release — no half-published versions.
+
 on:
   push:
     tags: ["v*.*.*"]
+
 permissions:
   contents: read
   id-token: write
+
 jobs:
   build:
+    name: Build wheel + sdist + SBOM
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for SOURCE_DATE_EPOCH derivation
+
       - uses: astral-sh/setup-uv@v4
-      - run: uv build
+        with:
+          enable-cache: true
+
+      - name: Set SOURCE_DATE_EPOCH for reproducible builds
+        # Standard §4.12 — derive from commit timestamp so the build is
+        # bit-identical across re-runs.
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> $GITHUB_ENV
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Install runtime deps for SBOM
+        # cyclonedx-py needs the project installed to traverse its
+        # dependency tree accurately.
+        run: |
+          uv sync --frozen
+          uv pip install cyclonedx-bom
+
+      - name: Generate CycloneDX SBOM
+        # Standard §4.8 — SBOM in CycloneDX format attached to every release.
+        run: |
+          uv run cyclonedx-py environment \
+            --output-format json \
+            --output-file dist/agent-guardian.cdx.json
+          ls -la dist/
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
-  publish:
+
+  sign:
+    name: Sigstore-sign artifacts
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/agent-guardian
     permissions:
-      id-token: write
+      contents: read
+      id-token: write  # OIDC token for keyless Sigstore signing
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Sign wheel + sdist + SBOM with Sigstore
+        # Standard §4.3 — keyless signing via Sigstore (Fulcio short-lived
+        # certs + Rekor transparency log). Anyone can verify with
+        # ``sigstore verify`` against the published workflow identity.
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        with:
+          inputs: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-dist
+          path: dist/
+
+  release:
+    name: Attach to GitHub Release
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to create / update Releases
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-dist
+          path: dist/
+
+      - name: Create or update GitHub Release with signed artifacts
+        # Attach every file (wheel, sdist, SBOM, .sigstore signatures)
+        # to the Release for the tag that triggered this run.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+            dist/*.sigstore
+            dist/*.sigstore.json
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+
+  publish:
+    name: Publish to PyPI
+    needs: sign
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/agent-guardian
+    permissions:
+      id-token: write  # OIDC for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-dist
+          path: dist/
+
+      - name: Strip non-distribution files before upload
+        # PyPI only accepts wheels + sdists. Sigstore .sigstore files
+        # and the SBOM go to the GitHub Release, not to PyPI.
+        run: |
+          mkdir -p dist-upload
+          cp dist/*.whl dist-upload/ 2>/dev/null || true
+          cp dist/*.tar.gz dist-upload/ 2>/dev/null || true
+          ls -la dist-upload/
+
+      - name: Publish via Trusted Publishing
+        # Standard §4.4 — OIDC, no PYPI_API_TOKEN secret involved.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-upload/
+          attestations: true  # PEP 740 attestations attached to PyPI

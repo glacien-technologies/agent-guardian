@@ -1,0 +1,56 @@
+# CODEOWNERS — automatic review-request routing per Standard §6.5.
+#
+# Every PR that touches a path matched here automatically requests a
+# review from the listed team. The branch-protection rule on ``main``
+# requires at least one approving review from a code owner before merge.
+#
+# Order matters: later patterns win, so the catch-all at the top is
+# safe to be overridden by more specific paths below.
+
+* @glacien-technologies/oss-maintainers
+
+# --- Core engine ---
+/src/agent_guardian/agents/        @glacien-technologies/oss-maintainers
+/src/agent_guardian/core/          @glacien-technologies/oss-maintainers
+/src/agent_guardian/strategies/    @glacien-technologies/oss-maintainers
+/src/agent_guardian/probes/        @glacien-technologies/oss-maintainers
+
+# --- LLM providers ---
+/src/agent_guardian/llm/           @glacien-technologies/oss-maintainers
+
+# --- Adapters ---
+/src/agent_guardian/adapters/      @glacien-technologies/oss-maintainers
+
+# --- Reports / scoring ---
+/src/agent_guardian/reports/       @glacien-technologies/oss-maintainers
+/src/agent_guardian/models/        @glacien-technologies/oss-maintainers
+
+# --- Server / dashboard ---
+/src/agent_guardian/server/        @glacien-technologies/oss-maintainers
+
+# --- CLI surface ---
+/src/agent_guardian/cli.py         @glacien-technologies/oss-maintainers
+
+# --- Build + release tooling ---
+/.github/workflows/                @glacien-technologies/oss-maintainers
+/.github/dependabot.yml            @glacien-technologies/oss-maintainers
+/pyproject.toml                    @glacien-technologies/oss-maintainers
+/uv.lock                           @glacien-technologies/oss-maintainers
+
+# --- Docs + community files ---
+/docs/                             @glacien-technologies/oss-maintainers
+/README.md                         @glacien-technologies/oss-maintainers
+/CHANGELOG.md                      @glacien-technologies/oss-maintainers
+/CODE_OF_CONDUCT.md                @glacien-technologies/oss-maintainers
+/CONTRIBUTING.md                   @glacien-technologies/oss-maintainers
+/governance.md                     @glacien-technologies/oss-maintainers
+/MAINTAINERS.md                    @glacien-technologies/oss-maintainers
+/SECURITY.md                       @glacien-technologies/oss-maintainers
+/TRADEMARKS.md                     @glacien-technologies/oss-maintainers
+
+# --- Security-sensitive paths ---
+# These get a mandatory second review from the Security Lead role even
+# if the first reviewer is a maintainer — set up at PR-bot level once
+# the team-membership routing is finalised.
+/SECURITY.md                       @glacien-technologies/oss-maintainers
+/docs/security/                    @glacien-technologies/oss-maintainers

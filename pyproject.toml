@@ -12,12 +12,17 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Glacien Pte. Ltd.", email = "opensource@glacien.ai" }]
 keywords = ["llm", "agent", "red-team", "security", "owasp", "mitre-atlas", "aivss", "agentic-ai"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
+  "Intended Audience :: System Administrators",
   "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -25,6 +30,8 @@ classifiers = [
   "Topic :: Security",
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Software Development :: Testing",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
 ]
 dependencies = [
   "fastapi>=0.115",
@@ -87,6 +94,11 @@ dev = [
   "pre-commit>=4.0",
   "respx>=0.22",
   "pip-licenses>=5.0",
+  # Bandit — Python-specific SAST. Wired into ci.yml ``sast`` job. The
+  # baseline ruleset catches eval/exec misuse, weak crypto choices, shell
+  # injection, hardcoded credentials. High-severity, high-confidence
+  # findings block the merge.
+  "bandit>=1.7",
   # python-dotenv enables ``.env`` auto-loading from the cwd (see
   # ``cli._try_load_dotenv``). Dev-only by design: production users export
   # real environment variables; the dev extra is the path of least

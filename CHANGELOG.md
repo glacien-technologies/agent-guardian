@@ -5,6 +5,39 @@ All notable changes to **agent-guardian** are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-05-27
+
+First stable release. Promotes the contents of `1.0.0rc1` to General Availability after the soft-beta cohort and the engineering-standards hardening pass below.
+
+### Added
+
+- **EARLY_STOP actually cancels.** Cooperative cancellation between `SwarmCommander` and `AsiAgent`: agents observe a shared `asyncio.Event` at each turn boundary and exit cleanly with `terminated_by="cancelled"` rather than running to natural budget. The EARLY_STOP log message is now honest about its semantics. Empirical effect on the LangGraph T3 verification target: parallel phase 337s → 28s (92% reduction).
+- **Live Dashboard — Coverage page.** New route `GET /scan/{id}/coverage` rendering a 5-row coverage matrix (OWASP 10 cells, MITRE ATLAS 10 tactics, CSA 12 categories, AIVSS 6 sub-scores, attack strategies 5 cells) plus a paginated findings table with severity / ASI / free-text filters. Self-contained chrome to preserve the design's editorial-tech aesthetic. 19 dedicated tests.
+- **OpenSSF Scorecard workflow** at `.github/workflows/scorecard.yml`, weekly cron + push trigger.
+- **Sigstore signing + CycloneDX SBOM** in the publish workflow — every wheel, sdist, and SBOM gets a keyless OIDC signature attached to the GitHub Release; PEP-740 attestations attached to PyPI.
+- **Bandit + Semgrep + Gitleaks** wired into CI (`sast` and `secret-scan` jobs).
+- **Dependabot** configured for `pip`, `github-actions`, and `docker` ecosystems.
+- **Brand-integrity workflow** enforcing `@glacien.ai` author emails on `main`.
+- **MAINTAINERS.md, .github/CODEOWNERS, governance.md** — corporate-backed governance documented in public.
+- **Reproducible-build documentation** at `docs/security/reproducible-builds.md` with byte-for-byte verification protocol and annual independent-verification table.
+- **Public disclosure-history log** scaffolded at `docs/security/disclosure-history.md`.
+- **Deprecation policy** documented at `docs/contributing/deprecation-policy.md` — six-month notice, DeprecationWarning, CHANGELOG flagging.
+- **5 additional README badges** per Standard §11.1: Coverage, OpenSSF Scorecard, OpenSSF Best Practices, PyPI downloads, Discord.
+
+### Changed
+
+- **`pyproject.toml` development status** Alpha → Production/Stable. Added Linux/macOS/Windows OS classifiers, `Typing :: Typed`, `Python 3 :: Only`.
+- **`SECURITY.md`** — added scope/disclosure history pointers, replaced GPG `TBD` with a `_pending_` placeholder until the key-ceremony lands, documented Sigstore verification path.
+- **Bandit added to dev extras** (`pyproject.toml`) so `uv sync --extra dev` brings it in for the CI `sast` job.
+
+### Fixed
+
+- **Silent except handlers in coverage filter** — `_filter_findings` now logs a `_LOG.debug` line when an invalid severity or ASI query param is ignored, satisfying the no-silent-failures mandate enforced by `test_no_silent_excepts_in_src`.
+
+### Security
+
+- **Signed releases mandatory.** The publish workflow refuses to upload if Sigstore signing fails. Verifiable via `sigstore verify` against the published workflow identity.
+
 ## [1.0.0rc1] — 2026-05-27
 
 First public release candidate. M1–M15 of the build plan are complete.

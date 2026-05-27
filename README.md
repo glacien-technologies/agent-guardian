@@ -4,7 +4,27 @@
 [![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/glacien-technologies/agent-guardian/branch/main/graph/badge.svg)](https://codecov.io/gh/glacien-technologies/agent-guardian)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/glacien-technologies/agent-guardian/badge)](https://scorecard.dev/viewer/?uri=github.com/glacien-technologies/agent-guardian)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/0000/badge)](https://www.bestpractices.dev/projects/0000)
+[![Downloads](https://static.pepy.tech/badge/agent-guardian/month)](https://pepy.tech/project/agent-guardian)
+[![Discord](https://img.shields.io/discord/0000000000000000?label=discord&logo=discord)](https://discord.gg/agentguardian)
 [![Docs](https://img.shields.io/badge/docs-agentguardian.ai-cyan.svg)](https://glacien-technologies.github.io/agent-guardian/)
+
+<!--
+README badge row tracks Engineering Standards §11.1. Two badges currently
+point at placeholder IDs that need replacement after the manual setup:
+
+  * OpenSSF Best Practices — replace ``/projects/0000`` after registering
+    at https://www.bestpractices.dev (Standard §4.2). The form takes ~2 hr.
+  * Discord — replace the all-zero server ID once the Discord server is
+    provisioned (Standard §6.7). The invite URL ``discord.gg/agentguardian``
+    is the canonical alias to set up.
+
+The Scorecard badge will populate once .github/workflows/scorecard.yml runs
+its first weekly cron (Sundays 02:00 UTC).
+-->
+
 
 > The first open-source adversarial-swarm framework for agentic AI
 > red-teaming. Eleven specialist agents attack your AI agent in parallel

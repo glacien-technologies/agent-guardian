@@ -491,14 +491,22 @@ def _filter_findings(
         try:
             target = Severity(severity.lower())
             out = [f for f in out if f.severity is target]
-        except ValueError:
-            pass
+        except ValueError as exc:
+            _LOG.debug(
+                "coverage filter: ignoring invalid severity %r (%s) — showing all severities",
+                severity,
+                exc,
+            )
     if asi:
         try:
             asi_target = AsiCategory(asi)
             out = [f for f in out if f.asi is asi_target]
-        except ValueError:
-            pass
+        except ValueError as exc:
+            _LOG.debug(
+                "coverage filter: ignoring invalid ASI %r (%s) — showing all categories",
+                asi,
+                exc,
+            )
     if q:
         needle = q.lower()
         out = [

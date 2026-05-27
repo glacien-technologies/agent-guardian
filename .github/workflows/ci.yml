@@ -65,3 +65,49 @@ jobs:
           # roster — anything reciprocal that would taint a downstream
           # Apache-2.0 redistributor.
           uv run pip-licenses --fail-on="GPLv2;GPLv3;LGPLv2;LGPLv3;AGPLv3"
+
+  # Standard §4.6 — SAST. Bandit catches Python-specific security
+  # antipatterns; Semgrep catches cross-language patterns plus AI-security
+  # rules. High-severity findings block the merge; medium are surfaced as
+  # PR annotations.
+  sast:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - name: Run bandit (Python SAST)
+        # ``-ll`` = report low+, ``-iii`` = high-confidence only.
+        # The build fails on any high-severity, high-confidence finding.
+        run: uv run bandit -r src/agent_guardian -ll -iii
+      - name: Run semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/default
+            p/python
+            p/security-audit
+            p/owasp-top-ten
+        env:
+          # Semgrep CLI exits 1 on findings; we let it surface annotations
+          # without blocking the PR until the rule set has been tuned.
+          SEMGREP_TIMEOUT: "60"
+
+  # Standard §3.6 — secret scanning on every push. Layered with GitHub
+  # native secret scanning (enabled at the repository level once the repo
+  # goes public — see docs/operator-checklist.md item §1.x).
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs full history to scan
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
