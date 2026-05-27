@@ -121,6 +121,13 @@ from agent_guardian.models.probe import (
     load_probes_from_dir,
 )
 from agent_guardian.models.scan import Scan
+from agent_guardian.models.scenario import (
+    AgentOrigin,
+    DeliveryVector,
+    Scenario,
+    ScenarioBatch,
+    ScenarioType,
+)
 from agent_guardian.models.severity import (
     Severity,
     SeverityBand,
@@ -178,6 +185,7 @@ __all__ = [
     "A2AAgent",
     "ADKAdapter",
     "AgentBudget",
+    "AgentOrigin",
     "AgentReport",
     "AivssResult",
     "AnthropicClient",
@@ -195,6 +203,7 @@ __all__ = [
     "CrescendoStrategy",
     "CrewAIAdapter",
     "CsaCategory",
+    "DeliveryVector",
     "DriftAgent",
     "Ed25519Keypair",
     "Ed25519SignatureBlock",
@@ -244,6 +253,9 @@ __all__ = [
     "SandboxViolation",
     "Scan",
     "ScanStore",
+    "Scenario",
+    "ScenarioBatch",
+    "ScenarioType",
     "Severity",
     "SeverityBand",
     "SharedMemory",
