@@ -950,7 +950,10 @@ async def _run_scan(
         tier_override=tier_override,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
-        recon_wall_seconds=5.0,
+        # recon_wall_seconds intentionally left at the SwarmConfig default (90s);
+        # 5s caused recon to time out on any real LLM call (esp. rate-limited
+        # free-tier Gemini) and the swarm then produced fake "EXCELLENT" scores
+        # against an empty memory.
     )
     swarm = SwarmCommander(
         config=swarm_config,

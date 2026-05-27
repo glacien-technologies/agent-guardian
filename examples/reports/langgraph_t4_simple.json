@@ -15,8 +15,8 @@
   },
   "band": "EXCELLENT",
   "cost_usd": 0.0,
-  "created_at": "2026-05-27T11:46:05.898527+08:00",
-  "duration_seconds": 200.13756516715512,
+  "created_at": "2026-05-27T11:59:04.610577+08:00",
+  "duration_seconds": 218.40860062511638,
   "findings": [],
   "findings_summary": {
     "critical": 0,
@@ -26,20 +26,20 @@
   },
   "package_version": "1.0.0rc1",
   "probe_library_version": "0.0.0-placeholder",
-  "scan_id": "cli-e3e35c0bf0fb",
+  "scan_id": "runner-035525",
   "schema": "agentguardian-scan-v1",
   "signatures": {
     "ed25519": {
       "algorithm": "Ed25519",
       "public_key_b32": "QC5XSSJAYYEXA4C7VVZ6YGC37ONPDISNJMVI6Q63BHK6I55FFQUA",
-      "signature": "xhbnAW8ybYE3g/qhFHvRxOxmPs1ziIniEcfK/1cbzX2NldwsbKGTFDeP1eupMBlgjiEvNROTtHKmTzNfN3UAAA==",
+      "signature": "1FlOFRiy8l7akB5nk4lT2bv0oJCYUsO0J8ii2pryG+R50Bo7bnfIMw3wtBxyidm+6/Z9uFSWcvorCatsYru3BA==",
       "version": "ag-sig-v1"
     },
     "hmac_sha256": {
       "algorithm": "HMAC-SHA256",
       "iterations": 600000,
-      "salt": "/osj9PaILL8pU+YJafbUfg==",
-      "signature": "Yy+Mv5ZbM79A4IAR7Z0Ge8vBow0M1VYR1JkK9l7dp10=",
+      "salt": "qMz1gl2O4lB3EYOt02nPMA==",
+      "signature": "9K9XQrDGBGuVzUP24s8NIby+Y1jzOMsqYObdvC9GiDo=",
       "version": "ag-sig-v1"
     }
   },
