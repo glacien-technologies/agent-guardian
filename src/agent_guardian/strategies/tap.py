@@ -123,6 +123,7 @@ class TAPStrategy(Strategy):
             self.ctx.attacker_llm,
             prompt=branch_text,
             model=self.ctx.attacker_model,
+            extra_system=self._attack_system_extra(),
         )
         refusal_text = ""
         if refused:
@@ -145,12 +146,14 @@ class TAPStrategy(Strategy):
         # red-team framing in case the provider considers the *content* of
         # the candidate itself disallowed.
         scored: list[tuple[int, str]] = []
+        extra_sys = self._attack_system_extra()
         for cand in candidates:
             score_text, _ = await attacker_complete(
                 self.ctx.attacker_llm,
                 prompt=_SCORE_PROMPT.format(goal=self.ctx.goal, candidate=cand),
                 model=self.ctx.attacker_model,
                 temperature=0.0,
+                extra_system=extra_sys,
             )
             scored.append((_parse_score(score_text), cand))
 

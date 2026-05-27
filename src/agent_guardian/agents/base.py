@@ -446,6 +446,12 @@ class AsiAgent(ABC):
             )
 
         # 3. Build strategy.
+        # ``attack_specialization`` is the per-agent ASI framing paragraph
+        # from design-spec §9. Strategies prepend it (alongside the PAIR
+        # roleplay preamble) to every attacker-LLM call so the attacker
+        # ships category-specific attack-pattern vocabulary on top of the
+        # calibrated anti-refusal frame. ``getattr`` with default protects
+        # agents that don't define ``attack_specialization`` (recon).
         ctx = StrategyContext(
             attacker_llm=self.attacker_llm,
             attacker_model=self.attacker_model,
@@ -454,6 +460,7 @@ class AsiAgent(ABC):
             memory=memory,
             rng=self.rng,
             max_turns=self.budget.max_turns,
+            attack_specialization=getattr(self, "attack_specialization", ""),
         )
         try:
             strategy = self.strategy_stack(ctx)

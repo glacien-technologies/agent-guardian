@@ -101,6 +101,7 @@ class CrescendoStrategy(Strategy):
                 self.ctx.attacker_llm,
                 prompt=_BENIGN_SEED_PROMPT.format(goal=self.ctx.goal),
                 model=self.ctx.attacker_model,
+                extra_system=self._attack_system_extra(),
             )
             if refused:
                 self._attacker_refused_count += 1
@@ -152,6 +153,7 @@ class CrescendoStrategy(Strategy):
                 prev_response=target_response,
             ),
             model=self.ctx.attacker_model,
+            extra_system=self._attack_system_extra(),
         )
         if refused_attacker:
             self._attacker_refused_count += 1

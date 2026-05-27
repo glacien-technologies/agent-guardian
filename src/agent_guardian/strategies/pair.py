@@ -92,6 +92,7 @@ class PAIRStrategy(Strategy):
             self.ctx.attacker_llm,
             prompt=refine_text,
             model=self.ctx.attacker_model,
+            extra_system=self._attack_system_extra(),
         )
         if refused:
             self._attacker_refused_count += 1
