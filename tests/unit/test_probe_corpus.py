@@ -49,9 +49,26 @@ def test_probe_ids_are_unique() -> None:
     assert len(ids) == len(set(ids)), f"duplicate IDs: {sorted(set(duplicates))}"
 
 
-def test_corpus_size_is_fifty() -> None:
-    """M11 ships exactly 50 seed probes (5 per ASI category)."""
-    assert len(load_all_probes()) == 50
+def test_each_asi_has_at_least_seven_probes_after_owasp_upgrade() -> None:
+    """Phase B coverage gate: every ASI category has >=7 probes after the
+    OWASP-2026 upgrade (5 seed + 2-3 new = 7-8)."""
+    counts = Counter(p.asi for p in load_all_probes())
+    for asi in AsiCategory:
+        assert counts[asi] >= 7, f"{asi.value} has only {counts[asi]} probes — Phase B expects >=7"
+
+
+def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
+    """Phase B CC-4 gate: every probe in the corpus carries an
+    ``owasp_scenario`` citation linking it to the OWASP 2026 example
+    attack scenario it exercises."""
+    probes = load_all_probes()
+    missing = [p.id for p in probes if not p.owasp_scenario]
+    assert not missing, f"probes missing owasp_scenario: {sorted(missing)}"
+
+
+def test_corpus_size_is_seventy_nine() -> None:
+    """Phase B ships 50 original + 29 OWASP-aligned probes = 79."""
+    assert len(load_all_probes()) == 79
 
 
 def test_corpus_version_stamp() -> None:
@@ -63,11 +80,16 @@ def test_corpus_version_stamp() -> None:
     assert PROBE_CORPUS_VERSION == "2026.05"
 
 
-def test_load_probes_for_asi_returns_five_each() -> None:
-    """``load_probes_for_asi`` is the per-category lens used by the agents."""
+def test_load_probes_for_asi_returns_at_least_five_each() -> None:
+    """``load_probes_for_asi`` is the per-category lens used by the agents.
+
+    Phase B added 2-3 probes per category; the original M11 invariant of
+    >=5 still holds, and every returned probe must belong to the requested
+    ASI category.
+    """
     for asi in AsiCategory:
         probes = load_probes_for_asi(asi)
-        assert len(probes) == 5, f"{asi.value} returned {len(probes)} probes"
+        assert len(probes) >= 5, f"{asi.value} returned {len(probes)} probes"
         for probe in probes:
             assert probe.asi == asi
 

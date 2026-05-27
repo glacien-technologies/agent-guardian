@@ -96,9 +96,10 @@ def test_list_agents_prints_eleven_rows(runner: CliRunner) -> None:
 def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     result = runner.invoke(app, ["list-probes"])
     assert result.exit_code == 0
-    # M11: 50 bundled probes + corpus-version stamp.
+    # M11 shipped 50 bundled probes; Phase B added 29 OWASP-2026-aligned
+    # probes for a total of 79. The corpus-version stamp is also printed.
     assert "Probe corpus version" in result.stdout
-    assert "Found 50 probes" in result.stdout
+    assert "Found 79 probes" in result.stdout
     # At least one ID from each category should appear.
     for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
         assert asi in result.stdout
@@ -107,7 +108,8 @@ def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
 def test_list_probes_with_asi_filter(runner: CliRunner) -> None:
     result = runner.invoke(app, ["list-probes", "--asi", "ASI01"])
     assert result.exit_code == 0
-    assert "Found 5 probes (filtered by ASI01)" in result.stdout
+    # ASI01 has 5 original + 3 Phase-B probes = 8.
+    assert "Found 8 probes (filtered by ASI01)" in result.stdout
     assert "ASI02" not in result.stdout
 
 
