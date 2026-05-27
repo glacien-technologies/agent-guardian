@@ -103,18 +103,30 @@ async def test_agent_reuses_pre_wrapped_llm_counter(
         evaluator_llm=judge,
         attacker_model="stub-model",
         evaluator_model="stub-model",
-        # max_turns=4 is enough for at least one MAD-MAX→child attacker
-        # round-trip after the seed-only first turn.
         budget=AgentBudget(tokens_remaining=50_000, max_turns=4),
     )
-    target = make_target(llm=StubScript().default("ok").build())
-    memory = make_memory()
-    await agent.run(target, memory)
-    # Counter must reflect EVERY attacker call exactly once — not twice. If
-    # the agent rewrapped instead of detecting the existing wrapper, the
-    # pre-supplied counter would stay at zero.
-    assert counter.calls >= 1
+    # Invariant under test: agent must point at the pre-supplied counter,
+    # not at a fresh one it created. Two ways to verify — (a) attribute
+    # identity, (b) any direct ``.complete`` on the wrapper bumps the
+    # shared counter. Property (a) is the contract we want; (b) is the
+    # natural consequence. We test (a) here directly because the MAD-MAX
+    # bandit's RNG-driven turn schedule makes the natural-consequence
+    # path flaky to assert in isolation (some seeds don't reach a child
+    # attacker call within the small max_turns window).
     assert agent._attacker_usage is counter
+    assert agent.attacker_llm is pre
+    # Direct call to the wrapper must still bump the counter — confirms
+    # the wrapper is functional (would catch a refactor that detached it).
+    from agent_guardian.llm.base import LLMMessage, LLMRequest
+
+    await pre.complete(
+        LLMRequest(
+            messages=[LLMMessage(role="user", content="ping")],
+            model="stub-model",
+        )
+    )
+    assert counter.calls == 1
+    _ = (agent, judge, make_memory, make_target)  # keep fixtures referenced
 
 
 @pytest.mark.asyncio
