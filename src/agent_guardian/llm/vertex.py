@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse, LLMUsage
@@ -20,6 +21,8 @@ __all__ = [
     "build_vertex_payload",
     "map_vertex_response",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 VERTEX_HOST_TEMPLATE = "{region}-aiplatform.googleapis.com"
 
@@ -74,6 +77,7 @@ def map_vertex_response(model: str, data: dict[str, Any]) -> LLMResponse:
         raw_finish = candidate.get("finishReason", "STOP") or "STOP"
         usage = data.get("usageMetadata") or {}
     except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        _LOG.warning("vertex: malformed response (%s): %s", type(exc).__name__, exc)
         raise LLMResponseFormatError(f"vertex: malformed response: {exc}") from exc
     prompt_tokens = int(usage.get("promptTokenCount", 0))
     completion_tokens = int(usage.get("candidatesTokenCount", 0))
