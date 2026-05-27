@@ -96,6 +96,13 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("bedrock", "eu.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
     PriceRow("bedrock", "apac.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
     PriceRow("bedrock", "apac.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
+    # Global inference profile IDs — verified working 2026-05-28 in
+    # ap-southeast-1 / us-east-1 / us-west-2 / eu-west-1. Note the
+    # inconsistent suffix policy across model families: Opus 4.6 needs
+    # the ``-v1`` suffix, but Sonnet 4.6 does NOT (Bedrock returns
+    # 400 "invalid model identifier" if you add it). Empirically tested.
+    PriceRow("bedrock", "global.anthropic.claude-opus-4-6-v1", 15.00, 75.00),
+    PriceRow("bedrock", "global.anthropic.claude-sonnet-4-6", 3.00, 15.00),
     # Catch-all for any other Bedrock model ID (priced at the Sonnet
     # default so estimates err on the conservative side).
     PriceRow("bedrock", "*", 3.00, 15.00),

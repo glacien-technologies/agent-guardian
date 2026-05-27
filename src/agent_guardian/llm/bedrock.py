@@ -340,11 +340,19 @@ class BedrockClient(BaseLLM):
     async def _send(self, request: LLMRequest) -> LLMResponse:
         body = build_bedrock_payload(request)
         body_json = json.dumps(body)
-        url = f"{(self.base_url or '').rstrip('/')}/model/{request.model}/converse"
+        # Strip a ``bedrock:`` provider prefix if the caller passed the
+        # spec form (e.g. ``bedrock:global.anthropic.claude-opus-4-6-v1``)
+        # rather than the bare model id. Without this strip the request
+        # URL becomes ``/model/bedrock:global.anthropic.../converse`` and
+        # Bedrock responds 400 "invalid model identifier".
+        bedrock_model_id = request.model
+        if bedrock_model_id.startswith("bedrock:"):
+            bedrock_model_id = bedrock_model_id[len("bedrock:") :]
+        url = f"{(self.base_url or '').rstrip('/')}/model/{bedrock_model_id}/converse"
         headers = self._build_signed_headers(url, body_json)
         _LOG.debug(
             "bedrock call: model=%s region=%s n_messages=%d max_tokens=%s",
-            request.model,
+            bedrock_model_id,
             self.region,
             len(request.messages),
             request.max_tokens,
