@@ -494,3 +494,113 @@ def test_bedrock_profile_not_found_raises(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
     with pytest.raises(LLMAuthError):
         BedrockClient(region="us-east-1", profile="this-profile-does-not-exist")
+
+
+@respx.mock
+async def test_bedrock_resource_not_found_maps_to_permanent(_fake_aws_env: None) -> None:
+    """Wrong model ID (or model unavailable in region) -> LLMPermanentError."""
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            404,
+            json={
+                "__type": "ResourceNotFoundException",
+                "message": "Could not find model",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMPermanentError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_expired_token_maps_to_auth(_fake_aws_env: None) -> None:
+    """Expired session token (common with SSO) -> LLMAuthError."""
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(
+            403,
+            json={
+                "__type": "ExpiredTokenException",
+                "message": "The security token has expired",
+            },
+        )
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMAuthError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_non_json_error_body(_fake_aws_env: None) -> None:
+    """Server returns 503 with non-JSON body -> falls back to HTTP-status mapping."""
+    from agent_guardian.llm import retry as retry_mod
+
+    # 503 maps to LLMTransientError which retries; squash sleep.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(retry_mod, "compute_delay", lambda *_a, **_k: 0.0)
+        respx.post(_converse_url_re()).mock(
+            return_value=Response(503, content=b"<html>Gateway Error</html>")
+        )
+        client = BedrockClient(region="us-east-1")
+        try:
+            with pytest.raises(LLMTransientError):
+                await client.complete(
+                    LLMRequest(
+                        messages=[LLMMessage(role="user", content="hi")],
+                        model="anthropic.claude-haiku-4-5-v1:0",
+                    )
+                )
+        finally:
+            await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_unknown_4xx_maps_to_permanent(_fake_aws_env: None) -> None:
+    """4xx with no recognised body code -> LLMPermanentError."""
+    respx.post(_converse_url_re()).mock(
+        return_value=Response(418, json={"message": "I'm a teapot"})
+    )
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMPermanentError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_malformed_success_body_raises(_fake_aws_env: None) -> None:
+    """200 with garbage body -> LLMResponseFormatError."""
+    respx.post(_converse_url_re()).mock(return_value=Response(200, content=b"not json"))
+    client = BedrockClient(region="us-east-1")
+    try:
+        with pytest.raises(LLMResponseFormatError):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+    finally:
+        await client.aclose()
