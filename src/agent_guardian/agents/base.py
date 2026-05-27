@@ -103,7 +103,7 @@ def fallback_seeds(
     ]
 
 
-TerminationReason = Literal["success", "exhausted", "refused", "budget", "error"]
+TerminationReason = Literal["success", "exhausted", "refused", "budget", "error", "cancelled"]
 
 _DEFAULT_REFUSAL_MARKERS: tuple[str, ...] = (
     "i cannot",
@@ -399,6 +399,11 @@ class AsiAgent(ABC):
         # :meth:`generate_goal_specific_scenarios` (spec §8).
         # Forward reference to avoid an import cycle with models.swarm_brief.
         self._brief: Any = None
+        # Cooperative cancellation signal — set by SwarmCommander when an
+        # EARLY_STOP checkpoint fires. The run loop checks ``is_set()`` at
+        # each turn boundary and exits cleanly. ``Any`` so we don't have to
+        # import ``asyncio.Event`` here just for the type annotation.
+        self._cancel_event: Any = None
 
     # ------------------------------------------------------------------
     # Subclass hooks
@@ -766,6 +771,22 @@ class AsiAgent(ABC):
                     reason,
                     turns,
                     self.budget.max_turns,
+                    findings_count,
+                    elapsed,
+                )
+                break
+
+            # Cooperative cancellation — the swarm sets ``self._cancel_event``
+            # when an EARLY_STOP checkpoint fires. Checking it here (between
+            # turns) lets in-flight agents exit cleanly without discarding
+            # the current turn's already-recorded findings.
+            cancel_event = getattr(self, "_cancel_event", None)
+            if cancel_event is not None and cancel_event.is_set():
+                terminated_by = "cancelled"
+                _LOG.info(
+                    "agent %s: cancellation requested — exiting at turn boundary (turns=%d findings=%d elapsed=%.1fs)",
+                    agent_name,
+                    turns,
                     findings_count,
                     elapsed,
                 )

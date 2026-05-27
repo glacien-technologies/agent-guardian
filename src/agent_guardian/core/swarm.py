@@ -715,11 +715,13 @@ class SwarmCommander:
                     type(exc).__name__,
                     exc,
                 )
+        cancelled_count = sum(1 for r in self._agent_reports if r.terminated_by == "cancelled")
         _LOG.info(
-            "phase parallel: done (%d agents, duration=%.1fs, last_decision=%s)",
+            "phase parallel: done (%d agents, duration=%.1fs, last_decision=%s, cancelled=%d)",
             len(agents),
             time.monotonic() - parallel_started,
             self._final_decision.value,
+            cancelled_count,
         )
 
     async def _run_taskgroup(self, agents: list[AsiAgent]) -> None:
@@ -765,10 +767,15 @@ class SwarmCommander:
                     findings_count=0,
                     turns=0,
                     duration_seconds=0.0,
-                    terminated_by="budget",
-                    notes="cancelled by early-stop checkpoint",
+                    terminated_by="cancelled",
+                    notes="cancelled by early-stop checkpoint before agent started",
                 )
             else:
+                # Cooperative cancellation: agents observe this event at the
+                # top of each turn and exit cleanly (see AsiAgent.run loop).
+                # Using attribute injection to match the existing ``_brief``
+                # pattern so we don't widen the public ``run()`` signature.
+                agent._cancel_event = self._cancel_event
                 report = await agent.run(self.target, self.memory)
         except Exception as exc:
             _LOG.warning("agent %s raised %s: %s", name, type(exc).__name__, exc)
@@ -825,7 +832,11 @@ class SwarmCommander:
                     )
                 )
                 if decision is CheckpointDecision.EARLY_STOP:
-                    _LOG.info("checkpoint: EARLY_STOP triggered — cancelling remaining agents")
+                    _LOG.info(
+                        "checkpoint: EARLY_STOP triggered — cancel signal set; "
+                        "in-flight agents will exit at their next turn boundary, "
+                        "agents not yet started will skip immediately"
+                    )
                     self._cancel_event.set()
                     return
                 # TODO(v1.1): RE_TASK / ESCALATE_JUDGE wiring lands later.
