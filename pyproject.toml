@@ -53,6 +53,18 @@ docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
 ]
+# ``examples`` carries every dep used by the demo target agents under
+# ``examples/`` (LangGraph + OpenAI Agents SDK trios). They are strictly
+# opt-in so the runtime install of agent-guardian stays lean — the OSS
+# scanner itself never imports these libraries. Installed via
+# ``uv sync --extra examples`` (typically alongside ``--extra dev``).
+examples = [
+  "langgraph>=0.2",
+  "langchain-google-genai>=2.0",
+  "langchain-core>=0.3",
+  "openai>=1.50",
+  "openai-agents>=0.3",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
@@ -126,6 +138,27 @@ exclude = ["tests/"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# ``examples/`` is demo target code that calls real Gemini and is
+# explicitly NOT a test surface (would cost money on every CI run).
+# ``testpaths`` already restricts collection to ``tests/`` but
+# ``norecursedirs`` adds defence-in-depth if anyone ever invokes
+# ``pytest .`` ad-hoc. We include the pytest defaults explicitly
+# (``.*``, ``CVS``, ``_darcs``, ``{arch}``, ``*.egg``, ``venv``, ``node_modules``)
+# so we extend the ignore list rather than replacing it.
+norecursedirs = [
+  "examples",
+  ".*",
+  "*.egg",
+  "_darcs",
+  "{arch}",
+  "CVS",
+  "dist",
+  "build",
+  "site",
+  "node_modules",
+  "venv",
+  ".venv",
+]
 addopts = "-ra --strict-markers --strict-config"
 
 [tool.coverage.run]
