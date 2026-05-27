@@ -1,0 +1,162 @@
+"""Google Gemini (AI Studio) chat completion client (PRD §14.3).
+
+Uses the simple API-key-in-URL auth flow against
+``https://generativelanguage.googleapis.com/v1beta`` — **not** the OAuth2
+Vertex AI path served by ``aiplatform.googleapis.com``. Compatible with
+every Gemini 2.5+ / 3.x model exposed via AI Studio.
+
+The Gemini Generative Language API is a separate surface from Vertex AI.
+The Vertex client (``vertex.py``) stays for users running on GCP with
+service-account auth; this client is the low-friction option for users
+with a plain API key from https://aistudio.google.com/app/apikey.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.errors import (
+    LLMAuthError,
+    LLMPermanentError,
+    LLMRateLimitError,
+    LLMResponseFormatError,
+    LLMTimeoutError,
+    LLMTransientError,
+)
+from agent_guardian.llm.retry import with_backoff
+
+__all__ = ["GeminiClient"]
+
+_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+# Gemini → our FinishReason normalisation table.
+_FINISH_REASON_MAP = {
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "SPII": "content_filter",
+}
+
+
+class GeminiClient(BaseLLM):
+    """Google Gemini chat completion provider client (AI Studio endpoint).
+
+    Validation of the model name happens server-side — we accept any model
+    string (``gemini-3.1-pro-preview``, ``gemini-3.5-flash``,
+    ``gemini-2.5-flash``…) and let the API decide. The :mod:`cost` table
+    ships rows for the well-known SKUs so the pre-flight USD estimate is
+    informative for the common models.
+    """
+
+    provider = "gemini"
+    default_max_concurrency = 5
+
+    def _build_payload(self, request: LLMRequest) -> dict[str, Any]:
+        # System messages go into the dedicated ``systemInstruction`` field;
+        # the rest of the conversation goes in ``contents`` with the
+        # assistant role renamed to ``model``.
+        system_parts: list[str] = []
+        contents: list[dict[str, Any]] = []
+        for msg in request.messages:
+            if msg.role == "system":
+                system_parts.append(msg.content)
+                continue
+            role = "model" if msg.role == "assistant" else msg.role
+            contents.append({"role": role, "parts": [{"text": msg.content}]})
+
+        generation_config: dict[str, Any] = {
+            "temperature": request.temperature,
+            "maxOutputTokens": request.max_tokens,
+        }
+        if request.stop is not None:
+            generation_config["stopSequences"] = list(request.stop)
+
+        payload: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": generation_config,
+        }
+        if system_parts:
+            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+        return payload
+
+    @staticmethod
+    def _parse_response(model: str, data: dict[str, Any]) -> LLMResponse:
+        try:
+            candidate = data["candidates"][0]
+            parts = candidate["content"]["parts"]
+            text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
+            usage_meta = data.get("usageMetadata") or {}
+            raw_finish = candidate.get("finishReason", "STOP") or "STOP"
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMResponseFormatError(f"gemini: malformed response: {exc}") from exc
+        prompt_tokens = int(usage_meta.get("promptTokenCount", 0))
+        completion_tokens = int(usage_meta.get("candidatesTokenCount", 0))
+        total_tokens = int(usage_meta.get("totalTokenCount", prompt_tokens + completion_tokens))
+        return LLMResponse(
+            text=text,
+            model=data.get("modelVersion", model),
+            provider="gemini",
+            usage=LLMUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            ),
+            finish_reason=_FINISH_REASON_MAP.get(raw_finish, "stop"),  # type: ignore[arg-type]
+            raw=data,
+        )
+
+    async def _send(self, request: LLMRequest) -> LLMResponse:
+        base = (self.base_url or _DEFAULT_BASE_URL).rstrip("/")
+        url = f"{base}/models/{request.model}:generateContent"
+        params: dict[str, str] = {}
+        if self.api_key:
+            params["key"] = self.api_key
+        req = self._client.build_request(
+            "POST",
+            url,
+            params=params,
+            json=self._build_payload(request),
+            headers={"content-type": "application/json"},
+        )
+        try:
+            resp = await self._client.send(req)
+        except httpx.TimeoutException as exc:
+            raise LLMTimeoutError(f"gemini: timeout: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise LLMTransientError(f"gemini: network error: {exc}") from exc
+        _raise_for_gemini_status(resp)
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise LLMResponseFormatError(f"gemini: invalid JSON: {exc}") from exc
+        return self._parse_response(request.model, data)
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        async with self._semaphore:
+            return await with_backoff(lambda: self._send(request))
+
+
+def _raise_for_gemini_status(resp: httpx.Response) -> None:
+    """Map a Gemini HTTP response to our error hierarchy."""
+    if resp.status_code < 400:
+        return
+    if resp.status_code in (401, 403):
+        raise LLMAuthError(f"gemini: auth failed: {resp.status_code} {resp.text}")
+    if resp.status_code == 429:
+        retry_after_hdr = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+        retry_after: float | None = None
+        if retry_after_hdr is not None:
+            try:
+                retry_after = float(retry_after_hdr)
+            except ValueError:
+                retry_after = None
+        raise LLMRateLimitError("gemini: rate limited", retry_after=retry_after)
+    if resp.status_code == 408 or resp.status_code >= 500:
+        raise LLMTransientError(f"gemini: transient {resp.status_code}: {resp.text}")
+    raise LLMPermanentError(f"gemini: {resp.status_code} {resp.text}")

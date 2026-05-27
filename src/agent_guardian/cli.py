@@ -45,6 +45,7 @@ from agent_guardian.cost import estimate_scan_cost
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
+    GeminiClient,
     LLMError,
     OllamaClient,
     OpenAIClient,
@@ -150,6 +151,30 @@ _BANNER = (
 )
 
 
+def _try_load_dotenv() -> None:
+    """Load ``.env`` from the current working directory if python-dotenv is installed.
+
+    Project-local only by design: we look in ``Path.cwd()`` (not ``$HOME``
+    or arbitrary ancestors) so users running ``agent-guardian`` against
+    different projects don't accidentally leak API keys across projects.
+    Existing environment variables are never overridden — real shell exports
+    always win.
+
+    The lookup is non-fatal: if python-dotenv is not installed (it's in the
+    ``dev`` extra, not the base deps), or if no ``.env`` file is present,
+    this is a silent no-op. Production users who want to avoid the dotenv
+    dependency simply export their keys in the usual way.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    cwd = Path.cwd()
+    for candidate in (cwd / ".env", cwd / ".env.local"):
+        if candidate.is_file():
+            load_dotenv(candidate, override=False)
+
+
 def _show_ethical_banner_once() -> None:
     """Print the ethical-use banner the first time a user runs a scan."""
     state = _read_state()
@@ -177,6 +202,8 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
       required. Safe for tests and dry runs.
     * ``"openai:<model>"`` / heuristic ``"gpt-*"`` → :class:`OpenAIClient`.
     * ``"anthropic:<model>"`` / heuristic ``"claude-*"`` → :class:`AnthropicClient`.
+    * ``"gemini:<model>"`` / heuristic ``"gemini-*"`` → :class:`GeminiClient`
+      (Google AI Studio API; see :mod:`agent_guardian.llm.gemini`).
     * ``"ollama:<model>"`` → :class:`OllamaClient` (local — no key).
 
     The role string is used only in error messages so the user knows
@@ -197,12 +224,15 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
             provider, model = "openai", spec
         elif lowered.startswith("claude-"):
             provider, model = "anthropic", spec
+        elif lowered.startswith("gemini-"):
+            provider, model = "gemini", spec
         elif lowered.startswith("ollama-"):
             provider, model = "ollama", spec
         else:
             raise typer.BadParameter(
                 f"Cannot infer provider for model spec '{spec}' (role={role}). "
-                f"Use one of: stub, openai:<model>, anthropic:<model>, ollama:<model>."
+                f"Use one of: stub, openai:<model>, anthropic:<model>, "
+                f"gemini:<model>, ollama:<model>."
             )
 
     if provider == "stub":
@@ -216,16 +246,26 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
         api_key = env_api_key("openai")
         if not api_key:
             raise typer.BadParameter(
-                f"OpenAI requested for {role} but AGENT_GUARDIAN_OPENAI_API_KEY is not set."
+                f"OpenAI requested for {role} but no API key found. "
+                f"Set AGENT_GUARDIAN_OPENAI_API_KEY or OPENAI_API_KEY."
             )
         return OpenAIClient(api_key=api_key)
     if provider == "anthropic":
         api_key = env_api_key("anthropic")
         if not api_key:
             raise typer.BadParameter(
-                f"Anthropic requested for {role} but AGENT_GUARDIAN_ANTHROPIC_API_KEY is not set."
+                f"Anthropic requested for {role} but no API key found. "
+                f"Set AGENT_GUARDIAN_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY."
             )
         return AnthropicClient(api_key=api_key)
+    if provider == "gemini":
+        api_key = env_api_key("gemini")
+        if not api_key:
+            raise typer.BadParameter(
+                f"Gemini requested for {role} but no API key found. "
+                f"Set AGENT_GUARDIAN_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY."
+            )
+        return GeminiClient(api_key=api_key)
     raise typer.BadParameter(
         f"Unknown provider '{provider}' for model spec '{spec}' (role={role})."
     )
@@ -424,7 +464,7 @@ def doctor() -> None:
 
     # Detect available LLM keys.
     found_keys = []
-    for provider in ("openai", "anthropic", "bedrock", "vertex"):
+    for provider in ("openai", "anthropic", "gemini", "bedrock", "vertex"):
         if env_api_key(provider):
             found_keys.append(provider)
     if found_keys:
@@ -854,7 +894,7 @@ async def _run_scan(
         evaluator_model=eff_evaluator,
         total_tokens=cfg.swarm.budget.max_total_tokens,
     )
-    typer.echo(f"cost estimate: ${estimate:.4f} (provider list prices, 2026-05-26)")
+    typer.echo(f"cost estimate: ${estimate:.4f} (provider list prices, 2026-05-27)")
     if budget_usd is not None and estimate > budget_usd:
         typer.echo(
             f"budget exceeded: estimate ${estimate:.4f} > cap ${budget_usd:.4f}",
@@ -1005,6 +1045,10 @@ def main(
     ),
 ) -> None:
     """AgentGuardian Open — eleven-agent adversarial swarm CLI."""
+    # Project-local .env auto-loading. Fires for every sub-command so
+    # ``agent-guardian scan`` / ``doctor`` / ``serve`` all see the keys.
+    # See ``_try_load_dotenv`` for the (deliberately conservative) lookup.
+    _try_load_dotenv()
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ Public surface:
 * :class:`BaseLLM`, :class:`LLMRequest`, :class:`LLMResponse`,
   :class:`LLMMessage`, :class:`LLMUsage` — provider-agnostic types.
 * :class:`StubLLM` + :class:`StubScript` — deterministic test fixture.
-* :class:`OpenAIClient`, :class:`AnthropicClient`, :class:`OllamaClient` —
-  live provider clients (work today).
+* :class:`OpenAIClient`, :class:`AnthropicClient`, :class:`GeminiClient`,
+  :class:`OllamaClient` — live provider clients (work today).
 * :class:`BedrockClient`, :class:`VertexClient` — request/response shaping
   only; full auth lands in M9.
 * :class:`LLMError` hierarchy.
@@ -34,6 +34,7 @@ from agent_guardian.llm.errors import (
     LLMTimeoutError,
     LLMTransientError,
 )
+from agent_guardian.llm.gemini import GeminiClient
 from agent_guardian.llm.ollama import OllamaClient
 from agent_guardian.llm.openai import OpenAIClient
 from agent_guardian.llm.retry import compute_delay, with_backoff
@@ -48,6 +49,7 @@ __all__ = [
     "AnthropicClient",
     "BaseLLM",
     "BedrockClient",
+    "GeminiClient",
     "LLMAuthError",
     "LLMError",
     "LLMMessage",

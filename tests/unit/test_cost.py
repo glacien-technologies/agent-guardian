@@ -80,6 +80,50 @@ def test_lookup_anthropic_heuristic() -> None:
     assert row.provider == "anthropic"
 
 
+def test_lookup_gemini_31_pro_preview_uses_table_price() -> None:
+    """The flagship 3.1 Pro Preview SKU resolves via the AI Studio rows."""
+    row = lookup_price("gemini:gemini-3.1-pro-preview")
+    assert row.provider == "gemini"
+    assert row.input_per_1k == pytest.approx(1.250)
+    assert row.output_per_1k == pytest.approx(10.000)
+
+
+def test_lookup_gemini_35_flash_table_price() -> None:
+    row = lookup_price("gemini:gemini-3.5-flash")
+    assert row.provider == "gemini"
+    assert row.input_per_1k == pytest.approx(0.300)
+    assert row.output_per_1k == pytest.approx(2.500)
+
+
+def test_lookup_gemini_31_flash_lite_table_price() -> None:
+    row = lookup_price("gemini:gemini-3.1-flash-lite")
+    assert row.provider == "gemini"
+    assert row.input_per_1k == pytest.approx(0.075)
+    assert row.output_per_1k == pytest.approx(0.300)
+
+
+def test_lookup_gemini_heuristic_routes_to_gemini_provider() -> None:
+    """Bare ``gemini-`` prefix routes to the AI Studio provider (was vertex)."""
+    row = lookup_price("gemini-future-99")
+    assert row.provider == "gemini"
+    # Unknown specific model -> fallback rate is positive.
+    assert row.input_per_1k > 0
+
+
+def test_price_table_has_six_gemini_rows() -> None:
+    gemini_rows = [r for r in PRICE_TABLE if r.provider == "gemini"]
+    assert len(gemini_rows) == 6
+    models = {r.model for r in gemini_rows}
+    assert {
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    } <= models
+
+
 def test_lookup_gpt_prefix_routes_to_openai() -> None:
     row = lookup_price("gpt-future-7")
     assert row.provider == "openai"

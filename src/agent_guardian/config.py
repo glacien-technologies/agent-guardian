@@ -166,6 +166,38 @@ def load_config(path: Path | None = None) -> Config:
 # ---------------------------------------------------------------------------
 
 
+# Provider → conventional env-var names to consult as a fallback when no
+# namespaced ``AGENT_GUARDIAN_<PROVIDER>_API_KEY`` is set. Order matters:
+# the first var with a value wins. ``GOOGLE_API_KEY`` is widely used as the
+# Gemini AI Studio key and is accepted as an alias.
+_STANDARD_ENV_VAR: dict[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY",),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+}
+
+
 def env_api_key(provider: str) -> str | None:
-    """Look up the ``AGENT_GUARDIAN_<PROVIDER>_API_KEY`` env var."""
-    return os.environ.get(f"AGENT_GUARDIAN_{provider.upper()}_API_KEY")
+    """Resolve a provider API key from the environment.
+
+    Precedence:
+
+    1. ``AGENT_GUARDIAN_<PROVIDER>_API_KEY`` — the namespaced variable. Users
+       running multiple red-team tools side-by-side can keep their per-tool
+       keys isolated this way.
+    2. The provider's conventional env var(s) — ``OPENAI_API_KEY``,
+       ``ANTHROPIC_API_KEY``, ``GEMINI_API_KEY``. For Gemini we also accept
+       ``GOOGLE_API_KEY`` as an alias because that's what the Google AI
+       Studio quickstart hands users.
+
+    Returns ``None`` when neither is set, so callers can decide whether to
+    error out (paid providers) or silently fall back (Ollama / stub).
+    """
+    namespaced = os.environ.get(f"AGENT_GUARDIAN_{provider.upper()}_API_KEY")
+    if namespaced:
+        return namespaced
+    for var in _STANDARD_ENV_VAR.get(provider.lower(), ()):
+        value = os.environ.get(var)
+        if value:
+            return value
+    return None

@@ -229,3 +229,99 @@ def test_env_api_key_returns_none_when_unset(monkeypatch: pytest.MonkeyPatch) ->
 def test_env_api_key_uppercases_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_GUARDIAN_ANTHROPIC_API_KEY", "ant-key")
     assert env_api_key("anthropic") == "ant-key"
+
+
+# Standard-env-var fallback. Namespaced ``AGENT_GUARDIAN_*`` keys win when set;
+# otherwise we fall back to the provider's conventional variable. GOOGLE_API_KEY
+# is accepted as an alias for Gemini.
+
+
+def test_env_api_key_prefers_namespaced_over_standard_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDIAN_OPENAI_API_KEY", "namespaced-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "standard-key")
+    assert env_api_key("openai") == "namespaced-key"
+
+
+def test_env_api_key_falls_back_to_standard_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_GUARDIAN_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fallback")
+    assert env_api_key("openai") == "openai-fallback"
+
+
+def test_env_api_key_falls_back_to_standard_anthropic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_GUARDIAN_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-fallback")
+    assert env_api_key("anthropic") == "anthropic-fallback"
+
+
+def test_env_api_key_prefers_namespaced_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUARDIAN_GEMINI_API_KEY", "namespaced-gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "fallback-gemini")
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-gemini")
+    assert env_api_key("gemini") == "namespaced-gemini"
+
+
+def test_env_api_key_falls_back_to_gemini_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_GUARDIAN_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-fallback")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert env_api_key("gemini") == "gemini-fallback"
+
+
+def test_env_api_key_google_api_key_alias_for_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GOOGLE_API_KEY is accepted as a fallback alias for Gemini."""
+    monkeypatch.delenv("AGENT_GUARDIAN_GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-fallback")
+    assert env_api_key("gemini") == "google-fallback"
+
+
+def test_env_api_key_gemini_prefers_gemini_api_key_over_google_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When both standard aliases are set, GEMINI_API_KEY wins."""
+    monkeypatch.delenv("AGENT_GUARDIAN_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-wins")
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-loses")
+    assert env_api_key("gemini") == "gemini-wins"
+
+
+def test_env_api_key_returns_none_when_nothing_set_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for var in ("AGENT_GUARDIAN_OPENAI_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    assert env_api_key("openai") is None
+
+
+def test_env_api_key_returns_none_when_nothing_set_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for var in (
+        "AGENT_GUARDIAN_GEMINI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    assert env_api_key("gemini") is None
+
+
+def test_env_api_key_unknown_provider_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Providers with no standard alias (e.g. bedrock) still resolve via the
+    namespaced var, and otherwise return None."""
+    monkeypatch.delenv("AGENT_GUARDIAN_BEDROCK_API_KEY", raising=False)
+    assert env_api_key("bedrock") is None
+    monkeypatch.setenv("AGENT_GUARDIAN_BEDROCK_API_KEY", "bk")
+    assert env_api_key("bedrock") == "bk"

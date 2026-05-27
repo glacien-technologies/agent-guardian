@@ -6,10 +6,11 @@ agents. Each consumes some slice of the 2M-token budget defined by
 per-provider price table and a deterministic estimator so the CLI can
 print a pre-flight USD figure before any tokens are spent.
 
-The price table is **frozen as of 2026-05-26** and reflects the public
+The price table is **frozen as of 2026-05-27** and reflects the public
 list prices for each provider's tier. Unknown models fall back to a
 documented default rate that errs on the high side so the operator does
-not under-estimate.
+not under-estimate. Gemini list prices should be re-verified at
+https://ai.google.dev/pricing before any decision relies on them.
 
 The estimator splits the 2M-token budget across three roles:
 
@@ -35,7 +36,7 @@ __all__ = [
 ]
 
 # Date the price table was last verified against provider public pricing.
-PRICE_TABLE_AS_OF = "2026-05-26"
+PRICE_TABLE_AS_OF = "2026-05-27"
 
 # Fallback rate used when an unknown model is requested. Documented in
 # ``lookup_price`` — kept deliberately above the typical mid-tier rate so
@@ -60,7 +61,7 @@ class PriceRow:
 
 
 PRICE_TABLE: tuple[PriceRow, ...] = (
-    # OpenAI — list prices for the gpt-4o family (verified 2026-05-26).
+    # OpenAI — list prices for the gpt-4o family (verified 2026-05-27).
     PriceRow("openai", "gpt-4o", 2.50, 10.00),
     PriceRow("openai", "gpt-4o-mini", 0.150, 0.60),
     PriceRow("openai", "gpt-4.1", 2.00, 8.00),
@@ -73,7 +74,17 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     # Bedrock — pass-through Anthropic Claude pricing.
     PriceRow("bedrock", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("bedrock", "claude-sonnet-4-6", 3.00, 15.00),
-    # Vertex AI — Gemini family list prices (rough estimates 2026-05-26).
+    # Google Gemini — AI Studio "Standard" tier list prices, USD / 1k tokens.
+    # Verified 2026-05-27 against https://ai.google.dev/pricing — re-check
+    # before relying on these numbers; the Gemini SKU lineup moves quickly.
+    PriceRow("gemini", "gemini-3.1-pro-preview", 1.250, 10.000),
+    PriceRow("gemini", "gemini-3.5-flash", 0.300, 2.500),
+    PriceRow("gemini", "gemini-3.1-flash-lite", 0.075, 0.300),
+    PriceRow("gemini", "gemini-2.5-pro", 1.250, 10.000),
+    PriceRow("gemini", "gemini-2.5-flash", 0.300, 2.500),
+    PriceRow("gemini", "gemini-2.5-flash-lite", 0.075, 0.300),
+    # Vertex AI — Gemini family list prices (parity with the AI Studio
+    # surface; pricing is the same per-token on the Vertex SKU).
     PriceRow("vertex", "gemini-2.5-flash", 0.30, 2.50),
     PriceRow("vertex", "gemini-2.5-pro", 1.25, 10.00),
     # Free / local — wildcard rows.
@@ -137,7 +148,9 @@ def lookup_price(model_spec: str) -> PriceRow:
     if spec.startswith("claude-"):
         return PriceRow("anthropic", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
     if spec.startswith("gemini-"):
-        return PriceRow("vertex", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
+        # AI Studio is the default Gemini surface for new users. Vertex
+        # users typically use the ``vertex:`` provider prefix explicitly.
+        return PriceRow("gemini", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
 
     # Last resort — return a row with the fallback default rate.
     return PriceRow("unknown", spec, _FALLBACK_INPUT_PER_1K, _FALLBACK_OUTPUT_PER_1K)
@@ -163,6 +176,12 @@ def estimate_scan_cost(
     estimator multiplies through the per-1k price for the matching model
     and sums to a single dollar figure. Returns ``0.0`` for free /
     local-only model mixes (Ollama, stub).
+
+    Recognised paid providers today: OpenAI (``gpt-*``), Anthropic
+    (``claude-*``), Google Gemini (``gemini-*`` via AI Studio), Bedrock /
+    Vertex (Claude / Gemini on hyperscaler infra). Unknown models fall
+    back to a conservative documented default rate — see
+    :func:`lookup_price` for the resolution chain.
     """
     if total_tokens <= 0:
         return 0.0

@@ -21,7 +21,7 @@ from agent_guardian.cli import (
     app,
     build_llm,
 )
-from agent_guardian.llm import OpenAIClient, StubLLM
+from agent_guardian.llm import GeminiClient, OpenAIClient, StubLLM
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -39,12 +39,19 @@ def _isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Redirect HOME at the OS layer so each CLI test gets a clean state dir."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    # Clear any provider keys leaking from the host env.
+    # Clear any provider keys leaking from the host env — both the
+    # namespaced AGENT_GUARDIAN_* vars and the standard fallbacks the
+    # post-M15 env_api_key() resolves via.
     for var in (
         "AGENT_GUARDIAN_OPENAI_API_KEY",
         "AGENT_GUARDIAN_ANTHROPIC_API_KEY",
+        "AGENT_GUARDIAN_GEMINI_API_KEY",
         "AGENT_GUARDIAN_BEDROCK_API_KEY",
         "AGENT_GUARDIAN_VERTEX_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -445,6 +452,50 @@ def test_build_llm_heuristic_gpt() -> None:
     with pytest.raises(_typer.BadParameter):
         # No env key — but routing must work.
         build_llm("gpt-future-99", role="attacker")
+
+
+def test_build_llm_routes_gemini_prefix_heuristic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare ``gemini-...`` spec routes to the AI Studio Gemini client."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    llm = build_llm("gemini-3.1-pro-preview", role="attacker")
+    assert isinstance(llm, GeminiClient)
+    assert llm.provider == "gemini"
+
+
+def test_build_llm_explicit_gemini_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``gemini:<model>`` prefix routes to GeminiClient regardless of name."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    llm = build_llm("gemini:gemini-3.5-flash", role="evaluator")
+    assert isinstance(llm, GeminiClient)
+
+
+def test_build_llm_gemini_accepts_google_api_key_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``GOOGLE_API_KEY`` is honoured as a fallback for ``gemini`` routing."""
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+    llm = build_llm("gemini-3.1-pro-preview", role="attacker")
+    assert isinstance(llm, GeminiClient)
+
+
+def test_build_llm_gemini_missing_key_errors_with_all_three_options() -> None:
+    """The missing-key error message must name every accepted env var so the
+    operator can pick whichever one fits their setup."""
+    import typer as _typer
+
+    with pytest.raises(_typer.BadParameter, match="no API key found") as exc_info:
+        build_llm("gemini-3.1-pro-preview", role="attacker")
+    message = str(exc_info.value)
+    assert "AGENT_GUARDIAN_GEMINI_API_KEY" in message
+    assert "GEMINI_API_KEY" in message
+    assert "GOOGLE_API_KEY" in message
+
+
+def test_build_llm_openai_with_standard_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OPENAI_API_KEY (standard env var) works alongside the namespaced one."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-standard")
+    llm = build_llm("openai:gpt-4o", role="attacker")
+    assert isinstance(llm, OpenAIClient)
 
 
 # ---------------------------------------------------------------------------

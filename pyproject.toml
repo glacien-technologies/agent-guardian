@@ -63,6 +63,11 @@ dev = [
   "pre-commit>=4.0",
   "respx>=0.22",
   "pip-licenses>=5.0",
+  # python-dotenv enables ``.env`` auto-loading from the cwd (see
+  # ``cli._try_load_dotenv``). Dev-only by design: production users export
+  # real environment variables; the dev extra is the path of least
+  # friction for local hacking.
+  "python-dotenv>=1.0",
 ]
 
 [project.urls]
