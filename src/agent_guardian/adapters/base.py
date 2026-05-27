@@ -40,6 +40,13 @@ class TargetFingerprint(BaseModel):
     has_memory: bool = False
     touches_pii: bool = False
     is_multi_agent: bool = False
+    # OWASP-2026-relevant evidence-backed signals (set by recon agent based on
+    # observed target responses). Distinct from ``has_tools`` / ``has_memory``
+    # / ``is_multi_agent`` which are heuristic / adapter-declared — these
+    # three are populated only when recon probes elicit positive evidence.
+    external_systems_detected: bool = False
+    multi_agent_detected: bool = False
+    cross_session_data_detected: bool = False
     framework: str | None = None
     declared_tools: list[str] = Field(default_factory=list)
     declared_memory_keys: list[str] = Field(default_factory=list)
