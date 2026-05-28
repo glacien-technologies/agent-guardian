@@ -434,6 +434,11 @@ class StrategyContext:
     # inside a plausible operational cover story (defeats refuse-on-transparent-
     # ask). Default off so it can be A/B'd against the recon-adaptive baseline.
     enable_pretext: bool = False
+    # M2 roadmap #2 — when True, attacker delivers its instruction embedded in
+    # trusted-channel content (retrieved doc / tool output / email / memory /
+    # a2a message) rather than a direct user ask (indirect prompt injection).
+    # Orthogonal to pretext; both may be on. Default off.
+    enable_indirect: bool = False
 
 
 class Strategy(ABC):
@@ -559,4 +564,9 @@ class Strategy(ABC):
             from agent_guardian.strategies.pretext import render_pretext_directive
 
             extra = f"{extra}\n\n{render_pretext_directive(self.ctx.rng)}"
+        # M2 roadmap #2 — indirect-injection delivery (trusted-channel envelope).
+        if self.ctx.enable_indirect:
+            from agent_guardian.strategies.indirect import render_indirect_directive
+
+            extra = f"{extra}\n\n{render_indirect_directive(self.ctx.rng)}"
         return extra

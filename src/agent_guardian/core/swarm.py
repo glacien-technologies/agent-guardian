@@ -243,6 +243,10 @@ class SwarmConfig:
     # payloads are wrapped in a rotating legitimate-operations pretext to defeat
     # refuse-on-transparent-ask. Threaded into every agent's StrategyContext.
     enable_pretext: bool = False
+    # M2 roadmap #2 — indirect-injection delivery. When True, attacker payloads
+    # are delivered embedded in trusted-channel content (doc/tool-output/email/
+    # memory/a2a) rather than as a direct user ask. Threaded onto every agent.
+    enable_indirect: bool = False
 
     def __post_init__(self) -> None:
         """Apply the scan-mode preset to any un-overridden knobs.
@@ -789,6 +793,8 @@ class SwarmCommander:
             # cap, keeping the public AsiAgent API stable).
             if self.config.enable_pretext:
                 agent._enable_pretext = True  # type: ignore[attr-defined]
+            if self.config.enable_indirect:
+                agent._enable_indirect = True  # type: ignore[attr-defined]
             # Spec §6: attach the per-agent Commander brief (if any). The
             # agent's strategy iteration is unchanged; goal-specific
             # scenarios are folded into the seed pool via spec §8 wiring.
