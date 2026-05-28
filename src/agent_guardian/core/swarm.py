@@ -73,6 +73,7 @@ from agent_guardian.core.scoring import (
     AivssResult,
     compute_aivss,
 )
+from agent_guardian.core.supervisor import Supervisor
 from agent_guardian.core.tiering import detect_tier
 from agent_guardian.cost import lookup_price
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
@@ -381,9 +382,16 @@ class SwarmCommander:
         memory: SharedMemory | None = None,
         observer: SwarmObserver | None = None,
         rng_seed: int = 0,
+        supervisor: Supervisor | None = None,
     ) -> None:
         self.config = config
         self.target = target
+        # M2 Pattern 9 — optional human-in-the-loop control. When supplied, the
+        # checkpoint loop honors an operator cancel by tripping the existing
+        # cooperative cancel signal (so in-flight agents exit at their next
+        # turn boundary, exactly like an EARLY_STOP). ``None`` keeps the v1
+        # behavior unchanged.
+        self._supervisor = supervisor
         # Wrap each LLM client in a usage-tracking decorator so the per-role
         # tokens consumed during the scan are observable for cost rollup in
         # :meth:`_phase_finalise`. Cooperates with the per-agent wrappers in
@@ -939,6 +947,15 @@ class SwarmCommander:
         try:
             while not self._cancel_event.is_set():
                 await asyncio.sleep(self.config.checkpoint_interval_seconds)
+                # M2 Pattern 9 — operator cancel maps onto the cooperative
+                # cancel signal so in-flight agents exit cleanly.
+                if self._supervisor is not None and self._supervisor.is_cancelled:
+                    _LOG.info(
+                        "checkpoint: supervisor cancel (%s) -- setting cancel signal",
+                        self._supervisor.cancel_reason,
+                    )
+                    self._cancel_event.set()
+                    return
                 decision = self._checkpoint()
                 self._final_decision = decision
                 self._emit(
