@@ -447,6 +447,12 @@ class Strategy(ABC):
     """
 
     name: str = ""
+    # M2 Pattern 1 — N-version racing metadata. Strategies sharing an
+    # ``orthogonality_class`` are NOT raced against each other (they'd explore
+    # the same space); the racer picks orthogonal classes. ``estimated_tokens``
+    # is the planner's a-priori cost hint for the budget ledger.
+    orthogonality_class: str = "default"
+    estimated_tokens: int = 5_000
 
     def __init__(self, ctx: StrategyContext) -> None:
         self.ctx = ctx
