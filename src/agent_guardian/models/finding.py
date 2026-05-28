@@ -28,6 +28,11 @@ class Finding(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     summary: str = Field(min_length=1)
     transcript_ref: str | None = None
+    # M2 Pattern 2 — the attack prompt that produced this finding, so the PoV
+    # runner can faithfully replay it. ``None`` for findings whose trigger was
+    # not captured (then the PoV gate keeps them ungated rather than dropping
+    # something it cannot reproduce).
+    trigger_prompt: str | None = None
     # M2 Pattern 2 — PoV-as-oracle. ``pov_reference`` points at the reproducer
     # script (e.g. ``pov/<finding_id>.py`` inside the bundle) and
     # ``pov_reliability`` is the N-fold rerun success rate (Wilson-lower-bounded

@@ -1132,6 +1132,7 @@ class AsiAgent(ABC):
             confidence=verdict.confidence,
             summary=summary[:480],
             transcript_ref=None,
+            trigger_prompt=prompt,
             created_at=_utcnow(),
         )
 
