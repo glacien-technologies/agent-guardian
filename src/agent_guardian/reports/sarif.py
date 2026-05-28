@@ -74,20 +74,28 @@ def _build_rules(findings: list[Finding]) -> list[dict[str, Any]]:
 
 
 def _build_result(finding: Finding) -> dict[str, Any]:
+    props: dict[str, Any] = {
+        "aivss_severity": finding.severity.value,
+        "asi": finding.asi.value,
+        "mitre_atlas": list(finding.mitre_atlas),
+        "csa": finding.csa_category.value,
+        "confidence": finding.confidence,
+        "success": finding.success,
+        "attempt_count": finding.attempt_count,
+        "finding_id": finding.id,
+    }
+    # M2 Pattern 10 — surface the PoV reference + reliability when present so
+    # downstream evidence-pack tooling can locate the reproducer. Omitted for
+    # v1 findings that predate the PoV harness (fields are None).
+    if finding.pov_reference is not None:
+        props["pov_reference"] = finding.pov_reference
+    if finding.pov_reliability is not None:
+        props["pov_reliability"] = finding.pov_reliability
     return {
         "ruleId": finding.probe_id,
         "level": _sarif_level(finding.severity.value),
         "message": {"text": finding.summary},
-        "properties": {
-            "aivss_severity": finding.severity.value,
-            "asi": finding.asi.value,
-            "mitre_atlas": list(finding.mitre_atlas),
-            "csa": finding.csa_category.value,
-            "confidence": finding.confidence,
-            "success": finding.success,
-            "attempt_count": finding.attempt_count,
-            "finding_id": finding.id,
-        },
+        "properties": props,
     }
 
 

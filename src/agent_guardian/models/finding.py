@@ -28,6 +28,14 @@ class Finding(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     summary: str = Field(min_length=1)
     transcript_ref: str | None = None
+    # M2 Pattern 2 — PoV-as-oracle. ``pov_reference`` points at the reproducer
+    # script (e.g. ``pov/<finding_id>.py`` inside the bundle) and
+    # ``pov_reliability`` is the N-fold rerun success rate (Wilson-lower-bounded
+    # in the runner). Both ``None`` for v1 findings produced before the PoV
+    # harness; the Commander drops findings whose reliability falls below the
+    # gate before SARIF emission.
+    pov_reference: str | None = None
+    pov_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")
