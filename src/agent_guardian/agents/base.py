@@ -347,6 +347,16 @@ class AsiAgent(ABC):
     default_csa_category: ClassVar[CsaCategory]
     default_severity: ClassVar[Severity] = Severity.HIGH
 
+    # M2 Pattern 8 — specialist contract. ``allowed_tools`` is the closed
+    # allowlist of typed-tool names (see :mod:`agent_guardian.tools`) this
+    # agent may invoke; the empty default means "uses the prompt-generation
+    # strategy path only" (the v1 attack agents, which don't call typed
+    # tools). ``estimated_cost_per_run_usd`` is the planner's a-priori cost
+    # estimate the Commander's budget ledger (Pattern 7) uses for proportional
+    # allocation before any spend is observed.
+    allowed_tools: ClassVar[frozenset[str]] = frozenset()
+    estimated_cost_per_run_usd: ClassVar[float] = 0.05
+
     # Termination knobs.
     target_findings: ClassVar[int] = 3
     no_progress_seconds: ClassVar[int] = 60
