@@ -429,6 +429,11 @@ class StrategyContext:
     declared_tools: list[str] = field(default_factory=list)
     declared_memory_keys: list[str] = field(default_factory=list)
     surface_notes: str = ""
+    # M2 roadmap #1 — when True, attacker calls additionally carry a rotating
+    # pretext / social-engineering directive so the adversarial ask arrives
+    # inside a plausible operational cover story (defeats refuse-on-transparent-
+    # ask). Default off so it can be A/B'd against the recon-adaptive baseline.
+    enable_pretext: bool = False
 
 
 class Strategy(ABC):
@@ -549,4 +554,9 @@ class Strategy(ABC):
         )
         if surface:
             extra = f"{extra}\n\n{surface}"
+        # M2 roadmap #1 — rotating pretext / social-engineering frame.
+        if self.ctx.enable_pretext:
+            from agent_guardian.strategies.pretext import render_pretext_directive
+
+            extra = f"{extra}\n\n{render_pretext_directive(self.ctx.rng)}"
         return extra

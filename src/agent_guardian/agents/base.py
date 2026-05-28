@@ -742,6 +742,7 @@ class AsiAgent(ABC):
             declared_tools=list(fingerprint.declared_tools),
             declared_memory_keys=list(fingerprint.declared_memory_keys),
             surface_notes=fingerprint.notes,
+            enable_pretext=getattr(self, "_enable_pretext", False),
         )
         try:
             strategy = self.strategy_stack(ctx)

@@ -239,6 +239,10 @@ class SwarmConfig:
     # (evidence/specificity/novelty/false-positive-risk) and dropped if the
     # quality is too low / FP-risk too high. Default OFF.
     enable_critic_rubric: bool = False
+    # M2 roadmap #1 — pretext / social-engineering framing. When True, attacker
+    # payloads are wrapped in a rotating legitimate-operations pretext to defeat
+    # refuse-on-transparent-ask. Threaded into every agent's StrategyContext.
+    enable_pretext: bool = False
 
     def __post_init__(self) -> None:
         """Apply the scan-mode preset to any un-overridden knobs.
@@ -779,6 +783,12 @@ class SwarmCommander:
             # keeps the public AsiAgent API stable.
             if self.config.probes_per_category is not None:
                 agent._mode_probe_cap = self.config.probes_per_category  # type: ignore[attr-defined]
+            # M2 roadmap #1 -- propagate the pretext-framing toggle onto the
+            # agent; it reads ``_enable_pretext`` when building its
+            # StrategyContext (same private-attribute indirection as the probe
+            # cap, keeping the public AsiAgent API stable).
+            if self.config.enable_pretext:
+                agent._enable_pretext = True  # type: ignore[attr-defined]
             # Spec §6: attach the per-agent Commander brief (if any). The
             # agent's strategy iteration is unchanged; goal-specific
             # scenarios are folded into the seed pool via spec §8 wiring.
