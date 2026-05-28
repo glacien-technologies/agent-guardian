@@ -1,6 +1,6 @@
-# AgentGuardian Open
+# AgentGuardian
 
-The first open-source adversarial-swarm framework for agentic AI red-teaming.
+Adversarial-swarm framework for agentic AI red-teaming.
 
 [![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
@@ -42,11 +42,6 @@ to the [Architecture](architecture.md) page if you want the technical tour.
 | OWASP AIVSS v0.8                     | Deterministic 0–100 score, four-tier severity bands      |
 | MITRE ATLAS v5.4.0                   | Every finding tagged with one or more ATLAS tactic IDs   |
 | CSA Agentic AI Red Teaming Guide     | Cross-tagged on every finding                            |
-
-## Project status
-
-Active development, pre-1.0. See the [Roadmap](roadmap.md) for the
-milestone-by-milestone breakdown and what ships when.
 
 ## License
 

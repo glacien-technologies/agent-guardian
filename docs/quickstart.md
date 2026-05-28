@@ -76,10 +76,17 @@ Generate the marketing badge:
 agent-guardian badge $(agent-guardian last-score) --svg > badge.svg
 ```
 
-Or get the full PDF report:
+Or regenerate the report in a different format from the stored scan:
 
 ```bash
-agent-guardian report --format pdf --out report.pdf
+agent-guardian report $(jq -r .last_scan_id ~/.agentguardian/state.json) --output md
+```
+
+Need a PDF? Install the PDF extra and pass `--output pdf` on the next scan:
+
+```bash
+pip install 'agent-guardian[full]'
+agent-guardian scan --system-prompt prompt.txt --output pdf --output-path report.pdf
 ```
 
 That's it — under five minutes, and you have a deterministic, signed,

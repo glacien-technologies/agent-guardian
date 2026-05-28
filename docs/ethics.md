@@ -1,7 +1,7 @@
 # Ethics and Responsible Use
 
 !!! warning "Authorised use only"
-    AgentGuardian Open is for testing systems you own or are explicitly
+    AgentGuardian is for testing systems you own or are explicitly
     authorised to test. Use against third-party systems without
     authorisation is unlawful in most jurisdictions and a violation of
     these terms.
@@ -57,7 +57,7 @@ for our disclosure policy.
 
 ## Telemetry
 
-AgentGuardian Open sends **zero telemetry**. The package does not phone
+AgentGuardian sends **zero telemetry**. The package does not phone
 home, does not log usage metrics, does not check for updates, and does
 not contact any Glacien-operated infrastructure. Verify this for yourself
 by inspecting `src/agent_guardian/` — there are no external calls except
@@ -86,7 +86,7 @@ enforcement where appropriate.
 
 ## Disclaimer
 
-AgentGuardian Open is provided under the Apache License 2.0 "as is,"
+AgentGuardian is provided under the Apache License 2.0 "as is,"
 without warranty of any kind. The authors and Glacien Pte. Ltd. accept
 no liability for damages arising from use of this software — including,
 but not limited to, damages caused by use of the software outside its

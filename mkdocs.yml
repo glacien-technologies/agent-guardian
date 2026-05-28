@@ -1,5 +1,12 @@
-site_name: AgentGuardian Open
+site_name: AgentGuardian
 site_url: https://agentguardian.ai/docs/
+use_directory_urls: false
+
+exclude_docs: |
+  contributing/
+  security/
+  telemetry/
+  launch-manual-blockers.md
 site_description: First open-source adversarial-swarm framework for agentic AI red-teaming.
 site_author: Glacien Pte. Ltd.
 copyright: Copyright &copy; 2026 Glacien Pte. Ltd. Apache-2.0.
@@ -12,8 +19,8 @@ theme:
   name: material
   palette:
     - scheme: slate
-      primary: cyan
-      accent: cyan
+      primary: deep purple
+      accent: purple
   features:
     - navigation.tabs
     - navigation.sections
@@ -27,22 +34,64 @@ theme:
     logo: material/shield-search
     repo: fontawesome/brands/github
 
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: sphinx
+            show_source: true
+            show_root_heading: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+
 nav:
   - Home: index.md
-  - Why: why.md
-  - Quickstart: quickstart.md
-  - Architecture: architecture.md
-  - AIVSS Formula: aivss-formula.md
-  - Adapters:
-      - Overview: adapters/index.md
-      - System Prompt: adapters/prompt.md
-      - Code: adapters/code.md
-      - HTTP: adapters/http.md
-      - Framework: adapters/framework.md
-  - API Reference: api-reference.md
-  - Ethics: ethics.md
-  - Glossary: glossary.md
+  - Getting Started:
+      - Why: why.md
+      - Install: getting-started/install.md
+      - Quickstart: quickstart.md
+      - Your first scan: getting-started/first-scan.md
+  - User Guide:
+      - Configuration: guide/configuration.md
+      - Targets & Adapters:
+          - Overview: adapters/index.md
+          - System Prompt: adapters/prompt.md
+          - Code: adapters/code.md
+          - HTTP: adapters/http.md
+          - Framework: adapters/framework.md
+      - LLM Providers:
+          - Overview: providers/index.md
+          - OpenAI: providers/openai.md
+          - Anthropic: providers/anthropic.md
+          - Google Gemini / Vertex: providers/vertex.md
+          - AWS Bedrock: providers/bedrock.md
+          - Ollama (local): providers/ollama.md
+      - Output Formats: guide/output-formats.md
+      - Operations Checklist: operator-checklist.md
+  - CLI Reference: cli.md
+  - Concepts:
+      - Architecture: architecture.md
+      - AIVSS Score: aivss-formula.md
+      - Probes: concepts/probes.md
+      - Agents & Swarm: concepts/swarm.md
+      - Glossary: glossary.md
+  - API Reference:
+      - Overview: api/index.md
+      - CLI: api/cli.md
+      - Models: api/models.md
+      - Adapters: api/adapters.md
+      - Core (Swarm): api/core.md
+  - Contributing:
+      - Contributing: contributing.md
+      - Releasing to PyPI: publishing.md
+      - Deploying the docs site: site-deployment.md
+      - Ethics: ethics.md
   - Roadmap: roadmap.md
+  - Research / Citation: arxiv-preprint.md
 
 markdown_extensions:
   - admonition

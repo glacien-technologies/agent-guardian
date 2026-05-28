@@ -62,6 +62,6 @@ alignment matrix.
 ## Beyond v2.0
 
 We will see. The agentic-security landscape will look very different in
-2027. We want AgentGuardian Open to be the open framework everyone
+2027. We want AgentGuardian to be the open framework everyone
 agrees the 0–100 score should run on, however the rest of the stack
 evolves around it.

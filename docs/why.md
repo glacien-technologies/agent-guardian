@@ -57,7 +57,7 @@ on the scoring side. The 0–100 number ends up gated behind a paywall, the
 methodology is proprietary, and reproducibility dies. We do not want that
 to be the future of the agentic-security category.
 
-AgentGuardian Open is Apache-2.0, with no telemetry, no API-key
+AgentGuardian is Apache-2.0, with no telemetry, no API-key
 requirement, and a published formula. Every probe, every adapter, every
 weight is in the repo. If you do not trust us, you can read the code.
 That is the point.
@@ -70,11 +70,3 @@ multi-step LLM attacks. The reconnaissance phase implements the
 tool-graph and memory-graph probing techniques described in the OWASP ASI
 2026 reference implementation. We did not invent these; we packaged them
 into a swarm.
-
-## What we want from you
-
-Use it. Find bugs. Submit probes. Build adapters for the frameworks we
-have not covered. File CVE-style disclosures responsibly via the
-[security policy](https://github.com/glacien-technologies/agent-guardian/blob/main/SECURITY.md).
-The agentic-security category is being defined right now, in 2026, and
-the more eyes on the framework the better the number gets.
