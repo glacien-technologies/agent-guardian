@@ -713,15 +713,25 @@ class AsiAgent(ABC):
                 len(goal_specific_seeds),
                 len(combined_seeds),
             )
+        # v1.1 — recon-adaptive goal: when the recon phase discovered concrete
+        # tool names, fold them into the goal string so even strategies that
+        # only read ``ctx.goal`` (not the full surface brief) get a handle on
+        # the real attack surface instead of a bare ASI category.
+        goal = f"Compromise the target via {self.asi_category.value}"
+        if fingerprint.declared_tools:
+            goal = f"{goal} — target exposes tools: {', '.join(fingerprint.declared_tools)}"
         ctx = StrategyContext(
             attacker_llm=self.attacker_llm,
             attacker_model=self.attacker_model,
-            goal=f"Compromise the target via {self.asi_category.value}",
+            goal=goal,
             seeds=combined_seeds,
             memory=memory,
             rng=self.rng,
             max_turns=self.budget.max_turns,
             attack_specialization=getattr(self, "attack_specialization", ""),
+            declared_tools=list(fingerprint.declared_tools),
+            declared_memory_keys=list(fingerprint.declared_memory_keys),
+            surface_notes=fingerprint.notes,
         )
         try:
             strategy = self.strategy_stack(ctx)
