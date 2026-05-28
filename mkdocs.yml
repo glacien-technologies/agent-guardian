@@ -78,6 +78,7 @@ nav:
       - AIVSS Score: aivss-formula.md
       - Probes: concepts/probes.md
       - Agents & Swarm: concepts/swarm.md
+      - Scan Modes: concepts/scan-modes.md
       - Glossary: glossary.md
   - API Reference:
       - Overview: api/index.md

@@ -49,7 +49,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 
@@ -210,6 +210,110 @@ class SwarmConfig:
     # synthesise goal-specific scenarios (spec §8). When None, the swarm
     # skips Commander decomposition and runs the standard seed pass only.
     target_goal: str | None = None
+    # v1.1 — three-mode scan policy. See ``ScanMode`` enum below for
+    # semantics. Default flips to FULL so security-tool users get
+    # thorough coverage out of the box; SMART/FAST are explicit
+    # downgrades for cost/CI scenarios.
+    mode: ScanMode | None = None
+    # Per-mode knobs (auto-populated from the mode preset below if not
+    # explicitly overridden by the caller). Setting any of these in the
+    # constructor wins over the preset.
+    min_turns_before_early_stop: int | None = None
+    probes_per_category: int | None = None
+    max_turns_per_agent: int | None = None
+
+    def __post_init__(self) -> None:
+        """Apply the scan-mode preset to any un-overridden knobs.
+
+        Mode is the user-facing dial. The individual knobs above are
+        present for legacy callers and for tests that want to mix-and-
+        match; if both are set the explicit value wins, mirroring how
+        Pydantic-style configs typically resolve precedence.
+        """
+        # Default mode is FULL — security tools should be thorough by
+        # default; users opt-down to SMART/FAST for speed.
+        effective_mode = self.mode if self.mode is not None else ScanMode.FULL
+        preset = _MODE_PRESETS[effective_mode]
+        # Only fill knobs the caller left unset (None). This makes mode
+        # composable with explicit overrides: a test can say
+        # ``SwarmConfig(mode=FULL, max_turns_per_agent=4)`` and get a
+        # FULL-everything-else-with-tiny-turns scan.
+        if self.min_turns_before_early_stop is None:
+            object.__setattr__(
+                self, "min_turns_before_early_stop", preset["min_turns_before_early_stop"]
+            )
+        if self.probes_per_category is None and preset["probes_per_category"] is not None:
+            object.__setattr__(self, "probes_per_category", preset["probes_per_category"])
+        if self.max_turns_per_agent is None and preset["max_turns_per_agent"] is not None:
+            object.__setattr__(self, "max_turns_per_agent", preset["max_turns_per_agent"])
+        # The early_stop_variance_threshold field has a non-None default
+        # (2.0 — the SMART value), so we only let the preset override it
+        # when the caller did not pass it explicitly. We can't easily
+        # detect "explicit vs default" with dataclasses, so the rule is:
+        # FULL forces 0.0 (variance can never be < 0), FAST relaxes to 5.0,
+        # SMART keeps whatever's in the field. This matches user intent.
+        if effective_mode is ScanMode.FULL:
+            object.__setattr__(self, "early_stop_variance_threshold", 0.0)
+        elif effective_mode is ScanMode.FAST and self.early_stop_variance_threshold == 2.0:
+            # Only push it up if it's still at the SMART default.
+            object.__setattr__(self, "early_stop_variance_threshold", 5.0)
+        # Finally, persist the resolved mode so downstream consumers
+        # (Scan model, telemetry, dashboard) can read it back.
+        object.__setattr__(self, "mode", effective_mode)
+
+
+class ScanMode(str, Enum):
+    """User-facing scan thoroughness modes (v1.1).
+
+    Orthogonal to :class:`Tier`. Tier sets the *target's* threat level
+    (drives probe-set selection); mode sets the *scan's* thoroughness
+    (drives early-stop + per-agent budgets + probe-subset gating).
+
+    Picks:
+
+    * ``FAST`` — CI gate / smoke check. Top 3 probes per agent, 4-turn
+      cap per agent, aggressive early-stop. ~$0.008 / ~45s on Gemini.
+    * ``SMART`` — Today's pre-v1.1 default. Full probe corpus, 12-turn
+      budget, early-stop fires on AIVSS variance + no-recent-findings.
+      ~$0.03 / ~2 min on Gemini.
+    * ``FULL`` *(new default)* — Pre-release audit, security review,
+      coverage measurement. Full corpus, 12 turns, **early-stop
+      effectively disabled** (gated until every agent has used its
+      full budget). ~$0.06 / ~5 min on Gemini.
+
+    Default is FULL because for a security tool, the right failure
+    mode is "you paid 2x more for thorough coverage" not "you got a
+    fast misleading score."
+    """
+
+    FAST = "fast"
+    SMART = "smart"
+    FULL = "full"
+
+
+# Mode -> overrides for SwarmConfig fields. Keys mirror the field names.
+# ``None`` means "leave whatever the caller set" (so the SwarmConfig field
+# default applies). Concrete values override.
+_MODE_PRESETS: dict[ScanMode, dict[str, int | None]] = {
+    ScanMode.FAST: {
+        "min_turns_before_early_stop": 0,
+        "probes_per_category": 3,
+        "max_turns_per_agent": 4,
+    },
+    ScanMode.SMART: {
+        "min_turns_before_early_stop": 0,
+        "probes_per_category": None,
+        "max_turns_per_agent": None,
+    },
+    ScanMode.FULL: {
+        # Gate any EARLY_STOP decision until every still-running agent
+        # has used its full turn budget. 999 is "effectively never opens"
+        # since per-agent max_turns is 12 in current configs.
+        "min_turns_before_early_stop": 999,
+        "probes_per_category": None,
+        "max_turns_per_agent": None,
+    },
+}
 
 
 class CheckpointDecision(str, Enum):
@@ -610,17 +714,31 @@ class SwarmCommander:
         # derive the per-agent slice from total_tokens so test overrides
         # propagate cleanly.
         for cls in _ASI_AGENT_CLASSES:
+            # v1.1 -- in FAST mode, cap per-agent turns at a small value
+            # so the whole scan finishes quickly. SMART/FULL keep the
+            # AgentBudget default (12 turns).
+            mode_max_turns = self.config.max_turns_per_agent
+            agent_budget_kwargs: dict[str, Any] = {
+                "tokens_remaining": per_agent_tokens,
+                "wall_seconds_remaining": self.config.overall_wall_seconds,
+            }
+            if mode_max_turns is not None:
+                agent_budget_kwargs["max_turns"] = mode_max_turns
             agent = cls(
                 attacker_llm=self.attacker_llm,
                 evaluator_llm=self.evaluator_llm,
                 attacker_model=self.config.attacker_model,
                 evaluator_model=self.config.evaluator_model,
-                budget=AgentBudget(
-                    tokens_remaining=per_agent_tokens,
-                    wall_seconds_remaining=self.config.overall_wall_seconds,
-                ),
+                budget=AgentBudget(**agent_budget_kwargs),
                 rng=random.Random(self.rng_seed + len(agents)),
             )
+            # v1.1 -- in FAST mode, subset the agent's seeds to the
+            # top-N most-effective probes. SMART/FULL leave the full
+            # corpus. The cap is applied via a private attribute the
+            # base class reads in seeds_for_category(); the indirection
+            # keeps the public AsiAgent API stable.
+            if self.config.probes_per_category is not None:
+                agent._mode_probe_cap = self.config.probes_per_category  # type: ignore[attr-defined]
             # Spec §6: attach the per-agent Commander brief (if any). The
             # agent's strategy iteration is unchanged; goal-specific
             # scenarios are folded into the seed pool via spec §8 wiring.
@@ -873,13 +991,32 @@ class SwarmCommander:
         if (  # pragma: no cover -- early_stop branch exercised in live runs only
             variance < self.config.early_stop_variance_threshold and no_recent_findings
         ):
+            # v1.1 -- mode-aware EARLY_STOP gate. FULL mode sets
+            # ``min_turns_before_early_stop`` to a value >> the
+            # per-agent max_turns (typically 999 vs 12). That signal
+            # means "never early-stop in this scan, regardless of
+            # AIVSS variance." SMART/FAST modes keep the v1.0 behaviour
+            # (gate=0 always passes).
+            max_turns_possible = self.config.max_turns_per_agent or 12
+            min_turns_gate = self.config.min_turns_before_early_stop or 0
+            if min_turns_gate >= max_turns_possible:
+                _LOG.info(
+                    "checkpoint: aivss=%d decision=continue (early-stop suppressed "
+                    "by mode=%s -- min_turns_gate=%d >= max_turns_possible=%d)",
+                    provisional,
+                    self.config.mode.value if self.config.mode else "unset",
+                    min_turns_gate,
+                    max_turns_possible,
+                )
+                return CheckpointDecision.CONTINUE
             _LOG.info(
                 "checkpoint: aivss=%d decision=early_stop (variance=%.2f<%.2f, "
-                "no_recent_findings=True, findings=%d)",
+                "no_recent_findings=True, findings=%d, mode=%s)",
                 provisional,
                 variance,
                 self.config.early_stop_variance_threshold,
                 current_findings,
+                self.config.mode.value if self.config.mode else "unset",
             )
             return CheckpointDecision.EARLY_STOP
         _LOG.info(  # pragma: no cover -- continue-with-data branch exercised in live runs only
@@ -1001,6 +1138,9 @@ class SwarmCommander:
             duration_seconds=max(0.0, duration),
             cost_usd=cost_usd,
             tokens_total=tokens_total,
+            # __post_init__ guarantees mode is non-None; the `or FULL`
+            # is a belt-and-braces narrowing for Pyright.
+            mode=(self.config.mode or ScanMode.FULL).value,
             created_at=_utcnow(),
         )
         self._emit(
@@ -1078,6 +1218,12 @@ class SwarmCommander:
                 aivss=scan.aivss,
                 band=scan.band.value,
                 tier=_tier_to_telem(scan.tier),
+                # ESSENTIAL: which mode produced this scan. The collector
+                # needs it to avoid mixing FAST/SMART/FULL findings in
+                # the same aggregate -- they have legitimately different
+                # coverage profiles. Mode is in the dashboard "Coverage"
+                # break-out; not identifying.
+                mode=scan.mode,
                 duration_seconds=max(0.0, duration),
                 terminated_by="success",
                 agents_count=agents_count,

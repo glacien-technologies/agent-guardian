@@ -90,6 +90,15 @@ class ScanCompletedEvent(_Base):
     aivss: int = Field(ge=0, le=100)
     band: Literal["EXCELLENT", "GOOD", "WARNING", "POOR", "CRITICAL"]
     tier: Literal["T1", "T2", "T3", "T4"]
+    # v1.1 -- scan thoroughness mode. ESSENTIAL because it's purely
+    # operational (which preset ran) -- it carries no identifying or
+    # environmental information about the user, and the collector needs
+    # it to bucket crash-rate / coverage stats by mode (FAST scans
+    # legitimately find fewer things; we shouldn't conflate them with
+    # FULL scans in dashboards). Defaults to "smart" so events emitted
+    # by clients still on v1.0 deserialise without breaking the
+    # collector's strict-allowlist contract.
+    mode: Literal["fast", "smart", "full"] = "smart"
     duration_seconds: float = Field(ge=0.0)
     terminated_by: TerminationKind
     agents_count: int = Field(ge=0, default=0)

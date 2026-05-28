@@ -38,6 +38,11 @@ class Scan(BaseModel):
     # with hand-constructed test fixtures that pre-date the cost-tracking
     # work (PRD §8.1 — IMPORTANT #3).
     tokens_total: int = Field(default=0, ge=0)
+    # v1.1 — which scan-mode produced this report. ``"full"`` is the v1.1+
+    # default; v1.0rc1 scans persist as ``"smart"`` for back-compat
+    # (matches v1.0's actual behaviour). Defaults to ``"smart"`` here so
+    # any older Scan JSON on disk continues to deserialise.
+    mode: Literal["fast", "smart", "full"] = "smart"
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")

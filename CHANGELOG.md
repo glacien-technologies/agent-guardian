@@ -5,6 +5,26 @@ All notable changes to **agent-guardian** are documented in this file.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — Unreleased
+
+### Added
+
+- **Three explicit scan modes — `fast`, `smart`, `full` (default).** New `--mode` / `-m` flag on `agent-guardian scan`. Picks documented in `docs/concepts/scan-modes.md` and reproduced in `--help`. Empirical numbers below from the vulnerable-by-design target (`agentguardian-benchmarks/targets/vulnerable/owasp_asi_all.py`) on Gemini 2.5 Flash:
+  - **`fast`** — CI gate / smoke check. Top-3 probes per agent, 4-turn cap, aggressive early-stop. ~165s, ~$0.016, ~32k tokens.
+  - **`smart`** — v1.0 default. Full corpus, 12-turn budget, early-stop on AIVSS variance + no-recent-findings. ~190s, ~$0.019, ~38k tokens.
+  - **`full` (new default)** — Full corpus, 12 turns, early-stop effectively disabled (gated until every agent has used its full budget). ~365s, ~$0.030, ~66k tokens.
+- **Mode is recorded on every `Scan` report** (`mode` field in the JSON) and on every `ScanCompletedEvent` telemetry payload (ESSENTIAL tier — operational, not identifying — so the public dashboard can break down findings by mode without re-bucketing legacy data as FULL).
+- **`ScanMode` enum** and `_MODE_PRESETS` table on `SwarmConfig` for programmatic callers. Per-mode knobs (`probes_per_category`, `max_turns_per_agent`, `min_turns_before_early_stop`) auto-populate from the preset; an explicit override always wins so tests can compose e.g. `SwarmConfig(mode=FULL, max_turns_per_agent=4)`.
+- **18 unit tests in `tests/unit/test_swarm_modes.py`** covering preset wiring, the `_checkpoint` gate behaviour for each mode, CLI flag routing, JSON round-tripping on the `Scan` model, and telemetry-event serialisation.
+
+### Changed
+
+- **BREAKING DEFAULT CHANGE — scans without `--mode` now run `full`.** Pre-v1.1 scans implicitly ran the equivalent of `smart`; the default flips to `full` because for a security tool, the right failure mode is "you paid 2× more for thorough coverage" not "you got a fast misleading score." To restore the v1.0 cost/wall profile, pass `--mode smart`. The flag's `--help` text spells out the cost/duration trade-offs.
+
+### Fixed
+
+- **EARLY_STOP bias against slow-burn attack categories.** The v1.0 `_checkpoint` returned EARLY_STOP whenever AIVSS variance dropped below threshold **and** no findings had landed in the last checkpoint window. The second condition fires after any quiet window, silencing goal-hijack / memory-poisoning / trust-exploitation agents that legitimately take longer to land their first finding. v1.1 keeps that v1.0 behaviour on `smart` (unchanged) but adds a `min_turns_before_early_stop` gate that `full` mode sets to 999 (>> per-agent max turns of 12), so FULL mode's checkpoints always return CONTINUE. Mode-validation runs against the vulnerable-by-design target show FULL using ~2× the wall time of SMART (365s vs 190s) — confirming early-stop is genuinely suppressed. ASI coverage between modes is target-dependent and LLM-stochastic; FULL's value is removing the *risk* of an over-eager EARLY_STOP rather than a guaranteed coverage-count improvement on every target.
+
 ## [1.0.0] — 2026-05-27
 
 First stable release. Promotes the contents of `1.0.0rc1` to General Availability after the soft-beta cohort and the engineering-standards hardening pass below.

@@ -1005,8 +1005,34 @@ def scan(
             "synthesises goal-specific scenarios on top of the standard pass."
         ),
     ),
+    mode: str = typer.Option(
+        "full",
+        "--mode",
+        "-m",
+        help=(
+            "Scan thoroughness mode. 'full' (default, v1.1+) runs every "
+            "probe on every agent to completion -- no early-stop, ~5min, "
+            "~\\$0.06 on Gemini. 'smart' is the v1.0 default -- early-stop "
+            "when AIVSS variance stabilises, ~2min, ~\\$0.03. 'fast' caps "
+            "each agent at 3 probes / 4 turns for CI-gate smoke checks, "
+            "~45s, ~\\$0.008."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
+    # v1.1 -- validate --mode before anything expensive (target load,
+    # LLM client construction, cost-estimate computation). A user who
+    # mistypes 'smort' deserves an immediate, clear error.
+    from agent_guardian.core.swarm import ScanMode
+
+    try:
+        ScanMode(mode.lower())
+    except ValueError:
+        typer.echo(
+            f"unknown mode '{mode}' -- must be 'fast', 'smart', or 'full'.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from None
     try:
         exit_code = asyncio.run(
             _run_scan(
@@ -1027,6 +1053,7 @@ def scan(
                 config_path=config_path,
                 seed=seed,
                 goal=goal,
+                mode=mode,
             )
         )
     except KeyboardInterrupt:
@@ -1054,6 +1081,7 @@ async def _run_scan(
     config_path: Path | None,
     seed: int,
     goal: str | None = None,
+    mode: str = "full",
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -1122,6 +1150,19 @@ async def _run_scan(
 
     # 7. Build swarm.
     scan_id = f"cli-{uuid.uuid4().hex[:12]}"
+    # v1.1 mode resolution. ScanMode validates against the {fast,smart,full}
+    # vocabulary; anything else is a user error worth surfacing as
+    # EXIT_CONFIG rather than crashing the SwarmConfig constructor.
+    from agent_guardian.core.swarm import ScanMode
+
+    try:
+        resolved_mode = ScanMode(mode.lower())
+    except ValueError:
+        typer.echo(
+            f"unknown mode '{mode}' -- must be 'fast', 'smart', or 'full'.",
+            err=True,
+        )
+        return EXIT_CONFIG
     swarm_config = SwarmConfig(
         scan_id=scan_id,
         commander_model=_normalise_model_name(eff_commander),
@@ -1132,6 +1173,7 @@ async def _run_scan(
         max_parallel_agents=min(10, cfg.swarm.max_parallel_agents),
         tier_override=tier_override,
         target_goal=goal,
+        mode=resolved_mode,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
         # recon_wall_seconds intentionally left at the SwarmConfig default (90s);

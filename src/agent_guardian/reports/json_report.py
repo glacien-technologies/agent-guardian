@@ -122,6 +122,12 @@ def emit_json(
         "duration_seconds": scan.duration_seconds,
         "cost_usd": scan.cost_usd,
         "tokens_total": scan.tokens_total,
+        # v1.1 -- mode is the user-facing dial that controls early-stop
+        # and probe-subsetting. Surfacing it in the report lets the
+        # public dashboard segment coverage stats by mode (you can't
+        # fairly compare a 45-second FAST scan against a 5-minute FULL
+        # scan in the same aggregate bucket).
+        "mode": scan.mode,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),

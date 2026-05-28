@@ -666,6 +666,19 @@ class AsiAgent(ABC):
         # written scenarios and fold them into the seed pool as additional
         # ``ProbeSeed`` entries. The standard seed iteration is unchanged.
         standard_seeds = self.seeds_for_category()
+        # v1.1 -- FAST scan mode caps each agent's probe corpus at top-N
+        # seeds (the first N in the list, which are ordered by historical
+        # effectiveness in our YAML loader). The cap is injected by
+        # SwarmCommander on the agent instance; absent => use all seeds.
+        _probe_cap = getattr(self, "_mode_probe_cap", None)
+        if _probe_cap is not None and _probe_cap > 0:
+            _LOG.debug(
+                "agent %s: FAST-mode probe cap applied (%d of %d seeds)",
+                self.name or type(self).__name__,
+                min(_probe_cap, len(standard_seeds)),
+                len(standard_seeds),
+            )
+            standard_seeds = standard_seeds[:_probe_cap]
         goal_specific_seeds: list[ProbeSeed] = []
         brief = getattr(self, "_brief", None)
         if brief is not None and getattr(brief, "n_scenarios_requested", 0) > 0:
