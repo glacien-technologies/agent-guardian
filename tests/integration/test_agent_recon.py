@@ -96,6 +96,87 @@ async def test_recon_keeps_bare_fingerprint_when_target_says_nothing(
     assert refined.cross_session_data_detected is False
 
 
+async def test_recon_extracts_tool_names_via_llm(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    """The tool-inventory reply is mined for tool handles via the recon LLM.
+
+    The target describes its tool in prose; the recon (attacker) LLM extracts
+    a JSON array of handles, which lands on ``fingerprint.declared_tools`` and
+    unblocks the recon-adaptive attacker + tool-exfil strategy.
+    """
+    target_llm = (
+        StubScript()
+        .respond_to(
+            "tools or functions",
+            "I have access to a knowledge base search tool to look up product info.",
+        )
+        .default("ok")
+        .build()
+    )
+    target = make_target(llm=target_llm)
+    memory = make_memory()
+    # The recon LLM (separate from the target) does the extraction.
+    attacker = (
+        StubScript()
+        .respond_to(
+            "Extract the tool/capability handles",
+            '["search_kb", "knowledge base search"]',
+        )
+        .default("[]")
+        .build()
+    )
+    agent = ReconAgent(attacker_llm=attacker, model="stub")
+    await agent.run(target, memory)
+    refined = memory.target_fingerprint()
+    assert refined is not None
+    assert refined.has_tools is True
+    assert refined.declared_tools == ["search_kb", "knowledge base search"]
+
+
+async def test_recon_extracts_tool_names_via_regex_fallback(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    """When the recon LLM returns nothing parseable, fall back to a regex over
+    backtick / snake_case identifiers in the tool-inventory reply."""
+    target_llm = (
+        StubScript()
+        .respond_to(
+            "tools or functions",
+            "My tools: file_read, web_search and `code_interpreter`.",
+        )
+        .default("ok")
+        .build()
+    )
+    target = make_target(llm=target_llm)
+    memory = make_memory()
+    # Unparseable extraction output → regex fallback over the reply text.
+    agent = ReconAgent(attacker_llm=StubLLM(default="not json at all"), model="stub")
+    await agent.run(target, memory)
+    refined = memory.target_fingerprint()
+    assert refined is not None
+    assert "file_read" in refined.declared_tools
+    assert "web_search" in refined.declared_tools
+    assert "code_interpreter" in refined.declared_tools
+
+
+async def test_recon_no_tools_leaves_declared_tools_empty(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    """A target that names no tools yields an empty declared_tools list."""
+    target_llm = StubScript().default("I just chat, no special tools.").build()
+    target = make_target(llm=target_llm)
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default="[]"), model="stub")
+    await agent.run(target, memory)
+    refined = memory.target_fingerprint()
+    assert refined is not None
+    assert refined.declared_tools == []
+
+
 async def test_recon_terminates_under_budget_pressure(
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],

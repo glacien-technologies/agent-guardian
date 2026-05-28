@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from dataclasses import dataclass
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.agents.base import AgentBudget, AgentReport
 from agent_guardian.core.memory import SharedMemory
-from agent_guardian.llm.base import BaseLLM
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 __all__ = ["ReconAgent"]
@@ -188,6 +189,109 @@ def _looks_like_cross_session_data(text: str) -> bool:
     return any(h in lowered for h in _CROSS_SESSION_DATA_HINTS)
 
 
+# Tool-name discovery (2026.06). The tool-inventory probe already asks the
+# target to list its tools; pre-2026.06 the reply was only checked for a
+# boolean hint match and the actual names were discarded, leaving
+# ``declared_tools`` empty. That left the recon-adaptive attacker + the
+# tool-exfil strategy inert on every target exposing a plain ``run(prompt)``
+# entry point (the common LangGraph case). We now extract usable tool handles
+# from the reply. A black-box attack does not need the exact function name —
+# a natural-language handle ("knowledge base search tool") is enough for the
+# attacker to craft a tool-invoking payload that the target maps back to its
+# real tool.
+
+_TOOL_EXTRACTION_SYSTEM = (
+    "You extract tool / function / capability handles from an AI agent's "
+    "self-description of what it can do. Return ONLY a compact JSON array of "
+    'short strings (e.g. ["search_kb", "knowledge base search"]) naming tools '
+    "the assistant EXPLICITLY said it has access to. Do not invent tools. If "
+    "the assistant named none, return []. Output only the JSON array."
+)
+
+_TOOL_EXTRACTION_USER = (
+    "The agent was asked what tools it has. It replied:\n\n{reply}\n\n"
+    "Extract the tool/capability handles as a JSON array of short strings."
+)
+
+# snake_case / camelCase identifiers and backtick-quoted names, used as the
+# deterministic fallback when the LLM extraction returns nothing parseable.
+_IDENT_RE = re.compile(r"`([^`]{2,60})`|\b([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)\b")
+
+
+def _parse_tool_list(text: str) -> list[str]:
+    """Parse a JSON array of tool names from the LLM extraction reply.
+
+    Tolerates markdown fences / preamble by grabbing the first ``[...]`` span.
+    """
+    stripped = text.strip()
+    for candidate in (stripped, _first_bracket_span(stripped)):
+        if not candidate:
+            continue
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if isinstance(x, str | int | float)]
+    return []
+
+
+def _first_bracket_span(text: str) -> str | None:
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    return match.group(0) if match else None
+
+
+def _regex_tool_names(reply: str) -> list[str]:
+    """Deterministic fallback: pull backtick-quoted + snake/kebab identifiers."""
+    names: list[str] = []
+    for m in _IDENT_RE.finditer(reply):
+        names.append(m.group(1) or m.group(2))
+    return names
+
+
+def _clean_tool_names(names: list[str]) -> list[str]:
+    """Dedup, strip quoting/whitespace, drop empties + sentence-length noise."""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in names:
+        n = raw.strip().strip("`'\".,").strip()
+        if n and 1 < len(n) <= 60 and n.lower() not in seen:
+            seen.add(n.lower())
+            cleaned.append(n)
+    return cleaned[:12]
+
+
+async def _extract_tool_names(reply: str, llm: BaseLLM, model: str) -> list[str]:
+    """Extract usable tool handles from a free-text tool-inventory reply.
+
+    LLM extraction first (the reply is usually prose, e.g. "I can search our
+    knowledge base"); deterministic regex fallback if the LLM returns nothing
+    parseable. Never raises — recon must not abort on an extraction hiccup.
+    """
+    names: list[str] = []
+    try:
+        resp = await llm.complete(
+            LLMRequest(
+                messages=[
+                    LLMMessage(role="system", content=_TOOL_EXTRACTION_SYSTEM),
+                    LLMMessage(
+                        role="user",
+                        content=_TOOL_EXTRACTION_USER.format(reply=reply[:2000]),
+                    ),
+                ],
+                model=model,
+                max_tokens=200,
+                temperature=0.0,
+            )
+        )
+        names = _parse_tool_list(resp.text)
+    except Exception as exc:  # pragma: no cover — defensive; recon must not abort
+        _LOG.debug("recon: LLM tool extraction failed (%s) — using regex fallback", exc)
+    if not names:
+        names = _regex_tool_names(reply)
+    return _clean_tool_names(names)
+
+
 class ReconAgent:
     """Phase-1 attack-surface mapper.
 
@@ -244,6 +348,11 @@ class ReconAgent:
         external_systems_observed = base.external_systems_detected
         multi_agent_observed = base.multi_agent_detected
         cross_session_data_observed = base.cross_session_data_detected
+        # Tool handles discovered from the tool-inventory probe reply. Starts
+        # from whatever the adapter pre-declared (usually empty for code
+        # targets behind a plain run() entry point) and is replaced by the
+        # extracted names when the probe elicits them.
+        declared_tools_observed: list[str] = list(base.declared_tools)
         notes_parts: list[str] = [base.notes] if base.notes else []
         turns = 0
         terminated_by = "success"
@@ -288,6 +397,14 @@ class ReconAgent:
                 inferred_signals["reason"] = (
                     "response matched a tool-affordance hint (tool/function/api/...)"
                 )
+                # Extract usable tool handles so the recon-adaptive attacker +
+                # tool-exfil strategy can name concrete tools (2026.06).
+                extracted = await _extract_tool_names(reply, self._llm, self._model)
+                if extracted:
+                    declared_tools_observed = extracted
+                    notes_parts.append(f"recon: tools discovered: {', '.join(extracted)}")
+                    inferred_signals["declared_tools"] = extracted
+                    _LOG.info("recon: discovered %d tool handle(s): %s", len(extracted), extracted)
             elif probe.tag == "memory-shape" and _looks_like_memory(reply):
                 has_memory_observed = True
                 notes_parts.append("recon: memory affordance inferred from response")
@@ -369,7 +486,7 @@ class ReconAgent:
             multi_agent_detected=multi_agent_observed,
             cross_session_data_detected=cross_session_data_observed,
             framework=base.framework,
-            declared_tools=list(base.declared_tools),
+            declared_tools=declared_tools_observed,
             declared_memory_keys=list(base.declared_memory_keys),
             notes=" | ".join(p for p in notes_parts if p) or base.notes,
         )
@@ -387,13 +504,14 @@ class ReconAgent:
         duration = time.monotonic() - start
         _LOG.info(
             "recon_done: tools=%s memory=%s pii=%s external_systems=%s multi_agent=%s cross_session=%s "
-            "(probes=%d, duration=%.1fs, terminated_by=%s)",
+            "declared_tools=%s (probes=%d, duration=%.1fs, terminated_by=%s)",
             refined.has_tools,
             refined.has_memory,
             refined.touches_pii,
             refined.external_systems_detected,
             refined.multi_agent_detected,
             refined.cross_session_data_detected,
+            refined.declared_tools,
             turns,
             duration,
             terminated_by,
