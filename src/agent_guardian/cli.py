@@ -1018,6 +1018,53 @@ def scan(
             "~45s, ~\\$0.008."
         ),
     ),
+    pov_gate: bool = typer.Option(
+        False,
+        "--pov-gate",
+        help=(
+            "Re-run each finding's trigger N times and drop the unreproducible "
+            "ones before scoring (PoV-as-oracle credibility gate)."
+        ),
+    ),
+    critic: bool = typer.Option(
+        False,
+        "--critic",
+        help=(
+            "With --pov-gate, also score each PoV-passing finding on an LLM "
+            "rubric (evidence/specificity/novelty/false-positive-risk) and drop "
+            "low-quality / high-FP-risk findings."
+        ),
+    ),
+    bundle: Path | None = typer.Option(
+        None,
+        "--bundle",
+        help="Write a checksummed SARIF+PoV bundle to this directory.",
+    ),
+    pretext: bool = typer.Option(
+        False,
+        "--pretext",
+        help=(
+            "Wrap attacker payloads in a rotating legitimate-operations pretext "
+            "(auditor/compliance/incident/onboarding) to test refuse-on-framing."
+        ),
+    ),
+    indirect: bool = typer.Option(
+        False,
+        "--indirect",
+        help=(
+            "Deliver attacker payloads embedded in trusted-channel content "
+            "(retrieved doc / tool output / email / memory / a2a) instead of a "
+            "direct user ask (indirect prompt injection)."
+        ),
+    ),
+    owasp_llm: bool = typer.Option(
+        False,
+        "--owasp-llm",
+        help=(
+            "Additionally dispatch the OWASP-LLM specialist agents (fuzzing, "
+            "secret-extraction, denial-of-wallet, detection-evasion)."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -1054,6 +1101,12 @@ def scan(
                 seed=seed,
                 goal=goal,
                 mode=mode,
+                pov_gate=pov_gate,
+                critic=critic,
+                bundle=bundle,
+                pretext=pretext,
+                indirect=indirect,
+                owasp_llm=owasp_llm,
             )
         )
     except KeyboardInterrupt:
@@ -1082,6 +1135,12 @@ async def _run_scan(
     seed: int,
     goal: str | None = None,
     mode: str = "full",
+    pov_gate: bool = False,
+    critic: bool = False,
+    bundle: Path | None = None,
+    pretext: bool = False,
+    indirect: bool = False,
+    owasp_llm: bool = False,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -1170,10 +1229,19 @@ async def _run_scan(
         evaluator_model=_normalise_model_name(eff_evaluator),
         overall_wall_seconds=float(cfg.swarm.budget.wall_seconds),
         total_tokens=cfg.swarm.budget.max_total_tokens,
-        max_parallel_agents=min(10, cfg.swarm.max_parallel_agents),
+        # Allow the extra OWASP-LLM specialists past the parallel cap when asked
+        # (core slate is 10; +4 M2 specialists = 14).
+        max_parallel_agents=(14 if owasp_llm else min(10, cfg.swarm.max_parallel_agents)),
         tier_override=tier_override,
         target_goal=goal,
         mode=resolved_mode,
+        # M2 capabilities (all default-off; flags above turn them on).
+        enable_pov_gate=pov_gate or critic,
+        enable_critic_rubric=critic,
+        bundle_dir=bundle,
+        enable_pretext=pretext,
+        enable_indirect=indirect,
+        include_m2_agents=owasp_llm,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
         # recon_wall_seconds intentionally left at the SwarmConfig default (90s);

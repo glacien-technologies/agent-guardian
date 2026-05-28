@@ -247,6 +247,10 @@ class SwarmConfig:
     # are delivered embedded in trusted-channel content (doc/tool-output/email/
     # memory/a2a) rather than as a direct user ask. Threaded onto every agent.
     enable_indirect: bool = False
+    # M2 — additionally dispatch the OWASP-LLM specialist agents (fuzzing,
+    # secret-extraction, denial-of-wallet, detection-evasion) alongside the
+    # core ASI01-10 slate. Default OFF so the agentic-risk scan is unchanged.
+    include_m2_agents: bool = False
 
     def __post_init__(self) -> None:
         """Apply the scan-mode preset to any un-overridden knobs.
@@ -757,11 +761,19 @@ class SwarmCommander:
             self.config.total_tokens,
         )
         agents: list[AsiAgent] = []
-        per_agent_tokens = max(1, self.config.total_tokens // (len(_ASI_AGENT_CLASSES) + 3))
+        # M2 — optionally append the OWASP-LLM specialists to the slate. Kept
+        # out of _ASI_AGENT_CLASSES so the default agentic-risk scan is
+        # unchanged; included only when the operator targets the LLM risk set.
+        agent_classes: tuple[type[AsiAgent], ...] = _ASI_AGENT_CLASSES
+        if self.config.include_m2_agents:
+            from agent_guardian.agents import M2_SPECIALIST_AGENTS
+
+            agent_classes = (*_ASI_AGENT_CLASSES, *M2_SPECIALIST_AGENTS)
+        per_agent_tokens = max(1, self.config.total_tokens // (len(agent_classes) + 3))
         # Each ASI agent gets ~150k tokens by default (per PRD §14.2). We
         # derive the per-agent slice from total_tokens so test overrides
         # propagate cleanly.
-        for cls in _ASI_AGENT_CLASSES:
+        for cls in agent_classes:
             # v1.1 -- in FAST mode, cap per-agent turns at a small value
             # so the whole scan finishes quickly. SMART/FULL keep the
             # AgentBudget default (12 turns).
