@@ -54,6 +54,9 @@ async def test_race_counts_errors() -> None:
         raise RuntimeError("nope")
 
     async def good() -> int:
+        # Delay so the instant-raising sibling is observed first and the error
+        # is deterministically counted before the winner lands.
+        await asyncio.sleep(0.03)
         return 5
 
     outcome = await race_first_success({"boom": boom, "good": good}, validator=lambda r: True)

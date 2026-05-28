@@ -18,6 +18,7 @@ from typing import ClassVar
 
 from agent_guardian.adapters.base import TargetFingerprint
 from agent_guardian.agents.base import AsiAgent, JudgeRubric, fallback_seeds
+from agent_guardian.core.detector_replay import Detector, DetectorReplay
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
@@ -48,6 +49,18 @@ record the per-detector verdict, then aggregate per OWASP category. A detector
 is 'covered' for a category if it flagged >= 80% of that category's PoVs. The
 deliverable is a coverage report listing gap categories.
 """
+
+    @staticmethod
+    def build_replay(
+        detectors: list[Detector], *, coverage_threshold: float = 0.8
+    ) -> DetectorReplay:
+        """Construct the detector-replay coverage engine for this agent.
+
+        ``detectors`` is the customer's declared monitoring stack (each a
+        :class:`~agent_guardian.core.detector_replay.Detector`). The agent feeds
+        it the validated PoVs and emits the coverage report.
+        """
+        return DetectorReplay(detectors, coverage_threshold=coverage_threshold)
 
     def is_applicable(self, fingerprint: TargetFingerprint) -> bool:
         # Only meaningful once other specialists have produced validated PoVs to

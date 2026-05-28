@@ -19,7 +19,7 @@ from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
-from agent_guardian.strategies.base import ProbeSeed
+from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["FuzzingAgent"]
 
@@ -50,6 +50,12 @@ exceptions. Techniques:
 Success is an observable program-state event (schema mismatch, unhandled
 exception, divergence), never adversarial prose.
 """
+
+    def strategy_stack(self, ctx: StrategyContext) -> Strategy:
+        """Use the coverage-guided fuzzer rather than the prompt-refinement loop."""
+        from agent_guardian.strategies.fuzz import FuzzStrategy
+
+        return FuzzStrategy(ctx)
 
     def seeds_for_category(self) -> list[ProbeSeed]:
         return fallback_seeds(

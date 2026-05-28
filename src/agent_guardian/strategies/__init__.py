@@ -9,6 +9,7 @@ from agent_guardian.strategies.base import (
     Turn,
 )
 from agent_guardian.strategies.crescendo import CrescendoStrategy
+from agent_guardian.strategies.fuzz import FuzzStrategy
 from agent_guardian.strategies.mad_max import MadMaxStrategy
 from agent_guardian.strategies.pair import PAIRStrategy
 from agent_guardian.strategies.tap import TAPStrategy
@@ -16,6 +17,7 @@ from agent_guardian.strategies.tool_exfil import ToolExfilStrategy
 
 __all__ = [
     "CrescendoStrategy",
+    "FuzzStrategy",
     "MadMaxStrategy",
     "NextPrompt",
     "PAIRStrategy",
