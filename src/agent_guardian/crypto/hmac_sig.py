@@ -64,6 +64,20 @@ def _resolve_secret(secret: str | None) -> str:
     return os.environ.get(_ENV_VAR, DEFAULT_SIGNING_SECRET)
 
 
+def _resolve_verify_secret(secret: str | None) -> str | None:
+    """Resolve the secret for *verification* — fail closed.
+
+    Unlike :func:`_resolve_secret`, this never falls back to the public
+    :data:`DEFAULT_SIGNING_SECRET`: a report signed (or forged) with the public
+    default must NOT verify as trusted. Returns the explicit ``secret`` if
+    given, else the value of :data:`AGENT_GUARDIAN_SIGNING_SECRET` from the
+    environment, else ``None`` (caller treats ``None`` as "unverifiable").
+    """
+    if secret is not None:
+        return secret
+    return os.environ.get(_ENV_VAR)
+
+
 def derive_key(secret: str, salt: bytes, *, iterations: int = DEFAULT_PBKDF2_ITERATIONS) -> bytes:
     """PBKDF2-HMAC-SHA256 → 32-byte signing key.
 
@@ -110,7 +124,21 @@ def verify_hmac(
     Returns ``False`` for any structural defect — wrong algorithm, missing
     fields, malformed base64. Only returns ``True`` when the recomputed
     digest matches and the algorithm/version are recognised.
+
+    **Fails closed**: when no ``secret`` is supplied and
+    ``AGENT_GUARDIAN_SIGNING_SECRET`` is unset, verification returns ``False``
+    rather than falling back to the public :data:`DEFAULT_SIGNING_SECRET`. A
+    report signed with the public default is therefore unverifiable (its
+    provenance cannot be trusted) — supply the real secret to verify it.
     """
+    effective_secret = _resolve_verify_secret(secret)
+    if effective_secret is None:
+        _LOG.warning(
+            "hmac verify: no signing secret supplied and %s is unset — "
+            "failing closed (the public default secret is never trusted for verify)",
+            _ENV_VAR,
+        )
+        return False
     try:
         algorithm = block.get("algorithm")
         version = block.get("version")
@@ -141,7 +169,6 @@ def verify_hmac(
     except (ValueError, TypeError) as exc:
         _LOG.warning("hmac verify: salt/signature decode failed: %s", exc)
         return False
-    effective_secret = _resolve_secret(secret)
     key = derive_key(effective_secret, salt, iterations=iterations)
     actual = hmac.new(key, payload, hashlib.sha256).digest()
     return hmac.compare_digest(actual, expected)

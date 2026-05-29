@@ -18,6 +18,12 @@ LLM error hierarchy and returns a :class:`Response` whose ``error`` is the
 mapped :class:`TransportError`. An ``error_path`` that matches on an otherwise
 successful 200 yields a :class:`TransportErrorCategory.BLOCKED` fault (the
 target refused/blocked the request at the application layer).
+
+TLS is configurable via ``verify``: the default ``True`` does full certificate
+verification; a path string pins a private CA bundle; ``False`` disables
+verification entirely (insecure — for self-signed / dev targets). The
+contract→transport factory lowers ``transport.tls.{ca_bundle,insecure}`` onto
+this parameter.
 """
 
 from __future__ import annotations
@@ -94,6 +100,7 @@ class HttpTransport(Transport):
         timeout_seconds: float = 60.0,
         max_retries: int = 3,
         max_concurrency: int = 5,
+        verify: bool | str = True,
         client: httpx.AsyncClient | None = None,
         adapter: HttpAdapter | None = None,
     ) -> None:
@@ -124,12 +131,16 @@ class HttpTransport(Transport):
         # shape because we never invoke the adapter's opinionated ``call()`` —
         # only the raw ``send_raw`` seam — so the shape is irrelevant here.
         self._owns_adapter = adapter is None
+        # ``verify`` governs TLS: True (default), a CA-bundle path, or False
+        # (insecure — no cert verification). It is applied only to a client this
+        # transport builds; an injected ``client`` carries its own TLS config.
         self._adapter = adapter or HttpAdapter(
             endpoint,
             shape="generic",
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             max_concurrency=max_concurrency,
+            verify=verify,
             client=client,
         )
         # Serializes the per-request endpoint swap used only for "query"

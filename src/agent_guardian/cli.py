@@ -662,10 +662,30 @@ def serve(
     port: int = typer.Option(7474, "--port", help="Bind port."),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
 ) -> None:
-    """Start the local dashboard at http://<host>:<port>."""
+    """Start the local dashboard at http://<host>:<port>.
+
+    The dashboard defaults to loopback (127.0.0.1). Binding to a non-loopback
+    address exposes scan history (target URLs + findings) and the telemetry
+    ingest endpoint to the network; a loud warning is printed and the ingest
+    write endpoint requires a token unless explicitly opened (see
+    ``AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN`` / ``..._ALLOW_PUBLIC_INGEST``).
+    """
     import uvicorn
 
     from agent_guardian.server.app import create_app
+
+    loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+    if host not in loopback_hosts:
+        typer.echo(
+            f"WARNING: binding the dashboard to a non-loopback host ({host}). This "
+            "exposes scan history (target URLs + findings) and the telemetry-ingest "
+            "endpoint to the network. The dashboard ships NO authentication for its "
+            "read views -- only run this on a trusted network, behind your own auth "
+            "proxy. The telemetry-ingest WRITE endpoint stays disabled off-loopback "
+            "unless you set AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN (or "
+            "AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST=1).",
+            err=True,
+        )
 
     if reload:
         # uvicorn's reload mode requires an import string, not a factory.
@@ -693,21 +713,107 @@ def report(
     output: str = typer.Option(
         "json", "--output", help="Report format: json | sarif | junit | md | pdf."
     ),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output-path",
+        help=(
+            "Write the report to this file instead of printing to stdout. "
+            "Required for --output pdf (binary)."
+        ),
+    ),
 ) -> None:
-    """Regenerate a report from a stored scan."""
-    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
-    scan_file = scan_dir / "scan.json"
-    if not scan_file.is_file():
-        typer.echo(f"no scan found at {scan_file}", err=True)
+    """Regenerate a report from a stored scan.
+
+    Text formats (json / sarif / junit / md) print to stdout by default, or to
+    ``--output-path`` when given. ``--output pdf`` is binary and always requires
+    ``--output-path`` -- it is routed through the PDF writer, which raises a
+    clear remediation error if no PDF engine (WeasyPrint / reportlab) is
+    installed.
+    """
+    if output not in _ALL_FORMATS:
+        typer.echo(
+            f"unknown output format '{output}' -- choose one of: {', '.join(sorted(_ALL_FORMATS))}",
+            err=True,
+        )
         raise typer.Exit(code=EXIT_CONFIG)
-    payload = json.loads(scan_file.read_text(encoding="utf-8"))
-    scan = Scan.model_validate(payload)
+
+    # Prefer the raw, model-roundtrippable dump (scan.raw.json); fall back to a
+    # legacy single-file scan.json (where scan.json WAS the raw model dump).
+    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    scan_file: Path | None = None
+    for name in ("scan.raw.json", "scan.json"):
+        candidate = scan_dir / name
+        if candidate.is_file():
+            scan_file = candidate
+            break
+    if scan_file is None:
+        typer.echo(f"no scan found at {scan_dir / 'scan.json'}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    try:
+        payload = json.loads(scan_file.read_text(encoding="utf-8"))
+        scan = Scan.model_validate(payload)
+    except (json.JSONDecodeError, ValueError) as exc:
+        typer.echo(f"could not load scan from {scan_file}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # PDF is binary -- it can only be written to a file, never echoed.
+    if output == "pdf" and output_path is None:
+        typer.echo(
+            "--output pdf is binary and requires --output-path to write the file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    if output_path is not None:
+        try:
+            _write_report(scan, output, output_path)
+        except typer.BadParameter as exc:
+            typer.echo(f"output format error: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        except Exception as exc:
+            # PDF engines can raise PdfFeatureUnavailable etc. Surface clearly.
+            typer.echo(f"report write error: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        typer.echo(f"report written to {output_path}")
+        return
+
     typer.echo(_render_scan(scan, output))
 
 
 @app.command()
-def verify(path: Path = typer.Argument(..., help="Path to a signed JSON report.")) -> None:
-    """Verify HMAC-SHA256 + Ed25519 signatures on a JSON report (M13)."""
+def verify(
+    path: Path = typer.Argument(..., help="Path to a signed JSON report."),
+    pubkey: str | None = typer.Option(
+        None,
+        "--pubkey",
+        help=(
+            "Pinned Ed25519 signer public key (base32, no padding). The report's "
+            "embedded key must match this before its Ed25519 signature is trusted."
+        ),
+    ),
+    pubkey_file: Path | None = typer.Option(
+        None,
+        "--pubkey-file",
+        help="Read the pinned Ed25519 public key (base32) from this file instead of --pubkey.",
+    ),
+    secret: str | None = typer.Option(
+        None,
+        "--secret",
+        help=(
+            "Expected HMAC signing secret. Defaults to AGENT_GUARDIAN_SIGNING_SECRET "
+            "from the environment. The public default secret is never accepted on verify."
+        ),
+    ),
+) -> None:
+    """Verify HMAC-SHA256 + Ed25519 signatures on a JSON report (M13).
+
+    Verification fails closed: a signature alone proves only that the bytes
+    were not tampered (integrity), not *who* signed them. To report a green
+    (OK) result you must supply a trust anchor -- a pinned Ed25519 public key
+    (``--pubkey`` / ``--pubkey-file``) and/or a real HMAC secret (``--secret``
+    or ``AGENT_GUARDIAN_SIGNING_SECRET``). Without an anchor the report is shown
+    as UNANCHORED and the command exits non-zero.
+    """
     if not path.exists():
         typer.echo(f"path not found: {path}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
@@ -720,12 +826,37 @@ def verify(path: Path = typer.Argument(..., help="Path to a signed JSON report."
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
+    # Resolve the pinned Ed25519 pubkey (file takes precedence over the literal).
+    expected_pubkey: str | None = pubkey
+    if pubkey_file is not None:
+        if not pubkey_file.is_file():
+            typer.echo(f"pubkey file not found: {pubkey_file}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        expected_pubkey = pubkey_file.read_text(encoding="utf-8").strip()
+    # Resolve the HMAC secret (explicit flag > env). verify_signatures itself
+    # falls back to AGENT_GUARDIAN_SIGNING_SECRET, but resolving here lets us
+    # tell the operator clearly whether *any* anchor was supplied.
+    hmac_secret = secret if secret is not None else os.environ.get("AGENT_GUARDIAN_SIGNING_SECRET")
+    anchor_supplied = expected_pubkey is not None or hmac_secret is not None
+
     from agent_guardian.reports.json_report import verify_signatures
 
-    result = verify_signatures(path)
+    result = verify_signatures(
+        path,
+        expected_ed25519_pubkey=expected_pubkey,
+        expected_hmac_secret=hmac_secret,
+    )
     typer.echo(f"schema:       {'OK' if result.schema_ok else 'FAIL'}")
     typer.echo(f"HMAC-SHA256:  {'OK' if result.hmac_valid else 'FAIL'}")
     typer.echo(f"Ed25519:      {'OK' if result.ed25519_valid else 'FAIL'}")
+    typer.echo(f"trust anchor: {'PINNED' if result.anchored else 'UNANCHORED'}")
+    if not anchor_supplied:
+        typer.echo(
+            "provenance UNVERIFIED: no trust anchor supplied. A signed report only "
+            "proves the bytes were not tampered, not who produced it. Pass --pubkey / "
+            "--pubkey-file (Ed25519) and/or --secret (HMAC) to establish provenance.",
+            err=True,
+        )
     if result.error:
         typer.echo(f"error:        {result.error}", err=True)
     if not result.ok:
@@ -804,8 +935,13 @@ def publish(
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
+    # We refuse to publish a *tampered* scan, so we require the Ed25519
+    # signature to recompute (bytes-not-modified). Ed25519 alone proves
+    # integrity without a shared secret; the HMAC leg fails closed off a real
+    # secret, so it is not the right integrity gate here. Full provenance trust
+    # (who signed) is the job of the ``verify`` command with a pinned key.
     verify_result = verify_signatures(payload)
-    if not verify_result.ok:
+    if not (verify_result.ed25519_valid and verify_result.schema_ok):
         typer.echo(
             "signature verification failed -- refusing to publish a possibly "
             "tampered scan. Details:",
@@ -1614,7 +1750,31 @@ async def _run_scan(
         audit_path.write_text(json.dumps(audit, sort_keys=True) + "\n", encoding="utf-8")
         typer.echo(f"contract audit written to {audit_path}")
 
-    # 9. Render + persist report.
+    # 8b. Authoritative-scan gate (#1). A scan whose evaluator/attacker was the
+    #     stub (or that the swarm otherwise marked non-authoritative) can never
+    #     produce a real finding, so its numeric AIVSS is vacuous. The swarm
+    #     already forces band=NOT_EVALUATED + scoring_valid=False for such runs;
+    #     here we make it LOUD on stderr and ensure --fail-under treats it as a
+    #     failure (never a silent green pass).
+    authoritative = scan_result.scoring_valid
+    if not authoritative:
+        engine = scan_result.engine or {}
+        typer.echo(
+            "WARNING: this scan is NON-AUTHORITATIVE. "
+            f"evaluation_mode={scan_result.evaluation_mode} "
+            f"(engine: attacker={engine.get('attacker', '?')}, "
+            f"evaluator={engine.get('evaluator', '?')}). A stub / non-LLM evaluator "
+            "cannot flag findings, so the numeric AIVSS is meaningless and the band "
+            "is reported as NOT_EVALUATED. Re-run with a real --model (e.g. "
+            "openai:gpt-4o, anthropic:claude-haiku-4-5, gemini:gemini-2.5-flash) for "
+            "an authoritative assessment.",
+            err=True,
+        )
+
+    # 9. Render + persist report. The canonical scan.json is always written via
+    #    the signed/redacted ``write_json`` path so the persisted artifact is
+    #    schema-stamped, signed, and PII-redacted (#1/#2). The user-chosen
+    #    --output report is written separately (may be a different format).
     if output_path is None:
         output_path = Path.home() / ".agentguardian" / "scans" / scan_id / f"report.{output}"
     try:
@@ -1627,10 +1787,19 @@ async def _run_scan(
         typer.echo(f"report write error: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
 
-    # Also persist the raw scan.json for later `report` calls.
+    # Persist the canonical scan.json (signed + redacted + schema-stamped) for
+    # later `report` / `verify` / `publish` calls. The raw, unsigned model dump
+    # is kept alongside as scan.raw.json for debugging only.
+    from agent_guardian.reports.json_report import write_json
+
     scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
     scan_dir.mkdir(parents=True, exist_ok=True)
-    (scan_dir / "scan.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
+    try:
+        write_json(scan_result, scan_dir / "scan.json")
+    except Exception as exc:
+        typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
+        return EXIT_CONFIG
+    (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
 
     # 10. Final state + summary.
     state = _read_state()
@@ -1641,14 +1810,25 @@ async def _run_scan(
         _write_state(state)
 
     band: SeverityBand = scan_result.band
+    aivss_label = str(scan_result.aivss) if authoritative else "n/a"
     typer.echo(
-        f"scan {scan_id} done: AIVSS={scan_result.aivss} band={band.value} "
+        f"scan {scan_id} done: AIVSS={aivss_label} band={band.value} "
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)} "
         f"report={output_path}"
     )
 
-    if fail_under is not None and scan_result.aivss < fail_under:
-        return EXIT_FAIL_UNDER
+    # --fail-under: a non-authoritative scan is ALWAYS a failure (it tested
+    # nothing); otherwise compare the numeric AIVSS against the floor.
+    if fail_under is not None:
+        if not authoritative:
+            typer.echo(
+                f"--fail-under {fail_under}: FAILED -- scan is non-authoritative "
+                "(NOT_EVALUATED); a stub/unscored run never passes a gate.",
+                err=True,
+            )
+            return EXIT_FAIL_UNDER
+        if scan_result.aivss < fail_under:
+            return EXIT_FAIL_UNDER
     return EXIT_OK
 
 

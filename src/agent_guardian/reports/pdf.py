@@ -23,7 +23,9 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
+from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory, asi_description
+from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import colour_for_band
 
@@ -99,29 +101,35 @@ def _resolve_engine(engine: str | None) -> str:
     )
 
 
-def _build_asi_rows(scan: Scan) -> list[dict[str, Any]]:
+def _build_asi_rows(findings: list[Finding], scan: Scan) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     by_asi: dict[AsiCategory, list[Any]] = {cat: [] for cat in AsiCategory}
-    for finding in scan.findings:
+    for finding in findings:
         by_asi[finding.asi].append(finding)
     for category in AsiCategory:
-        findings = by_asi[category]
+        cat_findings = by_asi[category]
         rows.append(
             {
                 "id": category.value,
                 "description": asi_description(category),
                 "score": scan.asi_scores.get(category, 100.0),
-                "count": len(findings),
-                "findings": findings,
+                "count": len(cat_findings),
+                "findings": cat_findings,
             }
         )
     return rows
 
 
-def _render_weasyprint(scan: Scan, path: Path) -> None:  # pragma: no cover — needs native libs
+def _render_weasyprint(
+    scan: Scan, path: Path, *, redact: bool
+) -> None:  # pragma: no cover — needs native libs
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from weasyprint import HTML  # type: ignore[import-not-found,import-untyped,unused-ignore]
 
+    # Scrub PII + credential shapes from finding text before it reaches the
+    # template (Jinja autoescape handles HTML escaping; redaction handles
+    # secrets/PII). The template renders the ``findings`` var, not scan.findings.
+    findings = [redact_finding(f, enabled=redact) for f in scan.findings]
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(str(template_dir)),
@@ -130,20 +138,21 @@ def _render_weasyprint(scan: Scan, path: Path) -> None:  # pragma: no cover — 
     template = env.get_template("pdf/report.html.jinja")
     html_str = template.render(
         scan=scan,
-        asi_rows=_build_asi_rows(scan),
+        findings=findings,
+        asi_rows=_build_asi_rows(findings, scan),
         band_colour=colour_for_band(scan.band),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     HTML(string=html_str).write_pdf(str(path))
 
 
-def write_pdf(scan: Scan, path: Path, *, engine: str | None = None) -> None:
+def write_pdf(scan: Scan, path: Path, *, engine: str | None = None, redact: bool = True) -> None:
     """Render ``scan`` to PDF at ``path`` using the best available engine."""
     chosen = _resolve_engine(engine)
     if chosen == "weasyprint":
-        _render_weasyprint(scan, path)
+        _render_weasyprint(scan, path, redact=redact)
         return
     # Fallback path — always importable on systems with reportlab installed.
     from agent_guardian.reports.pdf_reportlab import write_pdf_reportlab
 
-    write_pdf_reportlab(scan, path)
+    write_pdf_reportlab(scan, path, redact=redact)

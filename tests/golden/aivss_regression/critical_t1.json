@@ -325,6 +325,6 @@
       "created_at": "2026-05-26T12:00:00Z"
     }
   ],
-  "expected_aivss": 0,
-  "expected_band": "CRITICAL"
+  "expected_aivss": 45,
+  "expected_band": "POOR"
 }

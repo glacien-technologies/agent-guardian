@@ -330,6 +330,89 @@ def test_build_transport_no_error_path_is_none() -> None:
     assert transport._tool_call_path is None
 
 
+# ---------------------------------------------------------------------------
+# build_transport — TLS wiring (#23): tls.insecure / tls.ca_bundle → verify
+# ---------------------------------------------------------------------------
+
+
+def _ssl_context(transport: HttpTransport) -> object:
+    return transport._adapter._client._transport._pool._ssl_context  # type: ignore[attr-defined]
+
+
+def test_build_http_transport_tls_insecure_disables_verification() -> None:
+    import ssl
+
+    from agent_guardian.contract.schema import Tls
+
+    contract = _contract(
+        transport=ContractHttpTransport.model_validate({"url": URL, "tls": Tls(insecure=True)}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    ctx = _ssl_context(transport)
+    assert ctx.verify_mode == ssl.CERT_NONE  # type: ignore[attr-defined]
+
+
+def test_build_http_transport_no_tls_keeps_secure_default() -> None:
+    import ssl
+
+    contract = _contract()
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    ctx = _ssl_context(transport)
+    assert ctx.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
+
+
+def test_build_http_transport_resolves_ca_bundle_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # tls.ca_bundle is a SecretRef resolving to a CA-bundle PATH (the same
+    # convention mtls.ca_bundle uses); the factory resolves it and threads the
+    # path into verify (proven by httpx loading that CA file without error).
+    import ssl
+
+    import certifi
+
+    from agent_guardian.contract.schema import Tls
+
+    monkeypatch.setenv("AG_CA_BUNDLE", certifi.where())
+    contract = _contract(
+        transport=ContractHttpTransport.model_validate(
+            {"url": URL, "tls": Tls(ca_bundle=SecretRef("${env:AG_CA_BUNDLE}"))}
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    ctx = _ssl_context(transport)
+    # A pinned CA bundle still verifies certs (CERT_REQUIRED) — it just trusts a
+    # specific root. The point is the resolved path loaded without error.
+    assert ctx.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
+
+
+def test_build_http_transport_tls_insecure_wins_over_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ssl
+
+    import certifi
+
+    from agent_guardian.contract.schema import Tls
+
+    monkeypatch.setenv("AG_CA_BUNDLE", certifi.where())
+    contract = _contract(
+        transport=ContractHttpTransport.model_validate(
+            {
+                "url": URL,
+                "tls": Tls(insecure=True, ca_bundle=SecretRef("${env:AG_CA_BUNDLE}")),
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    ctx = _ssl_context(transport)
+    assert ctx.verify_mode == ssl.CERT_NONE  # type: ignore[attr-defined]
+
+
 async def test_build_transport_oauth2_builds_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CID", "c")
     monkeypatch.setenv("CSEC", "s")

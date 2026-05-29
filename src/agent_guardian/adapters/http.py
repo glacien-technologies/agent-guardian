@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 from typing import Any
 
 import httpx
@@ -83,6 +84,7 @@ class HttpAdapter(TargetAdapter):
         max_retries: int = 3,
         max_concurrency: int = 5,
         client: httpx.AsyncClient | None = None,
+        verify: bool | str = True,
     ) -> None:
         super().__init__()
         if not endpoint:
@@ -105,8 +107,16 @@ class HttpAdapter(TargetAdapter):
         self._shape: HttpShape = get_shape(shape)
 
         self._owns_client = client is None
+        # ``verify`` is honoured only for a client we build ourselves; an
+        # injected client carries its own TLS config. ``verify=False`` disables
+        # certificate verification (insecure — for self-signed/dev targets);
+        # ``verify="<path>"`` pins a private CA bundle. A CA-bundle *path* is
+        # lifted into an ``ssl.SSLContext`` (httpx deprecates ``verify=<str>``).
+        verify_arg: bool | ssl.SSLContext = (
+            ssl.create_default_context(cafile=verify) if isinstance(verify, str) else verify
+        )
         self._client: httpx.AsyncClient = client or httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds)
+            timeout=httpx.Timeout(timeout_seconds), verify=verify_arg
         )
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._closed = False

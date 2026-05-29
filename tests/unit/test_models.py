@@ -155,6 +155,28 @@ def test_colour_for_band_returns_hex() -> None:
     assert colour_for_band(SeverityBand.CRITICAL) == "#991b1b"
 
 
+def test_severity_band_has_not_evaluated_member() -> None:
+    assert SeverityBand.NOT_EVALUATED.value == "not_evaluated"
+    assert SeverityBand("not_evaluated") is SeverityBand.NOT_EVALUATED
+
+
+def test_colour_for_band_handles_not_evaluated() -> None:
+    # Must not KeyError — report/dashboard rendering relies on this being total.
+    assert colour_for_band(SeverityBand.NOT_EVALUATED) == "#64748b"
+
+
+def test_colour_for_band_is_total_over_all_bands() -> None:
+    # Guards against a new band being added without a colour (KeyError at render).
+    for band in SeverityBand:
+        assert colour_for_band(band).startswith("#")
+
+
+def test_band_for_score_never_returns_not_evaluated() -> None:
+    # NOT_EVALUATED is a non-numeric band — only the scoring phase sets it.
+    for score in range(0, 101):
+        assert band_for_score(score) is not SeverityBand.NOT_EVALUATED
+
+
 def test_severity_enum_values() -> None:
     assert Severity.CRITICAL.value == "critical"
     assert Severity.LOW.value == "low"
@@ -310,6 +332,49 @@ def test_scan_round_trips() -> None:
 def test_scan_aivss_rejects_out_of_range() -> None:
     base = _make_scan(findings=[]).model_dump()
     base["aivss"] = 200
+    with pytest.raises(ValidationError):
+        Scan.model_validate(base)
+
+
+def test_scan_provenance_fields_default_to_real_and_valid() -> None:
+    scan = _make_scan(findings=[])
+    assert scan.engine is None
+    assert scan.evaluation_mode == "real"
+    assert scan.scoring_valid is True
+
+
+def test_scan_accepts_engine_and_stub_provenance() -> None:
+    scan = Scan(
+        id="sc_01ABCDEF01ABCDEF01ABCDEF",
+        package_version="0.0.0",
+        aivss_formula_version="aivss-v1",
+        probe_library_version="0.0.0",
+        target_mode="prompt",
+        target_ref="prompt.txt",
+        tier=Tier.T1_CRITICAL,
+        aivss=0,
+        band=SeverityBand.NOT_EVALUATED,
+        sub_scores={},
+        findings=[],
+        asi_scores={cat: 100.0 for cat in AsiCategory},
+        duration_seconds=1.0,
+        cost_usd=0.0,
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        evaluation_mode="stub",
+        scoring_valid=False,
+        created_at=datetime(2026, 5, 26, 12, 0, tzinfo=UTC),
+    )
+    assert scan.engine == {"commander": "stub", "attacker": "stub", "evaluator": "stub"}
+    assert scan.evaluation_mode == "stub"
+    assert scan.scoring_valid is False
+    assert scan.band is SeverityBand.NOT_EVALUATED
+    # Round-trips with the new fields + non-numeric band.
+    assert Scan.model_validate(scan.model_dump()) == scan
+
+
+def test_scan_rejects_unknown_evaluation_mode() -> None:
+    base = _make_scan(findings=[]).model_dump()
+    base["evaluation_mode"] = "bogus"
     with pytest.raises(ValidationError):
         Scan.model_validate(base)
 

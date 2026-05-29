@@ -38,7 +38,7 @@
           <circle cx="22.5" cy="9" r="2.4" fill="#8B5CF6"></circle>
         </svg>
       </span>
-      <span class="brand__name">AgentGuardian <em>Open</em></span>
+      <span class="brand__name">AgentGuardian</span>
     </a>
 
     <nav class="topnav" hidden></nav>
@@ -50,7 +50,7 @@
             <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>
           </svg>
         </span>
-        <span class="urlbar__t"><span class="muted">http://</span>localhost<span class="muted">:7474</span></span>
+        <span class="urlbar__t"><span class="muted">{{ request.url.scheme }}://</span>{{ request.url.hostname }}{% if request.url.port %}<span class="muted">:{{ request.url.port }}</span>{% endif %}</span>
       </div>
       <div class="locality">
         <span class="locality__dot"></span>
@@ -373,7 +373,7 @@
   <footer class="page-foot">
     <div>
       <strong>AgentGuardian</strong> &middot; v{{ version }} &middot; Apache 2.0
-      {% if scan %}&middot; AIVSS formula <code>{{ scan.aivss_formula_version }}</code> &middot; probe library <code>{{ scan.probe_library_version }}</code>{% endif %}
+      {% if scan %}&middot; AIVSS formula <code>{{ scan.aivss_formula_version }}</code> &middot; probe library <code>{{ probe_library_label }}</code>{% endif %}
     </div>
     <div>
       <code>~/.agentguardian/scans/{{ scan_id }}/</code>

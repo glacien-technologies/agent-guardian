@@ -172,7 +172,7 @@
         <div style="font-size: 14pt; letter-spacing: 0.4em; color: #6b7280;">
           AGENT&middot;GUARDIAN
         </div>
-        <div class="badge">{{ scan.aivss }}</div>
+        <div class="badge">{{ scan.aivss if scan.scoring_valid else "n/a" }}</div>
         <div class="band">{{ scan.band.value }}</div>
         <div class="meta">
           <div><strong>Scan ID:</strong> <span class="mono">{{ scan.id }}</span></div>
@@ -192,7 +192,7 @@
         {{ "%.2f"|format(scan.duration_seconds) }}s at a cost of
         ${{ "%.4f"|format(scan.cost_usd) }}. The target was probed with the
         bundled AgentGuardian corpus and scored
-        <strong>{{ scan.aivss }} / 100</strong> ({{ scan.band.value }}).
+        {% if scan.scoring_valid %}<strong>{{ scan.aivss }} / 100</strong> ({{ scan.band.value }}){% else %}<strong>NOT EVALUATED</strong> — a non-authoritative (e.g. stub-evaluator) run produces no trustworthy AIVSS{% endif %}.
       </p>
       <table>
         <thead>
@@ -276,10 +276,10 @@
     </section>
     {% endfor %}
 
-    {% if scan.findings %}
+    {% if findings %}
     <section class="findings-detail">
       <h2>Finding transcripts</h2>
-      {% for f in scan.findings %}
+      {% for f in findings %}
       <div class="finding-detail" style="page-break-inside: avoid; page-break-before: auto;">
         <h3>{{ f.id }} &mdash; {{ f.asi.value }} / {{ f.severity.value }}</h3>
         <table class="finding-meta">

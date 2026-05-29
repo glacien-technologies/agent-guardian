@@ -313,12 +313,31 @@ class TestActiveTracer:
         assert span.attributes["gen_ai.tool.type"] == "function"
         assert span.attributes["gen_ai.operation.name"] == "execute_tool"
 
-    def test_transport_span_emits_endpoint(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
+    def test_transport_span_emits_host_and_default_port(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
+        # #22: server.address is the HOST only (semconv) — not the full URL —
+        # and server.port carries the (defaulted) port for host-level grouping.
         with transport_span("https://target.example/chat"):
             pass
         span = in_memory_tracer.get_finished_spans()[0]
         assert span.name == "transport.send https://target.example/chat"
-        assert span.attributes["server.address"] == "https://target.example/chat"
+        assert span.attributes["server.address"] == "target.example"
+        assert span.attributes["server.port"] == 443
+
+    def test_transport_span_emits_explicit_port(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
+        with transport_span("http://target.example:8080/v1/chat"):
+            pass
+        span = in_memory_tracer.get_finished_spans()[0]
+        assert span.attributes["server.address"] == "target.example"
+        assert span.attributes["server.port"] == 8080
+
+    def test_transport_span_non_url_endpoint_sets_no_address(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
+        # A non-URL sentinel (e.g. an in-process transport) sets nothing rather
+        # than emitting a malformed server.address.
+        with transport_span("transport"):
+            pass
+        span = in_memory_tracer.get_finished_spans()[0]
+        assert "server.address" not in span.attributes
+        assert "server.port" not in span.attributes
 
     def test_set_usage_on_current_span(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
         with agent_span("recon-agent"):

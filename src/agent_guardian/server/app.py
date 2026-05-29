@@ -23,9 +23,12 @@ Boot sequence
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -34,10 +37,26 @@ from agent_guardian.server.scan_store import ScanStore
 
 __all__ = ["create_app"]
 
+_LOG = logging.getLogger(__name__)
 
 _SERVER_DIR = Path(__file__).resolve().parent
 _STATIC_DIR = _SERVER_DIR / "static"
 _TEMPLATE_DIR = _SERVER_DIR / "templates"
+
+
+def _cors_allow_origins() -> list[str]:
+    """Resolve the CORS allow-list (restrictive by default).
+
+    The dashboard is a same-origin server-rendered app -- no browser JS calls
+    it cross-origin -- so the default allow-list is empty (no cross-origin
+    reads). An operator who fronts it from a different origin can opt in via
+    ``AGENT_GUARDIAN_DASHBOARD_CORS_ORIGINS`` (comma-separated). We never emit a
+    wildcard ``*`` automatically.
+    """
+    raw = os.environ.get("AGENT_GUARDIAN_DASHBOARD_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
@@ -55,6 +74,21 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+
+    # Restrictive CORS. Default = no cross-origin access (the dashboard is a
+    # same-origin server-rendered app). Operators front-ending it from another
+    # origin opt in via AGENT_GUARDIAN_DASHBOARD_CORS_ORIGINS; we never auto-
+    # emit a wildcard.
+    allow_origins = _cors_allow_origins()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+    if allow_origins:
+        _LOG.info("dashboard CORS allow-list: %s", ", ".join(allow_origins))
 
     # Templates -- exposed both on app.state for handlers and stamped
     # with two globals every page expects.

@@ -5,9 +5,15 @@ both HMAC-SHA256 and Ed25519 signature blocks under the ``signatures`` key.
 The signing input is the canonical JSON of the payload *without* the
 ``signatures`` field so verifiers can reconstruct the signed bytes.
 
-PII redaction is on by default. With ``redact_pii=True`` the ``summary``
-and ``transcript_ref`` strings of each finding are passed through
-:class:`PiiRedactor` (best-effort, presidio-backed when available).
+PII / secret redaction is **on by default** (``redact_pii=True``). Every
+finding is routed through the shared :func:`agent_guardian.core.redact.redact_finding`
+helper, which scrubs ``summary``, ``description``, ``trigger_prompt``,
+``transcript_ref`` and ``evidence`` of PII *and* credential shapes (OpenAI /
+AWS / GitHub / Google keys, JWTs, bearer tokens, ``password=`` assignments)
+using the regex fallback, with presidio layered on for richer PII when the
+``[full]`` extra is installed. The same helper is used by the SARIF, JUnit,
+Markdown and PDF emitters so every output surface scrubs identically — a
+security scanner must never re-emit a captured secret.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agent_guardian.core.coverage import compute_coverage_from_memory
-from agent_guardian.core.redact import PiiRedactor
+from agent_guardian.core.redact import redact_finding
 from agent_guardian.crypto.ed25519_sig import (
     Ed25519SignatureBlock,
     sign_ed25519,
@@ -47,21 +53,13 @@ SCHEMA_VERSION = "agentguardian-scan-v1"
 
 _LOG = logging.getLogger(__name__)
 
-_REDACTOR = PiiRedactor()
-
-
-def _redact(text: str | None) -> str | None:
-    if text is None or not text:
-        return text
-    return _REDACTOR.redact(text)
-
 
 def _finding_to_dict(finding: Finding, redact: bool) -> dict[str, Any]:
-    data = finding.model_dump(mode="json")
-    if redact:
-        data["summary"] = _redact(finding.summary)
-        data["transcript_ref"] = _redact(finding.transcript_ref)
-    return data
+    # Redact at the Finding source-of-truth via the shared helper so summary,
+    # description, trigger_prompt, transcript_ref and evidence are all scrubbed
+    # of PII + credential shapes before serialisation.
+    scrubbed: Finding = redact_finding(finding, enabled=redact)
+    return scrubbed.model_dump(mode="json")
 
 
 def _strip_signatures(payload: dict[str, Any]) -> dict[str, Any]:
@@ -141,10 +139,25 @@ def emit_json(
         "completeness": (
             scan.completeness.model_dump(mode="json") if scan.completeness is not None else None
         ),
+        # Provenance: which LLM specs drove the scan (commander/attacker/evaluator
+        # → model id, e.g. "openai:gpt-4o" or "stub"). Folded in BEFORE signing so
+        # the signature covers it and an auditor/leaderboard can tell a real
+        # assessment from a vacuous stub run.
+        "engine": dict(scan.engine) if scan.engine is not None else None,
+        # Whether the verdicts came from a real evaluator + whether the numeric
+        # AIVSS is authoritative. Covered by the signature.
+        "evaluation_mode": scan.evaluation_mode,
+        "scoring_valid": scan.scoring_valid,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),
     }
+    # RoE / contract audit envelope (contract_sha256, authorization_ref,
+    # suppressed_tool_attempts, egress_refused_turns, …). Folded into the signed
+    # payload so the canonical artifact can prove which contract authorized the
+    # scan and how many turns were suppressed / refused.
+    if scan.audit is not None:
+        payload["audit"] = dict(scan.audit)
     if sign:
         payload["signatures"] = sign_payload(payload, secret=secret, keys_dir=keys_dir)
     return payload
@@ -184,24 +197,90 @@ def write_json(
 
 @dataclass(frozen=True, slots=True)
 class VerifyResult:
-    """Outcome of verifying a signed JSON report."""
+    """Outcome of verifying a signed JSON report.
+
+    Two distinct notions are kept separate:
+
+    * **integrity** (``integrity_ok``) — at least one signature channel
+      recomputes, so the signed bytes were not tampered. This says *nothing*
+      about who signed.
+    * **trust** (``anchored``) — the Ed25519 key was pinned against a caller-
+      supplied expected key (and verified), and/or HMAC verified with a real,
+      non-default secret. Without an anchor the report is integrity-checked but
+      ``UNANCHORED`` — its provenance cannot be trusted.
+
+    :attr:`ok` is the conservative, trust-bearing result: it requires a valid,
+    *anchored* signature channel. A forged report re-signed with a fresh key (or
+    the public default HMAC secret) never anchors, so it never reports ``ok``.
+    A genuine report whose HMAC was signed with the public default secret can
+    still report ``ok`` when its Ed25519 key is pinned and verifies — the HMAC
+    channel (worthless without a real secret) does not veto a pinned Ed25519.
+
+    ``hmac_anchor_failed`` / ``ed25519_anchor_failed`` record that an anchor was
+    explicitly supplied for that channel but it did *not* validate — a hard
+    tamper / wrong-anchor signal. Either vetoes ``ok``: when the operator
+    supplies both anchors, both must pass; when they supply one, that one must
+    pass. A worthless channel the operator did *not* anchor (e.g. HMAC with the
+    public default secret) cannot veto a pinned-and-valid Ed25519.
+    """
 
     hmac_valid: bool
     ed25519_valid: bool
     schema_ok: bool
+    anchored: bool = False
+    hmac_anchor_failed: bool = False
+    ed25519_anchor_failed: bool = False
     error: str | None = None
 
     @property
+    def integrity_ok(self) -> bool:
+        """Bytes-not-tampered: schema valid and at least one channel recomputes."""
+        return self.schema_ok and (self.hmac_valid or self.ed25519_valid)
+
+    @property
     def ok(self) -> bool:
-        return self.hmac_valid and self.ed25519_valid and self.schema_ok
+        """Trust-bearing result — requires a valid, anchored signature channel.
+
+        Fails closed if *any* explicitly-supplied anchor did not validate
+        (``hmac_anchor_failed`` / ``ed25519_anchor_failed``): an anchored channel
+        must never be silently ignored, so providing both anchors requires both
+        to pass and providing one requires that one to pass.
+        """
+        return (
+            self.schema_ok
+            and self.anchored
+            and not self.hmac_anchor_failed
+            and not self.ed25519_anchor_failed
+        )
 
 
 def verify_signatures(
     source: Path | dict[str, Any],
     *,
     secret: str | None = None,
+    expected_ed25519_pubkey: str | None = None,
+    expected_hmac_secret: str | None = None,
 ) -> VerifyResult:
-    """Verify HMAC + Ed25519 signatures on a JSON report path or in-memory dict."""
+    """Verify HMAC + Ed25519 signatures on a JSON report path or in-memory dict.
+
+    **Trust anchoring (fail closed).** A signature alone does not prove
+    authenticity — Ed25519 carries its own verifying key and the HMAC default
+    secret is public — so a forger can re-sign arbitrary content. To report a
+    *trusted* result (``VerifyResult.ok``) the caller must supply a trust
+    anchor:
+
+    * ``expected_ed25519_pubkey`` — the pinned signer public key (base32); the
+      embedded key must match it (constant-time) before Ed25519 is trusted.
+    * ``expected_hmac_secret`` (or ``secret`` / ``AGENT_GUARDIAN_SIGNING_SECRET``)
+      — the real signing secret; the public default is never accepted on verify.
+
+    Without an anchor the result is integrity-checked but ``anchored=False``
+    (``UNANCHORED``): ``integrity_ok`` may be true while ``ok`` is false.
+    """
+    # ``secret`` is the legacy/back-compat name; ``expected_hmac_secret`` takes
+    # precedence when both are given.
+    hmac_secret = expected_hmac_secret if expected_hmac_secret is not None else secret
+
     if isinstance(source, Path):
         try:
             data: dict[str, Any] = json.loads(source.read_text(encoding="utf-8"))
@@ -210,6 +289,7 @@ def verify_signatures(
                 hmac_valid=False,
                 ed25519_valid=False,
                 schema_ok=False,
+                anchored=False,
                 error=f"could not read JSON: {exc}",
             )
     else:
@@ -220,6 +300,7 @@ def verify_signatures(
             hmac_valid=False,
             ed25519_valid=False,
             schema_ok=False,
+            anchored=False,
             error="payload is not a JSON object",
         )
 
@@ -230,6 +311,7 @@ def verify_signatures(
             hmac_valid=False,
             ed25519_valid=False,
             schema_ok=schema_ok,
+            anchored=False,
             error="missing 'signatures' block",
         )
 
@@ -237,14 +319,53 @@ def verify_signatures(
     hmac_block = signatures.get("hmac_sha256")
     ed_block = signatures.get("ed25519")
 
+    # verify_hmac fails closed when no real secret is available (it never trusts
+    # the public DEFAULT_SIGNING_SECRET).
     hmac_ok = isinstance(hmac_block, dict) and verify_hmac(
-        canonical, cast(dict[str, object], hmac_block), secret=secret
+        canonical, cast(dict[str, object], hmac_block), secret=hmac_secret
     )
     ed_ok = isinstance(ed_block, dict) and verify_ed25519(
-        canonical, cast(dict[str, object], ed_block)
+        canonical,
+        cast(dict[str, object], ed_block),
+        expected_pubkey_b32=expected_ed25519_pubkey,
     )
+
+    # Anchored == a real trust anchor was supplied. An Ed25519 result is only a
+    # trust anchor when pinned; an HMAC result is a trust anchor when a real
+    # secret (explicit or env) was used (verify_hmac already failed closed on
+    # the default).
+    anchored = (expected_ed25519_pubkey is not None and ed_ok) or (
+        hmac_secret is not None and hmac_ok
+    )
+    # An anchor was explicitly supplied for a channel but it did not validate —
+    # a tamper / wrong-anchor signal that must veto a green result even if the
+    # other channel anchored. (Supplying both anchors thus requires both.)
+    hmac_anchor_failed = hmac_secret is not None and not hmac_ok
+    ed25519_anchor_failed = expected_ed25519_pubkey is not None and not ed_ok
+    error: str | None = None
+    if hmac_anchor_failed and (anchored or ed25519_anchor_failed):
+        error = (
+            "HMAC verification FAILED with the supplied secret — the report does "
+            "not match this signing secret (tamper or wrong secret); refusing to trust"
+        )
+    elif ed25519_anchor_failed and anchored:
+        error = (
+            "Ed25519 verification FAILED against the pinned public key — the "
+            "report was signed by a different key (forgery or wrong pin); refusing "
+            "to trust"
+        )
+    elif not anchored and (hmac_ok or ed_ok):
+        error = (
+            "UNANCHORED: signature integrity verified but no trust anchor supplied "
+            "(pass expected_ed25519_pubkey and/or a real HMAC secret to establish "
+            "provenance) — provenance untrusted"
+        )
     return VerifyResult(
         hmac_valid=hmac_ok,
         ed25519_valid=ed_ok,
         schema_ok=schema_ok,
+        anchored=anchored,
+        hmac_anchor_failed=hmac_anchor_failed,
+        ed25519_anchor_failed=ed25519_anchor_failed,
+        error=error,
     )

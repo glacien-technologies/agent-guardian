@@ -233,16 +233,33 @@ class ScanStore:
     # ------------------------------------------------------------------
 
     def load_completed(self, scan_id: str) -> Scan | None:
-        """Read the on-disk scan record. Returns ``None`` if missing."""
-        path = self.scan_dir(scan_id) / "scan.json"
-        if not path.is_file():
-            return None
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            return Scan.model_validate(payload)
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            _LOG.warning("failed to load scan %s: %s: %s", scan_id, type(exc).__name__, exc)
-            return None
+        """Read the on-disk scan record. Returns ``None`` if missing.
+
+        Since the hardening work, ``scan.json`` is the canonical *signed +
+        redacted* report (a different schema than the ``Scan`` model), and the
+        raw, model-roundtrippable dump is persisted alongside as
+        ``scan.raw.json``. We load the raw dump first and fall back to the
+        legacy single-file layout (where ``scan.json`` *was* the raw model
+        dump) so pre-existing on-disk scans still deserialise.
+        """
+        scan_dir = self.scan_dir(scan_id)
+        for name in ("scan.raw.json", "scan.json"):
+            path = scan_dir / name
+            if not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                return Scan.model_validate(payload)
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                _LOG.warning(
+                    "failed to load scan %s from %s: %s: %s",
+                    scan_id,
+                    name,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+        return None
 
     def get_scan(self, scan_id: str) -> Scan | None:
         """Resolve a scan by id — running or completed."""
@@ -335,7 +352,8 @@ class ScanStore:
             candidate = scan_dir / f"report.{fmt}"
             if candidate.is_file():
                 out[fmt] = candidate
-        # The raw scan.json always counts as a JSON report fall-back.
+        # The canonical signed/redacted scan.json always counts as a JSON
+        # report fall-back when no explicit report.json was written.
         scan_json = scan_dir / "scan.json"
         if "json" not in out and scan_json.is_file():
             out["json"] = scan_json

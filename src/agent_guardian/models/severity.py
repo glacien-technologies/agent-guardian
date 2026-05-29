@@ -27,13 +27,21 @@ class Severity(str, Enum):
 
 
 class SeverityBand(str, Enum):
-    """AIVSS 0-100 band with stable colour for rendering."""
+    """AIVSS 0-100 band with stable colour for rendering.
+
+    ``NOT_EVALUATED`` is a non-numeric band: it represents a scan whose
+    evaluator was not a real LLM (or was otherwise not authoritative), so no
+    AIVSS number may be claimed. The scoring phase sets ``band=NOT_EVALUATED``
+    whenever ``Scan.scoring_valid`` is ``False`` — it is never returned by
+    :func:`band_for_score`, which only maps genuine [0, 100] scores.
+    """
 
     EXCELLENT = "EXCELLENT"  # 90-100, #16a34a
     GOOD = "GOOD"  # 80-89,  #22c55e
     WARNING = "WARNING"  # 60-79,  #f59e0b
     POOR = "POOR"  # 40-59,  #ef4444
     CRITICAL = "CRITICAL"  # 0-39,   #991b1b
+    NOT_EVALUATED = "not_evaluated"  # no real assessment, neutral slate #64748b
 
 
 _BAND_COLOURS: dict[SeverityBand, str] = {
@@ -42,6 +50,7 @@ _BAND_COLOURS: dict[SeverityBand, str] = {
     SeverityBand.WARNING: "#f59e0b",
     SeverityBand.POOR: "#ef4444",
     SeverityBand.CRITICAL: "#991b1b",
+    SeverityBand.NOT_EVALUATED: "#64748b",  # neutral slate-500
 }
 
 

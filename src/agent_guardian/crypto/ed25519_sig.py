@@ -21,6 +21,7 @@ addresses, and DNSSEC use — it round-trips through copy/paste cleanly.
 from __future__ import annotations
 
 import base64
+import hmac
 import logging
 from pathlib import Path
 from typing import TypedDict
@@ -141,10 +142,21 @@ def sign_ed25519(payload: bytes, *, keys_dir: Path | None = None) -> Ed25519Sign
 def verify_ed25519(
     payload: bytes,
     block: Ed25519SignatureBlock | dict[str, object],
+    *,
+    expected_pubkey_b32: str | None = None,
 ) -> bool:
     """Verify a detached Ed25519 signature against an embedded public key.
 
     Returns ``False`` for any structural defect or signature mismatch.
+
+    **Trust anchoring**: when ``expected_pubkey_b32`` is supplied, the embedded
+    public key must match it (constant-time, normalised through the same
+    base32 round-trip) before the signature is even checked. Without a pinned
+    key the signature only attests *integrity* (the bytes were not tampered),
+    NOT *authenticity* (who signed) — because Ed25519 carries its own verifying
+    key, anyone can re-sign forged content with a fresh key. Callers that need a
+    trust decision (the ``verify`` CLI) must pass an expected key; see
+    :func:`agent_guardian.reports.json_report.verify_signatures`.
     """
     try:
         algorithm = block.get("algorithm")
@@ -172,6 +184,21 @@ def verify_ed25519(
     except (ValueError, TypeError, base64.binascii.Error) as exc:  # type: ignore[attr-defined]
         _LOG.warning("ed25519 verify: signature/public-key decode failed: %s", exc)
         return False
+    # Trust anchor: pin the embedded key against the expected one (constant-time
+    # on the raw key bytes, after normalising the expected key through the same
+    # decode so base32 padding / casing differences don't matter).
+    if expected_pubkey_b32 is not None:
+        try:
+            expected_raw = _b32_decode_no_padding(expected_pubkey_b32)
+        except (ValueError, TypeError, base64.binascii.Error) as exc:  # type: ignore[attr-defined]
+            _LOG.warning("ed25519 verify: expected public key decode failed: %s", exc)
+            return False
+        if not hmac.compare_digest(pub_raw, expected_raw):
+            _LOG.warning(
+                "ed25519 verify: embedded public key does not match the pinned "
+                "expected key — refusing to trust this signature"
+            )
+            return False
     try:
         public_key = ed25519.Ed25519PublicKey.from_public_bytes(pub_raw)
     except ValueError as exc:

@@ -137,12 +137,42 @@ class _FakeClock:
         self.now += dt
 
 
-async def test_observe_on_disabled_bucket_is_noop() -> None:
+async def test_observe_on_disabled_bucket_promotes_to_adaptive() -> None:
+    # Default-on back-off (#13): a 429 on a bucket with no configured rate must
+    # still throttle. The first observed 429 promotes the disabled bucket to an
+    # adaptive one paced from the conservative default rate, honouring any
+    # server retry_after as a cooldown.
     bucket = AsyncTokenBucket(None)
-    bucket.observe_rate_limited(5.0)  # must not raise / change anything
+    assert bucket.rate_per_sec == 0.0
+    bucket.observe_rate_limited(0.2)  # promotes + parks a cooldown
+    assert bucket.rate_per_sec > 0.0  # promoted to the default adaptive rate
     start = time.monotonic()
     await bucket.acquire()
-    assert time.monotonic() - start < 0.05
+    elapsed = time.monotonic() - start
+    # The parked retry_after cooldown is honoured even though no rate was set.
+    assert elapsed >= 0.2 * 0.9, elapsed
+
+
+async def test_observe_on_disabled_bucket_without_retry_after_still_paces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Even without a retry_after, a 429 on an unconfigured bucket promotes it and
+    # the next acquire paces against the default adaptive rate (not instant).
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    sleeps: list[float] = []
+
+    async def _fake_sleep(d: float) -> None:
+        sleeps.append(d)
+        clock.advance(d)
+
+    monkeypatch.setattr("agent_guardian.core.ratelimit.asyncio.sleep", _fake_sleep)
+    bucket = AsyncTokenBucket(None)
+    bucket.observe_rate_limited(None)  # promote + halve the default rate
+    await bucket.acquire()
+    # Tokens were drained on promotion, so the acquire waits for a refill at the
+    # halved default rate — a real (non-zero) pause.
+    assert sleeps and sleeps[-1] > 0.0
 
 
 async def test_cooldown_honours_retry_after() -> None:

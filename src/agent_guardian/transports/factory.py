@@ -397,7 +397,7 @@ def build_transport(
     auth = build_auth_provider(contract, resolver=resolver, oauth2_client=oauth2_client)
 
     if isinstance(transport, ContractHttpTransport):
-        return _build_http_transport(contract, transport, auth)
+        return _build_http_transport(contract, transport, auth, resolver=resolver)
     if isinstance(transport, ContractOpenAiTransport):
         return OpenAiResponsesTransport(
             base_url=str(transport.base_url),
@@ -508,6 +508,8 @@ def _build_http_transport(
     contract: Contract,
     transport: ContractHttpTransport,
     auth: AuthProvider,
+    *,
+    resolver: SecretResolver | None = None,
 ) -> HttpTransport:
     """Construct an :class:`HttpTransport` from the contract's HTTP primitives.
 
@@ -517,6 +519,14 @@ def _build_http_transport(
     ``session_send_name`` used to *replay* it outbound on the next turn. The
     :class:`~agent_guardian.transports.session.SessionMachine` (SERVER_SESSION
     mode) threads the captured id back through ``Request.session``.
+
+    TLS wiring: ``transport.tls`` is lowered onto the transport's ``verify``
+    knob — ``tls.insecure`` → ``verify=False`` (no cert verification), else a
+    resolved ``tls.ca_bundle`` → ``verify=<path>`` (pin a private CA), else the
+    secure default ``verify=True``. ``insecure`` wins if both are set. The
+    ``ca_bundle`` :class:`SecretRef` resolves to a CA-bundle *path* string (the
+    same convention :func:`build_auth_provider` uses for ``mtls.ca_bundle``);
+    reference it via e.g. ``${env:CA_BUNDLE_PATH}``.
     """
     target = contract.target
     response = target.response
@@ -527,6 +537,14 @@ def _build_http_transport(
     if session.id_send is not None:
         session_send_in = session.id_send.in_
         session_send_name = session.id_send.name
+
+    verify: bool | str = True
+    if transport.tls is not None:
+        if transport.tls.insecure:
+            verify = False
+        elif transport.tls.ca_bundle is not None:
+            refs = resolve_secrets(contract, resolver=resolver)
+            verify = _resolve(refs, transport.tls.ca_bundle)
 
     return HttpTransport(
         endpoint=str(transport.url),
@@ -540,6 +558,7 @@ def _build_http_transport(
         base_headers=transport.headers,
         auth=auth,
         timeout_seconds=transport.timeout_ms / 1000.0,
+        verify=verify,
     )
 
 

@@ -17,13 +17,19 @@ from agent_guardian.models.scan import Scan
 __all__ = ["write_pdf_reportlab"]
 
 
-def write_pdf_reportlab(scan: Scan, path: Path) -> None:  # pragma: no cover — needs reportlab
+def write_pdf_reportlab(
+    scan: Scan, path: Path, *, redact: bool = True
+) -> None:  # pragma: no cover — needs reportlab
     """Render a single-page summary PDF using ReportLab.
 
     The output is intentionally minimal — the canonical artefact is the
     JSON report; this PDF exists so CI without native libs can still
-    produce *something* humans can open.
+    produce *something* humans can open. It emits only aggregate stats (AIVSS,
+    severity counts, per-ASI scores) and no per-finding text, so ``redact`` is
+    accepted for signature parity with :func:`agent_guardian.reports.pdf.write_pdf`
+    but there is no finding text to scrub here.
     """
+    _ = redact  # no finding text rendered in the fallback; nothing to scrub
     # ReportLab ships no type stubs; mypy reports either `import-untyped`
     # (when reportlab is installed) or `import-not-found` (when it isn't),
     # so we silence both error codes plus the `unused-ignore` that would

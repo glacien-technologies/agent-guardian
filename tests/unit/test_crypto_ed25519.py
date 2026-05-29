@@ -99,3 +99,34 @@ def test_load_or_create_keypair_returns_objects(tmp_path: Path) -> None:
     # Re-signing with that keypair should be valid.
     sig = kp["private_key"].sign(b"hello")
     kp["public_key"].verify(sig, b"hello")
+
+
+# --- finding #6: trust anchoring (pinned public key) ---------------------
+
+
+def test_verify_accepts_matching_pinned_pubkey(tmp_path: Path) -> None:
+    block = sign_ed25519(b"payload", keys_dir=tmp_path / "k")
+    pinned = block["public_key_b32"]
+    assert verify_ed25519(b"payload", block, expected_pubkey_b32=pinned) is True
+
+
+def test_verify_rejects_mismatched_pinned_pubkey(tmp_path: Path) -> None:
+    # Forge with a fresh keypair; the embedded key differs from the pinned one.
+    pinned = sign_ed25519(b"payload", keys_dir=tmp_path / "trusted")["public_key_b32"]
+    forged = sign_ed25519(b"payload", keys_dir=tmp_path / "attacker")
+    # Signature itself is valid (integrity), but the key does not match the pin.
+    assert verify_ed25519(b"payload", forged) is True
+    assert verify_ed25519(b"payload", forged, expected_pubkey_b32=pinned) is False
+
+
+def test_verify_rejects_malformed_pinned_pubkey(tmp_path: Path) -> None:
+    block = sign_ed25519(b"payload", keys_dir=tmp_path / "k")
+    assert verify_ed25519(b"payload", block, expected_pubkey_b32="!!not-b32!!") is False
+
+
+def test_verify_pinned_pubkey_tolerates_padding_variants(tmp_path: Path) -> None:
+    block = sign_ed25519(b"payload", keys_dir=tmp_path / "k")
+    pinned = block["public_key_b32"]
+    # Re-pad to a multiple of 8 — the comparison normalises through decode.
+    padded = pinned + ("=" * ((-len(pinned)) % 8))
+    assert verify_ed25519(b"payload", block, expected_pubkey_b32=padded) is True

@@ -185,6 +185,44 @@ def test_empty_endpoint_raises() -> None:
         HttpTransport(endpoint="")
 
 
+# --- TLS verify wiring (#23) ------------------------------------------------
+
+
+def _ssl_context(t: HttpTransport) -> object:
+    # Reach the SSL context httpx built for the client the transport owns.
+    return t._adapter._client._transport._pool._ssl_context  # type: ignore[attr-defined]
+
+
+async def test_verify_false_disables_cert_verification_on_built_client() -> None:
+    # verify=False must reach the httpx client the transport builds (insecure):
+    # the SSL context has verification turned off (CERT_NONE / no hostname check).
+    import ssl
+
+    t = HttpTransport(endpoint=ENDPOINT, verify=False, max_retries=0)
+    ctx = _ssl_context(t)
+    assert ctx.verify_mode == ssl.CERT_NONE  # type: ignore[attr-defined]
+    assert ctx.check_hostname is False  # type: ignore[attr-defined]
+    await t.aclose()
+
+
+async def test_verify_default_true_requires_certs() -> None:
+    import ssl
+
+    t = HttpTransport(endpoint=ENDPOINT, max_retries=0)
+    ctx = _ssl_context(t)
+    # The default secure client requires + verifies the server certificate.
+    assert ctx.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
+    assert ctx.check_hostname is True  # type: ignore[attr-defined]
+    await t.aclose()
+
+
+def test_verify_path_reaches_tls_layer() -> None:
+    # An invalid CA-bundle path must surface an error from the TLS layer, proving
+    # the verify=<path> string actually reached httpx (not silently dropped).
+    with pytest.raises((OSError, ValueError)):
+        HttpTransport(endpoint=ENDPOINT, verify="/nonexistent/ca-bundle.pem", max_retries=0)
+
+
 def test_endpoint_property() -> None:
     t = _make_transport()
     assert t.endpoint == ENDPOINT

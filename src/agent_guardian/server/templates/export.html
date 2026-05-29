@@ -28,6 +28,10 @@
   {% else %}
   <p class="muted">No reports are available yet for this scan.</p>
   {% endif %}
-  <p class="muted footnote">PDF export lands in M13.</p>
+  <p class="muted footnote">
+    Need a PDF? Regenerate one from the CLI:
+    <code>agent-guardian report {{ scan_id }} --output pdf --output-path report.pdf</code>
+    (requires a PDF engine such as WeasyPrint or reportlab).
+  </p>
 </section>
 {% endblock %}

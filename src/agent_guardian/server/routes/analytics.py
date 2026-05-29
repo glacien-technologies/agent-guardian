@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -214,14 +215,61 @@ async def recent_json(limit: int = 5) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+
+
+def _ingest_authorized(request: Request) -> bool:
+    """Decide whether a telemetry-ingest WRITE is allowed for this request.
+
+    The collector is an unauthenticated WRITE into the analytics DB, so it must
+    not be open to the network by default. Policy (fail closed):
+
+    * If ``AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN`` is set, a matching
+      ``X-AgentGuardian-Ingest-Token`` header authorizes the write from any
+      host.
+    * Otherwise the write is allowed only from a loopback client.
+    * ``AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST=1`` opens it fully (the
+      explicit "I accept the risk" escape hatch).
+    """
+    if os.environ.get("AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST") == "1":
+        return True
+    token = os.environ.get("AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN")
+    if token:
+        supplied = request.headers.get("x-agentguardian-ingest-token")
+        if supplied is not None and secrets.compare_digest(supplied, token):
+            return True
+        # A token is configured but absent/wrong — fall through to the
+        # loopback check so local agents still work without the header.
+    client = request.client
+    host = client.host if client is not None else ""
+    return host in _LOOPBACK_HOSTS
+
+
 @router.post("/api/telemetry/v1/events", status_code=202)
-async def ingest_event(envelope: EventEnvelope) -> dict[str, str]:
+async def ingest_event(request: Request, envelope: EventEnvelope) -> dict[str, str]:
     """Collector endpoint. Accepts one envelope per request.
 
     Returns 202 Accepted on success, 400 on schema rejection (Pydantic
     catches that before we get here), 422 on clock-skew rejection or
-    non-persistable event type.
+    non-persistable event type, and 403 when the writer is not authorized
+    (off-loopback without a valid ingest token).
     """
+    if not _ingest_authorized(request):
+        client = request.client
+        _LOG.warning(
+            "analytics ingest: rejecting unauthorized WRITE from %s (non-loopback, "
+            "no valid ingest token)",
+            client.host if client is not None else "unknown",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "telemetry ingest is loopback-only by default. Set "
+                "AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN and send it in the "
+                "X-AgentGuardian-Ingest-Token header, or set "
+                "AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST=1 to open it."
+            ),
+        )
     _, store = _agg()
     ok = store.ingest(envelope)
     if not ok:

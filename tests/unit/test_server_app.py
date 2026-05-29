@@ -264,3 +264,156 @@ def test_home_lists_completed_scans(client: TestClient, store: ScanStore) -> Non
     assert resp.status_code == 200
     assert scan.id in resp.text
     assert "WARNING" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Dashboard redaction (#3) — every finding surface must scrub PII/secrets
+# ---------------------------------------------------------------------------
+
+
+def _make_leaky_finding(fid: str = "f-leak") -> Finding:
+    return Finding(
+        id=fid,
+        probe_id=f"probe-{fid}",
+        asi=AsiCategory.ASI01,
+        mitre_atlas=["AML.T0054"],
+        csa_category=CsaCategory.GOAL_INSTRUCTION_MANIPULATION,
+        severity=Severity.HIGH,
+        attempt_count=2,
+        success=True,
+        confidence=0.91,
+        summary="target leaked victim@example.com and key sk-proj-ABCDEF1234567890",
+        transcript_ref="USER: my ssn is 123-45-6789",
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+    )
+
+
+def test_transcripts_view_redacts_by_default(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan(findings=[_make_leaky_finding()])
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/transcripts/f-leak")
+    assert resp.status_code == 200
+    # Raw PII / secrets must NOT reach the browser.
+    assert "victim@example.com" not in resp.text
+    assert "sk-proj-ABCDEF1234567890" not in resp.text
+    assert "123-45-6789" not in resp.text
+    # Redaction markers are present.
+    assert "[REDACTED:" in resp.text
+    # The "on" chip is shown when redaction is actually applied.
+    assert "PII redaction: on" in resp.text
+
+
+def test_transcripts_view_raw_when_redact_false(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan(findings=[_make_leaky_finding()])
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/transcripts/f-leak?redact=false")
+    assert resp.status_code == 200
+    # With redaction explicitly off, the raw text is shown (operator opt-in).
+    assert "victim@example.com" in resp.text
+    assert "off (raw)" in resp.text
+
+
+def test_findings_view_redacts_summary(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan(findings=[_make_leaky_finding()])
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/findings")
+    assert resp.status_code == 200
+    assert "victim@example.com" not in resp.text
+    assert "sk-proj-ABCDEF1234567890" not in resp.text
+    assert "[REDACTED:" in resp.text
+
+
+def test_coverage_view_redacts_summary(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan(findings=[_make_leaky_finding()])
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/coverage")
+    assert resp.status_code == 200
+    assert "victim@example.com" not in resp.text
+    assert "sk-proj-ABCDEF1234567890" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Branding (#24) — no "AgentGuardian Open"; no hardcoded localhost:7474
+# ---------------------------------------------------------------------------
+
+
+def test_coverage_view_has_no_forbidden_open_branding(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/coverage")
+    assert resp.status_code == 200
+    assert "AgentGuardian" in resp.text
+    assert "<em>Open</em>" not in resp.text
+    # The URL chip reflects the real request host, not a hardcoded :7474.
+    assert ":7474" not in resp.text
+
+
+def test_analytics_view_has_no_forbidden_open_branding(client: TestClient) -> None:
+    resp = client.get("/analytics")
+    assert resp.status_code == 200
+    assert "<em>Open</em>" not in resp.text
+
+
+def test_export_view_has_no_stale_m13_footnote(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/export")
+    assert resp.status_code == 200
+    assert "lands in M13" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Telemetry-ingest WRITE endpoint protection (#11)
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_loopback_client_not_forbidden(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A POST from the (loopback) TestClient is never 403 — at worst 422 on a
+    bad body, but the auth gate lets it through."""
+    monkeypatch.setenv("AGENT_GUARDIAN_ANALYTICS_DB", str(tmp_path / "a.db"))
+    monkeypatch.delenv("AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST", raising=False)
+    resp = client.post("/api/telemetry/v1/events", json={"not": "an envelope"})
+    assert resp.status_code != 403
+
+
+def test_ingest_authorized_helper_blocks_remote_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agent_guardian.server.routes.analytics import _ingest_authorized
+
+    monkeypatch.delenv("AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST", raising=False)
+
+    remote = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"), headers={})
+    assert _ingest_authorized(remote) is False  # type: ignore[arg-type]
+
+    local = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={})
+    assert _ingest_authorized(local) is True  # type: ignore[arg-type]
+
+
+def test_ingest_authorized_helper_token_unlocks_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agent_guardian.server.routes.analytics import _ingest_authorized
+
+    monkeypatch.setenv("AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN", "s3cr3t")
+    monkeypatch.delenv("AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST", raising=False)
+
+    good = SimpleNamespace(
+        client=SimpleNamespace(host="203.0.113.7"),
+        headers={"x-agentguardian-ingest-token": "s3cr3t"},
+    )
+    assert _ingest_authorized(good) is True  # type: ignore[arg-type]
+
+    bad = SimpleNamespace(
+        client=SimpleNamespace(host="203.0.113.7"),
+        headers={"x-agentguardian-ingest-token": "wrong"},
+    )
+    assert _ingest_authorized(bad) is False  # type: ignore[arg-type]

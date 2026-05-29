@@ -44,6 +44,9 @@ def test_emit_json_has_expected_top_level_keys() -> None:
         "duration_seconds",
         "cost_usd",
         "tokens_total",
+        "engine",
+        "evaluation_mode",
+        "scoring_valid",
         "created_at",
         "signatures",
     ):
@@ -94,26 +97,106 @@ def test_write_json_roundtrips(tmp_path: Path) -> None:
     assert data["aivss"] == scan.aivss
 
 
-def test_verify_signatures_passes_on_fresh_report(tmp_path: Path) -> None:
+def _embedded_pubkey(path: Path) -> str:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    pubkey: str = data["signatures"]["ed25519"]["public_key_b32"]
+    return pubkey
+
+
+def test_verify_signatures_passes_on_fresh_report_with_anchor(tmp_path: Path) -> None:
     scan = make_scan()
     path = tmp_path / "report.json"
-    write_json(scan, path)
-    result = verify_signatures(path)
+    write_json(scan, path, secret="real-signing-secret")
+    # Trust-bearing verify needs a pinned pubkey + the real HMAC secret.
+    result = verify_signatures(
+        path,
+        expected_ed25519_pubkey=_embedded_pubkey(path),
+        expected_hmac_secret="real-signing-secret",
+    )
     assert result.schema_ok
     assert result.hmac_valid
     assert result.ed25519_valid
+    assert result.anchored
     assert result.ok
     assert result.error is None
+
+
+def test_verify_signatures_unanchored_is_integrity_only(tmp_path: Path) -> None:
+    # No anchor supplied: integrity may verify, but the result is NOT trusted.
+    scan = make_scan()
+    path = tmp_path / "report.json"
+    write_json(scan, path, secret="real-signing-secret")
+    result = verify_signatures(path, expected_hmac_secret="real-signing-secret")
+    # HMAC anchored via real secret -> ed25519 still unpinned, but HMAC anchor
+    # is enough for `ok` per the OR semantics; assert the ed25519-only path is
+    # unanchored instead.
+    ed_only = verify_signatures(path)  # no secret, no pubkey -> fully unanchored
+    assert ed_only.ed25519_valid  # integrity of ed25519 holds
+    assert not ed_only.hmac_valid  # HMAC fails closed (no secret)
+    assert not ed_only.anchored
+    assert not ed_only.ok
+    assert ed_only.error is not None and "UNANCHORED" in ed_only.error
+    # And the HMAC-anchored verify above IS trusted.
+    assert result.anchored and result.ok
+
+
+def test_verify_signatures_rejects_forged_ed25519_key(tmp_path: Path) -> None:
+    # Forge: re-sign tampered content with a DIFFERENT keypair. Integrity holds
+    # for the forged bytes, but pinning the original key must reject it.
+    scan = make_scan()
+    good = tmp_path / "good.json"
+    write_json(scan, good, secret="real-signing-secret")
+    pinned = _embedded_pubkey(good)
+
+    forged = tmp_path / "forged.json"
+    write_json(
+        scan.model_copy(update={"aivss": 100}),
+        forged,
+        secret="real-signing-secret",
+        keys_dir=tmp_path / "attacker-keys",  # fresh keypair
+    )
+    result = verify_signatures(
+        forged,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
+    # ed25519 pin mismatch -> ed25519 invalid; not trusted.
+    assert not result.ed25519_valid
+    assert not result.ok
+
+
+def test_verify_signatures_default_hmac_secret_is_not_trusted(tmp_path: Path) -> None:
+    # A report signed with the public DEFAULT secret must NOT verify when no
+    # real secret is supplied (fail closed).
+    scan = make_scan()
+    path = tmp_path / "report.json"
+    write_json(scan, path)  # signed with default secret
+    result = verify_signatures(path, expected_ed25519_pubkey=_embedded_pubkey(path))
+    # ed25519 is pinned + valid -> anchored via ed25519; HMAC fails closed (the
+    # public default secret is never trusted on verify).
+    assert not result.hmac_valid
+    assert result.ed25519_valid
+    assert result.anchored  # ed25519 pin is the anchor
+    # The HMAC channel was NOT anchored (no real secret supplied), so its
+    # closed-fail must not veto a pinned-and-valid Ed25519: a genuine report
+    # accepts when its Ed25519 key is pinned. (#6 — the common trust scenario.)
+    assert not result.hmac_anchor_failed
+    assert result.ok
 
 
 def test_verify_signatures_fails_on_tampered_payload(tmp_path: Path) -> None:
     scan = make_scan()
     path = tmp_path / "report.json"
-    write_json(scan, path)
+    write_json(scan, path, secret="real-signing-secret")
+    pinned = _embedded_pubkey(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     data["aivss"] = 0  # tamper
     path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    result = verify_signatures(path)
+    result = verify_signatures(
+        path,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
     assert not result.hmac_valid
     assert not result.ed25519_valid
     assert not result.ok
@@ -145,9 +228,89 @@ def test_canonical_json_is_stable_across_runs() -> None:
 
 
 def test_verify_signatures_accepts_in_memory_dict(tmp_path: Path) -> None:
-    payload = emit_json(make_scan())
-    result = verify_signatures(payload)
+    payload = emit_json(make_scan(), secret="real-signing-secret")
+    pinned = payload["signatures"]["ed25519"]["public_key_b32"]
+    result = verify_signatures(
+        payload,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
     assert result.ok
+
+
+# ----------------------------------------------------------------------
+# Finding #8 — audit + engine folded into the SIGNED payload
+# ----------------------------------------------------------------------
+
+
+def test_emit_json_includes_audit_and_engine_before_signing(tmp_path: Path) -> None:
+    scan = make_scan().model_copy(
+        update={
+            "audit": {
+                "contract_sha256": "d" * 64,
+                "authorization_ref": "JIRA-77",
+                "suppressed_tool_attempts": 47,
+            },
+            "engine": {
+                "commander": "openai:gpt-4o",
+                "attacker": "openai:gpt-4o",
+                "evaluator": "openai:gpt-4o",
+            },
+        }
+    )
+    payload = emit_json(scan, secret="real-signing-secret")
+    # audit + engine present in payload...
+    assert payload["audit"]["suppressed_tool_attempts"] == 47
+    assert payload["audit"]["contract_sha256"] == "d" * 64
+    assert payload["engine"]["evaluator"] == "openai:gpt-4o"
+    # ...and covered by the signature (verify trusts the whole payload).
+    pinned = payload["signatures"]["ed25519"]["public_key_b32"]
+    result = verify_signatures(
+        payload,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
+    assert result.ok
+    # Tampering with the embedded audit must break the signature.
+    import copy
+
+    tampered = copy.deepcopy(payload)
+    tampered["audit"]["suppressed_tool_attempts"] = 0
+    bad = verify_signatures(
+        tampered,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
+    assert not bad.ok
+
+
+def test_emit_json_engine_none_when_unset() -> None:
+    payload = emit_json(make_scan(), sign=False)
+    assert payload["engine"] is None
+    assert payload["evaluation_mode"] == "real"
+    assert payload["scoring_valid"] is True
+    assert "audit" not in payload  # omitted when scan.audit is None
+
+
+def test_emit_json_redacts_secrets_in_findings() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    leaky = make_finding(
+        id="f_leak",
+        probe_id="ASI02-TM-009",
+        severity=Severity.HIGH,
+        summary="target returned ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        trigger_prompt="leaked bearer abc123def456ghi789 token",
+    )
+    scan = make_scan(findings=[leaky])
+    payload = emit_json(scan, sign=False)
+    blob = json.dumps(payload)
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in blob
+    assert "[REDACTED:GITHUB_TOKEN]" in blob
+    # trigger_prompt is redacted too.
+    assert "abc123def456ghi789" not in blob
+    assert "[REDACTED:BEARER_TOKEN]" in blob
 
 
 # ----------------------------------------------------------------------
@@ -214,6 +377,8 @@ def test_emit_json_includes_coverage_block_empty_when_no_memory(tmp_path: Path) 
         "probes_attempted": [],
         "attacker_refused_turns": 0,
         "attacker_refusal_rate": 0.0,
+        "noop_attacker_turns": 0,
+        "attacker_active": True,
         "skipped_agents": [],
         "strategies_used": {},
         "strategies_flattened": {},
@@ -334,6 +499,11 @@ def test_emit_json_with_coverage_still_signs_and_verifies(tmp_path: Path) -> Non
         ],
     )
     path = tmp_path / "report.json"
-    write_json(scan, path, memory_root=tmp_path)
-    result = verify_signatures(path)
+    write_json(scan, path, memory_root=tmp_path, secret="real-signing-secret")
+    pinned = _embedded_pubkey(path)
+    result = verify_signatures(
+        path,
+        expected_ed25519_pubkey=pinned,
+        expected_hmac_secret="real-signing-secret",
+    )
     assert result.ok

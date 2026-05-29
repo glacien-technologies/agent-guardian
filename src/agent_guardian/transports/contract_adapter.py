@@ -12,19 +12,36 @@ Because **every** target call in a scan flows through this one ``call`` method,
 it is the natural — and only — place to enforce the contract's Rules of
 Engagement at request time, without touching the 1894-line orchestrator:
 
-* **Rate limiting + request cap.** ``await roe.acquire()`` paces every send and
-  enforces ``roe.budgets.max_requests``. A :class:`RoeBudgetExceeded` is allowed
-  to propagate: the agent loop treats a raised ``target.call`` as terminating,
-  which is the intended hard stop when a budget is blown.
-* **Data egress.** When the contract forbids external egress, the prompt is not
-  sent at all — a benign refusal string is returned so the agent observes a
-  declined turn rather than a network call.
-* **Tool-call screening.** Every tool call the target surfaces is recorded
-  against the allow/block policy; disallowed calls are counted (suppressed) for
-  the audit. Allowed calls open an ``execute_tool`` span.
+* **Data egress (checked first).** When the contract forbids external egress and
+  the prompt names an external sink, the turn is **not sent** and an
+  :class:`~agent_guardian.core.roe.EgressRefused` is raised so the agent loop
+  records the turn as *not tested* (and excludes it from clean verdicts). The
+  refused turn is counted in ``roe.egress_refused_turns`` but does **not**
+  consume the ``max_requests`` budget — it never left the process — so the gate
+  is evaluated before :meth:`RoeController.acquire`.
+* **Rate limiting + request cap.** ``await roe.acquire()`` paces every *sent*
+  turn and enforces ``roe.budgets.max_requests``. A :class:`RoeBudgetExceeded`
+  is allowed to propagate: the agent loop treats a raised ``target.call`` as
+  terminating, which is the intended hard stop when a budget is blown.
+* **Adaptive rate limiting.** Every response is fed to
+  :meth:`RoeController.observe_response`, so an observed ``429`` backs the pacing
+  off (AIMD) — *even when the contract set no ``roe.rate.max_rps``* (default-on).
+* **Tool-call screening (observe-only on HTTP/cloud).** Every tool call the
+  target surfaces is recorded against the allow/block policy; disallowed calls
+  are counted (and their names recorded) for the audit. **For HTTP / cloud
+  transports this is post-hoc**: the target has already executed the tool by the
+  time it surfaces in the reply, so recording it here is an audit/scoring signal,
+  not a live block. Only :class:`~agent_guardian.transports.mcp.McpTransport`
+  refuses a blocklisted tool *before* it executes (via the live tool gate wired
+  in :func:`build_contract_target_adapter`). Allowed calls open an
+  ``execute_tool`` span.
 * **Observability.** Each send is wrapped in a ``transport.send`` span and the
   response's token usage is stamped onto the current span. Both are no-ops when
   the OTel gate is closed, so the default install pays nothing.
+* **Session isolation.** When the contract sets ``session.isolate_per_scenario``,
+  each distinct ``session`` id passed to :meth:`ContractTargetAdapter.call` gets
+  its own :class:`~agent_guardian.transports.session.SessionMachine`, so
+  conversation state does not bleed across adversarial scenarios.
 
 A faulted :class:`~agent_guardian.transports.base.Response` (``error`` set) is
 turned into a ``RuntimeError`` so the agent loop's existing ``try/except``
@@ -37,6 +54,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+from agent_guardian.core.roe import EgressRefused
 from agent_guardian.obs.otel import set_usage, tool_span, transport_span
 from agent_guardian.transports.base import Request
 from agent_guardian.transports.factory import (
@@ -56,13 +74,6 @@ __all__ = [
     "build_contract_target_adapter",
 ]
 
-# Returned (without sending) when the contract forbids external data egress, so
-# the agent observes a declined turn instead of a network call.
-_EGRESS_REFUSAL = (
-    "[agent-guardian] request not sent: the contract's Rules of Engagement "
-    "forbid external data egress (roe.data_egress.allow_external = false)."
-)
-
 
 class ContractTargetAdapter(TargetAdapter):
     """A :class:`TargetAdapter` over a contract-built transport — the RoE chokepoint."""
@@ -76,11 +87,19 @@ class ContractTargetAdapter(TargetAdapter):
         session_machine: SessionMachine | None = None,
         roe: RoeController | None = None,
         fingerprint: TargetFingerprint | None = None,
+        isolate_per_scenario: bool = False,
     ) -> None:
         super().__init__()
         self._transport = transport
         self._session_machine = session_machine
         self._roe = roe
+        # When the contract asks for per-scenario isolation, each distinct
+        # ``session`` id seen at ``call`` gets its own SessionMachine forked off
+        # the template one (same transport + mode, fresh state), so conversation
+        # state never bleeds across adversarial scenarios. Disabled (or absent
+        # session machine) → the single shared machine is used for every turn.
+        self._isolate_per_scenario = isolate_per_scenario and session_machine is not None
+        self._scenario_machines: dict[str, SessionMachine] = {}
         # ``endpoint`` is exposed by HttpTransport; fall back gracefully for any
         # future transport that does not surface one.
         self._endpoint: str = str(getattr(transport, "endpoint", "transport"))
@@ -101,42 +120,75 @@ class ContractTargetAdapter(TargetAdapter):
     def endpoint(self) -> str:
         return self._endpoint
 
-    async def _send(self, prompt: str) -> Response:
-        """Send one turn via the session machine when present, else directly."""
-        if self._session_machine is not None:
-            return await self._session_machine.send(prompt)
+    def _machine_for(self, session: str | None) -> SessionMachine | None:
+        """Pick the SessionMachine for ``session``, forking one when isolating.
+
+        Without per-scenario isolation (or with no session machine at all) the
+        single shared machine — or ``None`` for a direct send — is used. With
+        isolation on, each distinct ``session`` id gets its own machine (forked
+        from the template via ``isolate_per_scenario``) so two scenarios never
+        share conversation state. A ``None`` session id under isolation falls
+        back to the shared machine (a scenario that opts out of an id).
+        """
+        if not self._isolate_per_scenario or session is None:
+            return self._session_machine
+        machine = self._scenario_machines.get(session)
+        if machine is None:
+            # ``self._session_machine`` is non-None here (guarded in __init__).
+            assert self._session_machine is not None
+            machine = self._session_machine.isolate_per_scenario()
+            self._scenario_machines[session] = machine
+        return machine
+
+    async def _send(self, prompt: str, session: str | None) -> Response:
+        """Send one turn via the (possibly per-scenario) session machine."""
+        machine = self._machine_for(session)
+        if machine is not None:
+            return await machine.send(prompt)
         return await self._transport.send(Request(prompt=prompt))
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         """Send one user-turn through the RoE chokepoint and return the reply text.
 
-        ``session`` is accepted for interface compatibility with the engine; the
-        contract's :class:`SessionMachine` owns conversation state, so the
-        per-call session id is not threaded into the transport here (a future
-        stage maps it onto ``session.id_send``).
+        ``session`` selects the conversation: with ``session.isolate_per_scenario``
+        each distinct id drives its own :class:`SessionMachine` so scenario state
+        does not bleed (see :meth:`_machine_for`).
+
+        Raises:
+            EgressRefused: the contract forbids external egress and ``prompt``
+                names an external sink. The turn is *not* sent and does not
+                consume the request budget; the agent loop records it as not
+                tested.
+            RoeBudgetExceeded: admitting this send would exceed ``max_requests``.
+            RuntimeError: the transport returned a faulted response.
         """
-        # Pace + count this request and enforce the max_requests cap. A blown
-        # budget raises RoeBudgetExceeded, which we deliberately let propagate.
+        # Data-egress gate FIRST — before acquire() — so a refused turn never
+        # consumes the max_requests budget (#12). We raise EgressRefused rather
+        # than fabricate a refusal string the judge would mis-score as clean.
+        if self._roe is not None and not self._roe.egress_allowed(prompt):
+            self._roe.note_egress_refused()
+            raise EgressRefused(
+                "request not sent: the contract's Rules of Engagement forbid "
+                "external data egress (roe.data_egress.allow_external = false)"
+            )
+
+        # Pace + count this (actually-sent) request and enforce max_requests. A
+        # blown budget raises RoeBudgetExceeded, which we deliberately propagate.
         if self._roe is not None:
             await self._roe.acquire()
-            # Data-egress gate: do not send the prompt at all when external
-            # egress is forbidden — return a benign refusal instead.
-            if not self._roe.egress_allowed(prompt):
-                return _EGRESS_REFUSAL
 
         with transport_span(self._endpoint):
-            response = await self._send(prompt)
+            response = await self._send(prompt, session)
+
+            # Adaptive rate limiting: feed EVERY response to the controller so an
+            # observed 429 backs the pacing off — default-on even with no
+            # configured max_rps. ``observe_response`` is a no-op for any
+            # non-rate-limit response, so we blanket-feed without branching.
+            if self._roe is not None:
+                self._roe.observe_response(response)
 
             if response.error is not None:
                 err = response.error
-                # Adaptive rate limiting: a RATE_LIMIT fault means the target is
-                # telling us we are pacing too fast. Feed it to the controller
-                # BEFORE surfacing the error so the token bucket backs off
-                # (honouring any server ``retry_after``) for subsequent turns.
-                # ``observe_response`` is a no-op for any non-rate-limit fault,
-                # so we can blanket-feed it without branching on the category.
-                if self._roe is not None:
-                    self._roe.observe_response(response)
                 raise RuntimeError(f"transport error: {err.category.value}: {err.message}")
 
             self._record_tool_calls(response)
@@ -150,9 +202,16 @@ class ContractTargetAdapter(TargetAdapter):
         """Screen + trace each tool call the target surfaced in its reply.
 
         For HTTP / cloud transports the call is recorded against the RoE
-        allow/block policy here (which counts suppressions for the audit); allowed
-        calls open an ``execute_tool`` span. When there is no RoE controller every
-        observed call is simply traced.
+        allow/block policy here (which counts suppressions + records the offered
+        blocklisted tool names for the audit); allowed calls open an
+        ``execute_tool`` span. When there is no RoE controller every observed
+        call is simply traced.
+
+        **This is observe-only on HTTP / cloud transports**: the target has
+        already executed the tool by the time it appears in the reply, so a
+        recorded suppression is post-hoc evidence the target *offered* a
+        screened-out tool, not proof it was prevented from running. Only the live
+        MCP tool gate (below) blocks pre-execution.
 
         For an MCP transport whose ``_tool_gate`` is wired live, the gate already
         recorded each decision *before* invocation (refusing a blocklisted tool
@@ -211,6 +270,7 @@ def build_contract_target_adapter(
         session_machine=session_machine,
         roe=roe,
         fingerprint=fingerprint,
+        isolate_per_scenario=contract.target.session.isolate_per_scenario,
     )
 
 

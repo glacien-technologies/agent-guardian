@@ -3,7 +3,7 @@
 Runs a full stub swarm scan against a respx-mocked HTTP endpoint driven entirely
 by a contract. Asserts that: a Scan is produced + persisted, an ``audit.jsonl``
 provenance trail is written under the scan dir, and the SARIF report carries the
-contract provenance (``contract_sha256``) + the RoE ``invocation`` block.
+contract provenance (``contract_sha256``) + the RoE ``invocations`` block.
 
 All LLM roles are pinned to ``--model stub`` so no network/keys are needed for
 the swarm itself; only the *target* endpoint is mocked via respx.
@@ -105,13 +105,17 @@ def test_scan_contract_full_stub_run(runner: CliRunner, tmp_path: Path) -> None:
     sarif = json.loads(report_path.read_text(encoding="utf-8"))
     run = sarif["runs"][0]
 
-    # Stage 1B provenance: contract_sha256 on run.properties + an invocation block.
+    # Stage 1B provenance: contract_sha256 on run.properties + an invocations
+    # block. SARIF 2.1.0 spells it ``run.invocations`` (an array), not the
+    # singular ``invocation`` (#7).
     assert "contract_sha256" in run["properties"]
     assert run["properties"]["environment"] == "staging"
     assert run["properties"]["authorization_ref"] == "TICKET-42"
-    assert "invocation" in run
-    assert run["invocation"]["executionSuccessful"] is True
-    inv_props = run["invocation"]["properties"]
+    assert "invocations" in run
+    assert isinstance(run["invocations"], list)
+    invocation = run["invocations"][0]
+    assert invocation["executionSuccessful"] is True
+    inv_props = invocation["properties"]
     assert "budgets_granted" in inv_props
     assert "budgets_consumed" in inv_props
 

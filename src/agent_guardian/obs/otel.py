@@ -36,6 +36,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from agent_guardian.core.swarm import SwarmEvent, SwarmObserver
@@ -70,6 +71,15 @@ _ATTR_OPERATION_NAME = "gen_ai.operation.name"
 # attributes unless the operator has explicitly accepted the experimental flag.
 _GENAI_OPT_IN_TOKEN = "gen_ai_latest_experimental"
 _OPT_IN_ENV_VAR = "OTEL_SEMCONV_STABILITY_OPT_IN"
+
+# Default ports per scheme, used to populate ``server.port`` when a transport
+# endpoint carries no explicit port (OTel semconv records the effective port).
+_DEFAULT_SCHEME_PORTS: dict[str, int] = {
+    "http": 80,
+    "https": 443,
+    "ws": 80,
+    "wss": 443,
+}
 
 
 # --- Span protocol ----------------------------------------------------------
@@ -187,17 +197,44 @@ def agent_span(agent_name: str, conversation_id: str | None = None) -> Iterator[
         yield span
 
 
+def _server_address_port(endpoint: str) -> tuple[str | None, int | None]:
+    """Split a transport endpoint into ``(host, port)`` for OTel semconv.
+
+    OpenTelemetry's semantic conventions want ``server.address`` to be the bare
+    host (not the full URL) and ``server.port`` the numeric port when known. We
+    parse a ``scheme://host:port/path`` endpoint and fall back to the scheme's
+    default port (``https`` → 443, ``http`` → 80, ``ws``/``wss`` likewise) when
+    no explicit port is present. A non-URL endpoint (e.g. an in-process
+    ``"transport"`` sentinel) yields ``(None, None)`` so we set nothing.
+    """
+    parsed = urlparse(endpoint)
+    host = parsed.hostname
+    if host is None:
+        return (None, None)
+    port = parsed.port
+    if port is None:
+        port = _DEFAULT_SCHEME_PORTS.get(parsed.scheme.lower())
+    return (host, port)
+
+
 @contextmanager
 def transport_span(endpoint: str) -> Iterator[_SpanLike]:
     """Span for one per-turn transport send to ``endpoint`` (CLIENT).
 
-    Wraps the single network call the adapter makes per target turn. No-op safe.
+    Wraps the single network call the adapter makes per target turn. Sets
+    ``server.address`` to the HOST only (+ ``server.port`` when known), per the
+    OTel semconv — not the full URL — so host-level grouping/correlation works.
+    No-op safe.
     """
     tracer = get_tracer()
+    host, port = _server_address_port(endpoint)
     with tracer.start_as_current_span(
         f"transport.send {endpoint}", kind=_span_kind_client()
     ) as span:
-        span.set_attribute("server.address", endpoint)
+        if host is not None:
+            span.set_attribute("server.address", host)
+            if port is not None:
+                span.set_attribute("server.port", port)
         yield span
 
 

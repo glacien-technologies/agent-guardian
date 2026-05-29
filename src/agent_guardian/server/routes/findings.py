@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
@@ -40,6 +41,10 @@ async def findings_view(request: Request, scan_id: str, asi: str | None = None) 
             if asi_filter is not None
             else list(scan.findings)
         )
+    # Redaction is always-on for the dashboard: a security scanner must never
+    # re-emit captured PII/secrets to a browser surface. Scrub each finding's
+    # summary/transcript_ref before the template renders it.
+    findings = [redact_finding(f, enabled=True) for f in findings]
 
     return templates.TemplateResponse(
         request,

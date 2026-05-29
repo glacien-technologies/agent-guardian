@@ -31,6 +31,7 @@ from agent_guardian.core.swarm import (
 )
 from agent_guardian.llm.stub import StubLLM, StubScript
 from agent_guardian.models.scan import Scan
+from agent_guardian.models.severity import SeverityBand
 from agent_guardian.models.tier import Tier
 
 # ---------------------------------------------------------------------------
@@ -387,8 +388,17 @@ async def test_swarm_one_liner_demo_pattern(
         memory=memory,
         rng_seed=0,
     ).run()
+    # A stub-driven scan retains its numeric AIVSS for debugging but is NOT
+    # authoritative (#1): the evaluator/attacker LLM objects are stubs, so the
+    # band is forced to NOT_EVALUATED and scoring_valid is False — no numeric
+    # EXCELLENT. ``evaluation_mode`` is detected from the live LLM clients;
+    # ``engine`` reports the configured model specs (here the SwarmConfig
+    # defaults, since this test passed stub LLM objects without pinning specs).
     assert scan.aivss >= 80
-    assert scan.band.value in {"EXCELLENT", "GOOD"}
+    assert scan.band is SeverityBand.NOT_EVALUATED
+    assert scan.scoring_valid is False
+    assert scan.evaluation_mode == "stub"
+    assert set(scan.engine or {}) == {"commander", "attacker", "evaluator"}
 
 
 @pytest.mark.asyncio

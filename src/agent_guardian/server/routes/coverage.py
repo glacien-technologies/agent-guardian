@@ -28,10 +28,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from agent_guardian.core.coverage import compute_coverage_from_memory, default_memory_path
+from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
+from agent_guardian.probes.loader import PROBE_CORPUS_VERSION
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
 __all__ = ["router"]
@@ -538,6 +540,10 @@ def _paginate_findings(
         sev_class, sev_label = _SEV_DISPLAY[f.severity]
         tags: list[tuple[str, bool]] = [(t, False) for t in f.mitre_atlas]
         tags.append((f.probe_id, True))
+        # Redaction is always-on for the dashboard: scrub PII/secrets out of the
+        # displayed summary before it reaches the browser. Filtering/search runs
+        # against the raw text above (server-side only, never rendered).
+        redacted = redact_finding(f, enabled=True)
         rows.append(
             FindingRow(
                 severity_class=sev_class,
@@ -545,7 +551,7 @@ def _paginate_findings(
                 when_time=_format_when(f.created_at, now),
                 when_agent=_ASI_TO_AGENT.get(f.asi, "?").replace("-agent", ""),
                 asi=f.asi.value,
-                summary=f.summary,
+                summary=redacted.summary,
                 tags=tags,
                 remediation_id=f"REM-{f.asi.value}-{f.probe_id.split('-')[-1] if '-' in f.probe_id else '000'}",
                 remediation_hint="see probe remediation guidance",
@@ -644,6 +650,14 @@ async def coverage_view(
 
     elapsed = scan.duration_seconds if scan is not None else 0.0
 
+    # The engine historically stamped scans with a "0.0.0-placeholder" probe
+    # library version; surface the real corpus version in the footer instead of
+    # the placeholder so the dashboard never erodes trust with a fake build tag.
+    probe_library_label: str | None = None
+    if scan is not None:
+        plv = scan.probe_library_version
+        probe_library_label = PROBE_CORPUS_VERSION if "placeholder" in plv else plv
+
     _LOG.debug(
         "coverage view: scan_id=%s aivss=%d findings=%d/%d page=%d/%d sort=%s sev=%s asi=%s",
         scan_id,
@@ -690,6 +704,7 @@ async def coverage_view(
             "asi_filter": asi,
             "q": q or "",
             "asi_categories": [(c.value, asi_description(c)) for c in AsiCategory],
+            "probe_library_label": probe_library_label,
         },
     )
 
@@ -702,6 +717,7 @@ def _band_css(band: SeverityBand) -> str:
         SeverityBand.WARNING: "attn",
         SeverityBand.POOR: "fail",
         SeverityBand.CRITICAL: "fail",
+        SeverityBand.NOT_EVALUATED: "attn",
     }[band]
 
 
@@ -713,6 +729,7 @@ def _band_label(band: SeverityBand) -> str:
         SeverityBand.WARNING: "Warning · 60\u201379",
         SeverityBand.POOR: "Poor · 40\u201359",
         SeverityBand.CRITICAL: "Critical · < 40",
+        SeverityBand.NOT_EVALUATED: "Not evaluated",
     }[band]
 
 

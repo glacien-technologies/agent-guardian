@@ -85,3 +85,36 @@ def test_emit_sarif_each_result_has_properties() -> None:
         props = result["properties"]
         for key in ("aivss_severity", "asi", "mitre_atlas", "csa"):
             assert key in props
+
+
+# --- finding #2: secret redaction in SARIF result message --------------
+
+
+def test_emit_sarif_redacts_secrets_in_message() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    leaky = make_finding(
+        id="f_leak",
+        probe_id="ASI02-TM-009",
+        severity=Severity.HIGH,
+        summary="leaked AKIAIOSFODNN7EXAMPLE in response",
+    )
+    log = emit_sarif(make_scan(findings=[leaky]))
+    blob = json.dumps(log)
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "[REDACTED:AWS_ACCESS_KEY]" in blob
+
+
+def test_emit_sarif_redact_false_leaves_raw() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    leaky = make_finding(
+        id="f_leak2",
+        probe_id="ASI02-TM-010",
+        severity=Severity.HIGH,
+        summary="raw user@example.com",
+    )
+    log = emit_sarif(make_scan(findings=[leaky]), redact=False)
+    assert "user@example.com" in json.dumps(log)

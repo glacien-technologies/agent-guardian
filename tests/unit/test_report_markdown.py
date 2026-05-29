@@ -70,3 +70,85 @@ def test_emit_markdown_severity_summary_table_present() -> None:
     assert "Severity summary" in md
     assert "Critical" in md
     assert "Total" in md
+
+
+# --- finding #21: HTML-escape finding text so <script> can't inject -----
+
+
+def test_emit_markdown_escapes_script_in_summary() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    nasty = make_finding(
+        id="f_xss",
+        probe_id="ASI01-GH-XSS",
+        severity=Severity.CRITICAL,
+        summary='<script>alert("pwn")</script> reflected',
+    )
+    md = emit_markdown(make_scan(findings=[nasty]))
+    # The raw <script> tag must NOT appear; it must be HTML-escaped.
+    assert "<script>" not in md
+    assert "&lt;script&gt;" in md
+
+
+def test_emit_markdown_escapes_probe_id_and_finding_id() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    nasty = make_finding(
+        id="f<id>",
+        probe_id="ASI01<img src=x>",
+        severity=Severity.HIGH,
+        summary="ok",
+    )
+    md = emit_markdown(make_scan(findings=[nasty]))
+    assert "<img src=x>" not in md
+    assert "&lt;img src=x&gt;" in md
+
+
+# --- finding #2: secret redaction in markdown ---------------------------
+
+
+def test_emit_markdown_redacts_secrets() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    leaky = make_finding(
+        id="f_leak",
+        probe_id="ASI02-TM-009",
+        severity=Severity.HIGH,
+        summary="leaked AKIAIOSFODNN7EXAMPLE in response",
+    )
+    md = emit_markdown(make_scan(findings=[leaky]))
+    assert "AKIAIOSFODNN7EXAMPLE" not in md
+    assert "[REDACTED:AWS_ACCESS_KEY]" in md
+
+
+def test_emit_markdown_redact_false_leaves_raw() -> None:
+    from agent_guardian.models.severity import Severity
+    from tests.unit._report_fixtures import make_finding
+
+    leaky = make_finding(
+        id="f_leak2",
+        probe_id="ASI02-TM-010",
+        severity=Severity.HIGH,
+        summary="raw user@example.com",
+    )
+    md = emit_markdown(make_scan(findings=[leaky]), redact=False)
+    assert "user@example.com" in md
+
+
+def test_emit_markdown_mirrors_audit_section() -> None:
+    scan = make_scan().model_copy(
+        update={
+            "audit": {
+                "contract_sha256": "e" * 64,
+                "suppressed_tool_attempts": 47,
+                "egress_refused_turns": 6,
+            }
+        }
+    )
+    md = emit_markdown(scan)
+    assert "Rules of Engagement / Audit" in md
+    assert "e" * 64 in md
+    assert "47" in md

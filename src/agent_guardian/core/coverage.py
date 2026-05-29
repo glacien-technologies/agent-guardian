@@ -47,6 +47,17 @@ def default_memory_path(scan_id: str, root_dir: Path | None = None) -> Path:
     return base / scan_id / "memory.jsonl"
 
 
+# Marker every :class:`~agent_guardian.llm.stub.StubLLM` reply carries
+# (``[stub:<role>] ...``). A turn whose attacker prompt starts with this was
+# not a real attack — the attacker LLM is a no-op stub (#16).
+_STUB_ATTACKER_MARKER = "[stub:"
+
+
+def _is_noop_attacker_prompt(prompt: object) -> bool:
+    """True when ``prompt`` is a stub/no-op attacker reply (#16)."""
+    return isinstance(prompt, str) and prompt.lstrip().startswith(_STUB_ATTACKER_MARKER)
+
+
 def _empty_coverage() -> dict[str, Any]:
     return {
         "attempts_total": 0,
@@ -57,6 +68,8 @@ def _empty_coverage() -> dict[str, Any]:
         "probes_attempted": [],
         "attacker_refused_turns": 0,
         "attacker_refusal_rate": 0.0,
+        "noop_attacker_turns": 0,
+        "attacker_active": True,
         "skipped_agents": [],
         "strategies_used": {},
         "strategies_flattened": {},
@@ -99,6 +112,12 @@ def compute_coverage_from_memory(
     agents: dict[str, int] = {}
     probes_attempted: set[str] = set()
     refused_turns = 0
+    # #16 — turns whose attacker prompt was a stub/no-op canned reply (the
+    # ``[stub:...]`` marker emitted by :class:`StubLLM`). These are NOT real
+    # adversarial attacks; counting them as landed attacks (and reporting a
+    # 0.0 refusal rate) hides a non-attacking attacker. Surfaced separately so
+    # operators can see "the attacker generated nothing real".
+    noop_attacker_turns = 0
     attempts = 0
     skipped_agents: list[dict[str, Any]] = []
     # IMPORTANT #6 — strategy attribution. ``strategies_used`` counts the
@@ -168,12 +187,19 @@ def compute_coverage_from_memory(
             continue
         if not isinstance(turn, dict):
             continue
-        # Recon probes (IMPORTANT #4) are persisted as reflections too but
+        # Recon traffic (IMPORTANT #4) is persisted as reflections too but
         # they're benign fingerprint queries, not adversarial attempts.
         # Don't count them in attempts_total / agents / strategies — they
         # belong to a separate "recon probes" facet that downstream tools
-        # can render off of the raw JSONL.
-        if turn.get("event") == "recon_probe":
+        # can render off of the raw JSONL. The recon agent writes
+        # ``event="recon_audit"``; ``recon_probe`` is kept for back-compat
+        # with any older on-disk memory (#15 — the dead ``recon_probe``-only
+        # check let ~47% recon traffic inflate attempts_total).
+        if turn.get("event") in ("recon_audit", "recon_probe"):
+            continue
+        # The egress-refused marker (#4) is a not-tested turn — it never
+        # reached the target, so it must not count as an adversarial attempt.
+        if turn.get("event") == "egress_refused":
             continue
         attempts += 1
         agent = turn.get("agent") or payload.get("agent")
@@ -193,6 +219,12 @@ def compute_coverage_from_memory(
             probes_attempted.add(seed_id)
         if turn.get("attacker_refused"):
             refused_turns += 1
+        # #16 — a stub/no-op attacker emits a canned ``[stub:attacker] ...``
+        # string instead of generating an attack. Detect it from the recorded
+        # prompt so a non-attacking attacker is visible rather than silently
+        # scoring as a landed attack with a misleading 0.0 refusal rate.
+        if _is_noop_attacker_prompt(turn.get("prompt")):
+            noop_attacker_turns += 1
 
         # Strategy attribution (IMPORTANT #6). Top-level count first.
         strategy = turn.get("strategy")
@@ -213,7 +245,15 @@ def compute_coverage_from_memory(
             else:
                 strategies_flattened[strategy] = strategies_flattened.get(strategy, 0) + 1
 
-    refusal_rate = refused_turns / attempts if attempts else 0.0
+    # #16 — the refusal rate must reflect every turn on which the attacker
+    # produced no real adversarial content: explicit refusals AND stub/no-op
+    # canned replies. Counting only explicit refusals let a stub attacker (no
+    # refusal, but no attack either) report 0.0 and look like a healthy scan.
+    inactive_turns = refused_turns + noop_attacker_turns
+    refusal_rate = inactive_turns / attempts if attempts else 0.0
+    # The attacker is "active" only if at least one judged turn carried a real
+    # (non-stub) attack prompt. An all-stub/all-refused scan is non-attacking.
+    attacker_active = attempts > 0 and noop_attacker_turns < attempts
 
     # Sort the skipped-agent rollup for stable JSON output. Multiple entries
     # for the same agent shouldn't happen today but we deduplicate by name
@@ -227,11 +267,13 @@ def compute_coverage_from_memory(
 
     _LOG.debug(
         "coverage computed: attempts=%d asi_categories=%d probes_used=%d refusal_rate=%.2f "
-        "skipped_agents=%d strategies=%s (malformed_lines=%d)",
+        "noop_attacker=%d attacker_active=%s skipped_agents=%d strategies=%s (malformed_lines=%d)",
         attempts,
         len(asi),
         len(probes_attempted),
         refusal_rate,
+        noop_attacker_turns,
+        attacker_active,
         len(sorted_skipped),
         list(strategies_used),
         malformed_lines,
@@ -246,6 +288,8 @@ def compute_coverage_from_memory(
         "probes_attempted": sorted(probes_attempted),
         "attacker_refused_turns": refused_turns,
         "attacker_refusal_rate": round(refusal_rate, 4),
+        "noop_attacker_turns": noop_attacker_turns,
+        "attacker_active": attacker_active,
         "skipped_agents": sorted_skipped,
         "strategies_used": dict(sorted(strategies_used.items())),
         "strategies_flattened": dict(sorted(strategies_flattened.items())),

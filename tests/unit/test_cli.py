@@ -202,15 +202,70 @@ def test_verify_rejects_non_json_suffix(runner: CliRunner, tmp_path: Path) -> No
     assert result.exit_code == EXIT_CONFIG
 
 
-def test_verify_succeeds_on_freshly_signed_report(runner: CliRunner, tmp_path: Path) -> None:
+def test_verify_unanchored_refuses_green(runner: CliRunner, tmp_path: Path) -> None:
+    """A freshly signed report with NO trust anchor is integrity-OK but the
+    command must refuse a green result (fail closed) and exit non-zero (#6)."""
     from agent_guardian.reports.json_report import write_json
     from tests.unit._report_fixtures import make_scan
 
     path = tmp_path / "report.json"
     write_json(make_scan(), path)
     result = runner.invoke(app, ["verify", str(path)])
-    assert result.exit_code == 0
-    assert "OK" in result.stdout
+    assert result.exit_code != 0
+    out = result.stdout + (result.stderr or "")
+    assert "UNANCHORED" in out
+    assert "provenance" in out.lower()
+
+
+def test_verify_pinned_pubkey_anchors_genuine_report_without_hmac_secret(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Pinning the report's Ed25519 pubkey is a sufficient trust anchor (#6).
+
+    A genuine report signed only with the public default HMAC secret still
+    verifies GREEN when its Ed25519 key is pinned and valid: the HMAC channel
+    (worthless without a real secret, so it fails closed) must NOT veto a
+    pinned-and-valid Ed25519. This is the common operator trust scenario —
+    requiring a real HMAC secret too would make the default signing path
+    impossible to verify."""
+    import json as _json
+
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path)  # signed with the public default HMAC secret
+    payload = _json.loads(path.read_text(encoding="utf-8"))
+    pubkey = payload["signatures"]["ed25519"]["public_key_b32"]
+    result = runner.invoke(app, ["verify", str(path), "--pubkey", pubkey])
+    # Ed25519 integrity holds + pin matches -> anchored & green; HMAC fails
+    # closed (default secret never trusted) but does not veto the pinned anchor.
+    assert result.exit_code == 0, (result.stdout, result.stderr)
+    assert "PINNED" in result.stdout
+    assert "Ed25519:      OK" in result.stdout
+    assert "HMAC-SHA256:  FAIL" in result.stdout
+
+
+def test_verify_succeeds_with_real_hmac_secret(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Signing + verifying with a real (non-default) HMAC secret plus a pinned
+    Ed25519 pubkey anchors trust and yields a green (exit 0) result."""
+    import json as _json
+
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    monkeypatch.setenv("AGENT_GUARDIAN_SIGNING_SECRET", "a-real-ci-secret")
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path)  # signed with the real env secret
+    payload = _json.loads(path.read_text(encoding="utf-8"))
+    pubkey = payload["signatures"]["ed25519"]["public_key_b32"]
+    result = runner.invoke(
+        app, ["verify", str(path), "--secret", "a-real-ci-secret", "--pubkey", pubkey]
+    )
+    assert result.exit_code == 0, (result.stdout, result.stderr)
+    assert "PINNED" in result.stdout
 
 
 def test_verify_fails_on_tampered_report(runner: CliRunner, tmp_path: Path) -> None:
@@ -909,6 +964,190 @@ def test_second_run_does_not_print_banner(runner: CliRunner, tmp_path: Path) -> 
 def test_report_missing_scan_returns_config_error(runner: CliRunner) -> None:
     result = runner.invoke(app, ["report", "no-such-scan-id"])
     assert result.exit_code == EXIT_CONFIG
+
+
+def test_scan_stub_is_non_authoritative_and_not_evaluated(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """A --model stub scan must be flagged NON-AUTHORITATIVE, present a
+    NOT_EVALUATED band (no numeric EXCELLENT), and never claim a numeric AIVSS
+    in the summary line (#1)."""
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    out_path = tmp_path / "scan.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    out = result.stdout + (result.stderr or "")
+    assert "NON-AUTHORITATIVE" in out
+    assert "not_evaluated" in out
+    assert "AIVSS=n/a" in out
+    assert "band=EXCELLENT" not in out
+
+
+def test_scan_stub_fail_under_always_fails(runner: CliRunner, tmp_path: Path) -> None:
+    """--fail-under on a stub (non-authoritative) scan must FAIL (exit 1),
+    never silently pass even at --fail-under 0 (#1)."""
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    out_path = tmp_path / "scan.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--fail-under",
+            "0",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == EXIT_FAIL_UNDER, result.output
+    out = result.stdout + (result.stderr or "")
+    assert "non-authoritative" in out.lower()
+
+
+def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path: Path) -> None:
+    """The canonical scan.json is the signed/redacted report (carries an
+    ``engine`` block + ``signatures``); a raw model dump is kept as
+    scan.raw.json (#1)."""
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    out_path = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    scan_id = result.stdout.strip().splitlines()[-1].split()[1]
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    # Canonical scan.json is the signed report (schema-stamped, has signatures).
+    assert "signatures" in canonical
+    assert "schema" in canonical
+    assert canonical["engine"] == {
+        "commander": "stub",
+        "attacker": "stub",
+        "evaluator": "stub",
+    }
+    assert canonical["scoring_valid"] is False
+    assert canonical["evaluation_mode"] == "stub"
+    # The raw, model-roundtrippable dump is alongside.
+    assert (scan_dir / "scan.raw.json").is_file()
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    assert raw["id"] == scan_id  # raw uses the Scan model field name
+
+
+def test_report_pdf_requires_output_path(runner: CliRunner, tmp_path: Path) -> None:
+    """``report --output pdf`` without --output-path must fail clearly (not
+    the old self-contradicting 'pdf is valid then rejected' error) (#18)."""
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("safe bot", encoding="utf-8")
+    out_path = tmp_path / "scan.json"
+    first = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert first.exit_code == EXIT_OK
+    scan_id = first.stdout.strip().splitlines()[-1].split()[1]
+    result = runner.invoke(app, ["report", scan_id, "--output", "pdf"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stdout + (result.stderr or "")
+    assert "requires --output-path" in out
+
+
+def test_report_writes_to_output_path(runner: CliRunner, tmp_path: Path) -> None:
+    """``report --output md --output-path FILE`` writes the report to a file
+    (the report command gained --output-path) (#18)."""
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("safe bot", encoding="utf-8")
+    out_path = tmp_path / "scan.json"
+    first = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert first.exit_code == EXIT_OK
+    scan_id = first.stdout.strip().splitlines()[-1].split()[1]
+    md_path = tmp_path / "regen.md"
+    result = runner.invoke(
+        app, ["report", scan_id, "--output", "md", "--output-path", str(md_path)]
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    assert md_path.is_file()
+    assert "AIVSS" in md_path.read_text(encoding="utf-8")
+
+
+def test_report_rejects_unknown_format(runner: CliRunner) -> None:
+    """``report --output bogus`` is rejected with EXIT_CONFIG (#18)."""
+    result = runner.invoke(app, ["report", "any-id", "--output", "bogus"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stdout + (result.stderr or "")
+    assert "unknown output format" in out
+
+
+def test_verify_no_anchor_refuses_green(runner: CliRunner, tmp_path: Path) -> None:
+    """``verify`` with no --pubkey/--secret refuses a green result (#6)."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path)
+    result = runner.invoke(app, ["verify", str(path)])
+    assert result.exit_code != 0
+    out = result.stdout + (result.stderr or "")
+    assert "UNANCHORED" in out or "UNVERIFIED" in out
 
 
 def test_report_regenerates_from_persisted_scan(runner: CliRunner, tmp_path: Path) -> None:

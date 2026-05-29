@@ -98,6 +98,23 @@ class Scan(BaseModel):
     # ``core.roe`` import — that would create an import cycle. Optional so
     # existing Scan construction + fixtures are unaffected.
     audit: dict[str, Any] | None = None
+    # Provenance: which LLM specs drove the scan. Keys are the swarm roles
+    # ``commander`` / ``attacker`` / ``evaluator`` mapping to a model id (e.g.
+    # ``"openai:gpt-4o"`` or ``"stub"``). Folded into the signed report so an
+    # auditor/leaderboard can tell a real assessment from a stub run. Optional
+    # so existing Scan construction + fixtures predating provenance still build.
+    engine: dict[str, str] | None = None
+    # Whether the evaluator(s) that produced the verdicts were real LLMs. A
+    # ``"stub"`` (canned-reply) evaluator can never flag a finding, so its
+    # AIVSS=100/EXCELLENT is vacuous; ``"mixed"`` means some turns ran real and
+    # some stub. The scoring phase sets ``scoring_valid=False`` for a stub run
+    # and the report refuses a numeric EXCELLENT band (uses NOT_EVALUATED).
+    evaluation_mode: Literal["real", "stub", "mixed"] = "real"
+    # ``False`` marks a scan whose numeric AIVSS is NOT authoritative (stub
+    # evaluator, or otherwise not a real assessment). ``--fail-under`` must
+    # treat such a scan as a failure rather than a pass. Defaults ``True`` so
+    # existing real-model scans + fixtures are unaffected.
+    scoring_valid: bool = True
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")

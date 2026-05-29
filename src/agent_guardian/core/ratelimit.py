@@ -19,15 +19,20 @@ Design notes:
   nothing (the deduction happens only once it actually has the tokens), so no
   capacity is lost.
 * **No-op fast path.** A ``rate_per_sec`` of ``None`` or ``<= 0`` disables
-  limiting entirely — :meth:`acquire` returns immediately without taking the
-  lock — so an un-throttled contract pays no overhead.
-* **Adaptive back-off.** A target that answers ``429`` is telling us we are
-  pacing too fast. :meth:`observe_rate_limited` reacts in two ways: it honours a
-  server-supplied ``retry_after`` by parking a *cooldown* (no token is granted
-  until it elapses) and it multiplicatively reduces the *effective* refill rate
-  (AIMD-style) so subsequent calls keep some slack. The reduction decays back to
-  the configured rate over a recovery window, so a transient burst of 429s
-  throttles the scan briefly without permanently crippling it. The configured
+  *configured* limiting — :meth:`acquire` returns immediately without taking the
+  lock — so an un-throttled contract pays no overhead **until** the target
+  signals a ``429`` (see Adaptive back-off below).
+* **Adaptive back-off (default-on).** A target that answers ``429`` is telling
+  us we are pacing too fast. :meth:`observe_rate_limited` reacts in two ways: it
+  honours a server-supplied ``retry_after`` by parking a *cooldown* (no token is
+  granted until it elapses) and it multiplicatively reduces the *effective*
+  refill rate (AIMD-style) so subsequent calls keep some slack. The reduction
+  decays back to the configured rate over a recovery window, so a transient
+  burst of 429s throttles the scan briefly without permanently crippling it.
+  Crucially this engages **even when no ``rate_per_sec`` was configured**: an
+  observed 429 promotes a disabled bucket to an adaptive one paced from a
+  conservative default rate, so the advertised back-off is never inert just
+  because the contract omitted ``roe.rate.max_rps``. The configured
   ``rate_per_sec`` is never mutated — only the effective rate the bucket paces
   at — so the bucket's public contract is unchanged.
 """
@@ -47,6 +52,12 @@ _MIN_RATE_FACTOR = 0.05
 # How long (seconds) the effective rate takes to recover linearly back to the
 # configured rate after the last observed 429.
 _RECOVERY_SECONDS = 30.0
+# When no ``rate_per_sec`` is configured, an observed 429 still has to throttle
+# *something*. We promote the disabled bucket to an adaptive one paced from this
+# conservative default rate (requests/sec), then apply the usual multiplicative
+# decrease. Chosen low enough to give a hammered target real breathing room
+# while not stalling the scan outright.
+_DEFAULT_ADAPTIVE_RATE = 2.0
 
 
 class AsyncTokenBucket:
@@ -54,12 +65,16 @@ class AsyncTokenBucket:
 
     ``rate_per_sec`` tokens accrue per second up to ``capacity`` (default: a
     one-second burst, i.e. ``rate_per_sec``). When ``rate_per_sec`` is ``None``
-    or non-positive the bucket is *disabled* and :meth:`acquire` is a no-op.
+    or non-positive the bucket is *disabled* and :meth:`acquire` is a no-op —
+    until a ``429`` is observed (see below).
 
     The bucket also supports *adaptive* back-off via
     :meth:`observe_rate_limited`: an observed ``429`` parks a cooldown (honouring
     the server's ``retry_after``) and temporarily slows the effective refill
-    rate, which recovers over :data:`_RECOVERY_SECONDS`.
+    rate, which recovers over :data:`_RECOVERY_SECONDS`. If the bucket was
+    *disabled* (no configured rate), the first observed ``429`` promotes it to an
+    adaptive bucket paced from :data:`_DEFAULT_ADAPTIVE_RATE` so the back-off is
+    never inert just because the contract omitted a rate.
     """
 
     def __init__(self, rate_per_sec: float | None, *, capacity: float | None = None) -> None:
@@ -157,7 +172,7 @@ class AsyncTokenBucket:
     def observe_rate_limited(self, retry_after: float | None = None) -> None:
         """React to an observed ``429`` by backing off subsequent acquires.
 
-        Two effects, both no-ops on a disabled bucket:
+        Two effects:
 
         * **Cooldown.** When ``retry_after`` (seconds) is supplied and positive,
           a cooldown is parked so the next :meth:`acquire` waits at least that
@@ -169,12 +184,23 @@ class AsyncTokenBucket:
           the bucket re-paces more conservatively. The reduction recovers
           linearly back to the configured rate over :data:`_RECOVERY_SECONDS`.
 
+        **Default-on promotion.** A bucket with no configured rate is otherwise
+        a no-op, but a 429 still has to throttle. The first observed 429 on a
+        disabled bucket promotes it to an adaptive bucket paced from
+        :data:`_DEFAULT_ADAPTIVE_RATE` (capacity 1) so subsequent acquires pace
+        rather than firing instantly. The bucket recovers to that default rate
+        (its new ``rate_per_sec``) over the recovery window.
+
         Synchronous + lock-free on purpose: it only stamps adaptive state read
         under the lock by :meth:`acquire`, so a caller can record a 429 from any
         context (including a transport error handler) without awaiting.
         """
         if not self._enabled:
-            return
+            # Promote a disabled bucket so the advertised back-off is never inert
+            # for an un-throttled contract: pace from a conservative default.
+            self._rate = _DEFAULT_ADAPTIVE_RATE
+            self._capacity = 1.0
+            self._enabled = True
         now = time.monotonic()
         # Multiplicative decrease, floored so the rate axis never fully stalls.
         self._rate_factor = max(_MIN_RATE_FACTOR, self._rate_factor * _BACKOFF_FACTOR)

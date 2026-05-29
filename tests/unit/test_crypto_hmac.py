@@ -104,3 +104,30 @@ def test_lower_iterations_speed_up_tests() -> None:
     block = sign_hmac(b"x", secret="s", iterations=1000)
     assert block["iterations"] == 1000
     assert verify_hmac(b"x", block, secret="s")
+
+
+def test_verify_fails_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding #6: verify never falls back to the public default secret."""
+    monkeypatch.delenv("AGENT_GUARDIAN_SIGNING_SECRET", raising=False)
+    # Sign with the (public) default secret, then verify with NO secret.
+    block = sign_hmac(b"payload")  # uses DEFAULT_SIGNING_SECRET
+    # Fail closed: the public default is never trusted on verify.
+    assert verify_hmac(b"payload", block) is False
+
+
+def test_verify_with_default_secret_succeeds_only_when_explicitly_supplied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.crypto.hmac_sig import DEFAULT_SIGNING_SECRET
+
+    monkeypatch.delenv("AGENT_GUARDIAN_SIGNING_SECRET", raising=False)
+    block = sign_hmac(b"payload")  # default secret
+    # Verification only works if the caller knowingly passes the default value.
+    assert verify_hmac(b"payload", block, secret=DEFAULT_SIGNING_SECRET) is True
+
+
+def test_verify_uses_env_secret_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUARDIAN_SIGNING_SECRET", "env-secret")
+    block = sign_hmac(b"payload")  # signs with env secret
+    # No explicit secret -> resolves env secret (a real, non-default secret).
+    assert verify_hmac(b"payload", block) is True

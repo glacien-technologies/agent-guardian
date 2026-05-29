@@ -45,6 +45,7 @@ from pydantic import ValidationError
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.core.memory import SharedMemory
+from agent_guardian.core.roe import EgressRefused
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.models.asi import AsiCategory
@@ -103,7 +104,9 @@ def fallback_seeds(
     ]
 
 
-TerminationReason = Literal["success", "exhausted", "refused", "budget", "error", "cancelled"]
+TerminationReason = Literal[
+    "success", "exhausted", "refused", "budget", "error", "cancelled", "not_tested"
+]
 
 _DEFAULT_REFUSAL_MARKERS: tuple[str, ...] = (
     "i cannot",
@@ -166,6 +169,12 @@ class AgentReport:
     error: str | None = None
     notes: str = ""
     tokens_consumed: dict[str, int] = field(default_factory=dict)
+    # Turns the egress gate refused before they reached the target (#4). These
+    # were NOT tested — they did not land as attacks and are not errors. The
+    # swarm uses this (together with ``turns``/``findings_count``) to decide
+    # whether an ASI category has any real coverage: an agent whose only turns
+    # were all egress-refused covered *nothing* and must not score as clean.
+    not_tested_turns: int = 0
 
 
 @dataclass(frozen=True)
@@ -787,6 +796,7 @@ class AsiAgent(ABC):
         response: str | None = None
         findings_count = 0
         turns = 0
+        not_tested_turns = 0
         terminated_by: TerminationReason = "exhausted"
         error: str | None = None
         # Track which seeds we've already announced via write_attempted_seed
@@ -883,6 +893,44 @@ class AsiAgent(ABC):
 
             try:
                 target_response = await target.call(result.text, session=session_id)
+            except EgressRefused as exc:
+                # #4 — the egress gate dropped this turn before it reached the
+                # target (the prompt named an external sink the contract
+                # forbids). This turn was NOT tested: it never landed as an
+                # attack and it is not an error. Count it as not-tested, persist
+                # a marker so coverage/scoring can exclude it, and move on to the
+                # next prompt rather than fabricating a refusal the judge would
+                # mis-score as a clean turn.
+                not_tested_turns += 1
+                _LOG.info(
+                    "agent %s turn %d: egress-refused (not tested) — %s",
+                    agent_name,
+                    turns + 1,
+                    exc,
+                )
+                try:
+                    await memory.write_reflection(
+                        agent_name,
+                        json.dumps(
+                            {
+                                "agent": agent_name,
+                                "asi_category": self.asi_category.value,
+                                "event": "egress_refused",
+                                "outcome": "not_tested",
+                                "prompt": result.text,
+                                "reason": str(exc) or "egress refused",
+                            }
+                        ),
+                        embed=False,
+                    )
+                except Exception as werr:  # pragma: no cover — defensive
+                    _LOG.warning(
+                        "agent %s: egress-refused reflection write failed (%s) — continuing",
+                        agent_name,
+                        werr,
+                    )
+                response = None
+                continue
             except (
                 Exception
             ) as exc:  # pragma: no cover — defensive: target adapters should not raise
@@ -1054,12 +1102,20 @@ class AsiAgent(ABC):
 
         duration = time.monotonic() - start
         tokens = self._snapshot_tokens()
+        # #4 — if the agent ran but EVERY turn was egress-refused (no real
+        # judged turn ever landed and it didn't error/cancel), the category was
+        # not actually tested. Mark it ``not_tested`` so the swarm scores it as
+        # not-covered instead of treating an empty findings list as "clean".
+        if turns == 0 and not_tested_turns > 0 and terminated_by not in ("error", "cancelled"):
+            terminated_by = "not_tested"
         _LOG.info(
-            "agent_done: %s asi=%s turns=%d findings=%d terminated_by=%s duration=%.1fs tokens=%d%s",
+            "agent_done: %s asi=%s turns=%d findings=%d not_tested=%d terminated_by=%s "
+            "duration=%.1fs tokens=%d%s",
             agent_name,
             self.asi_category.value,
             turns,
             findings_count,
+            not_tested_turns,
             terminated_by,
             duration,
             tokens.get("total", 0),
@@ -1074,6 +1130,7 @@ class AsiAgent(ABC):
             terminated_by=terminated_by,
             error=error,
             tokens_consumed=tokens,
+            not_tested_turns=not_tested_turns,
         )
 
     # ------------------------------------------------------------------
