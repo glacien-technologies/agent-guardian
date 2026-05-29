@@ -40,7 +40,7 @@ _LOG = logging.getLogger(__name__)
 
 FIRST_SCAN_NOTICE = """
   ────────────────────────────────────────────────────────────────────────
-  AgentGuardian Open -- essential telemetry is on by default.
+  AgentGuardian -- essential telemetry is on by default.
   Each scan sends ONLY anonymous operational counts:
       agents fired · attempts · successes · threats captured · AIVSS score
   No prompts, model output, file paths, hostnames, or environment data.
@@ -56,7 +56,7 @@ FIRST_SCAN_NOTICE = """
 # string used by ``agent-guardian telemetry show``. Keeps backwards
 # compatibility with any external code that imports PROMPT_TEXT.
 PROMPT_TEXT = """
-AgentGuardian Open -- what telemetry collects
+AgentGuardian -- what telemetry collects
 ═══════════════════════════════════════════════
 Default state: ESSENTIAL (on). Disable with `agent-guardian telemetry disable`.
 

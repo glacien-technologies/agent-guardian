@@ -43,7 +43,6 @@ from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
 from agent_guardian.core.sandbox import SandboxViolation
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
-from agent_guardian.cost import estimate_scan_cost
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
@@ -980,7 +979,13 @@ def scan(
     ),
     tier: str | None = typer.Option(None, "--tier", help="Force tier -- one of T1, T2, T3, T4."),
     budget_usd: float | None = typer.Option(
-        None, "--budget-usd", help="Cap; abort if the estimate exceeds this."
+        None,
+        "--budget-usd",
+        help=(
+            "Runtime USD cap (metered against actual spend). The swarm soft-stops "
+            "new attack turns at 80% and reserves the rest for the report. "
+            "Omit for no cap."
+        ),
     ),
     fail_under: int | None = typer.Option(
         None, "--fail-under", help="Exit 1 if final AIVSS < this value."
@@ -1157,20 +1162,18 @@ async def _run_scan(
     # 3. Ethical banner (PRD §15.6) -- first run only.
     _show_ethical_banner_once()
 
-    # 4. Cost estimate.
-    estimate = estimate_scan_cost(
-        commander_model=eff_commander,
-        attacker_model=eff_attacker,
-        evaluator_model=eff_evaluator,
-        total_tokens=cfg.swarm.budget.max_total_tokens,
-    )
-    typer.echo(f"cost estimate: ${estimate:.4f} (provider list prices, 2026-05-27)")
-    if budget_usd is not None and estimate > budget_usd:
+    # 4. Budget cap notice. The old mode-blind pre-flight estimate (it priced
+    #    the full 2M-token ceiling regardless of mode, over-estimating ~46x) is
+    #    gone. --budget-usd is now a *runtime* cap metered against actual spend:
+    #    the swarm soft-stops new attack turns at 80% and reserves the rest for
+    #    the finalise phase + report. Omit it to run uncapped.
+    if budget_usd is not None:
         typer.echo(
-            f"budget exceeded: estimate ${estimate:.4f} > cap ${budget_usd:.4f}",
-            err=True,
+            f"budget cap: ${budget_usd:.4f} "
+            "(soft-stops new attack turns at 80%, reserves the rest for the report)"
         )
-        return EXIT_CONFIG
+    else:
+        typer.echo("no budget cap (running to completion)")
 
     # 5. Resolve tier override.
     tier_override: Tier | None = None
@@ -1242,6 +1245,9 @@ async def _run_scan(
         enable_pretext=pretext,
         enable_indirect=indirect,
         include_m2_agents=owasp_llm,
+        # Runtime USD cap (opt-in). None = uncapped. Enforced live by the
+        # swarm's budget watchdog -- see SwarmConfig.usd_cap.
+        usd_cap=budget_usd,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
         # recon_wall_seconds intentionally left at the SwarmConfig default (90s);
@@ -1354,7 +1360,7 @@ def main(
         help="Show version and exit.",
     ),
 ) -> None:
-    """AgentGuardian Open -- eleven-agent adversarial swarm CLI."""
+    """AgentGuardian -- eleven-agent adversarial swarm CLI."""
     # Wire centralised logging FIRST so .env loading + every sub-command
     # see structured logs. Default level is INFO; operators bump to DEBUG
     # via AGENT_GUARDIAN_LOG_LEVEL=DEBUG when they need the full review

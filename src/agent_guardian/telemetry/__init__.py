@@ -1,6 +1,6 @@
 """Telemetry -- opt-in only, allowlist-only, auditable.
 
-AgentGuardian Open ships **off-by-default** telemetry. The user must
+AgentGuardian ships **off-by-default** telemetry. The user must
 explicitly opt in via the first-run prompt or ``agent-guardian telemetry
 enable``. Until they do, no event is collected, no event is buffered to
 disk, and no network request leaves the machine.

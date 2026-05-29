@@ -1,6 +1,6 @@
 # Maintainers
 
-AgentGuardian Open is maintained by [Glacien Pte. Ltd.](https://glacien.ai). This file lists the people responsible for the project by role rather than personal handle, per [Engineering Standards §6.5](docs/engineering-standards.md).
+AgentGuardian is maintained by [Glacien Pte. Ltd.](https://glacien.ai). This file lists the people responsible for the project by role rather than personal handle, per [Engineering Standards §6.5](docs/engineering-standards.md).
 
 For decision-making rules see [`governance.md`](governance.md). For how to contribute see [`CONTRIBUTING.md`](CONTRIBUTING.md). For security reports see [`SECURITY.md`](SECURITY.md).
 

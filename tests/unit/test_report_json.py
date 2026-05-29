@@ -52,7 +52,12 @@ def test_emit_json_has_expected_top_level_keys() -> None:
 
 def test_emit_json_target_subobject_shape() -> None:
     payload = emit_json(make_scan())
-    assert payload["target"] == {"mode": "prompt", "ref": "prompt.txt"}
+    assert payload["target"] == {
+        "mode": "prompt",
+        "ref": "prompt.txt",
+        "inferred_goal": None,
+        "profile_source": None,
+    }
 
 
 def test_emit_json_findings_summary_matches_scan() -> None:

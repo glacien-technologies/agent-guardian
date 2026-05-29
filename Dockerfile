@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 #
-# AgentGuardian Open — primary Dockerfile.
+# AgentGuardian — primary Dockerfile.
 #
 # This image builds agent-guardian from local source. Once v1.0.0 ships on
 # PyPI (M15), the recommended path will be the PyPI-install variant noted

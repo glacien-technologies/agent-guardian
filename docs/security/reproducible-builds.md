@@ -1,6 +1,6 @@
 # Reproducible builds
 
-AgentGuardian Open ships with reproducible builds. Any third party can rebuild a release wheel from source and confirm it matches the artifact published on PyPI byte-for-byte. This defeats an entire class of supply-chain attacks in which the source code on GitHub differs from the binary that consumers `pip install`.
+AgentGuardian ships with reproducible builds. Any third party can rebuild a release wheel from source and confirm it matches the artifact published on PyPI byte-for-byte. This defeats an entire class of supply-chain attacks in which the source code on GitHub differs from the binary that consumers `pip install`.
 
 This page documents (a) how releases are built reproducibly, (b) how to verify a release matches its source, and (c) the annual independent-verification protocol.
 
@@ -77,7 +77,7 @@ The verification report records:
 - **File timestamps in the zip archive** — controlled by `SOURCE_DATE_EPOCH`.
 - **`__pycache__` content** — not included in the wheel.
 - **Dependency tree at build time** — `pyproject.toml` only declares build-system requirements (hatchling); no runtime install happens during `uv build`.
-- **Compiler invocation** — AgentGuardian Open is pure Python; no C extensions; no compiler in the build path.
+- **Compiler invocation** — AgentGuardian is pure Python; no C extensions; no compiler in the build path.
 
 ## Known sources of non-determinism we do NOT control for
 

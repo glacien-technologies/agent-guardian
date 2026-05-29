@@ -1,8 +1,8 @@
-# Contributing to AgentGuardian Open
+# Contributing to AgentGuardian
 
 ## Welcome
 
-Thank you for considering a contribution to AgentGuardian Open. We welcome bug reports, new probes, new adapters, documentation improvements, and pull requests of every shape. The goal of this project is to give the agentic-AI security community a credible, open, deterministic 0–100 score (AIVSS) and a probe corpus that anyone can extend. Your contributions help us get there.
+Thank you for considering a contribution to AgentGuardian. We welcome bug reports, new probes, new adapters, documentation improvements, and pull requests of every shape. The goal of this project is to give the agentic-AI security community a credible, open, deterministic 0–100 score (AIVSS) and a probe corpus that anyone can extend. Your contributions help us get there.
 
 ## Developer Certificate of Origin (DCO)
 

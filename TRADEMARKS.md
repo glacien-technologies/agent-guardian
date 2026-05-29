@@ -1,6 +1,6 @@
 # Trademark policy
 
-"AgentGuardian", "AgentGuardian Open", and the AgentGuardian logo are trademarks of Glacien Pte. Ltd.
+"AgentGuardian", "AgentGuardian", and the AgentGuardian logo are trademarks of Glacien Pte. Ltd.
 
 The Apache License, Version 2.0, Section 6, explicitly does not grant trademark rights. This document supplements that license.
 
@@ -8,7 +8,7 @@ The Apache License, Version 2.0, Section 6, explicitly does not grant trademark 
 
 - Fork the source code under Apache-2.0.
 - Rename your fork (e.g. `swarmscan`, `redteam-toolkit`) and distribute it.
-- State that your work is "based on AgentGuardian Open by Glacien" in your README and documentation.
+- State that your work is "based on AgentGuardian by Glacien" in your README and documentation.
 - Use the AgentGuardian name in factual, descriptive references ("compatible with AgentGuardian", "fork of AgentGuardian").
 
 ## You MAY NOT

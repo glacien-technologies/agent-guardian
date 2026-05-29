@@ -191,7 +191,9 @@ def test_fast_mode_allows_early_stop() -> None:
 def test_cli_mode_flag_appears_in_help() -> None:
     """The --mode option must be visible in `agent-guardian scan --help`."""
     runner = CliRunner()
-    result = runner.invoke(app, ["scan", "--help"])
+    # Force a wide terminal so Rich doesn't truncate option names / help text
+    # with an ellipsis at CI's default (non-tty) width.
+    result = runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
     assert "--mode" in result.output
     # Sanity-check the three values are all in the help text.

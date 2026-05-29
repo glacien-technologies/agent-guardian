@@ -1,6 +1,6 @@
 # Telemetry transparency
 
-AgentGuardian Open ships with **essential-tier telemetry on by default** and an explicit opt-out. This page is the canonical reference for what's collected at each tier, what's NEVER collected, how to audit it, and how to disable it.
+AgentGuardian ships with **essential-tier telemetry on by default** and an explicit opt-out. This page is the canonical reference for what's collected at each tier, what's NEVER collected, how to audit it, and how to disable it.
 
 Per [Engineering Standards §9.4](../engineering-standards.md), the telemetry source code is shipped *in the package* so anyone can read it before opting out or upgrading. The aggregator that runs on Glacien infrastructure is also in the package, so you can self-host the collector for testing.
 

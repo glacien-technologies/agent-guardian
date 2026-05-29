@@ -1,6 +1,6 @@
 # Public disclosure history
 
-Per [Engineering Standards §9.5](../engineering-standards.md) and the policy in [`SECURITY.md`](../../SECURITY.md), AgentGuardian Open maintains a public log of every vulnerability report we've handled. Researchers can use this log to verify that our response times match the published policy. Adopters can use it to audit our incident-handling discipline before depending on the project.
+Per [Engineering Standards §9.5](../engineering-standards.md) and the policy in [`SECURITY.md`](../../SECURITY.md), AgentGuardian maintains a public log of every vulnerability report we've handled. Researchers can use this log to verify that our response times match the published policy. Adopters can use it to audit our incident-handling discipline before depending on the project.
 
 After two or three handled disclosures, this log itself becomes a meaningful trust signal — empirical evidence that the SECURITY.md policy is operationally real, not aspirational.
 

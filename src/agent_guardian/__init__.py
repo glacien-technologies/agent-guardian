@@ -1,4 +1,4 @@
-"""AgentGuardian Open — adversarial swarm framework for agentic AI red-teaming."""
+"""AgentGuardian — adversarial swarm framework for agentic AI red-teaming."""
 
 from agent_guardian._version import __version__
 from agent_guardian.adapters.base import (

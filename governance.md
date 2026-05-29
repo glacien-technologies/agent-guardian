@@ -1,10 +1,10 @@
 # Governance
 
-This document explains how decisions are made on AgentGuardian Open. It is intentionally brief — the rules are short enough to read in five minutes.
+This document explains how decisions are made on AgentGuardian. It is intentionally brief — the rules are short enough to read in five minutes.
 
 ## Sponsor
 
-AgentGuardian Open is funded and operated by [Glacien Pte. Ltd.](https://glacien.ai). Glacien employs the maintainers and underwrites the project's infrastructure (CI minutes, PyPI organisation, docs hosting, status page, etc.). This is a **corporate-backed open-source project**, not a community project. We say so plainly to avoid the ambiguity that erodes trust over time.
+AgentGuardian is funded and operated by [Glacien Pte. Ltd.](https://glacien.ai). Glacien employs the maintainers and underwrites the project's infrastructure (CI minutes, PyPI organisation, docs hosting, status page, etc.). This is a **corporate-backed open-source project**, not a community project. We say so plainly to avoid the ambiguity that erodes trust over time.
 
 That said: every line of code, every probe, and every documented practice is Apache-2.0 licensed and open to community contribution under the rules below.
 
@@ -21,7 +21,7 @@ At least three roles are filled at all times for bus-factor depth.
 
 ## Decision-making
 
-Decisions on AgentGuardian Open fall into four tiers, each with its own approval rule. The same rules apply equally to Glacien staff and to external contributors.
+Decisions on AgentGuardian fall into four tiers, each with its own approval rule. The same rules apply equally to Glacien staff and to external contributors.
 
 | Tier | Examples | Approval rule |
 |---|---|---|

@@ -619,31 +619,35 @@ def test_scan_openai_without_key_returns_llm_error(
     assert result.exit_code == EXIT_LLM_PROVIDER
 
 
-def test_scan_budget_too_low_aborts(runner: CliRunner, tmp_path: Path) -> None:
+def test_scan_low_budget_does_not_abort_preflight(runner: CliRunner, tmp_path: Path) -> None:
+    """A tiny --budget-usd no longer aborts before the scan runs.
+
+    The mode-blind pre-flight estimate gate was removed; --budget-usd is now a
+    *runtime* cap metered against actual spend. With the free stub model the cap
+    is never reached, so the scan runs to completion (EXIT_OK) and prints the
+    cap notice rather than a 'budget exceeded' abort.
+    """
     prompt = tmp_path / "p.txt"
     prompt.write_text("hello", encoding="utf-8")
+    out_path = tmp_path / "scan.json"
     result = runner.invoke(
         app,
         [
             "scan",
             "--system-prompt",
             str(prompt),
-            # Force a paid model so the estimate is > 0.
-            "--commander-model",
-            "openai:gpt-4o-mini",
-            "--attacker-model",
-            "openai:gpt-4o-mini",
-            "--evaluator-model",
-            "openai:gpt-4o-mini",
             "--model",
             "stub",
             "--budget-usd",
             "0.0001",
             "--no-tui",
+            "--output-path",
+            str(out_path),
         ],
     )
-    assert result.exit_code == EXIT_CONFIG
-    assert "budget" in result.stdout.lower() or "budget" in result.output.lower()
+    assert result.exit_code == EXIT_OK, result.output
+    assert "cost estimate" not in result.output.lower()
+    assert "budget cap" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -675,8 +679,9 @@ def test_scan_end_to_end_writes_json(runner: CliRunner, tmp_path: Path) -> None:
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert "aivss" in payload
     assert 0 <= payload["aivss"] <= 100
-    # Cost estimate banner printed.
-    assert "cost estimate" in result.stdout.lower()
+    # The mode-blind pre-flight estimate is gone; an uncapped run says so.
+    assert "cost estimate" not in result.stdout.lower()
+    assert "no budget cap" in result.stdout.lower()
 
 
 def test_scan_fail_under_returns_one(runner: CliRunner, tmp_path: Path) -> None:

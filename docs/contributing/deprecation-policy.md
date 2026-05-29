@@ -1,6 +1,6 @@
 # Deprecation policy
 
-Per [Engineering Standards §9.3](../engineering-standards.md), AgentGuardian Open commits to a predictable deprecation cadence so downstream consumers can plan their upgrades. This page is the canonical reference for the rule, the warning shape, the timeline, and the escalation path.
+Per [Engineering Standards §9.3](../engineering-standards.md), AgentGuardian commits to a predictable deprecation cadence so downstream consumers can plan their upgrades. This page is the canonical reference for the rule, the warning shape, the timeline, and the escalation path.
 
 ## The rule
 

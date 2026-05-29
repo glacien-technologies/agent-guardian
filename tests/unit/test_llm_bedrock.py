@@ -16,6 +16,14 @@ from __future__ import annotations
 import re
 
 import pytest
+
+# The Bedrock client needs the optional ``[aws]`` extra (botocore) for SigV4
+# signing + the AWS credential chain. CI installs it (``uv sync --extra aws``);
+# a plain ``--extra dev`` dev env does not. Skip the whole module cleanly there
+# instead of erroring at import (``BedrockClient.__init__`` raises LLMAuthError
+# when botocore is missing, which would otherwise red-fail every test here).
+pytest.importorskip("botocore", reason="Bedrock tests require the [aws] extra (botocore)")
+
 import respx
 from httpx import Response
 
