@@ -189,16 +189,23 @@ def test_fast_mode_allows_early_stop() -> None:
 
 
 def test_cli_mode_flag_appears_in_help() -> None:
-    """The --mode option must be visible in `agent-guardian scan --help`."""
-    runner = CliRunner()
-    # Force a wide terminal so Rich doesn't truncate option names / help text
-    # with an ellipsis at CI's default (non-tty) width.
-    result = runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
-    assert result.exit_code == 0
-    assert "--mode" in result.output
-    # Sanity-check the three values are all in the help text.
+    """The --mode option is registered on the scan command, documenting fast/smart/full.
+
+    Introspects the Typer command params rather than the rendered --help text:
+    Rich truncates option names at CI's non-tty width and honouring COLUMNS in
+    the invoke env is version-dependent, so asserting on rendered text is flaky.
+    """
+    from click import Group
+    from typer.main import get_command
+
+    cmd = get_command(app)
+    assert isinstance(cmd, Group)
+    scan = cmd.commands["scan"]
+    mode_param = next((p for p in scan.params if "--mode" in p.opts), None)
+    assert mode_param is not None
+    help_text = str(getattr(mode_param, "help", "") or "").lower()
     for token in ("fast", "smart", "full"):
-        assert token in result.output
+        assert token in help_text
 
 
 def test_cli_mode_flag_rejects_unknown_value() -> None:
