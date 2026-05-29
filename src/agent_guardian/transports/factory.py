@@ -34,13 +34,37 @@ from typing import TYPE_CHECKING
 import httpx
 
 from agent_guardian.contract.schema import (
+    AnthropicMessagesTransport as ContractAnthropicTransport,
+)
+from agent_guardian.contract.schema import (
     ApiKeyAuth as ContractApiKeyAuth,
+)
+from agent_guardian.contract.schema import (
+    AwsSigV4Auth as ContractAwsSigV4Auth,
+)
+from agent_guardian.contract.schema import (
+    AzureEntraAuth as ContractAzureEntraAuth,
+)
+from agent_guardian.contract.schema import (
+    AzureFoundryAgentTransport as ContractAzureFoundryTransport,
 )
 from agent_guardian.contract.schema import (
     BearerAuth as ContractBearerAuth,
 )
 from agent_guardian.contract.schema import (
+    BedrockAgentTransport as ContractBedrockTransport,
+)
+from agent_guardian.contract.schema import (
+    GcpAdcAuth as ContractGcpAdcAuth,
+)
+from agent_guardian.contract.schema import (
+    GcpSaJsonAuth as ContractGcpSaJsonAuth,
+)
+from agent_guardian.contract.schema import (
     HmacAuth as ContractHmacAuth,
+)
+from agent_guardian.contract.schema import (
+    HttpTransport as ContractHttpTransport,
 )
 from agent_guardian.contract.schema import (
     MtlsAuth as ContractMtlsAuth,
@@ -51,19 +75,33 @@ from agent_guardian.contract.schema import (
 from agent_guardian.contract.schema import (
     OAuth2ClientCredentialsAuth as ContractOAuth2Auth,
 )
+from agent_guardian.contract.schema import (
+    OpenAiResponsesTransport as ContractOpenAiTransport,
+)
+from agent_guardian.contract.schema import (
+    VertexAgentTransport as ContractVertexTransport,
+)
 from agent_guardian.contract.secrets import (
     SecretRef,
     SecretResolver,
     resolve_secrets,
 )
+from agent_guardian.transports.anthropic_messages import AnthropicMessagesTransport
 from agent_guardian.transports.auth.api_key import ApiKeyAuth
+from agent_guardian.transports.auth.azure_entra import AzureEntraAuth
 from agent_guardian.transports.auth.base import AuthProvider, NoAuth
 from agent_guardian.transports.auth.bearer import BearerAuth
+from agent_guardian.transports.auth.gcp import GcpAdcAuth, GcpSaJsonAuth
 from agent_guardian.transports.auth.hmac import HmacAuth
 from agent_guardian.transports.auth.mtls import MutualTlsAuth
 from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth
-from agent_guardian.transports.http import HttpTransport
+from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth
+from agent_guardian.transports.azure_foundry import AzureFoundryAgentTransport
+from agent_guardian.transports.bedrock_agent import BedrockAgentTransport
+from agent_guardian.transports.http import HttpTransport, SessionSendIn
+from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
 from agent_guardian.transports.session import SessionMachine, SessionMode
+from agent_guardian.transports.vertex_agent import VertexAgentTransport
 
 if TYPE_CHECKING:
     from agent_guardian.contract.schema import Auth, Contract
@@ -116,13 +154,20 @@ def build_auth_provider(
       (handed ``oauth2_client`` for its token round-trip)
     * ``mtls`` → :class:`MutualTlsAuth` (resolved cert / key / CA material)
     * ``hmac`` → :class:`HmacAuth`
+    * ``aws_sigv4`` → :class:`AwsSigV4Auth` (resolved AWS credentials, or the
+      default botocore credential chain when none are supplied)
+    * ``azure_entra`` → :class:`AzureEntraAuth` (handed ``oauth2_client`` for its
+      Entra token round-trip, like ``oauth2_client_credentials``)
+    * ``gcp_adc`` → :class:`GcpAdcAuth` (ambient Application Default Credentials)
+    * ``gcp_sa_json`` → :class:`GcpSaJsonAuth` (resolved service-account JSON)
 
     The providers only ever receive **resolved plaintext strings**; a
     :class:`SecretRef` never crosses this boundary.
 
     Raises:
-        ValueError: an ``oauth2_client_credentials`` auth was declared but no
-            ``oauth2_client`` was supplied to perform the token fetch.
+        ValueError: an ``oauth2_client_credentials`` or ``azure_entra`` auth was
+            declared but no ``oauth2_client`` was supplied to perform the token
+            fetch.
     """
     auth: Auth = contract.target.auth
     refs = resolve_secrets(contract, resolver=resolver)
@@ -173,11 +218,67 @@ def build_auth_provider(
             algorithm=auth.algorithm,
         )
 
+    if isinstance(auth, ContractAwsSigV4Auth):
+        # Explicit credentials are optional; when omitted the provider falls back
+        # to the default botocore credential chain.
+        access_key_id = _resolve(refs, auth.access_key_id) if auth.access_key_id else None
+        secret_access_key = (
+            _resolve(refs, auth.secret_access_key) if auth.secret_access_key else None
+        )
+        session_token = _resolve(refs, auth.session_token) if auth.session_token else None
+        return AwsSigV4Auth(
+            region=auth.region,
+            service=auth.service,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            session_token=session_token,
+        )
+
+    if isinstance(auth, ContractAzureEntraAuth):
+        if oauth2_client is None:
+            raise ValueError(
+                "azure_entra auth requires an httpx.AsyncClient for the Entra "
+                "token endpoint round-trip"
+            )
+        # ``client_secret`` is optional (federated / managed-identity flows); the
+        # provider requires a string, so an absent secret resolves to "".
+        client_secret = _resolve(refs, auth.client_secret) if auth.client_secret else ""
+        return AzureEntraAuth(
+            tenant_id=auth.tenant_id,
+            client_id=_resolve(refs, auth.client_id),
+            client_secret=client_secret,
+            scope=auth.scope,
+            client=oauth2_client,
+        )
+
+    if isinstance(auth, ContractGcpAdcAuth):
+        return GcpAdcAuth()
+
+    if isinstance(auth, ContractGcpSaJsonAuth):
+        service_account_json = _resolve(refs, auth.service_account_json)
+        if auth.scopes:
+            return GcpSaJsonAuth(
+                service_account_json=service_account_json,
+                scopes=tuple(auth.scopes),
+            )
+        # No scopes declared: let the provider apply its cloud-platform default.
+        return GcpSaJsonAuth(service_account_json=service_account_json)
+
     # The discriminated union is closed; an unrecognised member is unreachable
     # unless the schema gains a new auth kind without a matching factory arm.
     raise NotImplementedError(  # pragma: no cover - defensive
         f"auth kind {auth.kind!r} has no transport provider mapping"
     )
+
+
+# Auth kinds that require a dedicated httpx client for a token-endpoint
+# round-trip (OAuth2 client-credentials and Azure Entra). The factory builds one
+# and hands it to ``build_auth_provider``.
+_TOKEN_FETCH_AUTH = (ContractOAuth2Auth, ContractAzureEntraAuth)
+
+# Default data-plane timeout (seconds) for cloud transports whose contract
+# transport block carries no ``timeout_ms`` field.
+_DEFAULT_CLOUD_TIMEOUT_SECONDS = 60.0
 
 
 def build_transport(
@@ -187,33 +288,106 @@ def build_transport(
 ) -> Transport:
     """Build the :class:`Transport` the contract's ``target.transport`` describes.
 
-    Only ``kind == "http"`` ships today: it constructs an :class:`HttpTransport`
-    from the contract's transport / request / response primitives (endpoint,
-    Jinja request body, output / error / tool-call JSONPaths, base headers,
-    timeout). The OAuth2 provider — when the contract authenticates that way —
-    is given a dedicated :class:`httpx.AsyncClient` for its token round-trip.
+    Dispatches on the discriminated ``target.transport.kind``:
+
+    * ``http`` → :class:`HttpTransport` from the request / response primitives
+      (endpoint, Jinja request body, output / error / tool-call JSONPaths, base
+      headers, timeout) plus server-session wiring (``session.id_source`` →
+      ``session_path`` for capture, ``session.id_send.{in,name}`` →
+      ``session_send_in`` / ``session_send_name`` for outbound replay).
+    * ``openai_responses`` → :class:`OpenAiResponsesTransport`
+    * ``anthropic_messages`` → :class:`AnthropicMessagesTransport`
+    * ``bedrock_agent`` → :class:`BedrockAgentTransport`
+    * ``vertex_agent`` → :class:`VertexAgentTransport`
+    * ``azure_foundry_agent`` → :class:`AzureFoundryAgentTransport`
+
+    Each cloud transport is constructed from its contract fields plus the built
+    :class:`AuthProvider`; the transport graph owns whatever httpx client it
+    creates and closes it on ``aclose``. ``OAuth2`` / ``azure_entra`` auth — when
+    the contract authenticates that way — is given a dedicated
+    :class:`httpx.AsyncClient` for its token round-trip.
 
     Raises:
-        NotImplementedError: the transport kind is anything other than ``http``.
+        NotImplementedError: the transport kind has no factory arm.
     """
-    transport = contract.target.transport
-    if transport.kind != "http":
-        raise NotImplementedError(
-            f"transport kind {transport.kind!r} is not supported yet "
-            "(only 'http' ships in Stage 1; other kinds land in Stage 2+)"
-        )
-
     target = contract.target
-    response = target.response
+    transport = target.transport
 
-    # OAuth2 needs an httpx client for the token endpoint; build one only when
-    # the contract authenticates that way, and let the transport own it so it is
-    # closed on ``aclose``.
+    # OAuth2 / Entra need an httpx client for the token endpoint; build one only
+    # when the contract authenticates that way.
     oauth2_client: httpx.AsyncClient | None = None
-    if isinstance(target.auth, ContractOAuth2Auth):
-        oauth2_client = httpx.AsyncClient(timeout=httpx.Timeout(transport.timeout_ms / 1000.0))
+    if isinstance(target.auth, _TOKEN_FETCH_AUTH):
+        oauth2_client = httpx.AsyncClient(timeout=httpx.Timeout(_DEFAULT_CLOUD_TIMEOUT_SECONDS))
 
     auth = build_auth_provider(contract, resolver=resolver, oauth2_client=oauth2_client)
+
+    if isinstance(transport, ContractHttpTransport):
+        return _build_http_transport(contract, transport, auth)
+    if isinstance(transport, ContractOpenAiTransport):
+        return OpenAiResponsesTransport(
+            base_url=str(transport.base_url),
+            model=transport.model,
+            store=transport.store,
+            auth=auth,
+        )
+    if isinstance(transport, ContractAnthropicTransport):
+        return AnthropicMessagesTransport(
+            base_url=str(transport.base_url),
+            model=transport.model,
+            max_tokens=transport.max_tokens,
+            anthropic_version=transport.anthropic_version,
+            auth=auth,
+        )
+    if isinstance(transport, ContractBedrockTransport):
+        return BedrockAgentTransport(
+            region=transport.region,
+            agent_id=transport.agent_id,
+            agent_alias_id=transport.agent_alias_id,
+            enable_trace=transport.enable_trace,
+            auth=auth,
+        )
+    if isinstance(transport, ContractVertexTransport):
+        return VertexAgentTransport(
+            project=transport.project,
+            location=transport.location,
+            engine_id=transport.reasoning_engine_id,
+            auth=auth,
+        )
+    if isinstance(transport, ContractAzureFoundryTransport):
+        return AzureFoundryAgentTransport(
+            endpoint=str(transport.endpoint),
+            agent_id=transport.agent_id,
+            auth=auth,
+        )
+
+    # The discriminated union is closed; an unrecognised member is unreachable
+    # unless the schema gains a new transport kind without a matching factory arm.
+    raise NotImplementedError(f"transport kind {transport.kind!r} has no factory arm")
+
+
+def _build_http_transport(
+    contract: Contract,
+    transport: ContractHttpTransport,
+    auth: AuthProvider,
+) -> HttpTransport:
+    """Construct an :class:`HttpTransport` from the contract's HTTP primitives.
+
+    Server-session wiring: ``session.id_source`` becomes the ``session_path``
+    used to *capture* a server-issued session id off the response, and
+    ``session.id_send.{in,name}`` becomes the ``session_send_in`` /
+    ``session_send_name`` used to *replay* it outbound on the next turn. The
+    :class:`~agent_guardian.transports.session.SessionMachine` (SERVER_SESSION
+    mode) threads the captured id back through ``Request.session``.
+    """
+    target = contract.target
+    response = target.response
+    session = target.session
+
+    session_send_in: SessionSendIn | None = None
+    session_send_name: str | None = None
+    if session.id_send is not None:
+        session_send_in = session.id_send.in_
+        session_send_name = session.id_send.name
 
     return HttpTransport(
         endpoint=str(transport.url),
@@ -221,6 +395,9 @@ def build_transport(
         output_path=response.output_path,
         error_path=response.error.error_path,
         tool_call_path=response.tool_call_path,
+        session_path=session.id_source,
+        session_send_in=session_send_in,
+        session_send_name=session_send_name,
         base_headers=transport.headers,
         auth=auth,
         timeout_seconds=transport.timeout_ms / 1000.0,
@@ -241,6 +418,47 @@ def build_session_machine(contract: Contract, transport: Transport) -> SessionMa
     ``client_history``) onto the transport-layer :class:`SessionMode`. The
     machine starts with no seeded session token — the ``server_session`` flow
     captures the token from the first response.
+
+    The mapping is *transport-kind agnostic*: a cloud transport that manages its
+    own server session (``openai_responses`` via ``previous_response_id``,
+    ``bedrock_agent`` via the path ``sessionId``, ``vertex_agent`` via
+    ``session_id``, ``azure_foundry`` via the thread id) declares
+    ``session.mode: server_session`` and gets the SERVER_SESSION machine, which
+    captures :attr:`Response.session` and replays it via :attr:`Request.session`
+    on the next turn — exactly the contract every server-session transport
+    implements. The HTTP transport reaches the same place via the
+    ``id_source`` / ``id_send`` wiring done in :func:`_build_http_transport`.
+
+    Reset hooks (``session.reset.create`` / ``session.reset.delete``) are *not*
+    invoked here. They describe provider-native endpoints to mint / tear down a
+    session out-of-band; a future stage would call them from the transport's
+    :meth:`Transport.open_session` / :meth:`Transport.close_session` lifecycle
+    (see :func:`_session_reset_hooks` for the wiring sketch). Until then the
+    SERVER_SESSION machine's lazy capture-on-first-response is sufficient.
     """
     mode = _SESSION_MODE_MAP[contract.target.session.mode]
     return SessionMachine(transport, mode=mode)
+
+
+def _session_reset_hooks(contract: Contract) -> tuple[str | None, str | None]:
+    """Return the contract's ``(create, delete)`` session-reset hook references.
+
+    These map onto the :class:`Transport` lifecycle: a ``create`` hook would be
+    invoked by :meth:`Transport.open_session` to mint a fresh server session
+    (e.g. ``POST /threads`` for Azure Foundry, ``POST .../sessions`` for
+    Bedrock), and a ``delete`` hook by :meth:`Transport.close_session` to tear it
+    down. The base :class:`Transport` ships both as no-op defaults
+    (``open_session`` / ``close_session``), so a contract may declare the hooks
+    today and a later stage will wire provider-native create / delete calls
+    through them.
+
+    TODO(stage-3): drive ``create`` from :meth:`Transport.open_session` and
+    ``delete`` from :meth:`Transport.close_session` for transports that expose a
+    session-management data plane (Bedrock sessions, Foundry threads). The
+    current builders rely on lazy capture-on-first-response, which covers the
+    common case without an explicit create round-trip.
+    """
+    reset = contract.target.session.reset
+    if reset is None:
+        return (None, None)
+    return (reset.create, reset.delete)

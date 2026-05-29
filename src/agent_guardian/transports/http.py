@@ -22,8 +22,9 @@ target refused/blocked the request at the application layer).
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any
+from typing import Any, ClassVar, Literal
 
 import httpx
 
@@ -31,7 +32,14 @@ from agent_guardian.adapters.http import HttpAdapter
 from agent_guardian.adapters.http_shapes.generic_shape import walk_jsonpath
 from agent_guardian.llm.errors import LLMError, LLMResponseFormatError
 from agent_guardian.transports.auth.base import AuthContext, AuthProvider, NoAuth
-from agent_guardian.transports.base import Request, Response, TokenUsage, ToolCall, Transport
+from agent_guardian.transports.base import (
+    CapabilityReport,
+    Request,
+    Response,
+    TokenUsage,
+    ToolCall,
+    Transport,
+)
 from agent_guardian.transports.errors import TransportError, TransportErrorCategory, map_llm_error
 from agent_guardian.transports.templating import render_body
 
@@ -41,9 +49,28 @@ _LOG = logging.getLogger(__name__)
 
 _DEFAULT_TEMPLATE = '{"input": "{{ prompt }}"}'
 
+# Where an outbound server-session id may be placed on a request.
+SessionSendIn = Literal["header", "query", "body"]
+
+
+def _auth_scheme_name(auth: AuthProvider) -> str | None:
+    """Derive a readable auth-scheme label from a provider instance.
+
+    ``NoAuth`` reports ``None`` (unauthenticated); every other provider reports
+    its class name with a trailing ``Auth`` stripped (e.g. ``BearerAuth`` →
+    ``"Bearer"``). This avoids requiring every provider to carry a ``scheme``
+    attribute while still giving :meth:`HttpTransport.describe` a useful label.
+    """
+    if isinstance(auth, NoAuth):
+        return None
+    name = type(auth).__name__
+    return name[:-4] if name.endswith("Auth") else name
+
 
 class HttpTransport(Transport):
     """Production HTTP transport, built from primitives (not a Contract)."""
+
+    kind: ClassVar[str] = "http"
 
     def __init__(
         self,
@@ -56,9 +83,12 @@ class HttpTransport(Transport):
         tool_call_name_path: str = "$.name",
         tool_call_args_path: str = "$.arguments",
         session_path: str | None = None,
+        session_send_in: SessionSendIn | None = None,
+        session_send_name: str | None = None,
         usage_prompt_tokens_path: str | None = None,
         usage_completion_tokens_path: str | None = None,
         usage_total_tokens_path: str | None = None,
+        stream: bool = False,
         auth: AuthProvider | None = None,
         base_headers: dict[str, str] | None = None,
         timeout_seconds: float = 60.0,
@@ -69,6 +99,10 @@ class HttpTransport(Transport):
     ) -> None:
         if not endpoint:
             raise ValueError("HttpTransport requires a non-empty endpoint")
+        if session_send_in is not None and not session_send_name:
+            raise ValueError(
+                "HttpTransport: session_send_name is required when session_send_in is set"
+            )
         self._endpoint = endpoint
         self._request_template = request_template
         self._output_path = output_path
@@ -77,9 +111,12 @@ class HttpTransport(Transport):
         self._tool_call_name_path = tool_call_name_path
         self._tool_call_args_path = tool_call_args_path
         self._session_path = session_path
+        self._session_send_in = session_send_in
+        self._session_send_name = session_send_name
         self._usage_prompt_path = usage_prompt_tokens_path
         self._usage_completion_path = usage_completion_tokens_path
         self._usage_total_path = usage_total_tokens_path
+        self._stream = stream
         self._auth: AuthProvider = auth or NoAuth()
         self._base_headers = dict(base_headers or {})
 
@@ -95,26 +132,61 @@ class HttpTransport(Transport):
             max_concurrency=max_concurrency,
             client=client,
         )
+        # Serializes the per-request endpoint swap used only for "query"
+        # outbound session placement (the adapter posts to a fixed endpoint).
+        self._query_lock = asyncio.Lock()
 
     @property
     def endpoint(self) -> str:
         return self._endpoint
 
     def _build_body(self, request: Request) -> dict[str, Any]:
-        return render_body(
+        body = render_body(
             self._request_template,
             prompt=request.prompt,
             session=request.session,
             conversation=request.conversation,
         )
+        # Outbound session-id placement (body): set a top-level key IN ADDITION
+        # to whatever the template already rendered.
+        if (
+            self._session_send_in == "body"
+            and self._session_send_name is not None
+            and request.session is not None
+        ):
+            body[self._session_send_name] = request.session
+        return body
 
-    async def _build_headers(self, body: dict[str, Any]) -> tuple[dict[str, str], AuthContext]:
+    def _endpoint_for(self, request: Request) -> str:
+        """Endpoint for this request, with the session id merged into the query
+        string when outbound placement is ``"query"``."""
+        if (
+            self._session_send_in == "query"
+            and self._session_send_name is not None
+            and request.session is not None
+        ):
+            url = httpx.URL(self._endpoint)
+            url = url.copy_merge_params({self._session_send_name: request.session})
+            return str(url)
+        return self._endpoint
+
+    async def _build_headers(
+        self, request: Request, url: str
+    ) -> tuple[dict[str, str], AuthContext]:
         headers: dict[str, str] = {
             "content-type": "application/json",
             "accept": "application/json",
         }
         headers.update(self._base_headers)
-        ctx = AuthContext(method="POST", url=self._endpoint, headers=headers)
+        # Outbound session-id placement (header): set IN ADDITION to base headers
+        # and before auth so an auth provider could sign over it if it wished.
+        if (
+            self._session_send_in == "header"
+            and self._session_send_name is not None
+            and request.session is not None
+        ):
+            headers[self._session_send_name] = request.session
+        ctx = AuthContext(method="POST", url=url, headers=headers)
         await self._auth.apply(ctx)
         return ctx.headers, ctx
 
@@ -187,6 +259,28 @@ class HttpTransport(Transport):
             raw=data,
         )
 
+    async def _send_raw(
+        self, body: dict[str, Any], headers: dict[str, str], url: str
+    ) -> dict[str, Any]:
+        """POST via the adapter at ``url``.
+
+        For the common case ``url`` equals the adapter's fixed endpoint and we
+        delegate straight to :meth:`HttpAdapter.send_raw`. Outbound ``"query"``
+        session placement produces a per-request URL; since the adapter posts to
+        a fixed endpoint we temporarily swap it under a lock (serialising only
+        query-mode sends) and restore it afterwards. ``header``/``body`` modes
+        never take this path.
+        """
+        if url == self._endpoint:
+            return await self._adapter.send_raw(body, headers)
+        async with self._query_lock:
+            original = self._adapter._endpoint
+            self._adapter._endpoint = url
+            try:
+                return await self._adapter.send_raw(body, headers)
+            finally:
+                self._adapter._endpoint = original
+
     async def send(self, request: Request) -> Response:
         """Send one turn, returning a :class:`Response` (never raises for faults)."""
         try:
@@ -195,9 +289,10 @@ class HttpTransport(Transport):
             _LOG.debug("http transport: request body build failed (%s)", exc)
             return Response(error=map_llm_error(exc))
 
+        url = self._endpoint_for(request)
         try:
-            headers, _ctx = await self._build_headers(body)
-            data = await self._adapter.send_raw(body, headers)
+            headers, _ctx = await self._build_headers(request, url)
+            data = await self._send_raw(body, headers, url)
             return self._parse_response(data)
         except _BlockedError as exc:
             _LOG.debug("http transport: target blocked the request (%s)", exc)
@@ -208,6 +303,28 @@ class HttpTransport(Transport):
         except LLMError as exc:
             _LOG.debug("http transport: send failed (%s)", exc)
             return Response(error=map_llm_error(exc))
+
+    def describe(self) -> CapabilityReport:
+        """Report this HTTP transport's static capabilities.
+
+        ``streaming`` reflects whether a streaming config is set; ``supports_tools``
+        whether a ``tool_call_path`` is configured; ``auth_scheme`` is derived from
+        the auth provider (``None`` for unauthenticated targets). ``session_modes``
+        lists the modes this transport can support — it can always run stateless or
+        replay client history; server-session requires a ``session_path`` to capture
+        the id and/or an outbound placement to replay it.
+        """
+        session_modes: list[str] = ["stateless", "client_history"]
+        if self._session_path is not None or self._session_send_in is not None:
+            session_modes.insert(1, "server_session")
+        return CapabilityReport(
+            kind=self.kind,
+            streaming=self._stream,
+            supports_tools=self._tool_call_path is not None,
+            session_modes=tuple(session_modes),
+            auth_scheme=_auth_scheme_name(self._auth),
+            endpoint=self._endpoint,
+        )
 
     async def aclose(self) -> None:
         if self._owns_adapter:

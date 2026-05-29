@@ -10,14 +10,18 @@ The seven stages mirror the operator's mental model of "can I even talk to this
 thing, and am I allowed to?":
 
 1. **resolve + lint** — load + validate the contract, print its redacted view.
-2. **connect** — build the transport from the contract primitives.
-3. **authenticate / probe** — send one benign turn and classify auth failures
-   (401/403 → unreachable; provider-auth → LLM-provider exit code).
-4. **benign round-trip** — extract + print the model's reply text.
-5. **session check** — for a stateful session, send a second benign turn and
-   confirm continuity (a stateless contract skips this with a note).
-6. **capability report** — reconcile the RoE allow/block lists against the
-   contract's declared / expected tools (a dangling ref is a config error).
+2. **connect** — build the transport (+ session machine) from the contract
+   primitives.
+3. **authenticate / probe** — run :meth:`Transport.probe` (one benign turn,
+   never raises) and classify the returned :class:`TransportError` category
+   (auth → unreachable; provider-auth wording → LLM-provider exit code).
+4. **benign round-trip** — print the probe's extracted reply text.
+5. **session check** — for a stateful session, drive the session machine through
+   two real turns and confirm the second turn continues (a stateless contract
+   skips this with a note).
+6. **capability report** — read :meth:`Transport.describe` and reconcile the RoE
+   allow/block lists against the transport's discovered tool support / the
+   contract's declared expected tools (a dangling ref is a config error).
 7. **RoE echo** — print the budgets / environment / authorization_ref and refuse
    a ``prod`` scan with no ``authorization_ref`` (via :func:`authorization_gate`).
 
@@ -44,11 +48,13 @@ from agent_guardian.contract.hashing import contract_sha256
 from agent_guardian.contract.loader import load_contract
 from agent_guardian.contract.secrets import redact
 from agent_guardian.core.roe import RoeAuthorizationError, authorization_gate
-from agent_guardian.transports.contract_adapter import ContractTargetAdapter
+from agent_guardian.transports.errors import TransportError, TransportErrorCategory
 from agent_guardian.transports.factory import build_session_machine, build_transport
 
 if TYPE_CHECKING:
     from agent_guardian.contract.schema import Contract
+    from agent_guardian.transports.base import CapabilityReport, Transport
+    from agent_guardian.transports.session import SessionMachine
 
 _LOG = logging.getLogger(__name__)
 
@@ -172,6 +178,36 @@ def _classify_send_error(message: str) -> tuple[int, str]:
     )
 
 
+def _classify_transport_error(error: TransportError) -> tuple[int, str]:
+    """Classify a :class:`TransportError` into an exit code + remediation.
+
+    Prefers the structured :class:`TransportErrorCategory` over string matching:
+    an ``AUTH`` fault whose message carries a recognised *LLM provider* marker is
+    an EXIT_LLM_PROVIDER (the operator's own key); any other fault is a target
+    problem (EXIT_TARGET_UNREACHABLE). The message is still consulted for the
+    provider-vs-target auth distinction the category alone cannot make.
+    """
+    message = error.message
+    lowered = message.lower()
+    if error.category is TransportErrorCategory.AUTH and any(
+        marker in lowered for marker in _PROVIDER_AUTH_MARKERS
+    ):
+        return (
+            _EXIT_LLM_PROVIDER,
+            "An LLM-provider credential looks wrong. Check the provider API key "
+            "(this is your own key, not the target's auth).",
+        )
+    if error.category is TransportErrorCategory.AUTH:
+        return (
+            _EXIT_TARGET_UNREACHABLE,
+            "The target rejected the credential (401/403). Verify the contract's "
+            "'auth' block and that the referenced secret resolves to a valid token.",
+        )
+    # Fall back to the message-based classifier for everything else so an LLM
+    # provider marker surfacing under a non-AUTH category is still caught.
+    return _classify_send_error(message)
+
+
 async def run_preflight(contract_path: Path) -> PreflightReport:
     """Run the seven-stage pre-flight against the contract at ``contract_path``.
 
@@ -186,14 +222,15 @@ async def run_preflight(contract_path: Path) -> PreflightReport:
     if contract is None:
         return report
 
-    # --- Stage 2: connect (build the transport) ----------------------------
-    adapter = _stage_connect(contract, report)
-    if adapter is None:
+    # --- Stage 2: connect (build the transport + session machine) ----------
+    built = _stage_connect(contract, report)
+    if built is None:
         return report
+    transport, session_machine = built
 
     try:
-        # --- Stage 3: authenticate / probe (benign send) ------------------
-        first_reply = await _stage_probe(adapter, report)
+        # --- Stage 3: authenticate / probe (transport.probe) --------------
+        first_reply = await _stage_probe(transport, report)
         if first_reply is None:
             return report
 
@@ -202,15 +239,15 @@ async def run_preflight(contract_path: Path) -> PreflightReport:
         if not report.ok:
             return report
 
-        # --- Stage 5: session check (2nd turn for stateful contracts) -----
-        await _stage_session(contract, adapter, report)
+        # --- Stage 5: session check (2 real turns for stateful contracts) -
+        await _stage_session(contract, session_machine, report)
         if not report.ok:
             return report
     finally:
-        await adapter.aclose()
+        await transport.aclose()
 
-    # --- Stage 6: capability report ----------------------------------------
-    _stage_capability(contract, report)
+    # --- Stage 6: capability report (transport.describe) -------------------
+    _stage_capability(contract, transport, report)
     if not report.ok:
         return report
 
@@ -289,19 +326,28 @@ def _stage_resolve(contract_path: Path, report: PreflightReport) -> Contract | N
     return contract
 
 
-def _stage_connect(contract: Contract, report: PreflightReport) -> ContractTargetAdapter | None:
-    """Stage 2 — build the transport + adapter from the contract primitives."""
+def _stage_connect(
+    contract: Contract, report: PreflightReport
+) -> tuple[Transport, SessionMachine] | None:
+    """Stage 2 — build the transport + session machine from the contract.
+
+    Returns the live ``(transport, session_machine)`` pair so later stages can
+    use the transport's :meth:`Transport.probe` / :meth:`Transport.describe`
+    introspection surface and drive the session machine directly — no
+    :class:`ContractTargetAdapter` (and therefore no RoE chokepoint) is built,
+    because pre-flight sends only benign turns and enforces no budgets.
+    """
     try:
         transport = build_transport(contract)
         session_machine = build_session_machine(contract, transport)
-        adapter = ContractTargetAdapter(transport=transport, session_machine=session_machine)
-    except NotImplementedError as exc:
+    except (NotImplementedError, ImportError) as exc:
         report.stages.append(
             StageResult(
                 name="connect",
                 ok=False,
                 detail=f"transport not supported: {exc}",
-                remediation="Only 'http' transports ship today; other kinds land in a later stage.",
+                remediation="Check the transport kind is supported and any optional "
+                "provider extra (e.g. agent-guardian[aws]) is installed.",
                 exit_code=_EXIT_CONFIG,
             )
         )
@@ -318,33 +364,30 @@ def _stage_connect(contract: Contract, report: PreflightReport) -> ContractTarge
         )
         return None
 
+    endpoint = str(getattr(transport, "endpoint", transport.kind))
     report.stages.append(
         StageResult(
             name="connect",
             ok=True,
-            detail=f"transport built for {adapter.endpoint}.",
+            detail=f"transport built for {endpoint}.",
         )
     )
-    return adapter
+    return transport, session_machine
 
 
-async def _stage_probe(adapter: ContractTargetAdapter, report: PreflightReport) -> str | None:
-    """Stage 3 — send one benign turn and classify any failure."""
+async def _stage_probe(transport: Transport, report: PreflightReport) -> str | None:
+    """Stage 3 — run :meth:`Transport.probe` and classify any fault.
+
+    :meth:`Transport.probe` sends one benign turn and folds the result into a
+    :class:`~agent_guardian.transports.base.ProbeResult` (it never raises for a
+    transport fault). On failure we classify the carried
+    :class:`~agent_guardian.transports.errors.TransportError` by category —
+    structurally, not by string-matching the round-trip exception text. The
+    probe's truncated reply is returned for the stage-4 round-trip echo.
+    """
     try:
-        reply = await adapter.call(BENIGN_PROMPT)
-    except RuntimeError as exc:
-        exit_code, remediation = _classify_send_error(str(exc))
-        report.stages.append(
-            StageResult(
-                name="authenticate/probe",
-                ok=False,
-                detail=f"benign probe failed: {exc}",
-                remediation=remediation,
-                exit_code=exit_code,
-            )
-        )
-        return None
-    except Exception as exc:
+        result = await transport.probe()
+    except Exception as exc:  # pragma: no cover - probe never raises for faults
         _LOG.debug("preflight probe raised unexpected %s", type(exc).__name__, exc_info=exc)
         report.stages.append(
             StageResult(
@@ -357,6 +400,22 @@ async def _stage_probe(adapter: ContractTargetAdapter, report: PreflightReport) 
         )
         return None
 
+    if not result.ok:
+        error = result.error or TransportError(
+            TransportErrorCategory.UNKNOWN, "probe failed with no error detail"
+        )
+        exit_code, remediation = _classify_transport_error(error)
+        report.stages.append(
+            StageResult(
+                name="authenticate/probe",
+                ok=False,
+                detail=f"benign probe failed [{error.category.value}]: {error.message}",
+                remediation=remediation,
+                exit_code=exit_code,
+            )
+        )
+        return None
+
     report.stages.append(
         StageResult(
             name="authenticate/probe",
@@ -364,7 +423,7 @@ async def _stage_probe(adapter: ContractTargetAdapter, report: PreflightReport) 
             detail="benign probe accepted (no auth fault).",
         )
     )
-    return reply
+    return result.detail
 
 
 def _stage_round_trip(reply: str, report: PreflightReport) -> None:
@@ -394,10 +453,20 @@ def _stage_round_trip(reply: str, report: PreflightReport) -> None:
 
 async def _stage_session(
     contract: Contract,
-    adapter: ContractTargetAdapter,
+    session_machine: SessionMachine,
     report: PreflightReport,
 ) -> None:
-    """Stage 5 — for a stateful session, send a 2nd turn to confirm continuity."""
+    """Stage 5 — for a stateful session, drive two real turns and confirm the 2nd.
+
+    The stage-3 probe goes straight at the transport and leaves the session
+    machine untouched, so to *genuinely* exercise a second turn we drive the
+    machine itself: turn one establishes state (``server_session`` captures the
+    server id; ``client_history`` records the first exchange), and turn two
+    replays that state — proving capture/replay (server) or history threading
+    (client) actually works. The machine's :meth:`SessionMachine.send` returns a
+    :class:`~agent_guardian.transports.base.Response` (never raises for faults),
+    so faults are classified by their :class:`TransportError` category.
+    """
     mode = contract.target.session.mode
     if mode == "stateless":
         report.stages.append(
@@ -409,34 +478,19 @@ async def _stage_session(
         )
         return
 
-    try:
-        reply = await adapter.call(_BENIGN_FOLLOWUP)
-    except RuntimeError as exc:
-        exit_code, remediation = _classify_send_error(str(exc))
-        report.stages.append(
-            StageResult(
-                name="session-check",
-                ok=False,
-                detail=f"second session turn failed: {exc}",
-                remediation=remediation,
-                exit_code=exit_code,
-            )
-        )
-        return
-    except Exception as exc:
-        _LOG.debug("preflight session turn raised unexpected %s", type(exc).__name__, exc_info=exc)
-        report.stages.append(
-            StageResult(
-                name="session-check",
-                ok=False,
-                detail=f"second session turn raised {type(exc).__name__}: {exc}",
-                remediation="Check session id capture/replay (session.id_source / id_send).",
-                exit_code=_EXIT_TARGET_UNREACHABLE,
-            )
-        )
+    # Turn one: establish session state through the machine.
+    first = await session_machine.send(BENIGN_PROMPT)
+    if not first.ok:
+        _append_session_fault(report, "first session turn", first.error)
         return
 
-    if not reply.strip():
+    # Turn two: a real second turn that should continue the conversation.
+    second = await session_machine.send(_BENIGN_FOLLOWUP)
+    if not second.ok:
+        _append_session_fault(report, "second session turn", second.error)
+        return
+
+    if not second.text.strip():
         report.stages.append(
             StageResult(
                 name="session-check",
@@ -452,29 +506,60 @@ async def _stage_session(
         StageResult(
             name="session-check",
             ok=True,
-            detail=f"session mode {mode!r} — second turn returned a reply.",
+            detail=f"session mode {mode!r} — two turns sent; the second returned a reply.",
         )
     )
 
 
-def _stage_capability(contract: Contract, report: PreflightReport) -> None:
-    """Stage 6 — reconcile the RoE allow/block lists with the declared tools.
+def _append_session_fault(
+    report: PreflightReport, which: str, error: TransportError | None
+) -> None:
+    """Append a failing session-check stage for a faulted turn."""
+    err = error or TransportError(
+        TransportErrorCategory.UNKNOWN, "session turn failed with no error detail"
+    )
+    exit_code, remediation = _classify_transport_error(err)
+    report.stages.append(
+        StageResult(
+            name="session-check",
+            ok=False,
+            detail=f"{which} failed [{err.category.value}]: {err.message}",
+            remediation=remediation,
+            exit_code=exit_code,
+        )
+    )
 
-    Without live tool discovery (HTTP has none today) the *expected* tool set is
-    the contract's ``target.tools.expected``. A RoE allow/block entry that names
-    a tool outside that expected set is a dangling reference and a config error;
-    when the contract declares no expected tools at all we note "no tool
-    discovery" rather than failing (the operator may legitimately block a tool
-    they haven't enumerated).
+
+def _stage_capability(contract: Contract, transport: Transport, report: PreflightReport) -> None:
+    """Stage 6 — read :meth:`Transport.describe` + reconcile the RoE tool lists.
+
+    :meth:`Transport.describe` returns a static
+    :class:`~agent_guardian.transports.base.CapabilityReport` (kind, streaming,
+    tool support, session modes, auth scheme) without sending any traffic — we
+    prefer it over inferring capabilities from a live round-trip. The *expected*
+    tool set is still the contract's ``target.tools.expected`` (no transport does
+    live tool enumeration yet); a RoE allow/block entry naming a tool outside
+    that expected set is a dangling reference and a config error. When the
+    contract declares no expected tools we note the transport's discovered
+    capability rather than failing (the operator may legitimately block a tool
+    they have not enumerated).
     """
+    capability: CapabilityReport = transport.describe()
     tools = contract.target.tools
     expected = {t.name for t in tools.expected} if tools else set()
     roe_tools = contract.roe.tools
     allowlist = set(roe_tools.allowlist or []) if roe_tools else set()
     blocklist = set(roe_tools.blocklist or []) if roe_tools else set()
 
+    cap_note = (
+        f"transport '{capability.kind}' "
+        f"(tools={'yes' if capability.supports_tools else 'no'}, "
+        f"streaming={'yes' if capability.streaming else 'no'}, "
+        f"session_modes={list(capability.session_modes)})"
+    )
+
     if not expected:
-        note = "no tool discovery for http transport"
+        note = f"{cap_note}; no declared expected tools"
         if allowlist or blocklist:
             note += (
                 f"; RoE references {sorted(allowlist | blocklist)} but the contract "
@@ -502,7 +587,8 @@ def _stage_capability(contract: Contract, report: PreflightReport) -> None:
         StageResult(
             name="capability-report",
             ok=True,
-            detail=f"{len(expected)} expected tool(s); RoE allow/block lists are a subset.",
+            detail=f"{cap_note}; {len(expected)} expected tool(s); "
+            "RoE allow/block lists are a subset.",
         )
     )
 

@@ -9,16 +9,24 @@ from pydantic import ValidationError
 
 from agent_guardian.contract.schema import (
     ALLOWED_TEMPLATE_VARS,
+    AnthropicMessagesTransport,
     ApiKeyAuth,
+    AwsSigV4Auth,
+    AzureEntraAuth,
+    AzureFoundryAgentTransport,
     BearerAuth,
+    BedrockAgentTransport,
     Budgets,
     Contract,
+    GcpAdcAuth,
+    GcpSaJsonAuth,
     HmacAuth,
     HttpTransport,
     IdSend,
     MtlsAuth,
     NoAuth,
     OAuth2ClientCredentialsAuth,
+    OpenAiResponsesTransport,
     Rate,
     Request,
     Response,
@@ -28,6 +36,7 @@ from agent_guardian.contract.schema import (
     Target,
     Tls,
     Tools,
+    VertexAgentTransport,
 )
 from agent_guardian.contract.secrets import SecretRef
 
@@ -196,6 +205,273 @@ def test_unknown_transport_kind_rejected() -> None:
 def test_missing_transport_discriminator_rejected() -> None:
     with pytest.raises(ValidationError):
         Contract.model_validate(_base_data(transport={"url": "https://x.example"}))
+
+
+# --------------------------------------------------------------------------
+# Cloud auth kinds — parse from dict, defaults, extra="forbid", SecretRef
+# --------------------------------------------------------------------------
+
+
+def test_auth_aws_sigv4_minimal() -> None:
+    c = Contract.model_validate(_base_data(auth={"kind": "aws_sigv4", "region": "us-east-1"}))
+    assert isinstance(c.target.auth, AwsSigV4Auth)
+    assert c.target.auth.region == "us-east-1"
+    # creds optional -> default credential chain
+    assert c.target.auth.service == "bedrock"
+    assert c.target.auth.access_key_id is None
+    assert c.target.auth.secret_access_key is None
+    assert c.target.auth.session_token is None
+
+
+def test_auth_aws_sigv4_with_credentials() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            auth={
+                "kind": "aws_sigv4",
+                "region": "eu-west-1",
+                "service": "bedrock-runtime",
+                "access_key_id": "${env:AWS_AK}",
+                "secret_access_key": "${env:AWS_SK}",
+                "session_token": "${env:AWS_ST}",
+            }
+        )
+    )
+    assert isinstance(c.target.auth, AwsSigV4Auth)
+    assert c.target.auth.service == "bedrock-runtime"
+    assert c.target.auth.access_key_id is not None
+    assert c.target.auth.access_key_id.backend == "env"
+    assert c.target.auth.session_token is not None
+
+
+def test_auth_azure_entra_minimal_and_default_scope() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            auth={
+                "kind": "azure_entra",
+                "tenant_id": "tid",
+                "client_id": "${env:AZ_CID}",
+            }
+        )
+    )
+    assert isinstance(c.target.auth, AzureEntraAuth)
+    assert c.target.auth.tenant_id == "tid"
+    assert c.target.auth.client_secret is None
+    assert c.target.auth.scope == "https://cognitiveservices.azure.com/.default"
+
+
+def test_auth_azure_entra_with_secret_and_scope() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            auth={
+                "kind": "azure_entra",
+                "tenant_id": "tid",
+                "client_id": "${env:AZ_CID}",
+                "client_secret": "${file:/run/az_cs}",
+                "scope": "https://management.azure.com/.default",
+            }
+        )
+    )
+    assert isinstance(c.target.auth, AzureEntraAuth)
+    assert c.target.auth.client_secret is not None
+    assert c.target.auth.client_secret.backend == "file"
+    assert c.target.auth.scope == "https://management.azure.com/.default"
+
+
+def test_auth_gcp_adc_has_no_secrets() -> None:
+    c = Contract.model_validate(_base_data(auth={"kind": "gcp_adc"}))
+    assert isinstance(c.target.auth, GcpAdcAuth)
+    assert c.target.auth.kind == "gcp_adc"
+
+
+def test_auth_gcp_sa_json_minimal() -> None:
+    c = Contract.model_validate(
+        _base_data(auth={"kind": "gcp_sa_json", "service_account_json": "${file:/run/sa.json}"})
+    )
+    assert isinstance(c.target.auth, GcpSaJsonAuth)
+    assert c.target.auth.service_account_json.backend == "file"
+    assert c.target.auth.scopes == []
+
+
+def test_auth_gcp_sa_json_with_scopes() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            auth={
+                "kind": "gcp_sa_json",
+                "service_account_json": "${env:GCP_SA}",
+                "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
+            }
+        )
+    )
+    assert isinstance(c.target.auth, GcpSaJsonAuth)
+    assert c.target.auth.scopes == ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"kind": "aws_sigv4", "region": "us-east-1", "regn": "typo"},
+        {"kind": "azure_entra", "tenant_id": "t", "client_id": "${env:K}", "tenent": "typo"},
+        {"kind": "gcp_adc", "junk": 1},
+        {"kind": "gcp_sa_json", "service_account_json": "${env:K}", "scope": "typo"},
+    ],
+)
+def test_cloud_auth_extra_field_forbidden(auth: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(auth=auth))
+
+
+def test_aws_sigv4_secret_fields_reject_raw_literal() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "aws_sigv4", "region": "us-east-1", "access_key_id": _RAW})
+        )
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "aws_sigv4", "region": "us-east-1", "secret_access_key": _RAW})
+        )
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "aws_sigv4", "region": "us-east-1", "session_token": _RAW})
+        )
+
+
+def test_azure_entra_secret_fields_reject_raw_literal() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "azure_entra", "tenant_id": "t", "client_id": _RAW})
+        )
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                auth={
+                    "kind": "azure_entra",
+                    "tenant_id": "t",
+                    "client_id": "${env:CID}",
+                    "client_secret": _RAW,
+                }
+            )
+        )
+
+
+def test_gcp_sa_json_secret_rejects_raw_literal() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "gcp_sa_json", "service_account_json": _RAW})
+        )
+
+
+# --------------------------------------------------------------------------
+# Cloud transport kinds — parse from dict, defaults, extra="forbid"
+# --------------------------------------------------------------------------
+
+
+def test_transport_openai_responses() -> None:
+    c = Contract.model_validate(
+        _base_data(transport={"kind": "openai_responses", "model": "gpt-4o"})
+    )
+    assert isinstance(c.target.transport, OpenAiResponsesTransport)
+    assert c.target.transport.model == "gpt-4o"
+    assert str(c.target.transport.base_url) == "https://api.openai.com/v1"
+    assert c.target.transport.store is True
+
+
+def test_transport_anthropic_messages() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "anthropic_messages",
+                "model": "claude-opus-4",
+                "max_tokens": 2048,
+            }
+        )
+    )
+    assert isinstance(c.target.transport, AnthropicMessagesTransport)
+    assert c.target.transport.max_tokens == 2048
+    assert c.target.transport.anthropic_version == "2023-06-01"
+    assert str(c.target.transport.base_url) == "https://api.anthropic.com/v1"
+
+
+def test_transport_anthropic_messages_rejects_non_positive_max_tokens() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "anthropic_messages", "model": "claude", "max_tokens": 0})
+        )
+
+
+def test_transport_bedrock_agent() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "bedrock_agent",
+                "region": "us-east-1",
+                "agent_id": "AID",
+                "agent_alias_id": "ALIAS",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, BedrockAgentTransport)
+    assert c.target.transport.agent_id == "AID"
+    assert c.target.transport.enable_trace is True
+
+
+def test_transport_vertex_agent() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "vertex_agent",
+                "project": "proj",
+                "location": "us-central1",
+                "reasoning_engine_id": "RE-1",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, VertexAgentTransport)
+    assert c.target.transport.reasoning_engine_id == "RE-1"
+
+
+def test_transport_azure_foundry_agent() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "azure_foundry_agent",
+                "endpoint": "https://foundry.example.com",
+                "agent_id": "agt-1",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, AzureFoundryAgentTransport)
+    assert c.target.transport.agent_id == "agt-1"
+    assert str(c.target.transport.endpoint).startswith("https://foundry.example.com")
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [
+        {"kind": "openai_responses", "model": "gpt-4o", "stor": True},
+        {"kind": "anthropic_messages", "model": "claude", "maxtokens": 1},
+        {"kind": "bedrock_agent", "region": "r", "agent_id": "a", "agent_alias_id": "x", "j": 1},
+        {
+            "kind": "vertex_agent",
+            "project": "p",
+            "location": "l",
+            "reasoning_engine_id": "r",
+            "z": 1,
+        },
+        {"kind": "azure_foundry_agent", "endpoint": "https://x.example", "agent_id": "a", "k": 1},
+    ],
+)
+def test_cloud_transport_extra_field_forbidden(transport: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport=transport))
+
+
+def test_cloud_transport_missing_required_field_rejected() -> None:
+    # openai_responses requires ``model``
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "openai_responses"}))
+    # bedrock_agent requires agent_id / agent_alias_id
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "bedrock_agent", "region": "r"}))
 
 
 # --------------------------------------------------------------------------

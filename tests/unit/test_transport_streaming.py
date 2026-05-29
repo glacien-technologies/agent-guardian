@@ -8,6 +8,7 @@ import pytest
 
 from agent_guardian.transports.streaming import (
     accumulate_chunked,
+    accumulate_chunked_async,
     accumulate_sse,
     accumulate_sse_async,
     accumulate_websocket,
@@ -130,9 +131,68 @@ def test_iter_sse_events_strips_only_one_leading_space() -> None:
     assert events == [" two-spaces"]
 
 
-def test_chunked_not_implemented() -> None:
-    with pytest.raises(NotImplementedError, match="chunked"):
-        accumulate_chunked()
+def test_accumulate_chunked_json_lines() -> None:
+    chunks = ['{"delta": "Hel"}', '{"delta": "lo"}', '{"delta": " world"}']
+    result = accumulate_chunked(chunks, delta_path="$.delta")
+    assert result.text == "Hello world"
+    assert result.done is True
+    assert len(result.events) == 3
+
+
+def test_accumulate_chunked_json_lines_skips_blank_and_malformed() -> None:
+    chunks = ['{"delta": "ok"}', "", "   ", "not-json", '{"delta": "!"}']
+    result = accumulate_chunked(chunks, delta_path="$.delta")
+    assert result.text == "ok!"
+    assert len(result.events) == 2
+
+
+def test_accumulate_chunked_custom_delta_path() -> None:
+    chunks = [
+        '{"choices": [{"delta": {"content": "a"}}]}',
+        '{"choices": [{"delta": {"content": "b"}}]}',
+    ]
+    result = accumulate_chunked(chunks, delta_path="$.choices[0].delta.content")
+    assert result.text == "ab"
+
+
+def test_accumulate_chunked_raw_concatenation() -> None:
+    chunks = ["Hello", ", ", "world", "!"]
+    result = accumulate_chunked(chunks, delta_path=None)
+    assert result.text == "Hello, world!"
+    assert result.events == []
+    assert result.done is True
+
+
+def test_accumulate_chunked_ignores_non_string_delta() -> None:
+    chunks = ['{"delta": 5}', '{"delta": "x"}']
+    result = accumulate_chunked(chunks, delta_path="$.delta")
+    assert result.text == "x"
+
+
+def test_accumulate_chunked_non_dict_json_skipped() -> None:
+    chunks = ["[1, 2, 3]", '{"delta": "y"}']
+    result = accumulate_chunked(chunks, delta_path="$.delta")
+    assert result.text == "y"
+    assert len(result.events) == 1
+
+
+async def test_accumulate_chunked_async() -> None:
+    async def gen() -> AsyncIterator[str]:
+        for chunk in ['{"delta": "a"}', '{"delta": "b"}']:
+            yield chunk
+
+    result = await accumulate_chunked_async(gen(), delta_path="$.delta")
+    assert result.text == "ab"
+    assert result.done is True
+
+
+async def test_accumulate_chunked_async_raw() -> None:
+    async def gen() -> AsyncIterator[str]:
+        for chunk in ["foo", "bar"]:
+            yield chunk
+
+    result = await accumulate_chunked_async(gen(), delta_path=None)
+    assert result.text == "foobar"
 
 
 def test_websocket_not_implemented() -> None:

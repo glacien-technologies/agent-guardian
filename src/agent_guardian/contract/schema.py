@@ -48,13 +48,20 @@ __all__ = [
     "ALLOWED_TEMPLATE_VARS",
     "CURRENT_CONTRACT_VERSION",
     "MAX_KNOWN_CONTRACT_VERSION",
+    "AnthropicMessagesTransport",
     "ApiKeyAuth",
     "Auth",
+    "AwsSigV4Auth",
+    "AzureEntraAuth",
+    "AzureFoundryAgentTransport",
     "BearerAuth",
+    "BedrockAgentTransport",
     "Budgets",
     "Contract",
     "DataEgress",
     "Environment_",
+    "GcpAdcAuth",
+    "GcpSaJsonAuth",
     "HmacAuth",
     "HttpTransport",
     "IdSend",
@@ -64,6 +71,7 @@ __all__ = [
     "NoAuth",
     "OAuth2ClientCredentialsAuth",
     "Observability",
+    "OpenAiResponsesTransport",
     "Rate",
     "Request",
     "Reset",
@@ -79,6 +87,7 @@ __all__ = [
     "ToolRef",
     "Tools",
     "Transport",
+    "VertexAgentTransport",
 ]
 
 CURRENT_CONTRACT_VERSION = 1
@@ -213,11 +222,82 @@ class HmacAuth(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class AwsSigV4Auth(BaseModel):
+    """AWS SigV4 request signing for AWS-hosted targets (Bedrock, etc.).
+
+    Explicit credentials are optional :class:`SecretRef` pointers; when omitted
+    the transport falls back to the default AWS credential chain (env vars,
+    shared config, instance / container role).
+    """
+
+    kind: Literal["aws_sigv4"] = "aws_sigv4"
+    region: str
+    service: str = "bedrock"
+    access_key_id: SecretRef | None = None
+    secret_access_key: SecretRef | None = None
+    session_token: SecretRef | None = None
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class AzureEntraAuth(BaseModel):
+    """Azure Entra ID (formerly Azure AD) OAuth2 client-credentials grant.
+
+    Exchanges ``client_id`` / ``client_secret`` against the tenant for an access
+    token scoped to ``scope``. ``client_secret`` is optional to allow
+    federated / managed-identity flows that need no static secret.
+    """
+
+    kind: Literal["azure_entra"] = "azure_entra"
+    tenant_id: str
+    client_id: SecretRef
+    client_secret: SecretRef | None = None
+    scope: str = "https://cognitiveservices.azure.com/.default"
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class GcpAdcAuth(BaseModel):
+    """GCP Application Default Credentials — no static secret material.
+
+    Credentials are discovered from the ambient environment (gcloud login,
+    workload identity, GCE metadata, ``GOOGLE_APPLICATION_CREDENTIALS``).
+    """
+
+    kind: Literal["gcp_adc"] = "gcp_adc"
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class GcpSaJsonAuth(BaseModel):
+    """GCP service-account authentication from a JSON key.
+
+    The service-account JSON is a :class:`SecretRef` pointer; ``scopes`` are the
+    OAuth2 scopes to mint the access token against.
+    """
+
+    kind: Literal["gcp_sa_json"] = "gcp_sa_json"
+    service_account_json: SecretRef
+    scopes: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 # Discriminated union keyed on ``kind``. Every variant maps 1:1 to an
-# implemented transport auth provider (api_key, bearer, oauth2, mtls, hmac), so
-# a later factory can dispatch on ``kind`` without a lookup table.
+# implemented transport auth provider (api_key, bearer, oauth2, mtls, hmac plus
+# the cloud-provider kinds), so a later factory can dispatch on ``kind`` without
+# a lookup table.
 Auth = Annotated[
-    NoAuth | ApiKeyAuth | BearerAuth | OAuth2ClientCredentialsAuth | MtlsAuth | HmacAuth,
+    NoAuth
+    | ApiKeyAuth
+    | BearerAuth
+    | OAuth2ClientCredentialsAuth
+    | MtlsAuth
+    | HmacAuth
+    | AwsSigV4Auth
+    | AzureEntraAuth
+    | GcpAdcAuth
+    | GcpSaJsonAuth,
     Field(discriminator="kind"),
 ]
 
@@ -250,11 +330,73 @@ class HttpTransport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-# A discriminated union keyed on ``kind``. Only ``http`` ships now; the
-# discriminator + Annotated shape is kept so additional transport kinds are
-# purely additive (``HttpTransport | GrpcTransport | ...``).
+class OpenAiResponsesTransport(BaseModel):
+    """OpenAI Responses API target (``/responses``)."""
+
+    kind: Literal["openai_responses"] = "openai_responses"
+    base_url: AnyUrl = AnyUrl("https://api.openai.com/v1")
+    model: str
+    store: bool = True
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class AnthropicMessagesTransport(BaseModel):
+    """Anthropic Messages API target (``/messages``)."""
+
+    kind: Literal["anthropic_messages"] = "anthropic_messages"
+    base_url: AnyUrl = AnyUrl("https://api.anthropic.com/v1")
+    model: str
+    max_tokens: int = Field(default=1024, gt=0)
+    anthropic_version: str = "2023-06-01"
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class BedrockAgentTransport(BaseModel):
+    """AWS Bedrock Agent runtime target (InvokeAgent)."""
+
+    kind: Literal["bedrock_agent"] = "bedrock_agent"
+    region: str
+    agent_id: str
+    agent_alias_id: str
+    enable_trace: bool = True
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class VertexAgentTransport(BaseModel):
+    """GCP Vertex AI reasoning-engine (agent) target."""
+
+    kind: Literal["vertex_agent"] = "vertex_agent"
+    project: str
+    location: str
+    reasoning_engine_id: str
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class AzureFoundryAgentTransport(BaseModel):
+    """Azure AI Foundry agent target."""
+
+    kind: Literal["azure_foundry_agent"] = "azure_foundry_agent"
+    endpoint: AnyUrl
+    agent_id: str
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+# A discriminated union keyed on ``kind``. ``http`` is the generic primitive;
+# the cloud-provider kinds are first-class so a later factory can dispatch on
+# ``kind`` without a lookup table. The discriminator + Annotated shape keeps
+# additional transport kinds purely additive.
 Transport = Annotated[
-    HttpTransport,
+    HttpTransport
+    | OpenAiResponsesTransport
+    | AnthropicMessagesTransport
+    | BedrockAgentTransport
+    | VertexAgentTransport
+    | AzureFoundryAgentTransport,
     Field(discriminator="kind"),
 ]
 

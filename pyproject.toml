@@ -67,6 +67,14 @@ pdf-fallback = ["reportlab>=4.2"]
 aws = [
   "botocore>=1.34",
 ]
+# ``gcp`` carries google-auth for the Vertex / GCP contract-auth providers
+# (``gcp_adc`` Application Default Credentials, ``gcp_sa_json`` service-account
+# JSON). Opt-in like ``aws``: the providers raise a clear ImportError with
+# remediation when it is absent, so users who never scan a GCP target don't
+# pay the install cost.
+gcp = [
+  "google-auth>=2.0",
+]
 # ``otel`` carries the OpenTelemetry stack used by the GenAI-observability
 # module (:mod:`agent_guardian.obs`). It is strictly opt-in: the module
 # degrades to a silent no-op when these packages are absent, so the default
@@ -200,6 +208,21 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["opentelemetry.*"]
 ignore_missing_imports = true
+
+# google-auth is an optional dependency (``[gcp]`` extra) used only by the
+# Vertex / GCP contract-auth providers, behind import guards. Its type coverage
+# is partial; silence the missing-import + partial-stub noise once for the whole
+# project so mypy is identical whether or not ``[gcp]`` is installed (precedent:
+# ``botocore.*``).
+[[tool.mypy.overrides]]
+module = ["google.*"]
+ignore_missing_imports = true
+# google-auth ships only partial type stubs, so an installed copy makes mypy
+# flag its untyped functions (no-untyped-call) while an absent copy makes any
+# inline ignore unused — the two environments disagree. ``follow_imports=skip``
+# treats google.* as ``Any`` whether or not it is installed, so mypy behaves
+# identically in CI (no [gcp]) and locally (with [gcp]).
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

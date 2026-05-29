@@ -60,6 +60,9 @@ full = [
     { name = "sentence-transformers" },
     { name = "weasyprint" },
 ]
+gcp = [
+    { name = "google-auth" },
+]
 otel = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -83,6 +86,7 @@ requires-dist = [
     { name = "exceptiongroup", marker = "python_full_version < '3.11'", specifier = ">=1.2" },
     { name = "faiss-cpu", marker = "extra == 'full'", specifier = ">=1.9" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "google-auth", marker = "extra == 'gcp'", specifier = ">=2.0" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.115" },
     { name = "jinja2", specifier = ">=3.1" },
@@ -119,7 +123,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "weasyprint", marker = "extra == 'full'", specifier = ">=63.0" },
 ]
-provides-extras = ["aws", "dev", "docs", "examples", "full", "otel", "pdf-fallback"]
+provides-extras = ["aws", "dev", "docs", "examples", "full", "gcp", "otel", "pdf-fallback"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "types-pyyaml", specifier = ">=6.0.12.20260518" }]

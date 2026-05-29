@@ -18,13 +18,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_guardian.logging_setup import redact_secrets
 from agent_guardian.transports.errors import TransportError
 
 __all__ = [
+    "CapabilityReport",
     "Message",
+    "ProbeResult",
     "Request",
     "Response",
     "TokenUsage",
@@ -125,6 +127,42 @@ class Response:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ProbeResult:
+    """Outcome of a transport liveness probe (a single benign round-trip).
+
+    ``ok`` is ``True`` when the target answered without a transport fault;
+    ``detail`` holds a short human-readable note (the truncated reply on
+    success). ``error`` carries the :class:`TransportError` on failure so the
+    caller can surface a category without re-running the probe.
+    """
+
+    ok: bool
+    detail: str = ""
+    error: TransportError | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityReport:
+    """Static, introspectable description of what a transport can do.
+
+    Returned by :meth:`Transport.describe`; used by operators and the
+    discovery surface to render "what is this target" without sending traffic.
+    All fields are best-effort and default to the conservative answer.
+    """
+
+    kind: str
+    streaming: bool = False
+    supports_tools: bool = False
+    session_modes: tuple[str, ...] = ()
+    auth_scheme: str | None = None
+    endpoint: str | None = None
+
+
+# Benign turn used by the default :meth:`Transport.probe` liveness check.
+_PROBE_PROMPT = "Hello, please introduce yourself."
+
+
 class Transport(ABC):
     """Abstract "send a turn, get a turn" seam over a target.
 
@@ -135,11 +173,45 @@ class Transport(ABC):
     :class:`Response` carrying the resulting :class:`TransportError`.
     Programming errors (bad config detected at construction, ``NotImplementedError``
     for unsupported features) may still raise.
+
+    The lifecycle surface (:meth:`probe`, :meth:`describe`, :meth:`open_session`,
+    :meth:`close_session`) ships with sensible non-abstract defaults so concrete
+    transports only override what they can answer better. Defaults never raise.
     """
+
+    kind: ClassVar[str] = "transport"
 
     @abstractmethod
     async def send(self, request: Request) -> Response:
         """Send one turn and return one turn. Never raises for transport faults."""
+
+    async def probe(self) -> ProbeResult:
+        """Liveness check: send one benign turn and map the :class:`Response`.
+
+        Default implementation sends ``"Hello, please introduce yourself."`` via
+        :meth:`send` and folds the result into a :class:`ProbeResult`. Because
+        :meth:`send` never raises for transport faults, neither does this.
+        """
+        response = await self.send(Request(prompt=_PROBE_PROMPT))
+        if response.ok:
+            return ProbeResult(ok=True, detail=response.text[:200])
+        return ProbeResult(ok=False, error=response.error)
+
+    def describe(self) -> CapabilityReport:
+        """Return a static :class:`CapabilityReport` for this transport.
+
+        Default reports only :attr:`kind`; concrete transports override to add
+        endpoint, streaming, tool, session-mode and auth-scheme detail.
+        """
+        return CapabilityReport(kind=getattr(self, "kind", "transport"))
+
+    async def open_session(self) -> None:
+        """Begin a stateful session if the transport supports one. Default no-op."""
+        return None
+
+    async def close_session(self) -> None:
+        """Tear down a stateful session if one was opened. Default no-op."""
+        return None
 
     async def aclose(self) -> None:
         """Release any underlying resources. Default is a no-op."""

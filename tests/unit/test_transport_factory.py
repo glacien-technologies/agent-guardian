@@ -15,9 +15,16 @@ import httpx
 import pytest
 
 from agent_guardian.contract.schema import (
+    AnthropicMessagesTransport as ContractAnthropicTransport,
+)
+from agent_guardian.contract.schema import (
     ApiKeyAuth,
+    AwsSigV4Auth,
+    AzureEntraAuth,
     BearerAuth,
     Contract,
+    GcpAdcAuth,
+    GcpSaJsonAuth,
     HmacAuth,
     MtlsAuth,
     NoAuth,
@@ -31,23 +38,44 @@ from agent_guardian.contract.schema import (
     Tools,
 )
 from agent_guardian.contract.schema import (
+    AzureFoundryAgentTransport as ContractAzureFoundryTransport,
+)
+from agent_guardian.contract.schema import (
+    BedrockAgentTransport as ContractBedrockTransport,
+)
+from agent_guardian.contract.schema import (
     HttpTransport as ContractHttpTransport,
 )
+from agent_guardian.contract.schema import (
+    OpenAiResponsesTransport as ContractOpenAiTransport,
+)
+from agent_guardian.contract.schema import (
+    VertexAgentTransport as ContractVertexTransport,
+)
 from agent_guardian.contract.secrets import SecretRef, SecretResolver
+from agent_guardian.transports.anthropic_messages import AnthropicMessagesTransport
 from agent_guardian.transports.auth.api_key import ApiKeyAuth as ProviderApiKeyAuth
+from agent_guardian.transports.auth.azure_entra import AzureEntraAuth as ProviderAzureEntraAuth
 from agent_guardian.transports.auth.base import AuthContext
 from agent_guardian.transports.auth.base import NoAuth as ProviderNoAuth
 from agent_guardian.transports.auth.bearer import BearerAuth as ProviderBearerAuth
+from agent_guardian.transports.auth.gcp import GcpAdcAuth as ProviderGcpAdcAuth
+from agent_guardian.transports.auth.gcp import GcpSaJsonAuth as ProviderGcpSaJsonAuth
 from agent_guardian.transports.auth.hmac import HmacAuth as ProviderHmacAuth
 from agent_guardian.transports.auth.mtls import MutualTlsAuth
 from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth as ProviderOAuth2
+from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth as ProviderAwsSigV4Auth
+from agent_guardian.transports.azure_foundry import AzureFoundryAgentTransport
+from agent_guardian.transports.bedrock_agent import BedrockAgentTransport
 from agent_guardian.transports.factory import (
     build_auth_provider,
     build_session_machine,
     build_transport,
 )
 from agent_guardian.transports.http import HttpTransport
+from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
 from agent_guardian.transports.session import SessionMode
+from agent_guardian.transports.vertex_agent import VertexAgentTransport
 
 URL = "https://api.example.com/v1/chat"
 
@@ -62,6 +90,23 @@ def _contract(*, auth: Any = None, **target_overrides: Any) -> Contract:
     if auth is not None:
         base["auth"] = auth
     base.update(target_overrides)
+    return Contract(target=Target(**base))
+
+
+def _cloud_contract(*, transport: Any, auth: Any = None) -> Contract:
+    """Build a minimal valid contract around a non-HTTP cloud transport.
+
+    The schema still requires a ``response`` block even though the cloud
+    transports parse their own provider shapes, so a dummy ``output_path`` is
+    supplied.
+    """
+    base: dict[str, Any] = {
+        "name": "cloud-demo",
+        "transport": transport,
+        "response": Response(output_path="$.output"),
+    }
+    if auth is not None:
+        base["auth"] = auth
     return Contract(target=Target(**base))
 
 
@@ -273,8 +318,15 @@ async def test_build_transport_oauth2_builds_client(monkeypatch: pytest.MonkeyPa
 
 def test_build_transport_unsupported_kind_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     contract = _contract()
-    # Force a non-http kind through the frozen model to exercise the guard.
-    object.__setattr__(contract.target.transport, "kind", "grpc")
+
+    # The dispatch is now isinstance-based over the discriminated union, so the
+    # defensive guard fires only for a transport object that is none of the known
+    # contract transport models. Swap in a stand-in that carries a ``kind`` but is
+    # not a union member to exercise it.
+    class _UnknownTransport:
+        kind = "grpc"
+
+    object.__setattr__(contract.target, "transport", _UnknownTransport())
     with pytest.raises(NotImplementedError, match="grpc"):
         build_transport(contract)
 
@@ -306,3 +358,316 @@ def test_fingerprint_declared_tools_via_full_build() -> None:
     )
     transport = build_transport(contract)
     assert isinstance(transport, HttpTransport)
+
+
+# ---------------------------------------------------------------------------
+# build_auth_provider — cloud provider kinds
+# ---------------------------------------------------------------------------
+
+
+def test_auth_aws_sigv4_explicit_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_AK", "AKIAEXAMPLE")
+    monkeypatch.setenv("AWS_SK", "secret-key-material")
+    contract = _contract(
+        auth=AwsSigV4Auth.model_validate(
+            {
+                "region": "us-east-1",
+                "service": "bedrock",
+                "access_key_id": "${env:AWS_AK}",
+                "secret_access_key": "${env:AWS_SK}",
+            }
+        )
+    )
+    provider = build_auth_provider(contract)
+    assert isinstance(provider, ProviderAwsSigV4Auth)
+
+
+def test_auth_aws_sigv4_no_explicit_credentials_uses_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With no explicit credentials the provider falls back to the botocore
+    # default chain at construction; we monkeypatch a session so the test does
+    # not depend on the host's AWS configuration.
+    import botocore.session
+
+    class _FakeCreds:
+        access_key = "AK"
+        secret_key = "SK"
+        token = None
+
+    class _FakeSession:
+        def get_credentials(self) -> _FakeCreds:
+            return _FakeCreds()
+
+    monkeypatch.setattr(botocore.session, "Session", _FakeSession)
+    contract = _contract(auth=AwsSigV4Auth.model_validate({"region": "eu-west-1"}))
+    provider = build_auth_provider(contract)
+    assert isinstance(provider, ProviderAwsSigV4Auth)
+
+
+async def test_auth_azure_entra_uses_injected_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZ_CID", "azure-client")
+    monkeypatch.setenv("AZ_CSEC", "azure-secret")
+    contract = _contract(
+        auth=AzureEntraAuth.model_validate(
+            {
+                "tenant_id": "tenant-123",
+                "client_id": "${env:AZ_CID}",
+                "client_secret": "${env:AZ_CSEC}",
+            }
+        )
+    )
+    async with httpx.AsyncClient() as client:
+        provider = build_auth_provider(contract, oauth2_client=client)
+        assert isinstance(provider, ProviderAzureEntraAuth)
+
+
+def test_auth_azure_entra_without_client_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZ_CID", "c")
+    monkeypatch.setenv("AZ_CSEC", "s")
+    contract = _contract(
+        auth=AzureEntraAuth.model_validate(
+            {
+                "tenant_id": "t",
+                "client_id": "${env:AZ_CID}",
+                "client_secret": "${env:AZ_CSEC}",
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="azure_entra"):
+        build_auth_provider(contract)
+
+
+def test_auth_gcp_adc(monkeypatch: pytest.MonkeyPatch) -> None:
+    import google.auth
+
+    class _FakeCreds:
+        valid = True
+        token = "ya29.fake"
+
+        def refresh(self, _request: object) -> None:  # pragma: no cover - not hit
+            return None
+
+    monkeypatch.setattr(google.auth, "default", lambda scopes=None: (_FakeCreds(), "proj"))
+    contract = _contract(auth=GcpAdcAuth())
+    provider = build_auth_provider(contract)
+    assert isinstance(provider, ProviderGcpAdcAuth)
+
+
+def test_auth_gcp_sa_json_resolves_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GCP_SA", '{"type": "service_account", "project_id": "p"}')
+
+    from google.oauth2 import service_account
+
+    class _FakeCreds:
+        valid = True
+        token = "ya29.fake"
+
+    captured: dict[str, Any] = {}
+
+    def _from_info(info: dict[str, Any], scopes: list[str] | None = None) -> _FakeCreds:
+        captured["info"] = info
+        captured["scopes"] = scopes
+        return _FakeCreds()
+
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_info", staticmethod(_from_info)
+    )
+    contract = _contract(
+        auth=GcpSaJsonAuth.model_validate(
+            {"service_account_json": "${env:GCP_SA}", "scopes": ["https://example/scope"]}
+        )
+    )
+    provider = build_auth_provider(contract)
+    assert isinstance(provider, ProviderGcpSaJsonAuth)
+    # The resolved JSON was parsed and threaded through to the provider.
+    assert captured["info"]["project_id"] == "p"
+    assert captured["scopes"] == ["https://example/scope"]
+
+
+def test_auth_gcp_sa_json_default_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GCP_SA", '{"type": "service_account"}')
+
+    from google.oauth2 import service_account
+
+    class _FakeCreds:
+        valid = True
+        token = "t"
+
+    captured: dict[str, Any] = {}
+
+    def _from_info(info: dict[str, Any], scopes: list[str] | None = None) -> _FakeCreds:
+        captured["scopes"] = scopes
+        return _FakeCreds()
+
+    monkeypatch.setattr(
+        service_account.Credentials, "from_service_account_info", staticmethod(_from_info)
+    )
+    contract = _contract(
+        auth=GcpSaJsonAuth.model_validate({"service_account_json": "${env:GCP_SA}"})
+    )
+    provider = build_auth_provider(contract)
+    assert isinstance(provider, ProviderGcpSaJsonAuth)
+    # No contract scopes → the provider applies its cloud-platform default.
+    assert captured["scopes"] == ["https://www.googleapis.com/auth/cloud-platform"]
+
+
+# ---------------------------------------------------------------------------
+# build_transport — cloud transport kinds
+# ---------------------------------------------------------------------------
+
+
+async def test_build_transport_openai_responses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OAI_KEY", "sk-openai")
+    contract = _cloud_contract(
+        transport=ContractOpenAiTransport.model_validate(
+            {"base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini", "store": True}
+        ),
+        auth=BearerAuth(token=SecretRef("${env:OAI_KEY}")),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, OpenAiResponsesTransport)
+    assert transport.endpoint == "https://api.openai.com/v1/responses"
+    await transport.aclose()
+
+
+async def test_build_transport_anthropic_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANT_KEY", "sk-ant")
+    contract = _cloud_contract(
+        transport=ContractAnthropicTransport.model_validate(
+            {"model": "claude-3-5-sonnet-latest", "max_tokens": 512}
+        ),
+        auth=ApiKeyAuth.model_validate({"name": "x-api-key", "value": "${env:ANT_KEY}"}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, AnthropicMessagesTransport)
+    assert transport.endpoint.endswith("/messages")
+    await transport.aclose()
+
+
+async def test_build_transport_bedrock_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    import botocore.session
+
+    class _FakeCreds:
+        access_key = "AK"
+        secret_key = "SK"
+        token = None
+
+    class _FakeSession:
+        def get_credentials(self) -> _FakeCreds:
+            return _FakeCreds()
+
+    monkeypatch.setattr(botocore.session, "Session", _FakeSession)
+    contract = _cloud_contract(
+        transport=ContractBedrockTransport.model_validate(
+            {"region": "us-east-1", "agent_id": "AGENT123", "agent_alias_id": "ALIAS1"}
+        ),
+        auth=AwsSigV4Auth.model_validate({"region": "us-east-1"}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, BedrockAgentTransport)
+    await transport.aclose()
+
+
+async def test_build_transport_vertex_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    import google.auth
+
+    class _FakeCreds:
+        valid = True
+        token = "ya29.fake"
+
+    monkeypatch.setattr(google.auth, "default", lambda scopes=None: (_FakeCreds(), "proj"))
+    contract = _cloud_contract(
+        transport=ContractVertexTransport.model_validate(
+            {"project": "proj-1", "location": "us-central1", "reasoning_engine_id": "1234567890"}
+        ),
+        auth=GcpAdcAuth(),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, VertexAgentTransport)
+    assert "reasoningEngines/1234567890:query" in transport.endpoint
+    await transport.aclose()
+
+
+async def test_build_transport_azure_foundry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZ_CID", "azure-client")
+    monkeypatch.setenv("AZ_CSEC", "azure-secret")
+    contract = _cloud_contract(
+        transport=ContractAzureFoundryTransport.model_validate(
+            {"endpoint": "https://foundry.example.com", "agent_id": "asst_1"}
+        ),
+        auth=AzureEntraAuth.model_validate(
+            {
+                "tenant_id": "tenant-123",
+                "client_id": "${env:AZ_CID}",
+                "client_secret": "${env:AZ_CSEC}",
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, AzureFoundryAgentTransport)
+    assert "/threads/runs" in transport.endpoint
+    await transport.aclose()
+
+
+# ---------------------------------------------------------------------------
+# build_transport — server-session wiring (id_source / id_send) for http
+# ---------------------------------------------------------------------------
+
+
+def test_build_http_transport_wires_session_capture_and_replay() -> None:
+    contract = _contract(
+        session=Session.model_validate(
+            {
+                "mode": "server_session",
+                "id_source": "$.session.id",
+                "id_send": {"in": "header", "name": "X-Session-Id"},
+            }
+        )
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    # id_source -> session_path (capture); id_send.{in,name} -> outbound replay.
+    assert transport._session_path == "$.session.id"
+    assert transport._session_send_in == "header"
+    assert transport._session_send_name == "X-Session-Id"
+
+
+def test_build_http_transport_session_query_placement() -> None:
+    contract = _contract(
+        session=Session.model_validate(
+            {
+                "mode": "server_session",
+                "id_source": "$.id",
+                "id_send": {"in": "query", "name": "sid"},
+            }
+        )
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    assert transport._session_send_in == "query"
+    assert transport._session_send_name == "sid"
+
+
+def test_build_http_transport_no_session_send_is_none() -> None:
+    contract = _contract(session=Session.model_validate({"mode": "stateless"}))
+    transport = build_transport(contract)
+    assert isinstance(transport, HttpTransport)
+    assert transport._session_path is None
+    assert transport._session_send_in is None
+    assert transport._session_send_name is None
+
+
+def test_build_session_machine_server_session_for_cloud_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A cloud transport that manages its own server session maps to SERVER_SESSION.
+    monkeypatch.setenv("OAI_KEY", "sk-openai")
+    contract = _cloud_contract(
+        transport=ContractOpenAiTransport.model_validate({"model": "gpt-4o-mini"}),
+        auth=BearerAuth(token=SecretRef("${env:OAI_KEY}")),
+    )
+    object.__setattr__(contract.target.session, "mode", "server_session")
+    transport = build_transport(contract)
+    machine = build_session_machine(contract, transport)
+    assert machine.mode is SessionMode.SERVER_SESSION

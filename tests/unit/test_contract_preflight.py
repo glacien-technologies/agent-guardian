@@ -223,8 +223,10 @@ async def test_preflight_session_check_sends_second_turn(tmp_path: Path) -> None
     session_stage = _stage(report, "session-check")
     assert session_stage.ok is True  # type: ignore[attr-defined]
     assert "server_session" in session_stage.detail  # type: ignore[attr-defined]
-    # Two benign turns were sent (probe + continuity).
-    assert route.call_count == 2
+    # Three benign turns: the stage-3 probe (straight at the transport) plus the
+    # two real turns the session-check drives through the session machine to
+    # genuinely exercise capture/replay continuity.
+    assert route.call_count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +282,11 @@ async def test_preflight_capability_no_discovery_note(tmp_path: Path) -> None:
 
     cap = _stage(report, "capability-report")
     assert cap.ok is True  # type: ignore[attr-defined]
-    assert "no tool discovery" in cap.detail  # type: ignore[attr-defined]
+    # The capability stage now reads transport.describe(): an HTTP transport with
+    # no tool_call_path reports tools=no and no declared expected tools.
+    assert "transport 'http'" in cap.detail  # type: ignore[attr-defined]
+    assert "tools=no" in cap.detail  # type: ignore[attr-defined]
+    assert "no declared expected tools" in cap.detail  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +371,100 @@ def test_classify_send_error(message: str, expected_code: int) -> None:
     code, remediation = _classify_send_error(message)
     assert code == expected_code
     assert remediation
+
+
+def test_classify_transport_error_uses_category() -> None:
+    from agent_guardian.contract.preflight import _classify_transport_error
+    from agent_guardian.transports.errors import TransportError, TransportErrorCategory
+
+    # A structured AUTH fault from the target -> target-unreachable.
+    code, remediation = _classify_transport_error(
+        TransportError(TransportErrorCategory.AUTH, "http: auth failed: 401")
+    )
+    assert code == EXIT_TARGET_UNREACHABLE
+    assert remediation
+
+    # An AUTH fault whose message carries a provider marker -> LLM-provider code.
+    code, _ = _classify_transport_error(
+        TransportError(TransportErrorCategory.AUTH, "invalid api key")
+    )
+    assert code == 4
+
+    # A non-auth fault falls back to the message classifier (unreachable).
+    code, _ = _classify_transport_error(
+        TransportError(TransportErrorCategory.PARSE, "output_path produced no value")
+    )
+    assert code == EXIT_TARGET_UNREACHABLE
+
+
+# ---------------------------------------------------------------------------
+# Stage 6 -- capability stage reads transport.describe()
+# ---------------------------------------------------------------------------
+
+
+_TOOL_CAPABLE = """
+version: 1
+target:
+  name: tool-aware
+  environment: staging
+  transport:
+    kind: http
+    url: https://api.example.com/v1/chat
+  response:
+    output_path: $.output.text
+    tool_call_path: $.tool_calls
+  session:
+    mode: stateless
+  tools:
+    discovery: manual
+    expected:
+      - name: search
+roe:
+  data_egress:
+    allow_external: true
+  tools:
+    allowlist: [search]
+"""
+
+
+@respx.mock
+async def test_preflight_capability_reports_describe(tmp_path: Path) -> None:
+    respx.post(URL).mock(return_value=httpx.Response(200, json={"output": {"text": "ok"}}))
+    path = _write(tmp_path, _TOOL_CAPABLE)
+
+    report = await run_preflight(path)
+
+    assert report.ok is True
+    cap = _stage(report, "capability-report")
+    # describe() surfaces the configured tool_call_path as tools=yes.
+    assert "tools=yes" in cap.detail  # type: ignore[attr-defined]
+    assert "1 expected tool(s)" in cap.detail  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Stage 5 -- a faulted second session turn fails the session-check
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_preflight_session_second_turn_fault_fails(tmp_path: Path) -> None:
+    # First two POSTs (probe + first session turn) succeed; the third (the real
+    # second session turn) returns a 401 -> session-check fails as unreachable.
+    responses = [
+        httpx.Response(200, json={"output": {"text": "hi"}}),
+        httpx.Response(200, json={"output": {"text": "still here"}}),
+        httpx.Response(401, json={"error": "unauthorized"}),
+    ]
+    respx.post(URL).mock(side_effect=responses)
+    path = _write(tmp_path, _SERVER_SESSION)
+
+    report = await run_preflight(path)
+
+    assert report.ok is False
+    failure = report.first_failure
+    assert failure is not None
+    assert failure.name == "session-check"
+    assert failure.exit_code == EXIT_TARGET_UNREACHABLE
 
 
 # ---------------------------------------------------------------------------
