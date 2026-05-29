@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.cli import app
@@ -30,13 +29,19 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_m2_flags_in_scan_help() -> None:
-    # Force a wide terminal: Rich truncates long option names with an ellipsis
-    # (e.g. ``--owasp-…``) at narrow widths, which is the default in CI's
-    # non-tty environment and would break the substring assertions below.
-    result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
-    assert result.exit_code == 0
+    # Assert against the registered Typer options, not the rendered --help text:
+    # Rich truncates long option names with an ellipsis at narrow widths (CI's
+    # non-tty default), and honouring COLUMNS in the invoke env is version-
+    # dependent. Introspecting the command params is environment-proof.
+    from click import Group
+    from typer.main import get_command
+
+    cmd = get_command(app)
+    assert isinstance(cmd, Group)
+    scan = cmd.commands["scan"]
+    registered = {opt for param in scan.params for opt in param.opts}
     for flag in ("--pov-gate", "--critic", "--bundle", "--pretext", "--indirect", "--owasp-llm"):
-        assert flag in result.output
+        assert flag in registered
 
 
 def test_include_m2_agents_extends_the_slate() -> None:
