@@ -1,0 +1,12 @@
+# Golden: a recognised-but-non-current schema version (v2).
+# The loader gates on version FIRST and raises MigrationNeeded before any
+# model validation runs.
+version: 2
+target:
+  name: future-schema-gateway
+  environment: staging
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v2/chat
+  response:
+    output_path: $.output.text

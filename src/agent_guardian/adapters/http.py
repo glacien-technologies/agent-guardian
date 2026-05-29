@@ -208,6 +208,48 @@ class HttpAdapter(TargetAdapter):
                 max_retries=self._max_retries,
             )
 
+    async def send_raw(
+        self,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """Public transport seam: POST a pre-built body, return the parsed JSON.
+
+        Unlike :meth:`call`, this performs **no** shape-specific request build
+        or response extraction — it is the low-level "send these exact bytes,
+        give me back the parsed object" primitive that the
+        :mod:`agent_guardian.transports` layer wraps. It reuses the same
+        concurrency semaphore, retry/backoff, and HTTP→LLM error mapping as
+        :meth:`call`, so callers get identical resilience without the opinionated
+        provider shaping.
+
+        Raises an :class:`~agent_guardian.llm.errors.LLMError` subclass on any
+        transport fault (auth, rate limit, timeout, transient, format).
+        """
+        if self._closed:
+            raise RuntimeError("HttpAdapter.send_raw() after aclose()")
+
+        async def _attempt() -> dict[str, Any]:
+            try:
+                resp = await self._client.post(self._endpoint, json=body, headers=headers)
+            except httpx.TimeoutException as exc:
+                raise LLMTimeoutError(f"http: timeout: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise LLMTransientError(f"http: network error: {exc}") from exc
+            _raise_for_status(resp)
+            try:
+                data = resp.json()
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise LLMResponseFormatError(f"http: invalid JSON: {exc}") from exc
+            if not isinstance(data, dict):
+                raise LLMResponseFormatError(
+                    f"http: expected JSON object at top level, got {type(data).__name__}"
+                )
+            return data
+
+        async with self._semaphore:
+            return await with_backoff(_attempt, max_retries=self._max_retries)
+
     async def aclose(self) -> None:
         """Close the underlying httpx client if we own it."""
         if self._closed:

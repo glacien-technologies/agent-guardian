@@ -1,0 +1,22 @@
+# Golden: a valid HTTP target authenticated via mutual TLS.
+version: 1
+target:
+  name: mtls-gateway
+  environment: clone
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v1/chat
+    tls:
+      ca_bundle: ${file:/etc/ssl/acme-ca.pem}
+      insecure: false
+  auth:
+    kind: mtls
+    client_cert: ${file:/run/secrets/client.crt}
+    client_key: ${file:/run/secrets/client.key}
+    ca_bundle: ${file:/etc/ssl/acme-ca.pem}
+  response:
+    output_path: $.output.text
+    stream:
+      format: sse
+      delta_path: $.delta.content
+      done_signal: "[DONE]"

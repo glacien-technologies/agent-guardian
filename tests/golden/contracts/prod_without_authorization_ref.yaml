@@ -1,0 +1,17 @@
+# Golden: a prod contract MISSING the required roe.authorization_ref.
+# Loading this must raise ContractValidationError (prod-requires-authorization).
+version: 1
+target:
+  name: acme-prod-gateway
+  environment: prod
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v1/chat
+  auth:
+    kind: bearer
+    token: ${env:ACME_PROD_TOKEN}
+  response:
+    output_path: $.output.text
+roe:
+  budgets:
+    max_tokens: 1000

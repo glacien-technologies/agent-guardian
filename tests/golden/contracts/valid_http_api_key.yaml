@@ -1,0 +1,53 @@
+# Golden: a valid Stage-1 HTTP target with API-key auth — the full tree.
+version: 1
+target:
+  name: acme-chat-gateway
+  description: ACME's customer-facing chat endpoint.
+  environment: staging
+  region: us-east-1
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v1/chat
+    method: POST
+    headers:
+      X-Client: agent-guardian
+    timeout_ms: 20000
+  auth:
+    kind: api_key
+    in: header
+    name: Authorization
+    prefix: "Bearer "
+    value: ${env:AG_KEY}
+  request:
+    prompt_location: body
+    body: '{"prompt": "{{ prompt }}", "session": "{{ session }}"}'
+    content_type: application/json
+  response:
+    output_path: $.choices[0].message.content
+    error:
+      status_success: [200]
+      error_path: $.error.message
+    tool_call_path: $.choices[0].message.tool_calls
+  session:
+    mode: server_session
+    id_source: $.session_id
+    id_send:
+      in: header
+      name: X-Session-Id
+    isolate_per_scenario: true
+observability:
+  otel_endpoint: http://localhost:4317
+roe:
+  budgets:
+    max_tokens: 100000
+    max_requests: 500
+  rate:
+    max_rps: 5.0
+    parallel_workers: 4
+    retry:
+      max_attempts: 3
+      backoff: exponential
+  data_egress:
+    allow_external: false
+x-team: redteam
+x-ticket: SEC-1234

@@ -1,0 +1,28 @@
+# Golden: a valid HTTP target authenticated via HMAC request signing.
+version: 1
+target:
+  name: hmac-gateway
+  environment: staging
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v1/chat
+  auth:
+    kind: hmac
+    header: X-Signature
+    algorithm: sha256
+    secret: ${env:ACME_HMAC_SECRET}
+    signing_string_template: "{method}\n{path}\n{timestamp}"
+  response:
+    output_path: $.output.text
+  tools:
+    discovery: openapi
+    record_calls: true
+    expected:
+      - name: search
+      - name: fetch
+roe:
+  authorization_ref: JIRA-9001
+  tools:
+    allowlist: [search, fetch]
+  network:
+    proxy: http://proxy.internal:3128

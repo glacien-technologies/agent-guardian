@@ -1,0 +1,17 @@
+# Golden: a valid HTTP target authenticated via OAuth2 client-credentials.
+version: 1
+target:
+  name: oauth2-gateway
+  environment: staging
+  transport:
+    kind: http
+    url: https://api.acme.example.com/v1/chat
+  auth:
+    kind: oauth2_client_credentials
+    token_url: https://auth.acme.example.com/oauth/token
+    client_id: ${env:ACME_CLIENT_ID}
+    client_secret: ${file:/run/secrets/acme_client_secret}
+    scope: chat.read chat.write
+    audience: https://api.acme.example.com
+  response:
+    output_path: $.output.text
