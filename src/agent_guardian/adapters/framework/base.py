@@ -15,10 +15,13 @@ that actually fires the callbacks lands in M9.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
-from agent_guardian.adapters.base import TargetAdapter
+from agent_guardian.adapters.base import ProfileEvidence, TargetAdapter, safe_source_and_root
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "AgentMessageCallback",
@@ -26,6 +29,25 @@ __all__ = [
     "MemoryWriteCallback",
     "ToolCallCallback",
 ]
+
+# Where concrete framework adapters stash their wrapped native object.
+_NATIVE_OBJ_ATTRS = ("_graph", "_crew", "_agent", "_chat", "_runner")
+
+# Common framework attributes that carry real profile signal (intent + surface).
+_INTROSPECT_ATTRS = (
+    "tools",
+    "registered_tools",
+    "available_tools",
+    "agents",
+    "crew_members",
+    "sub_agents",
+    "subagents",
+    "instructions",
+    "role",
+    "goal",
+    "backstory",
+    "tasks",
+)
 
 
 ToolCallCallback = Callable[[str, dict[str, Any]], None]
@@ -65,3 +87,46 @@ class FrameworkAdapter(TargetAdapter):
     def on_agent_message(self, callback: AgentMessageCallback) -> None:
         """Register a callback fired on agent-to-agent messages."""
         self._message_callbacks.append(callback)
+
+    def _native_object(self) -> object | None:
+        """The wrapped framework object, found across the known attr names."""
+        for attr in _NATIVE_OBJ_ATTRS:
+            obj: object | None = getattr(self, attr, None)
+            if obj is not None:
+                return obj
+        return None
+
+    def _introspect(self, obj: object) -> dict[str, Any]:
+        """Light, framework-agnostic introspection of intent + surface signal.
+
+        Reads common attributes (tools, agents, instructions/role/goal/...) the
+        major frameworks expose, so the profiler gets typed ground truth instead
+        of today's hardcoded ``has_tools=True``. Best-effort + defensive.
+        """
+        out: dict[str, Any] = {}
+        for attr in _INTROSPECT_ATTRS:
+            try:
+                val = getattr(obj, attr, None)
+            except Exception as exc:  # pragma: no cover -- property side-effects
+                _LOG.debug("framework introspection: getattr(%s) raised %s -- skipped", attr, exc)
+                continue
+            if val is None or callable(val):
+                continue
+            if isinstance(val, str) and val.strip():
+                out[attr] = val[:2000]
+            elif isinstance(val, (list, tuple)) and val:
+                out[attr] = [str(getattr(x, "name", x))[:200] for x in list(val)[:20]]
+        return out
+
+    def profile_evidence(self) -> ProfileEvidence:
+        # White-box: an in-process framework object can be both read (source of
+        # its class) and introspected (typed tool/agent/intent attrs). This
+        # replaces the old hardcoded has_tools/has_memory guess with reality.
+        obj = self._native_object()
+        if obj is None:
+            return ProfileEvidence(box="black")
+        text, root = safe_source_and_root(obj)
+        structured = self._introspect(obj)
+        if text is None and not structured:
+            return ProfileEvidence(box="black")
+        return ProfileEvidence(box="white", text=text, structured=structured, source_root=root)

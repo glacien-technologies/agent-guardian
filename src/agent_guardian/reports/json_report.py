@@ -110,7 +110,12 @@ def emit_json(
         "package_version": scan.package_version,
         "probe_library_version": scan.probe_library_version,
         "aivss_formula_version": scan.aivss_formula_version,
-        "target": {"mode": scan.target_mode, "ref": scan.target_ref},
+        "target": {
+            "mode": scan.target_mode,
+            "ref": scan.target_ref,
+            "inferred_goal": scan.target_inferred_goal,
+            "profile_source": scan.target_profile_source,
+        },
         "tier": scan.tier.value,
         "aivss": scan.aivss,
         "band": scan.band.value,
@@ -128,6 +133,14 @@ def emit_json(
         # fairly compare a 45-second FAST scan against a 5-minute FULL
         # scan in the same aggregate bucket).
         "mode": scan.mode,
+        # Why the scan ended + the USD budget outcome + how much of the planned
+        # attack work actually ran. ``stopped_reason="budget"`` plus a sub-100%
+        # ``completeness.pct`` lets a reader trust a partial (budget-capped) scan.
+        "stopped_reason": scan.stopped_reason,
+        "budget": scan.budget.model_dump(mode="json") if scan.budget is not None else None,
+        "completeness": (
+            scan.completeness.model_dump(mode="json") if scan.completeness is not None else None
+        ),
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),

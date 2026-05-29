@@ -14,15 +14,124 @@ of the swarm; the swarm's tiering logic (PRD §6.3) reads it via
 
 from __future__ import annotations
 
+import ast
+import inspect
+import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from agent_guardian.models.tier import ObservedSurface
 
-__all__ = ["TargetAdapter", "TargetFingerprint", "TargetMode"]
+__all__ = ["ProfileEvidence", "TargetAdapter", "TargetFingerprint", "TargetMode"]
+
+_LOG = logging.getLogger(__name__)
+
+# Cap on source text handed to the profiler in one shot. Generous because modern
+# models swallow it easily; a single agent + its tools is almost always well
+# under this. Sprawling multi-file agents that still exceed it get entry-point
+# scoping below (and, as a future follow-up, an agentic grep/read loop).
+_MAX_SOURCE_CHARS = 80_000
+
+
+def _scope_source(entry_src: str, module_src: str, cap: int) -> str:
+    """Scope a too-large module to the transitive closure from the entry point.
+
+    Instead of dumping (and truncating) a huge module, keep the entry-point
+    source plus the module-level functions / classes / constants it references
+    by name — the agent + its tools — and drop unrelated code. Falls back to a
+    capped slice of the module if parsing fails.
+    """
+    try:
+        referenced = {
+            node.id for node in ast.walk(ast.parse(entry_src)) if isinstance(node, ast.Name)
+        } | {
+            node.attr for node in ast.walk(ast.parse(entry_src)) if isinstance(node, ast.Attribute)
+        }
+        tree = ast.parse(module_src)
+    except SyntaxError:
+        return (entry_src or module_src)[:cap]
+
+    chunks: list[str] = [entry_src] if entry_src else []
+    seen: set[str] = set(chunks)
+    for node in tree.body:
+        name: str | None = None
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            name = next((t for t in targets if t in referenced), None)
+        if name and name in referenced:
+            segment = ast.get_source_segment(module_src, node)
+            if segment and segment not in seen:
+                chunks.append(segment)
+                seen.add(segment)
+    scoped = "\n\n".join(chunks).strip()
+    return (scoped or module_src)[:cap]
+
+
+def safe_source_and_root(obj: object) -> tuple[str | None, Path | None]:
+    """Best-effort `(source_text, source_root)` for a callable / class / instance.
+
+    Returns the defining module's source (it usually carries the agent + its
+    tool definitions); for a small module that's the whole thing, for a module
+    larger than ``_MAX_SOURCE_CHARS`` it's the entry-point-scoped slice (see
+    :func:`_scope_source`). Also returns the package dir so a future agentic
+    pass can read deeper. ``(None, None)`` when source is unavailable
+    (C-extension, REPL, lambda) — caller falls back to black-box.
+    """
+    target = obj if (inspect.isfunction(obj) or inspect.isclass(obj)) else type(obj)
+    module = inspect.getmodule(target)
+    module_src: str | None = None
+    try:
+        if module is not None:
+            module_src = inspect.getsource(module)
+    except (OSError, TypeError):
+        module_src = None
+    try:
+        entry_src: str | None = inspect.getsource(target)
+    except (OSError, TypeError):
+        entry_src = None
+
+    if module_src is not None and len(module_src) <= _MAX_SOURCE_CHARS:
+        text: str | None = module_src
+    elif module_src is not None:
+        # Large module: scope to the entry point's closure instead of truncating.
+        text = _scope_source(entry_src or "", module_src, _MAX_SOURCE_CHARS)
+    elif entry_src is not None:
+        text = entry_src[:_MAX_SOURCE_CHARS]
+    else:
+        _LOG.debug("source unavailable for %r -- black-box fallback", target)
+        text = None
+
+    root: Path | None = None
+    module_file = getattr(module, "__file__", None)
+    if module_file:
+        try:
+            root = Path(module_file).resolve().parent
+        except (OSError, ValueError):  # pragma: no cover -- defensive
+            root = None
+    return text, root
+
+
+@dataclass(frozen=True)
+class ProfileEvidence:
+    """The richest material the profiler can read for a target.
+
+    ``box="white"`` means we can *read* the target (system prompt text,
+    in-process source, framework introspection); ``box="black"`` means we can
+    only *call* it (HTTP endpoint) and must audit it behaviourally.
+    """
+
+    box: Literal["white", "black"]
+    text: str | None = None
+    structured: dict[str, Any] = field(default_factory=dict)
+    source_root: Path | None = None
+
 
 TargetMode = Literal["prompt", "code", "http", "framework"]
 
@@ -51,6 +160,19 @@ class TargetFingerprint(BaseModel):
     declared_tools: list[str] = Field(default_factory=list)
     declared_memory_keys: list[str] = Field(default_factory=list)
     notes: str = ""
+    # Intent profile (recon redesign). The target's *purpose* and the shape of
+    # what's worth attacking, derived from the richest available evidence
+    # (source / prompt / framework introspection / behavioural audit). These
+    # drive goal-relevant attack scenarios; surface flags above stay as
+    # ammunition + tiering. ``profile_source`` records HOW the profile was
+    # derived so the report is honest; ``"heuristic"`` is the static default
+    # before recon refines it.
+    inferred_goal: str | None = None
+    domain: str | None = None
+    sensitive_actions: list[str] = Field(default_factory=list)
+    declared_guardrails: list[str] = Field(default_factory=list)
+    profile_source: Literal["code", "prompt", "framework", "endpoint", "heuristic"] = "heuristic"
+    profile_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -91,6 +213,15 @@ class TargetAdapter(ABC):
         if self._fingerprint is None:
             raise RuntimeError(f"{type(self).__name__} did not set _fingerprint in __init__")
         return self._fingerprint
+
+    def profile_evidence(self) -> ProfileEvidence:
+        """Best readable evidence for profiling. Default: black-box (call-only).
+
+        White-box adapters (prompt / code / framework) override this to expose
+        the system prompt, source, or framework introspection so the profiler
+        can read the target instead of interrogating it.
+        """
+        return ProfileEvidence(box="black")
 
     async def aclose(self) -> None:
         """Release any resources (HTTP clients, etc.). Subclasses override."""

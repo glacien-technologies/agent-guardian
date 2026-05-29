@@ -96,7 +96,7 @@ def test_create_app_returns_fastapi() -> None:
 
     app = create_app()
     assert isinstance(app, FastAPI)
-    assert app.title == "AgentGuardian Open"
+    assert app.title == "AgentGuardian"
     assert app.version == __version__
 
 

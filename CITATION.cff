@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use AgentGuardian in academic work, please cite it as below."
-title: "AgentGuardian Open: A Multi-Agent Adversarial Swarm for OWASP ASI-Aligned Red Teaming"
+title: "AgentGuardian: A Multi-Agent Adversarial Swarm for OWASP ASI-Aligned Red Teaming"
 authors:
   - family-names: "Glacien Pte. Ltd."
     given-names: "Engineering"

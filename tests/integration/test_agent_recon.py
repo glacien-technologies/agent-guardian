@@ -1,246 +1,142 @@
-"""Integration tests for :class:`ReconAgent` (M7)."""
+"""Integration tests for :class:`ReconAgent` (recon redesign).
+
+Recon now produces a structured intent+surface profile from the richest evidence
+available: white-box (read the system prompt / source) when possible, else a
+black-box adaptive capability audit. These tests exercise the end-to-end
+``ReconAgent.run`` integration; the unit-level profiler and audit mechanics live
+in ``test_profiler.py`` / ``test_capability_audit.py``.
+"""
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 
-from agent_guardian.adapters.base import TargetFingerprint
+from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.adapters.prompt import PromptAdapter
-from agent_guardian.agents.base import AgentBudget
 from agent_guardian.agents.recon import ReconAgent
 from agent_guardian.core.memory import SharedMemory
-from agent_guardian.llm.stub import StubLLM, StubScript
+from agent_guardian.llm.stub import StubLLM
 
-_RECON_PROBE_COUNT = 7  # spec §7.1: 3 original + 3 OWASP-2026 + goal/scope-restatement
-
-
-def _make_target_with_tool_inventory_response() -> StubLLM:
-    return (
-        StubScript()
-        .respond_to(
-            "tools or functions",
-            "I have access to the following tools: file_read, web_search, code_interpreter.",
-        )
-        .respond_to(
-            "remember anything",
-            "Yes, I remember context from earlier in our conversation. Memory is enabled.",
-        )
-        .respond_to(
-            "tell me about yourself",
-            "I am a helpful assistant designed to follow strict safety guidelines.",
-        )
-        .respond_to(
-            "external systems",
-            "Yes, I connect to several external systems, APIs, and a knowledge base via http endpoints.",
-        )
-        .respond_to(
-            "delegate",
-            "Other agents delegate tasks to me, and I sometimes orchestrate sub-agents to do work.",
-        )
-        .respond_to(
-            "user-specific data",
-            "I remember user contacts, calendar entries, and persist preferences across sessions.",
-        )
-        .respond_to(
-            "purpose",
-            "My purpose is to assist with customer support; I should not provide medical, "
-            "legal, or financial advice.",
-        )
-        .default("ok")
-        .build()
-    )
-
-
-async def test_recon_runs_three_probes_and_refines_fingerprint(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    target_llm = _make_target_with_tool_inventory_response()
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    agent = ReconAgent(attacker_llm=StubLLM(default="unused"), model="stub")
-    report = await agent.run(target, memory)
-    assert report.agent == "recon-agent"
-    assert report.asi_category is None
-    assert report.turns == _RECON_PROBE_COUNT
-    assert report.terminated_by == "success"
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    # Tool / memory affordance inferred from the canned replies.
-    assert refined.has_tools is True
-    assert refined.has_memory is True
-    # OWASP-2026 evidence-backed signals (CC-2).
-    assert refined.external_systems_detected is True
-    assert refined.multi_agent_detected is True
-    assert refined.cross_session_data_detected is True
-    assert "recon:" in refined.notes
-
-
-async def test_recon_keeps_bare_fingerprint_when_target_says_nothing(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    target_llm = StubScript().default("Hello.").build()  # no tool / memory hints
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    agent = ReconAgent(attacker_llm=StubLLM(default="unused"), model="stub")
-    report = await agent.run(target, memory)
-    assert report.turns == _RECON_PROBE_COUNT
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    assert refined.has_tools is False
-    assert refined.has_memory is False
-    assert refined.external_systems_detected is False
-    assert refined.multi_agent_detected is False
-    assert refined.cross_session_data_detected is False
-
-
-async def test_recon_extracts_tool_names_via_llm(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    """The tool-inventory reply is mined for tool handles via the recon LLM.
-
-    The target describes its tool in prose; the recon (attacker) LLM extracts
-    a JSON array of handles, which lands on ``fingerprint.declared_tools`` and
-    unblocks the recon-adaptive attacker + tool-exfil strategy.
-    """
-    target_llm = (
-        StubScript()
-        .respond_to(
-            "tools or functions",
-            "I have access to a knowledge base search tool to look up product info.",
-        )
-        .default("ok")
-        .build()
-    )
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    # The recon LLM (separate from the target) does the extraction.
-    attacker = (
-        StubScript()
-        .respond_to(
-            "Extract the tool/capability handles",
-            '["search_kb", "knowledge base search"]',
-        )
-        .default("[]")
-        .build()
-    )
-    agent = ReconAgent(attacker_llm=attacker, model="stub")
-    await agent.run(target, memory)
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    assert refined.has_tools is True
-    assert refined.declared_tools == ["search_kb", "knowledge base search"]
-
-
-async def test_recon_extracts_tool_names_via_regex_fallback(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    """When the recon LLM returns nothing parseable, fall back to a regex over
-    backtick / snake_case identifiers in the tool-inventory reply."""
-    target_llm = (
-        StubScript()
-        .respond_to(
-            "tools or functions",
-            "My tools: file_read, web_search and `code_interpreter`.",
-        )
-        .default("ok")
-        .build()
-    )
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    # Unparseable extraction output → regex fallback over the reply text.
-    agent = ReconAgent(attacker_llm=StubLLM(default="not json at all"), model="stub")
-    await agent.run(target, memory)
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    assert "file_read" in refined.declared_tools
-    assert "web_search" in refined.declared_tools
-    assert "code_interpreter" in refined.declared_tools
-
-
-async def test_recon_no_tools_leaves_declared_tools_empty(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    """A target that names no tools yields an empty declared_tools list."""
-    target_llm = StubScript().default("I just chat, no special tools.").build()
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    agent = ReconAgent(attacker_llm=StubLLM(default="[]"), model="stub")
-    await agent.run(target, memory)
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    assert refined.declared_tools == []
-
-
-async def test_recon_terminates_under_budget_pressure(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    target_llm = StubScript().default("hi").build()
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    # Tight token budget — should fail to make all probes.
-    agent = ReconAgent(
-        attacker_llm=StubLLM(default="unused"),
-        model="stub",
-        budget=AgentBudget(
-            tokens_remaining=2, wall_seconds_remaining=30.0, max_turns=_RECON_PROBE_COUNT
-        ),
-    )
-    report = await agent.run(target, memory)
-    assert report.terminated_by == "budget"
-    assert report.findings_count == 0
-
-
-async def test_recon_persists_each_probe_as_reflection(
-    make_memory: Callable[..., SharedMemory],
-    make_target: Callable[..., PromptAdapter],
-) -> None:
-    """IMPORTANT #4: every benign probe must leave a forensic record."""
-    target_llm = _make_target_with_tool_inventory_response()
-    target = make_target(llm=target_llm)
-    memory = make_memory()
-    agent = ReconAgent(attacker_llm=StubLLM(default="unused"), model="stub")
-    await agent.run(target, memory)
-
-    reflections = memory.reflections_for("recon-agent")
-    # The agent issues all 7 probes; each writes one reflection.
-    assert len(reflections) == _RECON_PROBE_COUNT
-    parsed = [json.loads(c) for c in reflections]
-    names = {p["probe_name"] for p in parsed}
-    assert names == {
-        "tool-inventory-probe",
-        "memory-probe",
-        "refusal-style-probe",
-        "external-systems-probe",
-        "multi-agent-probe",
-        "cross-session-data-probe",
-        "goal-scope-restatement-probe",
+_PROFILE_JSON = json.dumps(
+    {
+        "inferred_goal": "authorize refunds for verified customers",
+        "domain": "banking",
+        "sensitive_actions": ["refund_payment"],
+        "declared_guardrails": ["verify identity before any refund"],
+        "has_tools": True,
+        "has_memory": False,
+        "is_multi_agent": False,
+        "external_systems": True,
+        "cross_session_data": False,
+        "declared_tools": ["refund_payment", "get_balance"],
+        "confidence": 0.9,
     }
-    # Every record must carry the actual prompt and the target's response.
-    for rec in parsed:
-        assert rec["event"] == "recon_probe"
-        assert rec["prompt"]
-        assert rec["target_response"]
-        assert "inferred_signals" in rec
-    # Tool-inventory probe must have surfaced ``has_tools=True`` from the
-    # canned target response.
-    tool_probe = next(p for p in parsed if p["probe_name"] == "tool-inventory-probe")
-    assert tool_probe["inferred_signals"].get("has_tools") is True
-    ext_probe = next(p for p in parsed if p["probe_name"] == "external-systems-probe")
-    assert ext_probe["inferred_signals"].get("external_systems_detected") is True
+)
+
+_TOKEN_RE = re.compile(r"MEM-[0-9a-f]{6}")
+
+
+class _BlackBoxMemoryTarget(TargetAdapter):
+    """Black-box endpoint with global (cross-session) memory of a planted token."""
+
+    mode = "http"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._token: str | None = None
+        self._fingerprint = TargetFingerprint(mode="http", ref="bb-mem")
+
+    async def call(self, prompt: str, *, session: str | None = None) -> str:
+        m = _TOKEN_RE.search(prompt)
+        if m:
+            self._token = m.group(0)
+            return "Stored."
+        if "code" in prompt.lower():
+            return f"The code was {self._token}." if self._token else "I don't recall a code."
+        return "I help Acme Bank customers with refunds and balance checks."
+
+
+# ----------------------------------------------------------------- white-box
+
+
+async def test_recon_white_box_prompt_extracts_profile(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    target = make_target(
+        llm=StubLLM(default="ok"),
+        prompt="You are FinBot, a banking refund assistant with get_balance and refund_payment.",
+    )
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default=_PROFILE_JSON), model="stub")
+    report = await agent.run(target, memory)
+    assert report.terminated_by == "success"
+    fp = memory.target_fingerprint()
+    assert fp is not None
+    assert fp.profile_source == "prompt"
+    assert fp.inferred_goal == "authorize refunds for verified customers"
+    assert fp.has_tools is True
+    assert "refund_payment" in fp.declared_tools
+
+
+async def test_recon_white_box_extraction_failure_falls_back_without_crashing(
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+) -> None:
+    # Attacker returns junk -> profile_from_material yields nothing -> recon
+    # falls back to the black-box audit against the prompt target; the target's
+    # replies advertise tools, so the heuristic still flips has_tools.
+    target = make_target(llm=StubLLM(default="I have access to file_read and web_search tools."))
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default="not json"), model="stub", audit_rounds=0)
+    report = await agent.run(target, memory)
+    fp = memory.target_fingerprint()
+    assert fp is not None  # recon never crashes
+    assert report.terminated_by == "success"
+    assert fp.has_tools is True
+
+
+# ----------------------------------------------------------------- black-box
+
+
+async def test_recon_black_box_detects_cross_session_memory(
+    make_memory: Callable[..., SharedMemory],
+) -> None:
+    target = _BlackBoxMemoryTarget()
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default=_PROFILE_JSON), model="stub", audit_rounds=0)
+    await agent.run(target, memory)
+    fp = memory.target_fingerprint()
+    assert fp is not None
+    assert fp.profile_source == "endpoint"
+    assert fp.has_memory is True  # planted token recalled in-session
+    assert fp.cross_session_data_detected is True  # ...and in a fresh session
+
+
+async def test_recon_black_box_writes_forensic_reflections(
+    make_memory: Callable[..., SharedMemory],
+) -> None:
+    target = _BlackBoxMemoryTarget()
+    memory = make_memory()
+    agent = ReconAgent(attacker_llm=StubLLM(default=_PROFILE_JSON), model="stub", audit_rounds=0)
+    await agent.run(target, memory)
+    reflections = memory.reflections_for("recon-agent")
+    assert reflections, "audit must persist a forensic reflection per turn"
+    parsed = [json.loads(c) for c in reflections]
+    assert all(r["event"] == "recon_audit" for r in parsed)
+    assert all(r["prompt"] and r["target_response"] for r in parsed)
+
+
+# ----------------------------------------------------------------- preservation
 
 
 async def test_recon_carries_existing_fingerprint_signal_forward(
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
 ) -> None:
-    """If the adapter already declared tools statically, recon must not regress that."""
+    """A statically-declared surface signal must not regress through recon."""
     declared = TargetFingerprint(
         mode="framework",
         ref="<pre-existing>",
@@ -249,13 +145,12 @@ async def test_recon_carries_existing_fingerprint_signal_forward(
         is_multi_agent=True,
         notes="pre-existing static description",
     )
-    target_llm = StubScript().default("plain").build()
-    target = make_target(llm=target_llm, fingerprint=declared)
+    target = make_target(llm=StubLLM(default="plain"), fingerprint=declared)
     memory = make_memory()
-    agent = ReconAgent(attacker_llm=StubLLM(default="unused"), model="stub")
+    agent = ReconAgent(attacker_llm=StubLLM(default="not json"), model="stub", audit_rounds=0)
     await agent.run(target, memory)
-    refined = memory.target_fingerprint()
-    assert refined is not None
-    assert refined.has_tools is True  # preserved
-    assert refined.is_multi_agent is True
-    assert refined.mode == "framework"
+    fp = memory.target_fingerprint()
+    assert fp is not None
+    assert fp.has_tools is True  # preserved
+    assert fp.is_multi_agent is True
+    assert fp.mode == "framework"

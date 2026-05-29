@@ -1,4 +1,4 @@
-# AgentGuardian Open
+# AgentGuardian
 
 [![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
@@ -159,7 +159,7 @@ public issue.
 
 ## Ethics
 
-AgentGuardian Open is for testing systems you own or are explicitly
+AgentGuardian is for testing systems you own or are explicitly
 authorised to test. Use against third-party systems without
 authorisation is unlawful in most jurisdictions and a violation of
 these terms. See [Ethics](https://glacien-technologies.github.io/agent-guardian/ethics/).

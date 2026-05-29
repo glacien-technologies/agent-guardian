@@ -49,7 +49,7 @@ def test_mkdocs_yml_is_valid_yaml() -> None:
     # structural keys, so SafeLoader is sufficient for this corpus.
     data = yaml.safe_load(raw)
     assert isinstance(data, dict)
-    assert data.get("site_name") == "AgentGuardian Open"
+    assert data.get("site_name") == "AgentGuardian"
     assert "nav" in data
     assert "theme" in data
     assert data["theme"]["name"] == "material"
@@ -78,7 +78,7 @@ def test_mkdocs_nav_covers_required_pages() -> None:
         "adapters/code.md",
         "adapters/http.md",
         "adapters/framework.md",
-        "api-reference.md",
+        "api/index.md",
         "ethics.md",
         "roadmap.md",
     }
@@ -101,7 +101,7 @@ def test_mkdocs_nav_covers_required_pages() -> None:
         "adapters/code.md",
         "adapters/http.md",
         "adapters/framework.md",
-        "api-reference.md",
+        "api/index.md",
         "ethics.md",
         "roadmap.md",
     ],
@@ -143,7 +143,7 @@ def test_glossary_exists_and_lists_aivss_term() -> None:
 def test_readme_has_marketing_sections() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     for needle in (
-        "AgentGuardian Open",
+        "AgentGuardian",
         "Why",
         "Quickstart",
         "Architecture",

@@ -49,7 +49,7 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
             scratch directory.
     """
     app = FastAPI(
-        title="AgentGuardian Open",
+        title="AgentGuardian",
         version=__version__,
         docs_url=None,
         redoc_url=None,

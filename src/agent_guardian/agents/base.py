@@ -543,7 +543,11 @@ class AsiAgent(ABC):
                         LLMMessage(role="user", content=user),
                     ],
                     model=self.attacker_model,
-                    max_tokens=2048,
+                    # A batch of goal-specific scenarios (with attack_text) at
+                    # temperature 1.0 is verbose; too small a cap truncated the
+                    # JSON so the batch failed to parse and the intent never
+                    # reached attacks. Keep ample headroom.
+                    max_tokens=8000,
                     temperature=1.0,
                 )
             )

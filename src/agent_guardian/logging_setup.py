@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from typing import IO
 
@@ -38,6 +39,53 @@ _DEFAULT_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)-5s %(name)-48s %(message
 _DEFAULT_DATEFMT = "%H:%M:%S"
 
 ENV_VAR = "AGENT_GUARDIAN_LOG_LEVEL"
+
+_REDACTED = "***REDACTED***"
+
+# Secrets that must never reach the logs. httpx logs request URLs at INFO, and
+# Gemini/Google pass the API key in the query string (``?key=...``) -- so
+# without this every scan wrote the user's key to stderr. We cover three shapes:
+#   1. sensitive query params (key/api_key/access_token/token/sig/signature)
+#   2. ``Authorization: Bearer <token>`` headers
+#   3. bare provider key shapes anywhere in the line (Google AIza..., OpenAI/
+#      Anthropic sk-...), as defence-in-depth for any path we didn't anticipate.
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"(?i)([?&](?:key|api[_-]?key|access_token|token|sig|signature)=)[^&\s\"']+"),
+        r"\1" + _REDACTED,
+    ),
+    (re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"), r"\1" + _REDACTED),
+    (re.compile(r"AIza[0-9A-Za-z_\-]{10,}"), _REDACTED),
+    (re.compile(r"sk-(?:ant-)?[A-Za-z0-9_\-]{12,}"), _REDACTED),
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask API keys / bearer tokens in a log line, preserving the surrounding
+    text (e.g. ``?key=AIza...`` -> ``?key=***REDACTED***``)."""
+    for pattern, repl in _SECRET_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
+
+
+class _RedactingFilter(logging.Filter):
+    """Scrubs secrets from every record before it is formatted/emitted.
+
+    Operates on the fully-rendered message (``record.getMessage()``) so it
+    catches secrets passed as ``%s`` args -- which is exactly how httpx logs
+    request URLs -- then collapses the record to a redacted literal.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered = record.getMessage()
+        except Exception:  # pragma: no cover -- malformed record; let it through
+            return True
+        redacted = redact_secrets(rendered)
+        if redacted != rendered:
+            record.msg = redacted
+            record.args = ()
+        return True
 
 
 def _resolve_level(level: str | int | None) -> int:
@@ -82,6 +130,12 @@ def configure_logging(
         datefmt=_DEFAULT_DATEFMT,
         force=True,
     )
+    # Scrub secrets (API keys / bearer tokens) from every record. Attached to
+    # the root handlers so it covers our own logs AND chatty deps like httpx
+    # that log request URLs containing ``?key=...``.
+    redactor = _RedactingFilter()
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(redactor)
     # Quiet down chatty deps unless the operator explicitly asked for DEBUG.
     if resolved > logging.DEBUG:
         for noisy in ("httpx", "httpcore", "urllib3", "google_genai.models"):

@@ -38,7 +38,12 @@ import warnings
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+from agent_guardian.adapters.base import (
+    ProfileEvidence,
+    TargetAdapter,
+    TargetFingerprint,
+    safe_source_and_root,
+)
 
 __all__ = ["CodeAdapter"]
 
@@ -102,6 +107,16 @@ class CodeAdapter(TargetAdapter):
     def from_dotted_path(cls, path: str) -> CodeAdapter:
         """Construct an adapter from a ``module:attr`` dotted path."""
         return cls(path)
+
+    def profile_evidence(self) -> ProfileEvidence:
+        # White-box: read the implementation. The defining module usually
+        # carries the agent + its tool definitions; ``source_root`` lets the
+        # profiler grep/read deeper for large targets. Fall back to black-box
+        # when source is unavailable (C-extension / REPL / lambda).
+        text, root = safe_source_and_root(self._target)
+        if text is None:
+            return ProfileEvidence(box="black")
+        return ProfileEvidence(box="white", text=text, source_root=root)
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         kwargs: dict[str, Any] = {}

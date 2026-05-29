@@ -30,7 +30,10 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_m2_flags_in_scan_help() -> None:
-    result = CliRunner().invoke(app, ["scan", "--help"])
+    # Force a wide terminal: Rich truncates long option names with an ellipsis
+    # (e.g. ``--owasp-…``) at narrow widths, which is the default in CI's
+    # non-tty environment and would break the substring assertions below.
+    result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
     for flag in ("--pov-gate", "--critic", "--bundle", "--pretext", "--indirect", "--owasp-llm"):
         assert flag in result.output

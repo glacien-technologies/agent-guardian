@@ -20,7 +20,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="referrer" content="no-referrer" />
-<title>{{ page_title|default("Coverage") }} · AgentGuardian Open</title>
+<title>{{ page_title|default("Coverage") }} · AgentGuardian</title>
 <link rel="stylesheet" href="/static/colors_and_type.css" />
 <link rel="stylesheet" href="/static/coverage.css" />
 {% if is_running %}<meta http-equiv="refresh" content="5">{% endif %}
@@ -372,7 +372,7 @@
   <!-- ───────────── FOOTER STRIP ───────────── -->
   <footer class="page-foot">
     <div>
-      <strong>AgentGuardian Open</strong> &middot; v{{ version }} &middot; Apache 2.0
+      <strong>AgentGuardian</strong> &middot; v{{ version }} &middot; Apache 2.0
       {% if scan %}&middot; AIVSS formula <code>{{ scan.aivss_formula_version }}</code> &middot; probe library <code>{{ scan.probe_library_version }}</code>{% endif %}
     </div>
     <div>

@@ -8,7 +8,7 @@ production) and auto-tiers to T4 — no tools, no memory, no PII.
 
 from __future__ import annotations
 
-from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+from agent_guardian.adapters.base import ProfileEvidence, TargetAdapter, TargetFingerprint
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 
 __all__ = ["PromptAdapter"]
@@ -50,6 +50,11 @@ class PromptAdapter(TargetAdapter):
             is_multi_agent=False,
             notes="Mode A: system prompt with no tools or memory.",
         )
+
+    def profile_evidence(self) -> ProfileEvidence:
+        # White-box: the system prompt is the spec — declares persona, tools,
+        # and rules. Read it directly instead of interrogating the model.
+        return ProfileEvidence(box="white", text=self._prompt)
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         key = session or "_default"

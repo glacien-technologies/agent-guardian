@@ -103,7 +103,7 @@ When items #1–9 are done:
 git log --oneline -3
 
 # Tag and push.
-git tag -s -a v1.0.0 -m "AgentGuardian Open v1.0.0"
+git tag -s -a v1.0.0 -m "AgentGuardian v1.0.0"
 git push origin v1.0.0
 
 # Watch the publish workflow run.
