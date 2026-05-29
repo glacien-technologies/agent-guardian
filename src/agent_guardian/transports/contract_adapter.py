@@ -43,6 +43,7 @@ from agent_guardian.transports.factory import (
     build_session_machine,
     build_transport,
 )
+from agent_guardian.transports.mcp import McpTransport
 
 if TYPE_CHECKING:
     from agent_guardian.contract.schema import Contract
@@ -83,6 +84,14 @@ class ContractTargetAdapter(TargetAdapter):
         # ``endpoint`` is exposed by HttpTransport; fall back gracefully for any
         # future transport that does not surface one.
         self._endpoint: str = str(getattr(transport, "endpoint", "transport"))
+        # When the transport screens tools *live* (an McpTransport with its
+        # ``_tool_gate`` wired to ``roe.record_tool_call``), the gate has already
+        # recorded every tool decision before the call returns. The post-hoc
+        # ``_record_tool_calls`` path must then only *trace* the surfaced calls,
+        # never re-record them — re-recording would double-count the audit.
+        self._live_tool_gate = (
+            isinstance(transport, McpTransport) and transport._tool_gate is not None
+        )
         self._fingerprint = fingerprint or TargetFingerprint(
             mode="http",
             ref=self._endpoint,
@@ -132,13 +141,21 @@ class ContractTargetAdapter(TargetAdapter):
     def _record_tool_calls(self, response: Response) -> None:
         """Screen + trace each tool call the target surfaced in its reply.
 
-        Every call is recorded against the RoE allow/block policy (which counts
-        suppressions for the audit); allowed calls open an ``execute_tool`` span.
-        When there is no RoE controller every observed call is simply traced.
+        For HTTP / cloud transports the call is recorded against the RoE
+        allow/block policy here (which counts suppressions for the audit); allowed
+        calls open an ``execute_tool`` span. When there is no RoE controller every
+        observed call is simply traced.
+
+        For an MCP transport whose ``_tool_gate`` is wired live, the gate already
+        recorded each decision *before* invocation (refusing a blocklisted tool
+        before its ``tools/call``), so this path must not re-record — it only
+        opens a span for the surfaced (allowed) calls to avoid double-counting the
+        audit. A blocked MCP tool is suppressed by the gate and never executed, so
+        the suppressed-attempt count is already correct.
         """
         for call in response.tool_calls:
             allowed = True
-            if self._roe is not None:
+            if self._roe is not None and not self._live_tool_gate:
                 allowed = self._roe.record_tool_call(call.name)
             if allowed:
                 with tool_span(call.name):
@@ -159,8 +176,26 @@ def build_contract_target_adapter(
     derives the static :class:`TargetFingerprint` from the contract's declared
     tools, and hands the optional :class:`RoeController` to the adapter so RoE is
     enforced at the single call chokepoint.
+
+    **Live tool-block wiring.** When the built transport is an
+    :class:`~agent_guardian.transports.mcp.McpTransport` and a
+    :class:`RoeController` is present, the controller's
+    :meth:`RoeController.record_tool_call` is installed as the transport's
+    ``tool_gate``. That makes a blocklisted (or non-allowlisted) tool be
+    *refused before* the ``tools/call`` executes — a live block — while
+    ``record_tool_call`` still counts the suppression for the audit. The gate is
+    handed as a plain ``Callable[[str], bool]`` so the transport never learns the
+    :class:`RoeController` type (the decoupling rule). HTTP / cloud transports
+    surface tool calls only after the fact, so they keep the post-hoc
+    :meth:`ContractTargetAdapter._record_tool_calls` screening unchanged.
     """
     transport = build_transport(contract)
+    if isinstance(transport, McpTransport) and roe is not None:
+        # Plain callable, not the RoeController itself: the transport refuses a
+        # destructive tool live (no tools/call) and the controller counts it.
+        # ``_tool_gate`` is the field the transport's send() consults before any
+        # tools/call; injecting it here keeps the transport decoupled from RoE.
+        transport._tool_gate = roe.record_tool_call
     session_machine = build_session_machine(contract, transport)
     fingerprint = _fingerprint_from_contract(contract, str(getattr(transport, "endpoint", "")))
     return ContractTargetAdapter(

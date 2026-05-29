@@ -66,6 +66,8 @@ __all__ = [
     "HttpTransport",
     "IdSend",
     "Identity",
+    "McpOAuthAuth",
+    "McpTransport",
     "MtlsAuth",
     "Network",
     "NoAuth",
@@ -283,10 +285,36 @@ class GcpSaJsonAuth(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class McpOAuthAuth(BaseModel):
+    """MCP OAuth 2.1 + PKCE authorization for an MCP transport.
+
+    The MCP authorization spec mandates OAuth 2.1 with PKCE (S256) and RFC 9728
+    Protected-Resource-Metadata discovery: the client fetches
+    ``{resource}/.well-known/oauth-protected-resource`` to learn the
+    ``authorization_servers``, then runs the authorization-code + PKCE flow and
+    sends the bearer token in the ``Authorization`` header.
+
+    ``resource`` is the protected-resource URL used for RFC 9728 discovery; when
+    ``None`` it is derived from the transport ``url``. ``token_url`` is an
+    optional explicit override that skips discovery entirely. Both ``client_id``
+    and the optional ``client_secret`` are :class:`SecretRef` pointers (public
+    clients omit the secret).
+    """
+
+    kind: Literal["mcp_oauth"] = "mcp_oauth"
+    client_id: SecretRef
+    client_secret: SecretRef | None = None
+    scopes: list[str] = Field(default_factory=list)
+    resource: str | None = None
+    token_url: AnyUrl | None = None
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 # Discriminated union keyed on ``kind``. Every variant maps 1:1 to an
 # implemented transport auth provider (api_key, bearer, oauth2, mtls, hmac plus
-# the cloud-provider kinds), so a later factory can dispatch on ``kind`` without
-# a lookup table.
+# the cloud-provider kinds and the MCP OAuth 2.1 + PKCE flow), so a later
+# factory can dispatch on ``kind`` without a lookup table.
 Auth = Annotated[
     NoAuth
     | ApiKeyAuth
@@ -297,7 +325,8 @@ Auth = Annotated[
     | AwsSigV4Auth
     | AzureEntraAuth
     | GcpAdcAuth
-    | GcpSaJsonAuth,
+    | GcpSaJsonAuth
+    | McpOAuthAuth,
     Field(discriminator="kind"),
 ]
 
@@ -386,17 +415,38 @@ class AzureFoundryAgentTransport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class McpTransport(BaseModel):
+    """A Model Context Protocol (MCP) server target.
+
+    Speaks JSON-RPC 2.0 over Streamable HTTP (or legacy SSE). The transport
+    ``initialize``s the server, discovers tools via ``tools/list``, then drives
+    the adversarial prompt through a ``tools/call`` to ``entry_tool`` (or the
+    first discovered tool when ``None``), mapping the prompt onto the
+    ``prompt_argument`` argument.
+    """
+
+    kind: Literal["mcp"] = "mcp"
+    url: AnyUrl
+    transport_type: Literal["streamable_http", "sse"] = "streamable_http"
+    entry_tool: str | None = None
+    prompt_argument: str = "input"
+    init_timeout_ms: int = Field(default=30000, gt=0)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 # A discriminated union keyed on ``kind``. ``http`` is the generic primitive;
-# the cloud-provider kinds are first-class so a later factory can dispatch on
-# ``kind`` without a lookup table. The discriminator + Annotated shape keeps
-# additional transport kinds purely additive.
+# the cloud-provider and MCP kinds are first-class so a later factory can
+# dispatch on ``kind`` without a lookup table. The discriminator + Annotated
+# shape keeps additional transport kinds purely additive.
 Transport = Annotated[
     HttpTransport
     | OpenAiResponsesTransport
     | AnthropicMessagesTransport
     | BedrockAgentTransport
     | VertexAgentTransport
-    | AzureFoundryAgentTransport,
+    | AzureFoundryAgentTransport
+    | McpTransport,
     Field(discriminator="kind"),
 ]
 

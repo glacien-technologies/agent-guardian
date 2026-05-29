@@ -47,6 +47,12 @@ from agent_guardian.contract.schema import (
     HttpTransport as ContractHttpTransport,
 )
 from agent_guardian.contract.schema import (
+    McpOAuthAuth as ContractMcpOAuthAuth,
+)
+from agent_guardian.contract.schema import (
+    McpTransport as ContractMcpTransport,
+)
+from agent_guardian.contract.schema import (
     OpenAiResponsesTransport as ContractOpenAiTransport,
 )
 from agent_guardian.contract.schema import (
@@ -62,6 +68,7 @@ from agent_guardian.transports.auth.bearer import BearerAuth as ProviderBearerAu
 from agent_guardian.transports.auth.gcp import GcpAdcAuth as ProviderGcpAdcAuth
 from agent_guardian.transports.auth.gcp import GcpSaJsonAuth as ProviderGcpSaJsonAuth
 from agent_guardian.transports.auth.hmac import HmacAuth as ProviderHmacAuth
+from agent_guardian.transports.auth.mcp_oauth import McpOAuthProvider
 from agent_guardian.transports.auth.mtls import MutualTlsAuth
 from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth as ProviderOAuth2
 from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth as ProviderAwsSigV4Auth
@@ -73,6 +80,7 @@ from agent_guardian.transports.factory import (
     build_transport,
 )
 from agent_guardian.transports.http import HttpTransport
+from agent_guardian.transports.mcp import McpTransport
 from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
 from agent_guardian.transports.session import SessionMode
 from agent_guardian.transports.vertex_agent import VertexAgentTransport
@@ -671,3 +679,114 @@ def test_build_session_machine_server_session_for_cloud_transport(
     transport = build_transport(contract)
     machine = build_session_machine(contract, transport)
     assert machine.mode is SessionMode.SERVER_SESSION
+
+
+# ---------------------------------------------------------------------------
+# build_transport — MCP transport
+# ---------------------------------------------------------------------------
+
+
+MCP_URL = "https://mcp.example.com/rpc"
+
+
+async def test_build_transport_mcp_maps_fields() -> None:
+    contract = _cloud_contract(
+        transport=ContractMcpTransport.model_validate(
+            {
+                "url": MCP_URL,
+                "entry_tool": "run",
+                "prompt_argument": "text",
+                "init_timeout_ms": 15000,
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, McpTransport)
+    assert transport.endpoint == MCP_URL
+    # entry_tool / prompt_argument / timeout mapped from the contract fields.
+    assert transport._entry_tool == "run"
+    assert transport._prompt_argument == "text"
+    # init_timeout_ms (15000) → timeout_seconds (15.0).
+    assert transport._timeout_seconds == pytest.approx(15.0)
+    # No RoE controller here, so the live tool gate stays unset until the adapter
+    # wires it (covered in test_contract_adapter).
+    assert transport._tool_gate is None
+    await transport.aclose()
+
+
+async def test_build_transport_mcp_defaults_no_auth() -> None:
+    contract = _cloud_contract(
+        transport=ContractMcpTransport.model_validate({"url": MCP_URL}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, McpTransport)
+    # No auth declared → NoAuth, default entry_tool/prompt_argument from schema.
+    assert transport._entry_tool is None
+    assert transport._prompt_argument == "input"
+    assert isinstance(transport._auth, ProviderNoAuth)
+    await transport.aclose()
+
+
+# ---------------------------------------------------------------------------
+# build_auth_provider — MCP OAuth 2.1 + PKCE
+# ---------------------------------------------------------------------------
+
+
+async def test_build_transport_mcp_with_oauth_builds_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_CID", "mcp-client-id")
+    monkeypatch.setenv("MCP_CSEC", "mcp-client-secret")
+    contract = _cloud_contract(
+        transport=ContractMcpTransport.model_validate({"url": MCP_URL, "entry_tool": "run"}),
+        auth=ContractMcpOAuthAuth.model_validate(
+            {
+                "client_id": "${env:MCP_CID}",
+                "client_secret": "${env:MCP_CSEC}",
+                "scopes": ["mcp.read", "mcp.write"],
+                "token_url": "https://auth.example.com/token",
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, McpTransport)
+    # The MCP transport's auth provider is the OAuth 2.1 + PKCE provider, handed
+    # a dedicated httpx client for its token round-trip (built by the factory).
+    assert isinstance(transport._auth, McpOAuthProvider)
+    await transport.aclose()
+
+
+async def test_build_auth_provider_mcp_oauth_resolves_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_CID", "cid")
+    contract = _cloud_contract(
+        transport=ContractMcpTransport.model_validate({"url": MCP_URL}),
+        auth=ContractMcpOAuthAuth.model_validate(
+            {
+                "client_id": "${env:MCP_CID}",
+                "scopes": ["mcp.read"],
+                "resource": "https://mcp.example.com",
+            }
+        ),
+    )
+    async with httpx.AsyncClient() as client:
+        provider = build_auth_provider(contract, oauth2_client=client)
+        assert isinstance(provider, McpOAuthProvider)
+        # A public client (no secret) carries a PKCE S256 challenge.
+        assert provider.code_challenge_method == "S256"
+        assert provider.scope == "mcp.read"
+
+
+def test_build_auth_provider_mcp_oauth_without_client_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_CID", "cid")
+    contract = _cloud_contract(
+        transport=ContractMcpTransport.model_validate({"url": MCP_URL}),
+        auth=ContractMcpOAuthAuth.model_validate(
+            {"client_id": "${env:MCP_CID}", "token_url": "https://auth.example.com/token"}
+        ),
+    )
+    with pytest.raises(ValueError, match="mcp_oauth"):
+        build_auth_provider(contract)

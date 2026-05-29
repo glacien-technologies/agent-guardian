@@ -31,6 +31,9 @@ from agent_guardian.contract.schema import (
     HttpTransport as ContractHttpTransport,
 )
 from agent_guardian.contract.schema import (
+    McpTransport as ContractMcpTransport,
+)
+from agent_guardian.contract.schema import (
     Request as ContractRequest,
 )
 from agent_guardian.contract.schema import (
@@ -50,14 +53,31 @@ from agent_guardian.transports.contract_adapter import (
 )
 from agent_guardian.transports.errors import TransportError, TransportErrorCategory
 from agent_guardian.transports.http import HttpTransport
+from agent_guardian.transports.mcp import McpTransport
 
 URL = "https://api.example.com/v1/chat"
+MCP_URL = "https://mcp.example.com/rpc"
 
 
 def _contract(*, roe: RoE | None = None, **target_overrides: Any) -> Contract:
     base: dict[str, Any] = {
         "name": "demo",
         "transport": ContractHttpTransport(url=URL),  # type: ignore[arg-type]
+        "response": ContractResponse(output_path="$.output.text"),
+    }
+    base.update(target_overrides)
+    return Contract(target=Target(**base), roe=roe or RoE())
+
+
+def _mcp_contract(
+    *, roe: RoE | None = None, entry_tool: str = "run", **target_overrides: Any
+) -> Contract:
+    """Build a minimal valid MCP contract (entry-tool driven)."""
+    base: dict[str, Any] = {
+        "name": "mcp-demo",
+        "transport": ContractMcpTransport.model_validate(
+            {"url": MCP_URL, "entry_tool": entry_tool}
+        ),
         "response": ContractResponse(output_path="$.output.text"),
     }
     base.update(target_overrides)
@@ -332,3 +352,109 @@ def test_default_fingerprint_without_explicit_one() -> None:
     fp = adapter.fingerprint()
     assert fp.mode == "http"
     assert fp.ref == URL
+
+
+# ---------------------------------------------------------------------------
+# MCP live tool-block wiring
+# ---------------------------------------------------------------------------
+
+
+def _mcp_rpc_responses(tools: list[str]) -> list[httpx.Response]:
+    """Scripted initialize + tools/list JSON-RPC responses for an MCP server."""
+    return [
+        httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}},
+            headers={"Mcp-Session-Id": "sess-1"},
+        ),
+        httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"tools": [{"name": name} for name in tools]},
+            },
+        ),
+    ]
+
+
+async def test_build_adapter_wires_mcp_tool_gate() -> None:
+    # When the transport is an McpTransport and a RoeController is present, the
+    # adapter injects roe.record_tool_call as the transport's live tool gate.
+    contract = _mcp_contract(roe=_egress_roe(tools=RoeTools(blocklist=["danger"])))
+    roe = RoeController.from_contract(contract)
+    adapter = build_contract_target_adapter(contract, roe=roe)
+    transport = adapter._transport
+    assert isinstance(transport, McpTransport)
+    # The exact callable wired is the controller's record_tool_call (a plain
+    # Callable[[str], bool] — the transport never learns the RoeController type).
+    assert transport._tool_gate == roe.record_tool_call
+    await adapter.aclose()
+
+
+async def test_build_adapter_mcp_no_roe_leaves_gate_unset() -> None:
+    # No RoE controller → no live gate is wired (the transport screens nothing).
+    contract = _mcp_contract()
+    adapter = build_contract_target_adapter(contract)
+    transport = adapter._transport
+    assert isinstance(transport, McpTransport)
+    assert transport._tool_gate is None
+    await adapter.aclose()
+
+
+@respx.mock
+async def test_mcp_blocklisted_tool_refused_live_and_counted() -> None:
+    # End-to-end: a blocklisted entry tool is refused BEFORE tools/call executes
+    # (only initialize + tools/list hit the server) AND counted as suppressed.
+    route = respx.post(MCP_URL).mock(
+        side_effect=_mcp_rpc_responses(["delete_everything", "safe_read"])
+    )
+    contract = _mcp_contract(
+        entry_tool="delete_everything",
+        roe=_egress_roe(tools=RoeTools(blocklist=["delete_everything"])),
+    )
+    roe = RoeController.from_contract(contract)
+    adapter = build_contract_target_adapter(contract, roe=roe)
+
+    reply = await adapter.call("please run the destructive tool")
+
+    # The benign blocked note is returned; the destructive tool never executed.
+    assert "blocked by RoE" in reply
+    # Exactly two RPCs: initialize + tools/list. NO tools/call for the blocked tool.
+    assert route.call_count == 2
+    # The suppression is counted exactly once (the live gate records it; the
+    # adapter's post-hoc path does not re-record for a live-gated transport).
+    assert roe.suppressed_tool_attempts == 1
+    await adapter.aclose()
+
+
+@respx.mock
+async def test_mcp_allowed_tool_executes_and_not_suppressed() -> None:
+    # An allowed tool runs the full initialize + tools/list + tools/call sequence
+    # and is not counted as suppressed.
+    responses = _mcp_rpc_responses(["safe_read"])
+    responses.append(
+        httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {"content": [{"type": "text", "text": "tool output"}]},
+            },
+        )
+    )
+    route = respx.post(MCP_URL).mock(side_effect=responses)
+    contract = _mcp_contract(
+        entry_tool="safe_read",
+        roe=_egress_roe(tools=RoeTools(blocklist=["delete_everything"])),
+    )
+    roe = RoeController.from_contract(contract)
+    adapter = build_contract_target_adapter(contract, roe=roe)
+
+    reply = await adapter.call("read something safe")
+
+    assert reply == "tool output"
+    # initialize + tools/list + tools/call.
+    assert route.call_count == 3
+    assert roe.suppressed_tool_attempts == 0
+    await adapter.aclose()

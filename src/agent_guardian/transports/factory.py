@@ -67,6 +67,12 @@ from agent_guardian.contract.schema import (
     HttpTransport as ContractHttpTransport,
 )
 from agent_guardian.contract.schema import (
+    McpOAuthAuth as ContractMcpOAuthAuth,
+)
+from agent_guardian.contract.schema import (
+    McpTransport as ContractMcpTransport,
+)
+from agent_guardian.contract.schema import (
     MtlsAuth as ContractMtlsAuth,
 )
 from agent_guardian.contract.schema import (
@@ -93,12 +99,14 @@ from agent_guardian.transports.auth.base import AuthProvider, NoAuth
 from agent_guardian.transports.auth.bearer import BearerAuth
 from agent_guardian.transports.auth.gcp import GcpAdcAuth, GcpSaJsonAuth
 from agent_guardian.transports.auth.hmac import HmacAuth
+from agent_guardian.transports.auth.mcp_oauth import McpOAuthProvider
 from agent_guardian.transports.auth.mtls import MutualTlsAuth
 from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth
 from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth
 from agent_guardian.transports.azure_foundry import AzureFoundryAgentTransport
 from agent_guardian.transports.bedrock_agent import BedrockAgentTransport
 from agent_guardian.transports.http import HttpTransport, SessionSendIn
+from agent_guardian.transports.mcp import McpTransport
 from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
 from agent_guardian.transports.session import SessionMachine, SessionMode
 from agent_guardian.transports.vertex_agent import VertexAgentTransport
@@ -160,14 +168,16 @@ def build_auth_provider(
       Entra token round-trip, like ``oauth2_client_credentials``)
     * ``gcp_adc`` → :class:`GcpAdcAuth` (ambient Application Default Credentials)
     * ``gcp_sa_json`` → :class:`GcpSaJsonAuth` (resolved service-account JSON)
+    * ``mcp_oauth`` → :class:`McpOAuthProvider` (MCP OAuth 2.1 + PKCE S256; handed
+      ``oauth2_client`` for its token round-trip + RFC 9728 discovery)
 
     The providers only ever receive **resolved plaintext strings**; a
     :class:`SecretRef` never crosses this boundary.
 
     Raises:
-        ValueError: an ``oauth2_client_credentials`` or ``azure_entra`` auth was
-            declared but no ``oauth2_client`` was supplied to perform the token
-            fetch.
+        ValueError: an ``oauth2_client_credentials``, ``azure_entra`` or
+            ``mcp_oauth`` auth was declared but no ``oauth2_client`` was supplied
+            to perform the token fetch.
     """
     auth: Auth = contract.target.auth
     refs = resolve_secrets(contract, resolver=resolver)
@@ -264,6 +274,27 @@ def build_auth_provider(
         # No scopes declared: let the provider apply its cloud-platform default.
         return GcpSaJsonAuth(service_account_json=service_account_json)
 
+    if isinstance(auth, ContractMcpOAuthAuth):
+        if oauth2_client is None:
+            raise ValueError(
+                "mcp_oauth auth requires an httpx.AsyncClient for the token "
+                "endpoint round-trip (and RFC 9728 discovery)"
+            )
+        # ``client_secret`` is optional (public clients omit it). ``token_url``
+        # (an explicit override that skips RFC 9728 discovery) is the only place a
+        # URL crosses; the provider derives discovery endpoints from ``resource``.
+        mcp_client_secret: str | None = (
+            _resolve(refs, auth.client_secret) if auth.client_secret else None
+        )
+        return McpOAuthProvider(
+            client_id=_resolve(refs, auth.client_id),
+            client_secret=mcp_client_secret,
+            scopes=list(auth.scopes),
+            resource=auth.resource,
+            token_url=str(auth.token_url) if auth.token_url else None,
+            client=oauth2_client,
+        )
+
     # The discriminated union is closed; an unrecognised member is unreachable
     # unless the schema gains a new auth kind without a matching factory arm.
     raise NotImplementedError(  # pragma: no cover - defensive
@@ -272,9 +303,10 @@ def build_auth_provider(
 
 
 # Auth kinds that require a dedicated httpx client for a token-endpoint
-# round-trip (OAuth2 client-credentials and Azure Entra). The factory builds one
-# and hands it to ``build_auth_provider``.
-_TOKEN_FETCH_AUTH = (ContractOAuth2Auth, ContractAzureEntraAuth)
+# round-trip (OAuth2 client-credentials, Azure Entra, and MCP OAuth — the latter
+# also walks RFC 9728 discovery over that client). The factory builds one and
+# hands it to ``build_auth_provider``.
+_TOKEN_FETCH_AUTH = (ContractOAuth2Auth, ContractAzureEntraAuth, ContractMcpOAuthAuth)
 
 # Default data-plane timeout (seconds) for cloud transports whose contract
 # transport block carries no ``timeout_ms`` field.
@@ -300,6 +332,9 @@ def build_transport(
     * ``bedrock_agent`` → :class:`BedrockAgentTransport`
     * ``vertex_agent`` → :class:`VertexAgentTransport`
     * ``azure_foundry_agent`` → :class:`AzureFoundryAgentTransport`
+    * ``mcp`` → :class:`McpTransport` (JSON-RPC 2.0 over Streamable HTTP; built
+      from ``url`` / ``entry_tool`` / ``prompt_argument`` / ``init_timeout_ms``,
+      owning its own httpx client)
 
     Each cloud transport is constructed from its contract fields plus the built
     :class:`AuthProvider`; the transport graph owns whatever httpx client it
@@ -358,6 +393,18 @@ def build_transport(
             endpoint=str(transport.endpoint),
             agent_id=transport.agent_id,
             auth=auth,
+        )
+    if isinstance(transport, ContractMcpTransport):
+        # The MCP transport owns its data-plane httpx client and closes it on
+        # ``aclose``. The auth provider (mcp_oauth) keeps the separate
+        # ``oauth2_client`` for its token / RFC 9728 discovery round-trips, like
+        # every other token-fetch transport in this module.
+        return McpTransport(
+            endpoint=str(transport.url),
+            entry_tool=transport.entry_tool,
+            prompt_argument=transport.prompt_argument,
+            auth=auth,
+            timeout_seconds=transport.init_timeout_ms / 1000.0,
         )
 
     # The discriminated union is closed; an unrecognised member is unreachable

@@ -23,6 +23,8 @@ from agent_guardian.contract.schema import (
     HmacAuth,
     HttpTransport,
     IdSend,
+    McpOAuthAuth,
+    McpTransport,
     MtlsAuth,
     NoAuth,
     OAuth2ClientCredentialsAuth,
@@ -472,6 +474,146 @@ def test_cloud_transport_missing_required_field_rejected() -> None:
     # bedrock_agent requires agent_id / agent_alias_id
     with pytest.raises(ValidationError):
         Contract.model_validate(_base_data(transport={"kind": "bedrock_agent", "region": "r"}))
+
+
+# --------------------------------------------------------------------------
+# MCP transport — parse from dict, defaults, extra="forbid"
+# --------------------------------------------------------------------------
+
+
+def test_transport_mcp_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(transport={"kind": "mcp", "url": "https://mcp.example.com/rpc"})
+    )
+    assert isinstance(c.target.transport, McpTransport)
+    assert c.target.transport.kind == "mcp"
+    assert str(c.target.transport.url) == "https://mcp.example.com/rpc"
+    assert c.target.transport.transport_type == "streamable_http"
+    assert c.target.transport.entry_tool is None
+    assert c.target.transport.prompt_argument == "input"
+    assert c.target.transport.init_timeout_ms == 30000
+
+
+def test_transport_mcp_explicit_values() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "mcp",
+                "url": "https://mcp.example.com/rpc",
+                "transport_type": "sse",
+                "entry_tool": "ask",
+                "prompt_argument": "query",
+                "init_timeout_ms": 5000,
+            }
+        )
+    )
+    assert isinstance(c.target.transport, McpTransport)
+    assert c.target.transport.transport_type == "sse"
+    assert c.target.transport.entry_tool == "ask"
+    assert c.target.transport.prompt_argument == "query"
+    assert c.target.transport.init_timeout_ms == 5000
+
+
+def test_transport_mcp_requires_url() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "mcp"}))
+
+
+def test_transport_mcp_transport_type_literal_enforced() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "mcp",
+                    "url": "https://mcp.example.com/rpc",
+                    "transport_type": "websocket",
+                }
+            )
+        )
+
+
+def test_transport_mcp_rejects_non_positive_init_timeout() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "mcp",
+                    "url": "https://mcp.example.com/rpc",
+                    "init_timeout_ms": 0,
+                }
+            )
+        )
+
+
+def test_transport_mcp_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "mcp", "url": "https://mcp.example.com/rpc", "junk": 1})
+        )
+
+
+# --------------------------------------------------------------------------
+# MCP OAuth auth — parse from dict, defaults, extra="forbid", SecretRef
+# --------------------------------------------------------------------------
+
+
+def test_auth_mcp_oauth_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(auth={"kind": "mcp_oauth", "client_id": "${env:MCP_CID}"})
+    )
+    assert isinstance(c.target.auth, McpOAuthAuth)
+    assert c.target.auth.kind == "mcp_oauth"
+    assert c.target.auth.client_id.backend == "env"
+    assert c.target.auth.client_secret is None
+    assert c.target.auth.scopes == []
+    assert c.target.auth.resource is None
+    assert c.target.auth.token_url is None
+
+
+def test_auth_mcp_oauth_full() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            auth={
+                "kind": "mcp_oauth",
+                "client_id": "${env:MCP_CID}",
+                "client_secret": "${file:/run/mcp_cs}",
+                "scopes": ["mcp:tools", "mcp:read"],
+                "resource": "https://mcp.example.com/rpc",
+                "token_url": "https://auth.example.com/oauth/token",
+            }
+        )
+    )
+    assert isinstance(c.target.auth, McpOAuthAuth)
+    assert c.target.auth.client_secret is not None
+    assert c.target.auth.client_secret.backend == "file"
+    assert c.target.auth.scopes == ["mcp:tools", "mcp:read"]
+    assert c.target.auth.resource == "https://mcp.example.com/rpc"
+    assert c.target.auth.token_url is not None
+    assert str(c.target.auth.token_url) == "https://auth.example.com/oauth/token"
+
+
+def test_auth_mcp_oauth_requires_client_id() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(auth={"kind": "mcp_oauth"}))
+
+
+def test_auth_mcp_oauth_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "mcp_oauth", "client_id": "${env:K}", "scope": "typo"})
+        )
+
+
+def test_mcp_oauth_client_id_rejects_raw_literal() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(auth={"kind": "mcp_oauth", "client_id": _RAW}))
+
+
+def test_mcp_oauth_client_secret_rejects_raw_literal() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(auth={"kind": "mcp_oauth", "client_id": "${env:CID}", "client_secret": _RAW})
+        )
 
 
 # --------------------------------------------------------------------------

@@ -557,3 +557,128 @@ def test_wizard_prod_requires_authorization_ref(tmp_path: Path) -> None:
 
     with pytest.raises(Exception, match="authorization_ref"):
         build_contract_dict(WizardDefaults(name="p", environment="prod"))
+
+
+# ---------------------------------------------------------------------------
+# Stage 6 -- MCP discovery feeds the capability-stage tool reconciliation
+# ---------------------------------------------------------------------------
+
+
+MCP_URL = "https://mcp.example.com/rpc"
+
+
+def _mcp_rpc_side_effect() -> list[httpx.Response]:
+    """initialize + tools/list + tools/call for the benign probe round-trip.
+
+    The MCP transport runs ``initialize`` then ``tools/list`` (discovering
+    ``search`` + ``send_email``) then ``tools/call`` against the entry tool; the
+    probe's reply text comes from the tools/call ``content``.
+    """
+    return [
+        httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}},
+            headers={"Mcp-Session-Id": "sess-1"},
+        ),
+        httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {"tools": [{"name": "search"}, {"name": "send_email"}]},
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {"content": [{"type": "text", "text": "I am the MCP demo."}]},
+            },
+        ),
+    ]
+
+
+_MCP_DISCOVERY_OK = """
+version: 1
+target:
+  name: mcp-demo
+  environment: staging
+  transport:
+    kind: mcp
+    url: https://mcp.example.com/rpc
+    entry_tool: search
+  response:
+    output_path: $.output.text
+  session:
+    mode: stateless
+roe:
+  data_egress:
+    allow_external: true
+  tools:
+    allowlist: [search]
+    blocklist: [send_email]
+"""
+
+
+@respx.mock
+async def test_preflight_mcp_capability_validates_against_discovered_tools(
+    tmp_path: Path,
+) -> None:
+    respx.post(MCP_URL).mock(side_effect=_mcp_rpc_side_effect())
+    path = _write(tmp_path, _MCP_DISCOVERY_OK)
+
+    report = await run_preflight(path)
+
+    assert report.ok is True, [s.detail for s in report.stages if not s.ok]
+    cap = _stage(report, "capability-report")
+    assert cap.ok is True  # type: ignore[attr-defined]
+    # describe() reports an MCP transport supporting tools.
+    assert "transport 'mcp'" in cap.detail  # type: ignore[attr-defined]
+    assert "tools=yes" in cap.detail  # type: ignore[attr-defined]
+    # The two tools discovered live via tools/list are surfaced.
+    assert "2 discovered tool(s)" in cap.detail  # type: ignore[attr-defined]
+    # The RoE allowlist (search) + blocklist (send_email) are both a subset of
+    # the discovered set, so reconciliation passes.
+    assert "subset" in cap.detail  # type: ignore[attr-defined]
+
+
+_MCP_DISCOVERY_DANGLING = """
+version: 1
+target:
+  name: mcp-demo
+  environment: staging
+  transport:
+    kind: mcp
+    url: https://mcp.example.com/rpc
+    entry_tool: search
+  response:
+    output_path: $.output.text
+  session:
+    mode: stateless
+roe:
+  data_egress:
+    allow_external: true
+  tools:
+    blocklist: [tool_that_does_not_exist]
+"""
+
+
+@respx.mock
+async def test_preflight_mcp_capability_dangling_against_discovered_fails(
+    tmp_path: Path,
+) -> None:
+    # The RoE blocklist names a tool the server does NOT advertise → because the
+    # MCP transport discovered a real tool set, this is now an enforceable
+    # dangling reference (EXIT_CONFIG), not a silently-ignored ref.
+    respx.post(MCP_URL).mock(side_effect=_mcp_rpc_side_effect())
+    path = _write(tmp_path, _MCP_DISCOVERY_DANGLING)
+
+    report = await run_preflight(path)
+
+    assert report.ok is False
+    failure = report.first_failure
+    assert failure is not None
+    assert failure.name == "capability-report"
+    assert failure.exit_code == EXIT_CONFIG
+    assert "tool_that_does_not_exist" in failure.detail

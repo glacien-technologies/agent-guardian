@@ -530,23 +530,50 @@ def _append_session_fault(
     )
 
 
+def _discovered_tools(transport: Transport) -> set[str]:
+    """Return the live tool names a transport discovered, if it does discovery.
+
+    An :class:`~agent_guardian.transports.mcp.McpTransport` enumerates the
+    server's tools via ``tools/list`` during the benign probe (stage 3) and
+    caches the names; we read that cache off its
+    :attr:`~agent_guardian.transports.mcp.McpTransport.discovered_tools`
+    property (a no-I/O read, safe after the transport has been closed). Any other
+    transport reports no discovered tools — they have no live enumeration surface
+    — so the RoE reconciliation falls back to the contract's declared
+    ``expected`` set exactly as before.
+    """
+    names = getattr(transport, "discovered_tools", ())
+    if isinstance(names, tuple | list | set):
+        return {name for name in names if isinstance(name, str)}
+    return set()
+
+
 def _stage_capability(contract: Contract, transport: Transport, report: PreflightReport) -> None:
     """Stage 6 — read :meth:`Transport.describe` + reconcile the RoE tool lists.
 
     :meth:`Transport.describe` returns a static
     :class:`~agent_guardian.transports.base.CapabilityReport` (kind, streaming,
     tool support, session modes, auth scheme) without sending any traffic — we
-    prefer it over inferring capabilities from a live round-trip. The *expected*
-    tool set is still the contract's ``target.tools.expected`` (no transport does
-    live tool enumeration yet); a RoE allow/block entry naming a tool outside
-    that expected set is a dangling reference and a config error. When the
-    contract declares no expected tools we note the transport's discovered
-    capability rather than failing (the operator may legitimately block a tool
-    they have not enumerated).
+    prefer it over inferring capabilities from a live round-trip.
+
+    The *validation* set a RoE allow/block reference must be a subset of is the
+    union of the contract's declared ``target.tools.expected`` **and** any tools
+    the transport enumerated live. An MCP transport runs ``tools/list`` during
+    the stage-3 probe, so by the time this stage runs it has a real discovered
+    set (read via :func:`_discovered_tools`); an HTTP / cloud transport
+    contributes nothing there, so the validation set is just ``expected`` exactly
+    as before. A RoE allow/block entry naming a tool outside the validation set
+    is a dangling reference and a config error. When neither source names any
+    tool we note the transport's discovered capability rather than failing (the
+    operator may legitimately block a tool they have not enumerated).
     """
     capability: CapabilityReport = transport.describe()
     tools = contract.target.tools
     expected = {t.name for t in tools.expected} if tools else set()
+    discovered = _discovered_tools(transport)
+    # Either source is authoritative: a RoE ref naming a declared-expected OR a
+    # live-discovered tool is valid; anything outside both is dangling.
+    validation_set = expected | discovered
     roe_tools = contract.roe.tools
     allowlist = set(roe_tools.allowlist or []) if roe_tools else set()
     blocklist = set(roe_tools.blocklist or []) if roe_tools else set()
@@ -557,8 +584,10 @@ def _stage_capability(contract: Contract, transport: Transport, report: Prefligh
         f"streaming={'yes' if capability.streaming else 'no'}, "
         f"session_modes={list(capability.session_modes)})"
     )
+    if discovered:
+        cap_note += f"; {len(discovered)} discovered tool(s)"
 
-    if not expected:
+    if not validation_set:
         note = f"{cap_note}; no declared expected tools"
         if allowlist or blocklist:
             note += (
@@ -568,14 +597,14 @@ def _stage_capability(contract: Contract, transport: Transport, report: Prefligh
         report.stages.append(StageResult(name="capability-report", ok=True, detail=note))
         return
 
-    dangling = sorted((allowlist | blocklist) - expected)
+    dangling = sorted((allowlist | blocklist) - validation_set)
     if dangling:
         report.stages.append(
             StageResult(
                 name="capability-report",
                 ok=False,
                 detail=f"RoE references tool(s) {dangling} not in the expected set "
-                f"{sorted(expected)}.",
+                f"{sorted(validation_set)}.",
                 remediation="Add the tool(s) to target.tools.expected or remove the "
                 "dangling RoE allow/block reference.",
                 exit_code=_EXIT_CONFIG,
@@ -587,7 +616,7 @@ def _stage_capability(contract: Contract, transport: Transport, report: Prefligh
         StageResult(
             name="capability-report",
             ok=True,
-            detail=f"{cap_note}; {len(expected)} expected tool(s); "
+            detail=f"{cap_note}; {len(validation_set)} expected tool(s); "
             "RoE allow/block lists are a subset.",
         )
     )
