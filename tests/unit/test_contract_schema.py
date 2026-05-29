@@ -16,10 +16,12 @@ from agent_guardian.contract.schema import (
     AzureFoundryAgentTransport,
     BearerAuth,
     BedrockAgentTransport,
+    BrowserTransport,
     Budgets,
     Contract,
     GcpAdcAuth,
     GcpSaJsonAuth,
+    GrpcTransport,
     HmacAuth,
     HttpTransport,
     IdSend,
@@ -33,12 +35,15 @@ from agent_guardian.contract.schema import (
     Request,
     Response,
     Retry,
+    SdkTransport,
     Session,
     Stream,
+    SubprocessTransport,
     Target,
     Tls,
     Tools,
     VertexAgentTransport,
+    WebSocketTransport,
 )
 from agent_guardian.contract.secrets import SecretRef
 
@@ -201,7 +206,7 @@ def test_missing_auth_discriminator_rejected() -> None:
 
 def test_unknown_transport_kind_rejected() -> None:
     with pytest.raises(ValidationError):
-        Contract.model_validate(_base_data(transport={"kind": "grpc", "url": "https://x.example"}))
+        Contract.model_validate(_base_data(transport={"kind": "carrier_pigeon", "url": "x"}))
 
 
 def test_missing_transport_discriminator_rejected() -> None:
@@ -550,6 +555,317 @@ def test_transport_mcp_extra_field_forbidden() -> None:
         Contract.model_validate(
             _base_data(transport={"kind": "mcp", "url": "https://mcp.example.com/rpc", "junk": 1})
         )
+
+
+# --------------------------------------------------------------------------
+# Long-tail transports — websocket / grpc / sdk / subprocess / browser
+# parse from dict, defaults, explicit values, extra="forbid"
+# --------------------------------------------------------------------------
+
+
+def test_transport_websocket_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(transport={"kind": "websocket", "url": "wss://chat.example.com/ws"})
+    )
+    assert isinstance(c.target.transport, WebSocketTransport)
+    assert c.target.transport.kind == "websocket"
+    assert str(c.target.transport.url) == "wss://chat.example.com/ws"
+    assert c.target.transport.send_template == '{"input": "{{ prompt }}"}'
+    assert c.target.transport.output_path == "$.output"
+    assert c.target.transport.subprotocol is None
+    assert c.target.transport.open_timeout_ms == 30000
+
+
+def test_transport_websocket_explicit_values() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "websocket",
+                "url": "ws://localhost:8080/socket",
+                "send_template": '{"q": "{{ prompt }}"}',
+                "output_path": "$.data.reply",
+                "subprotocol": "graphql-ws",
+                "open_timeout_ms": 5000,
+            }
+        )
+    )
+    assert isinstance(c.target.transport, WebSocketTransport)
+    assert c.target.transport.subprotocol == "graphql-ws"
+    assert c.target.transport.output_path == "$.data.reply"
+    assert c.target.transport.open_timeout_ms == 5000
+
+
+@pytest.mark.parametrize("url", ["ws://x.example/s", "wss://x.example/s"])
+def test_transport_websocket_accepts_ws_and_wss(url: str) -> None:
+    c = Contract.model_validate(_base_data(transport={"kind": "websocket", "url": url}))
+    assert isinstance(c.target.transport, WebSocketTransport)
+    assert str(c.target.transport.url) == url
+
+
+def test_transport_websocket_requires_url() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "websocket"}))
+
+
+def test_transport_websocket_rejects_non_positive_open_timeout() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={"kind": "websocket", "url": "wss://x.example/ws", "open_timeout_ms": 0}
+            )
+        )
+
+
+def test_transport_websocket_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "websocket", "url": "wss://x.example/ws", "junk": 1})
+        )
+
+
+def test_transport_grpc_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "grpc",
+                "target": "agent.example.com:443",
+                "service_method": "pkg.Service/Ask",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, GrpcTransport)
+    assert c.target.transport.kind == "grpc"
+    assert c.target.transport.target == "agent.example.com:443"
+    assert c.target.transport.service_method == "pkg.Service/Ask"
+    assert c.target.transport.use_tls is True
+    assert c.target.transport.output_field == "text"
+
+
+def test_transport_grpc_explicit_values() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "grpc",
+                "target": "localhost:50051",
+                "service_method": "chat.Chat/Send",
+                "use_tls": False,
+                "output_field": "reply",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, GrpcTransport)
+    assert c.target.transport.use_tls is False
+    assert c.target.transport.output_field == "reply"
+
+
+def test_transport_grpc_requires_target_and_method() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "grpc", "target": "host:443"}))
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "grpc", "service_method": "pkg.S/M"}))
+
+
+def test_transport_grpc_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "grpc",
+                    "target": "host:443",
+                    "service_method": "pkg.S/M",
+                    "junk": 1,
+                }
+            )
+        )
+
+
+def test_transport_sdk_minimal() -> None:
+    c = Contract.model_validate(
+        _base_data(transport={"kind": "sdk", "entrypoint": "my_agent.app:run"})
+    )
+    assert isinstance(c.target.transport, SdkTransport)
+    assert c.target.transport.kind == "sdk"
+    assert c.target.transport.entrypoint == "my_agent.app:run"
+
+
+def test_transport_sdk_requires_entrypoint() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "sdk"}))
+
+
+def test_transport_sdk_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "sdk", "entrypoint": "m:f", "junk": 1})
+        )
+
+
+def test_transport_subprocess_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(transport={"kind": "subprocess", "command": ["my-agent", "--chat"]})
+    )
+    assert isinstance(c.target.transport, SubprocessTransport)
+    assert c.target.transport.kind == "subprocess"
+    assert c.target.transport.command == ["my-agent", "--chat"]
+    assert c.target.transport.prompt_mode == "stdin"
+    assert c.target.transport.output_mode == "stdout_text"
+    assert c.target.transport.output_path is None
+    assert c.target.transport.cwd is None
+    assert c.target.transport.timeout_ms == 60000
+
+
+def test_transport_subprocess_explicit_values() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "subprocess",
+                "command": ["python", "agent.py"],
+                "prompt_mode": "arg",
+                "output_mode": "stdout_json",
+                "output_path": "$.reply",
+                "cwd": "/srv/agent",
+                "timeout_ms": 15000,
+            }
+        )
+    )
+    assert isinstance(c.target.transport, SubprocessTransport)
+    assert c.target.transport.prompt_mode == "arg"
+    assert c.target.transport.output_mode == "stdout_json"
+    assert c.target.transport.output_path == "$.reply"
+    assert c.target.transport.cwd == "/srv/agent"
+    assert c.target.transport.timeout_ms == 15000
+
+
+def test_transport_subprocess_requires_non_empty_command() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "subprocess"}))
+    with pytest.raises(ValidationError):
+        Contract.model_validate(_base_data(transport={"kind": "subprocess", "command": []}))
+
+
+def test_transport_subprocess_rejects_non_positive_timeout() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "subprocess", "command": ["a"], "timeout_ms": 0})
+        )
+
+
+def test_transport_subprocess_prompt_mode_literal_enforced() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "subprocess", "command": ["a"], "prompt_mode": "env"})
+        )
+
+
+def test_transport_subprocess_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(transport={"kind": "subprocess", "command": ["a"], "junk": 1})
+        )
+
+
+def test_transport_browser_minimal_defaults() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "browser",
+                "url": "https://chat.example.com",
+                "input_selector": "#prompt",
+                "output_selector": ".reply",
+            }
+        )
+    )
+    assert isinstance(c.target.transport, BrowserTransport)
+    assert c.target.transport.kind == "browser"
+    assert c.target.transport.input_selector == "#prompt"
+    assert c.target.transport.output_selector == ".reply"
+    assert c.target.transport.submit_selector is None
+    assert c.target.transport.headless is True
+    assert c.target.transport.nav_timeout_ms == 30000
+
+
+def test_transport_browser_explicit_values() -> None:
+    c = Contract.model_validate(
+        _base_data(
+            transport={
+                "kind": "browser",
+                "url": "https://chat.example.com",
+                "input_selector": "#prompt",
+                "submit_selector": "button[type=submit]",
+                "output_selector": ".reply",
+                "headless": False,
+                "nav_timeout_ms": 10000,
+            }
+        )
+    )
+    assert isinstance(c.target.transport, BrowserTransport)
+    assert c.target.transport.submit_selector == "button[type=submit]"
+    assert c.target.transport.headless is False
+    assert c.target.transport.nav_timeout_ms == 10000
+
+
+def test_transport_browser_requires_selectors() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "browser",
+                    "url": "https://x.example",
+                    "input_selector": "#p",
+                }
+            )
+        )
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "browser",
+                    "url": "https://x.example",
+                    "output_selector": ".r",
+                }
+            )
+        )
+
+
+def test_transport_browser_rejects_non_positive_nav_timeout() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "browser",
+                    "url": "https://x.example",
+                    "input_selector": "#p",
+                    "output_selector": ".r",
+                    "nav_timeout_ms": 0,
+                }
+            )
+        )
+
+
+def test_transport_browser_extra_field_forbidden() -> None:
+    with pytest.raises(ValidationError):
+        Contract.model_validate(
+            _base_data(
+                transport={
+                    "kind": "browser",
+                    "url": "https://x.example",
+                    "input_selector": "#p",
+                    "output_selector": ".r",
+                    "junk": 1,
+                }
+            )
+        )
+
+
+def test_union_still_resolves_http_and_mcp_after_long_tail_added() -> None:
+    http = Contract.model_validate(
+        _base_data(transport={"kind": "http", "url": "https://api.example.com/chat"})
+    )
+    assert isinstance(http.target.transport, HttpTransport)
+    mcp = Contract.model_validate(
+        _base_data(transport={"kind": "mcp", "url": "https://mcp.example.com/rpc"})
+    )
+    assert isinstance(mcp.target.transport, McpTransport)
 
 
 # --------------------------------------------------------------------------

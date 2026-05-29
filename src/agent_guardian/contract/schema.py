@@ -56,12 +56,14 @@ __all__ = [
     "AzureFoundryAgentTransport",
     "BearerAuth",
     "BedrockAgentTransport",
+    "BrowserTransport",
     "Budgets",
     "Contract",
     "DataEgress",
     "Environment_",
     "GcpAdcAuth",
     "GcpSaJsonAuth",
+    "GrpcTransport",
     "HmacAuth",
     "HttpTransport",
     "IdSend",
@@ -82,14 +84,17 @@ __all__ = [
     "Retry",
     "RoE",
     "RoeTools",
+    "SdkTransport",
     "Session",
     "Stream",
+    "SubprocessTransport",
     "Target",
     "Tls",
     "ToolRef",
     "Tools",
     "Transport",
     "VertexAgentTransport",
+    "WebSocketTransport",
 ]
 
 CURRENT_CONTRACT_VERSION = 1
@@ -435,10 +440,102 @@ class McpTransport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+class WebSocketTransport(BaseModel):
+    """A WebSocket (``ws://`` / ``wss://``) endpoint under test.
+
+    The prompt is rendered into ``send_template`` (a Jinja-ish payload, validated
+    elsewhere) and pushed over the socket; the reply is extracted from the
+    received frame(s) via the ``output_path`` JSONPath. ``subprotocol`` is the
+    optional ``Sec-WebSocket-Protocol`` value to negotiate at handshake.
+    """
+
+    kind: Literal["websocket"] = "websocket"
+    url: AnyUrl
+    send_template: str = '{"input": "{{ prompt }}"}'
+    output_path: str = "$.output"
+    subprotocol: str | None = None
+    open_timeout_ms: int = Field(default=30000, gt=0)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class GrpcTransport(BaseModel):
+    """A gRPC endpoint under test.
+
+    ``service_method`` is the fully-qualified ``pkg.Service/Method`` to invoke on
+    ``target`` (``host:port``); the prompt is mapped onto the request message and
+    the reply is read from ``output_field`` of the response message.
+    """
+
+    kind: Literal["grpc"] = "grpc"
+    target: str
+    service_method: str
+    use_tls: bool = True
+    output_field: str = "text"
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class SdkTransport(BaseModel):
+    """An in-process SDK callable under test.
+
+    ``entrypoint`` is a dotted ``module:callable`` reference resolving to a
+    callable with signature ``(prompt, *, session=None) -> str | awaitable``
+    (sync or async). Mirrors the resolution used by the legacy code adapter.
+    """
+
+    kind: Literal["sdk"] = "sdk"
+    entrypoint: str
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class SubprocessTransport(BaseModel):
+    """A subprocess (CLI / local binary) under test.
+
+    The agent is invoked as ``command`` (argv) with the prompt delivered either
+    on stdin (``prompt_mode="stdin"``) or appended as a final argv element
+    (``prompt_mode="arg"``). The reply is read from stdout as raw text
+    (``output_mode="stdout_text"``) or parsed as JSON and walked with
+    ``output_path`` (``output_mode="stdout_json"``).
+    """
+
+    kind: Literal["subprocess"] = "subprocess"
+    command: list[str] = Field(min_length=1)
+    prompt_mode: Literal["stdin", "arg"] = "stdin"
+    output_mode: Literal["stdout_text", "stdout_json"] = "stdout_text"
+    output_path: str | None = None
+    cwd: str | None = None
+    timeout_ms: int = Field(default=60000, gt=0)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class BrowserTransport(BaseModel):
+    """A browser-driven (Playwright) web UI under test.
+
+    Drives a headless (or headed) browser to ``url``, types the prompt into
+    ``input_selector``, optionally clicks ``submit_selector`` (otherwise submits
+    via Enter), and reads the reply text from ``output_selector``.
+    """
+
+    kind: Literal["browser"] = "browser"
+    url: AnyUrl
+    input_selector: str
+    submit_selector: str | None = None
+    output_selector: str
+    headless: bool = True
+    nav_timeout_ms: int = Field(default=30000, gt=0)
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 # A discriminated union keyed on ``kind``. ``http`` is the generic primitive;
-# the cloud-provider and MCP kinds are first-class so a later factory can
-# dispatch on ``kind`` without a lookup table. The discriminator + Annotated
-# shape keeps additional transport kinds purely additive.
+# the cloud-provider and MCP kinds are first-class, and the long-tail transports
+# (websocket, grpc, sdk, subprocess, browser) cover the remaining surfaces, so a
+# later factory can dispatch on ``kind`` without a lookup table. The
+# discriminator + Annotated shape keeps additional transport kinds purely
+# additive.
 Transport = Annotated[
     HttpTransport
     | OpenAiResponsesTransport
@@ -446,7 +543,12 @@ Transport = Annotated[
     | BedrockAgentTransport
     | VertexAgentTransport
     | AzureFoundryAgentTransport
-    | McpTransport,
+    | McpTransport
+    | WebSocketTransport
+    | GrpcTransport
+    | SdkTransport
+    | SubprocessTransport
+    | BrowserTransport,
     Field(discriminator="kind"),
 ]
 

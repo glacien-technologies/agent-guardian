@@ -34,9 +34,11 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from agent_guardian.core.ratelimit import AsyncTokenBucket
+from agent_guardian.transports.errors import TransportErrorCategory
 
 if TYPE_CHECKING:
     from agent_guardian.contract.schema import Contract
+    from agent_guardian.transports.base import Response
 
 # Matches absolute http(s) URLs embedded anywhere in an attack payload. Used by
 # the egress gate to spot a payload that tries to ship data to an external sink.
@@ -209,6 +211,24 @@ class RoeController:
             )
         await self._bucket.acquire()
         self._request_count += 1
+
+    def observe_response(self, response: Response) -> None:
+        """Feed a target :class:`Response` into the adaptive rate-limiter.
+
+        When the response carries a :class:`~agent_guardian.transports.errors.TransportError`
+        in the :attr:`~agent_guardian.transports.errors.TransportErrorCategory.RATE_LIMIT`
+        category, the bucket is told to back off — honouring any server-supplied
+        ``retry_after`` — so the *next* :meth:`acquire` paces more conservatively.
+        Any other response (success, or a non-rate-limit fault) is a no-op, so a
+        caller can blanket-feed every response without branching.
+
+        This keeps the single call chokepoint simple: it forwards each response
+        here and the controller decides whether the pacing needs to adapt.
+        """
+        error = response.error
+        if error is None or error.category is not TransportErrorCategory.RATE_LIMIT:
+            return
+        self._bucket.observe_rate_limited(error.retry_after)
 
     def record_tool_call(self, name: str) -> bool:
         """Screen a tool invocation; return ``True`` iff it is allowed.

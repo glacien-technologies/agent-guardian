@@ -1074,20 +1074,51 @@ def init(
         "-y",
         help="Non-interactive: write a minimal valid contract from defaults/flags.",
     ),
+    from_openapi: Path | None = typer.Option(
+        None,
+        "--from-openapi",
+        help=(
+            "Pre-fill the transport / request / response from an OpenAPI 3.1 spec "
+            "(YAML or JSON) instead of probe-and-infer. The first body-bearing "
+            "operation is used unless --openapi-path/--openapi-method narrow it."
+        ),
+    ),
+    openapi_path: str | None = typer.Option(
+        None,
+        "--openapi-path",
+        help="With --from-openapi: the spec path (e.g. /v1/chat) to derive shapes from.",
+    ),
+    openapi_method: str = typer.Option(
+        "post",
+        "--openapi-method",
+        help="With --from-openapi and --openapi-path: the HTTP method of the operation.",
+    ),
 ) -> None:
     """Author a new target contract, then pre-flight it.
 
     The interactive wizard (default) walks you through the HTTP target, auth,
     response extraction, session mode, and RoE. ``--yes`` writes a minimal valid
-    contract without prompting (useful for scaffolding + CI). On success the new
-    contract is immediately run through the pre-flight so you see whether it is
-    reachable.
+    contract without prompting (useful for scaffolding + CI). ``--from-openapi``
+    pre-fills the transport / request / response from an OpenAPI 3.1 spec so the
+    wizard (or ``--yes`` path) skips probe-and-infer for those shapes. On success
+    the new contract is immediately run through the pre-flight so you see whether
+    it is reachable.
     """
     from agent_guardian.contract.preflight import run_preflight
-    from agent_guardian.contract.wizard import run_wizard
+    from agent_guardian.contract.wizard import load_openapi_shapes, run_wizard
+
+    openapi_shapes: dict[str, Any] | None = None
+    if from_openapi is not None:
+        try:
+            openapi_shapes = load_openapi_shapes(
+                from_openapi, operation_path=openapi_path, method=openapi_method
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            typer.echo(f"could not read OpenAPI spec: {type(exc).__name__}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
     try:
-        written = run_wizard(out, yes=yes)
+        written = run_wizard(out, yes=yes, openapi_shapes=openapi_shapes)
     except Exception as exc:
         typer.echo(f"could not author contract: {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc

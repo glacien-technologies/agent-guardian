@@ -55,10 +55,16 @@ from agent_guardian.contract.schema import (
     BedrockAgentTransport as ContractBedrockTransport,
 )
 from agent_guardian.contract.schema import (
+    BrowserTransport as ContractBrowserTransport,
+)
+from agent_guardian.contract.schema import (
     GcpAdcAuth as ContractGcpAdcAuth,
 )
 from agent_guardian.contract.schema import (
     GcpSaJsonAuth as ContractGcpSaJsonAuth,
+)
+from agent_guardian.contract.schema import (
+    GrpcTransport as ContractGrpcTransport,
 )
 from agent_guardian.contract.schema import (
     HmacAuth as ContractHmacAuth,
@@ -85,7 +91,16 @@ from agent_guardian.contract.schema import (
     OpenAiResponsesTransport as ContractOpenAiTransport,
 )
 from agent_guardian.contract.schema import (
+    SdkTransport as ContractSdkTransport,
+)
+from agent_guardian.contract.schema import (
+    SubprocessTransport as ContractSubprocessTransport,
+)
+from agent_guardian.contract.schema import (
     VertexAgentTransport as ContractVertexTransport,
+)
+from agent_guardian.contract.schema import (
+    WebSocketTransport as ContractWebSocketTransport,
 )
 from agent_guardian.contract.secrets import (
     SecretRef,
@@ -105,11 +120,17 @@ from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth
 from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth
 from agent_guardian.transports.azure_foundry import AzureFoundryAgentTransport
 from agent_guardian.transports.bedrock_agent import BedrockAgentTransport
+from agent_guardian.transports.browser import BrowserTransport
+from agent_guardian.transports.grpc_transport import GrpcTransport
 from agent_guardian.transports.http import HttpTransport, SessionSendIn
 from agent_guardian.transports.mcp import McpTransport
 from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
+from agent_guardian.transports.sdk import SdkTransport
 from agent_guardian.transports.session import SessionMachine, SessionMode
+from agent_guardian.transports.subprocess import SubprocessTransport
 from agent_guardian.transports.vertex_agent import VertexAgentTransport
+from agent_guardian.transports.websocket import SessionMode as WsSessionMode
+from agent_guardian.transports.websocket import WebSocketTransport
 
 if TYPE_CHECKING:
     from agent_guardian.contract.schema import Auth, Contract
@@ -312,6 +333,16 @@ _TOKEN_FETCH_AUTH = (ContractOAuth2Auth, ContractAzureEntraAuth, ContractMcpOAut
 # transport block carries no ``timeout_ms`` field.
 _DEFAULT_CLOUD_TIMEOUT_SECONDS = 60.0
 
+# The WebSocket transport only models ``stateless`` / ``client_history`` (a
+# socket carries no server-issued session id to capture/replay). A contract that
+# declares ``server_session`` for a WebSocket target degrades to a per-send
+# (stateless) socket — the swarm still inlines prior turns via the template's
+# ``conversation`` variable under ``client_history``.
+_WS_SESSION_MODE_MAP: dict[str, WsSessionMode] = {
+    "stateless": "stateless",
+    "client_history": "client_history",
+}
+
 
 def build_transport(
     contract: Contract,
@@ -335,6 +366,15 @@ def build_transport(
     * ``mcp`` → :class:`McpTransport` (JSON-RPC 2.0 over Streamable HTTP; built
       from ``url`` / ``entry_tool`` / ``prompt_argument`` / ``init_timeout_ms``,
       owning its own httpx client)
+    * ``websocket`` → :class:`WebSocketTransport` (``ws(s)://`` send-template +
+      ``output_path``; auth applied as connection headers)
+    * ``grpc`` → :class:`GrpcTransport` (generic unary-unary; auth lowered into
+      call metadata; prompt mapped through the request template)
+    * ``sdk`` → :class:`SdkTransport` (in-process ``module:callable``; **no auth**)
+    * ``subprocess`` → :class:`SubprocessTransport` (spawn-per-turn local
+      executable; **no auth**)
+    * ``browser`` → :class:`BrowserTransport` (Playwright-driven web UI; **no
+      auth** — UI/cookie-driven, not header-driven)
 
     Each cloud transport is constructed from its contract fields plus the built
     :class:`AuthProvider`; the transport graph owns whatever httpx client it
@@ -405,6 +445,58 @@ def build_transport(
             prompt_argument=transport.prompt_argument,
             auth=auth,
             timeout_seconds=transport.init_timeout_ms / 1000.0,
+        )
+    if isinstance(transport, ContractWebSocketTransport):
+        # The WebSocket transport accepts an auth provider (applied as connection
+        # headers). ``subprotocol`` is not yet plumbed through the transport's
+        # constructor; the contract's stream block (delta/done) is a later wiring.
+        return WebSocketTransport(
+            url=str(transport.url),
+            send_template=transport.send_template,
+            output_path=transport.output_path,
+            session_mode=_WS_SESSION_MODE_MAP.get(contract.target.session.mode, "stateless"),
+            auth=auth,
+            timeout_seconds=transport.open_timeout_ms / 1000.0,
+        )
+    if isinstance(transport, ContractGrpcTransport):
+        # The gRPC transport accepts an auth provider (lowered into call
+        # metadata). It uses the JSON request encoding by default, mapping the
+        # prompt through the request template and reading ``output_field``.
+        return GrpcTransport(
+            target=transport.target,
+            service_method=transport.service_method,
+            output_field=transport.output_field,
+            use_tls=transport.use_tls,
+            send_template=contract.target.request.body,
+            auth=auth,
+        )
+    if isinstance(transport, ContractSdkTransport):
+        # In-process callable: no auth (the entrypoint lives in this process).
+        return SdkTransport(transport.entrypoint)
+    if isinstance(transport, ContractSubprocessTransport):
+        # Local executable: no auth. ``output_path`` is optional in the contract
+        # but the transport wants a JSONPath when parsing JSON; fall back to its
+        # default ``$.output`` when the contract leaves it unset.
+        return SubprocessTransport(
+            transport.command,
+            prompt_mode=transport.prompt_mode,
+            output_mode=transport.output_mode,
+            output_path=transport.output_path or "$.output",
+            cwd=transport.cwd,
+            timeout_seconds=transport.timeout_ms / 1000.0,
+        )
+    if isinstance(transport, ContractBrowserTransport):
+        # Browser UI: the transport takes no auth provider (a web UI session is
+        # cookie/UI-driven, not header-driven). ``submit_with_enter`` is implied
+        # when no explicit submit selector is declared.
+        return BrowserTransport(
+            url=str(transport.url),
+            input_selector=transport.input_selector,
+            output_selector=transport.output_selector,
+            submit_selector=transport.submit_selector,
+            submit_with_enter=transport.submit_selector is None,
+            nav_timeout_ms=transport.nav_timeout_ms,
+            headless=transport.headless,
         )
 
     # The discriminated union is closed; an unrecognised member is unreachable

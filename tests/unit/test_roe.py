@@ -28,6 +28,8 @@ from agent_guardian.core.roe import (
     RoeError,
     authorization_gate,
 )
+from agent_guardian.transports.base import Response as TransportResponse
+from agent_guardian.transports.errors import TransportError, TransportErrorCategory
 
 
 def _contract(
@@ -84,6 +86,71 @@ async def test_acquire_is_rate_limited() -> None:
     elapsed = time.monotonic() - start
     assert elapsed >= (3 / 10.0) * 0.9, elapsed
     assert controller.request_count == 13
+
+
+# ---------------------------------------------------------------------------
+# observe_response — adaptive back-off feed
+# ---------------------------------------------------------------------------
+
+
+def _rate_limited_response(retry_after: float | None) -> TransportResponse:
+    return TransportResponse(
+        error=TransportError(
+            TransportErrorCategory.RATE_LIMIT,
+            "429 too many requests",
+            retry_after=retry_after,
+        )
+    )
+
+
+async def test_observe_response_feeds_bucket_on_rate_limit() -> None:
+    # A RATE_LIMIT response parks a cooldown (retry_after) on the bucket so the
+    # next acquire backs off.
+    roe = RoE(rate=Rate(max_rps=100.0))
+    controller = RoeController.from_contract(_contract(roe=roe))
+    controller.observe_response(_rate_limited_response(retry_after=0.2))
+    start = time.monotonic()
+    await controller.acquire()
+    elapsed = time.monotonic() - start
+    assert elapsed >= 0.2 * 0.9, elapsed
+
+
+async def test_observe_response_reduces_effective_rate_without_retry_after() -> None:
+    roe = RoE(rate=Rate(max_rps=10.0))
+    controller = RoeController.from_contract(_contract(roe=roe))
+    bucket = controller._bucket
+    before = bucket._effective_rate(time.monotonic())
+    controller.observe_response(_rate_limited_response(retry_after=None))
+    after = bucket._effective_rate(time.monotonic())
+    assert after < before
+    assert after == pytest.approx(before * 0.5, rel=0.01)
+
+
+async def test_observe_response_noop_on_success() -> None:
+    roe = RoE(rate=Rate(max_rps=10.0))
+    controller = RoeController.from_contract(_contract(roe=roe))
+    bucket = controller._bucket
+    before = bucket._effective_rate(time.monotonic())
+    controller.observe_response(TransportResponse(text="all good"))
+    assert bucket._effective_rate(time.monotonic()) == before
+
+
+async def test_observe_response_noop_on_non_rate_limit_error() -> None:
+    roe = RoE(rate=Rate(max_rps=10.0))
+    controller = RoeController.from_contract(_contract(roe=roe))
+    bucket = controller._bucket
+    before = bucket._effective_rate(time.monotonic())
+    other = TransportResponse(error=TransportError(TransportErrorCategory.AUTH, "401 unauthorized"))
+    controller.observe_response(other)
+    assert bucket._effective_rate(time.monotonic()) == before
+
+
+async def test_observe_response_does_not_bump_request_count() -> None:
+    # observe_response is pacing-only; it never counts as an admitted request.
+    roe = RoE(rate=Rate(max_rps=10.0))
+    controller = RoeController.from_contract(_contract(roe=roe))
+    controller.observe_response(_rate_limited_response(retry_after=None))
+    assert controller.request_count == 0
 
 
 # ---------------------------------------------------------------------------

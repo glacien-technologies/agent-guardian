@@ -248,6 +248,80 @@ async def test_call_timeout_error_raises_runtimeerror() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Adaptive rate limiting — observe_response on a RATE_LIMIT fault (Stage 4)
+# ---------------------------------------------------------------------------
+
+
+async def test_call_rate_limit_feeds_observe_response_and_adapts() -> None:
+    # A RATE_LIMIT fault still surfaces as a RuntimeError (hard signal to the
+    # agent loop), BUT the controller has been fed the response so the bucket
+    # backs off for subsequent turns. Use a real RoeController with a configured
+    # max_rps so the bucket is enabled + adaptive.
+    contract = _contract(roe=_egress_roe(rate=Rate(max_rps=10.0)))
+    roe = RoeController.from_contract(contract)
+    bucket = roe._bucket  # the enabled adaptive token bucket
+    assert bucket._rate_factor == pytest.approx(1.0)
+
+    err = TransportError(TransportErrorCategory.RATE_LIMIT, "429 too many requests")
+    transport = _StubTransport([Response(error=err)])
+    adapter = ContractTargetAdapter(transport=transport, roe=roe)
+
+    with pytest.raises(RuntimeError, match="rate_limit"):
+        await adapter.call("hammer the target")
+
+    # observe_response fired BEFORE the raise: the bucket multiplicatively
+    # reduced its effective rate (AIMD back-off) so the next acquire paces slower.
+    assert bucket._rate_factor < 1.0
+
+
+async def test_call_rate_limit_honours_retry_after_cooldown() -> None:
+    # A server-supplied retry_after parks a cooldown on the bucket so the next
+    # acquire waits at least that long. We assert the cooldown was set.
+    contract = _contract(roe=_egress_roe(rate=Rate(max_rps=10.0)))
+    roe = RoeController.from_contract(contract)
+    bucket = roe._bucket
+    assert bucket._cooldown_until == pytest.approx(0.0)
+
+    err = TransportError(TransportErrorCategory.RATE_LIMIT, "slow down", retry_after=2.5)
+    transport = _StubTransport([Response(error=err)])
+    adapter = ContractTargetAdapter(transport=transport, roe=roe)
+
+    with pytest.raises(RuntimeError, match="rate_limit"):
+        await adapter.call("hammer")
+
+    # A cooldown deadline (monotonic future time) was parked from retry_after.
+    assert bucket._cooldown_until > 0.0
+
+
+async def test_call_non_rate_limit_fault_does_not_adapt() -> None:
+    # A non-RATE_LIMIT fault is a no-op for observe_response: the bucket's
+    # effective rate is left untouched (only true 429s adapt the pacing).
+    contract = _contract(roe=_egress_roe(rate=Rate(max_rps=10.0)))
+    roe = RoeController.from_contract(contract)
+    bucket = roe._bucket
+
+    err = TransportError(TransportErrorCategory.UNREACHABLE, "connection refused")
+    transport = _StubTransport([Response(error=err)])
+    adapter = ContractTargetAdapter(transport=transport, roe=roe)
+
+    with pytest.raises(RuntimeError, match="unreachable"):
+        await adapter.call("hi")
+
+    assert bucket._rate_factor == pytest.approx(1.0)
+    assert bucket._cooldown_until == pytest.approx(0.0)
+
+
+async def test_call_rate_limit_without_roe_still_raises() -> None:
+    # No controller present → no adaptation, but the RATE_LIMIT fault still
+    # surfaces as a RuntimeError (the existing behaviour is unchanged).
+    err = TransportError(TransportErrorCategory.RATE_LIMIT, "429")
+    transport = _StubTransport([Response(error=err)])
+    adapter = ContractTargetAdapter(transport=transport)
+    with pytest.raises(RuntimeError, match="rate_limit"):
+        await adapter.call("hi")
+
+
+# ---------------------------------------------------------------------------
 # Tool-call recording + blocklist suppression
 # ---------------------------------------------------------------------------
 

@@ -196,6 +196,153 @@ def test_init_yes_writes_valid_contract(runner: CliRunner, tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
+# init --from-openapi -- pre-fill transport/request/response from a spec
+# ---------------------------------------------------------------------------
+
+
+_OPENAPI_SPEC = """
+openapi: 3.1.0
+info:
+  title: Chat API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /chat:
+    post:
+      summary: Send a chat message
+      operationId: sendChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+"""
+
+
+def _write_openapi(tmp_path: Path, body: str, name: str = "openapi.yaml") -> Path:
+    path = tmp_path / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+@respx.mock
+def test_init_from_openapi_yes_generates_valid_contract(runner: CliRunner, tmp_path: Path) -> None:
+    # The spec server URL is https://api.example.com/v1 + /chat path -> the
+    # generated transport URL is the same as our mocked endpoint, so the
+    # post-write pre-flight round-trips against the respx mock.
+    respx.post(URL).mock(return_value=httpx.Response(200, json={"output": {"text": "hi"}}))
+    spec = _write_openapi(tmp_path, _OPENAPI_SPEC)
+    out = tmp_path / "from_openapi.yaml"
+
+    result = runner.invoke(app, ["init", "--out", str(out), "--yes", "--from-openapi", str(spec)])
+
+    assert out.is_file(), result.output
+    assert "contract written to" in result.output
+
+    from agent_guardian.contract import load_contract
+
+    contract = load_contract(out)
+    # The transport URL + method came from the spec (servers[0].url + /chat).
+    assert contract.target.transport.kind == "http"
+    assert str(contract.target.transport.url) == URL
+    # The request body maps the prompt onto the spec's 'prompt' field, and the
+    # output_path points at the spec's nested response text field.
+    assert "{{ prompt }}" in contract.target.request.body
+    assert '"prompt"' in contract.target.request.body
+    assert contract.target.response.output_path == "$.output.text"
+
+
+def test_init_from_openapi_missing_spec_exits_config(runner: CliRunner, tmp_path: Path) -> None:
+    out = tmp_path / "x.yaml"
+    missing = tmp_path / "does-not-exist.yaml"
+
+    result = runner.invoke(
+        app, ["init", "--out", str(out), "--yes", "--from-openapi", str(missing)]
+    )
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "could not read OpenAPI spec" in result.output
+    assert not out.is_file()
+
+
+def test_init_from_openapi_explicit_path_and_method(runner: CliRunner, tmp_path: Path) -> None:
+    # A spec with two operations; --openapi-path/--openapi-method narrow the pick.
+    spec_body = """
+openapi: 3.1.0
+info: {title: Multi, version: 1.0.0}
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /chat:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {message: {type: string}}}
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {type: object, properties: {reply: {type: string}}}
+  /ask:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {question: {type: string}}}
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {type: object, properties: {answer: {type: string}}}
+"""
+    spec = _write_openapi(tmp_path, spec_body, name="multi.yaml")
+    out = tmp_path / "ask.yaml"
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "--out",
+            str(out),
+            "--yes",
+            "--from-openapi",
+            str(spec),
+            "--openapi-path",
+            "/ask",
+            "--openapi-method",
+            "post",
+        ],
+    )
+
+    assert out.is_file(), result.output
+    from agent_guardian.contract import load_contract
+
+    contract = load_contract(out)
+    assert str(contract.target.transport.url) == "https://api.example.com/v1/ask"
+    assert '"question"' in contract.target.request.body
+    assert contract.target.response.output_path == "$.answer"
+
+
+# ---------------------------------------------------------------------------
 # contract sub-app
 # ---------------------------------------------------------------------------
 

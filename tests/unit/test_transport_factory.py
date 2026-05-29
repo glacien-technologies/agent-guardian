@@ -8,7 +8,9 @@ each resolving its :class:`SecretRef` against a monkeypatched env / file),
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import httpx
@@ -44,6 +46,12 @@ from agent_guardian.contract.schema import (
     BedrockAgentTransport as ContractBedrockTransport,
 )
 from agent_guardian.contract.schema import (
+    BrowserTransport as ContractBrowserTransport,
+)
+from agent_guardian.contract.schema import (
+    GrpcTransport as ContractGrpcTransport,
+)
+from agent_guardian.contract.schema import (
     HttpTransport as ContractHttpTransport,
 )
 from agent_guardian.contract.schema import (
@@ -56,7 +64,16 @@ from agent_guardian.contract.schema import (
     OpenAiResponsesTransport as ContractOpenAiTransport,
 )
 from agent_guardian.contract.schema import (
+    SdkTransport as ContractSdkTransport,
+)
+from agent_guardian.contract.schema import (
+    SubprocessTransport as ContractSubprocessTransport,
+)
+from agent_guardian.contract.schema import (
     VertexAgentTransport as ContractVertexTransport,
+)
+from agent_guardian.contract.schema import (
+    WebSocketTransport as ContractWebSocketTransport,
 )
 from agent_guardian.contract.secrets import SecretRef, SecretResolver
 from agent_guardian.transports.anthropic_messages import AnthropicMessagesTransport
@@ -73,17 +90,23 @@ from agent_guardian.transports.auth.mtls import MutualTlsAuth
 from agent_guardian.transports.auth.oauth2 import OAuth2ClientCredentialsAuth as ProviderOAuth2
 from agent_guardian.transports.auth.sigv4 import AwsSigV4Auth as ProviderAwsSigV4Auth
 from agent_guardian.transports.azure_foundry import AzureFoundryAgentTransport
+from agent_guardian.transports.base import Request as TransportRequest
 from agent_guardian.transports.bedrock_agent import BedrockAgentTransport
+from agent_guardian.transports.browser import BrowserTransport
 from agent_guardian.transports.factory import (
     build_auth_provider,
     build_session_machine,
     build_transport,
 )
+from agent_guardian.transports.grpc_transport import GrpcTransport
 from agent_guardian.transports.http import HttpTransport
 from agent_guardian.transports.mcp import McpTransport
 from agent_guardian.transports.openai_responses import OpenAiResponsesTransport
+from agent_guardian.transports.sdk import SdkTransport
 from agent_guardian.transports.session import SessionMode
+from agent_guardian.transports.subprocess import SubprocessTransport
 from agent_guardian.transports.vertex_agent import VertexAgentTransport
+from agent_guardian.transports.websocket import WebSocketTransport
 
 URL = "https://api.example.com/v1/chat"
 
@@ -790,3 +813,224 @@ def test_build_auth_provider_mcp_oauth_without_client_raises(
     )
     with pytest.raises(ValueError, match="mcp_oauth"):
         build_auth_provider(contract)
+
+
+# ---------------------------------------------------------------------------
+# build_transport — Stage 4 long-tail transports (ws/grpc/sdk/subprocess/browser)
+# ---------------------------------------------------------------------------
+#
+# ``grpcio`` and ``playwright`` are not installed in the test venv (their
+# transports fail-fast on import at construction), so we inject a minimal fake
+# module into ``sys.modules`` before building the factory arm. ``websockets`` IS
+# installed, so its arm builds against the real package.
+
+
+def _install_fake_grpc(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject a fake ``grpc`` module sufficient for GrpcTransport construction."""
+    grpc_mod = ModuleType("grpc")
+    grpc_mod.StatusCode = SimpleNamespace()  # type: ignore[attr-defined]
+    grpc_mod.RpcError = type("RpcError", (Exception,), {})  # type: ignore[attr-defined]
+    grpc_mod.ssl_channel_credentials = lambda: "fake-creds"  # type: ignore[attr-defined]
+    grpc_mod.aio = SimpleNamespace(  # type: ignore[attr-defined]
+        AioRpcError=type("AioRpcError", (Exception,), {}),
+        secure_channel=lambda target, creds: SimpleNamespace(),
+        insecure_channel=lambda target: SimpleNamespace(),
+    )
+    monkeypatch.setitem(sys.modules, "grpc", grpc_mod)
+
+
+def _install_fake_playwright(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject a fake ``playwright.async_api`` sufficient for construction."""
+    pkg = ModuleType("playwright")
+    async_api = ModuleType("playwright.async_api")
+    async_api.async_playwright = lambda: SimpleNamespace()  # type: ignore[attr-defined]
+    async_api.Error = type("Error", (Exception,), {})  # type: ignore[attr-defined]
+    async_api.TimeoutError = type("TimeoutError", (Exception,), {})  # type: ignore[attr-defined]
+    pkg.async_api = async_api  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "playwright", pkg)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
+
+
+async def test_build_transport_websocket_maps_fields() -> None:
+    contract = _cloud_contract(
+        transport=ContractWebSocketTransport.model_validate(
+            {
+                "url": "wss://chat.example.com/ws",
+                "send_template": '{"q": "{{ prompt }}"}',
+                "output_path": "$.reply.text",
+                "open_timeout_ms": 12000,
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, WebSocketTransport)
+    assert transport.url == "wss://chat.example.com/ws"
+    assert transport._send_template == '{"q": "{{ prompt }}"}'
+    assert transport._output_path == "$.reply.text"
+    # open_timeout_ms (12000) → timeout_seconds (12.0); default stateless mode.
+    assert transport._timeout_seconds == pytest.approx(12.0)
+    assert transport._session_mode == "stateless"
+    await transport.aclose()
+
+
+async def test_build_transport_websocket_client_history_mode() -> None:
+    contract = _cloud_contract(
+        transport=ContractWebSocketTransport.model_validate({"url": "wss://x.example.com/ws"}),
+    )
+    object.__setattr__(contract.target.session, "mode", "client_history")
+    transport = build_transport(contract)
+    assert isinstance(transport, WebSocketTransport)
+    assert transport._session_mode == "client_history"
+    await transport.aclose()
+
+
+async def test_build_transport_websocket_with_auth_applies_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WS_TOK", "ws-bearer-tok")
+    contract = _cloud_contract(
+        transport=ContractWebSocketTransport.model_validate({"url": "wss://x.example.com/ws"}),
+        auth=BearerAuth(token=SecretRef("${env:WS_TOK}")),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, WebSocketTransport)
+    headers = await transport._build_headers()
+    assert headers["Authorization"] == "Bearer ws-bearer-tok"
+    await transport.aclose()
+
+
+async def test_build_transport_grpc_maps_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_grpc(monkeypatch)
+    contract = _cloud_contract(
+        transport=ContractGrpcTransport.model_validate(
+            {
+                "target": "agent.example.com:443",
+                "service_method": "/pkg.Chat/Send",
+                "output_field": "$.reply",
+                "use_tls": True,
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, GrpcTransport)
+    assert transport.target == "agent.example.com:443"
+    assert transport._service_method == "/pkg.Chat/Send"
+    assert transport._output_field == "$.reply"
+    assert transport._use_tls is True
+    await transport.aclose()
+
+
+async def test_build_transport_grpc_with_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_grpc(monkeypatch)
+    monkeypatch.setenv("GRPC_TOK", "grpc-tok")
+    contract = _cloud_contract(
+        transport=ContractGrpcTransport.model_validate(
+            {"target": "localhost:50051", "service_method": "/pkg.Svc/Method", "use_tls": False}
+        ),
+        auth=BearerAuth(token=SecretRef("${env:GRPC_TOK}")),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, GrpcTransport)
+    # Auth is lowered into call metadata; the provider is the bearer provider.
+    metadata = await transport._build_metadata(TransportRequest(prompt="hi"))
+    assert ("authorization", "Bearer grpc-tok") in metadata
+    await transport.aclose()
+
+
+def test_build_transport_sdk_resolves_entrypoint() -> None:
+    # The factory resolves the dotted entrypoint via SdkTransport (same logic as
+    # CodeAdapter). Point it at a real callable in the stdlib so resolution works.
+    contract = _cloud_contract(
+        transport=ContractSdkTransport.model_validate({"entrypoint": "os.path:basename"}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, SdkTransport)
+    assert transport.ref == "os.path:basename"
+
+
+async def test_build_transport_sdk_takes_no_auth_and_invokes() -> None:
+    contract = _cloud_contract(
+        transport=ContractSdkTransport.model_validate({"entrypoint": "os.path:basename"}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, SdkTransport)
+    # The wrapped callable runs in-process; no auth provider is involved.
+    response = await transport.send(TransportRequest(prompt="/tmp/agent.log"))
+    assert response.text == "agent.log"
+
+
+def test_build_transport_subprocess_maps_fields() -> None:
+    contract = _cloud_contract(
+        transport=ContractSubprocessTransport.model_validate(
+            {
+                "command": ["python", "agent.py"],
+                "prompt_mode": "arg",
+                "output_mode": "stdout_json",
+                "output_path": "$.reply",
+                "timeout_ms": 45000,
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, SubprocessTransport)
+    assert transport._command == ["python", "agent.py"]
+    assert transport._prompt_mode == "arg"
+    assert transport._output_mode == "stdout_json"
+    assert transport._output_path == "$.reply"
+    # timeout_ms (45000) → timeout_seconds (45.0).
+    assert transport._timeout_seconds == pytest.approx(45.0)
+
+
+def test_build_transport_subprocess_default_output_path_when_unset() -> None:
+    # The contract leaves output_path unset (None); the factory falls back to the
+    # transport's default JSONPath so stdout_json parsing still has a path.
+    contract = _cloud_contract(
+        transport=ContractSubprocessTransport.model_validate({"command": ["./agent"]}),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, SubprocessTransport)
+    assert transport._output_path == "$.output"
+
+
+def test_build_transport_browser_maps_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_playwright(monkeypatch)
+    contract = _cloud_contract(
+        transport=ContractBrowserTransport.model_validate(
+            {
+                "url": "https://chat.example.com/app",
+                "input_selector": "#prompt",
+                "submit_selector": "#send",
+                "output_selector": "#reply",
+                "nav_timeout_ms": 20000,
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, BrowserTransport)
+    assert transport.url == "https://chat.example.com/app"
+    assert transport._input_selector == "#prompt"
+    assert transport._submit_selector == "#send"
+    assert transport._output_selector == "#reply"
+    assert transport._submit_with_enter is False
+    assert transport._nav_timeout_ms == 20000
+
+
+def test_build_transport_browser_submit_with_enter_when_no_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No submit_selector → the factory enables submit_with_enter so construction
+    # succeeds (the transport requires one of the two).
+    _install_fake_playwright(monkeypatch)
+    contract = _cloud_contract(
+        transport=ContractBrowserTransport.model_validate(
+            {
+                "url": "https://chat.example.com",
+                "input_selector": "#prompt",
+                "output_selector": "#reply",
+            }
+        ),
+    )
+    transport = build_transport(contract)
+    assert isinstance(transport, BrowserTransport)
+    assert transport._submit_selector is None
+    assert transport._submit_with_enter is True

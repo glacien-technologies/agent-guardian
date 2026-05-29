@@ -117,3 +117,109 @@ async def test_refill_noop_when_clock_does_not_advance(
     await bucket.acquire()
     # Both initial-burst tokens consumed; clock never advanced so no refill.
     assert bucket.capacity == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Adaptive back-off: observe_rate_limited()
+# ---------------------------------------------------------------------------
+
+
+class _FakeClock:
+    """A manually advanced monotonic clock for deterministic adaptive tests."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, dt: float) -> None:
+        self.now += dt
+
+
+async def test_observe_on_disabled_bucket_is_noop() -> None:
+    bucket = AsyncTokenBucket(None)
+    bucket.observe_rate_limited(5.0)  # must not raise / change anything
+    start = time.monotonic()
+    await bucket.acquire()
+    assert time.monotonic() - start < 0.05
+
+
+async def test_cooldown_honours_retry_after() -> None:
+    # A retry_after parks a cooldown: the next acquire must wait ~that long even
+    # though the bucket is otherwise full.
+    bucket = AsyncTokenBucket(100.0, capacity=5.0)
+    bucket.observe_rate_limited(retry_after=0.2)
+    start = time.monotonic()
+    await bucket.acquire()
+    elapsed = time.monotonic() - start
+    assert elapsed >= 0.2 * 0.9, elapsed
+
+
+async def test_cooldown_extends_never_shortens(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    bucket = AsyncTokenBucket(10.0, capacity=2.0)
+    bucket.observe_rate_limited(retry_after=10.0)
+    # A shorter retry_after must not shrink the existing, longer cooldown.
+    bucket.observe_rate_limited(retry_after=1.0)
+    assert bucket._cooldown_until == clock.now + 10.0
+
+
+async def test_backoff_reduces_effective_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Without a retry_after, a 429 still halves the effective refill rate and
+    # drains accrued tokens, so the next refill paces more slowly.
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    bucket = AsyncTokenBucket(10.0, capacity=10.0)
+    assert bucket._effective_rate(clock.now) == 10.0
+    bucket.observe_rate_limited(None)
+    # Rate halved immediately; tokens drained.
+    assert bucket._effective_rate(clock.now) == pytest.approx(5.0)
+    assert bucket._tokens == 0.0
+
+
+async def test_repeated_429s_compound_but_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    bucket = AsyncTokenBucket(10.0, capacity=10.0)
+    for _ in range(20):
+        bucket.observe_rate_limited(None)
+    # Multiplicative decrease compounds but never drops below the floor.
+    assert bucket._effective_rate(clock.now) >= 10.0 * 0.05 * 0.999
+    assert bucket._effective_rate(clock.now) <= 10.0 * 0.05 * 1.001
+
+
+async def test_effective_rate_recovers_over_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    bucket = AsyncTokenBucket(10.0, capacity=10.0)
+    bucket.observe_rate_limited(None)  # factor 0.5
+    assert bucket._effective_rate(clock.now) == pytest.approx(5.0)
+    # Halfway through the recovery window: factor ~0.75.
+    clock.advance(15.0)
+    assert bucket._effective_rate(clock.now) == pytest.approx(7.5, rel=0.01)
+    # Past the recovery window: fully recovered to the configured rate.
+    clock.advance(20.0)
+    assert bucket._effective_rate(clock.now) == 10.0
+
+
+async def test_backoff_then_recovery_paces_acquires(monkeypatch: pytest.MonkeyPatch) -> None:
+    # End-to-end: after a 429 the next acquire is slower than before the 429.
+    clock = _FakeClock()
+    monkeypatch.setattr("agent_guardian.core.ratelimit.time.monotonic", clock)
+    sleeps: list[float] = []
+
+    async def _fake_sleep(d: float) -> None:
+        sleeps.append(d)
+        clock.advance(d)
+
+    monkeypatch.setattr("agent_guardian.core.ratelimit.asyncio.sleep", _fake_sleep)
+
+    bucket = AsyncTokenBucket(10.0, capacity=1.0)
+    await bucket.acquire()  # burst token, no wait
+    assert sleeps == []
+    bucket.observe_rate_limited(None)  # halve rate, drain tokens
+    await bucket.acquire()
+    # Wait for 1 token at the halved rate (~5/s) => ~0.2s, vs ~0.1s un-throttled.
+    assert sleeps and sleeps[-1] == pytest.approx(0.2, rel=0.05)

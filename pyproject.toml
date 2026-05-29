@@ -106,6 +106,27 @@ examples = [
   "openai>=1.50",
   "openai-agents>=0.3",
 ]
+# ``ws`` carries the websockets client used by the ``websocket`` contract
+# transport. It is strictly opt-in like ``aws`` / ``gcp``: the transport's
+# import is guarded so users who never scan a WebSocket target don't pay the
+# install cost, and the transport raises a clear ImportError with remediation
+# when it is absent.
+ws = [
+  "websockets>=12.0",
+]
+# ``grpc`` carries grpcio for the ``grpc`` contract transport. Opt-in like
+# ``ws``: the transport import is guarded, so the default install stays lean
+# and only gRPC targets pull in the (larger) grpcio wheel.
+grpc = [
+  "grpcio>=1.60",
+]
+# ``browser`` carries Playwright for the ``browser`` contract transport, which
+# drives a headless browser against a web UI. Strictly opt-in: Playwright also
+# needs ``playwright install`` to fetch browser binaries, so it is never a base
+# dependency; the transport import is guarded behind a clear ImportError.
+browser = [
+  "playwright>=1.40",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
@@ -223,6 +244,19 @@ ignore_missing_imports = true
 # treats google.* as ``Any`` whether or not it is installed, so mypy behaves
 # identically in CI (no [gcp]) and locally (with [gcp]).
 follow_imports = "skip"
+
+# websockets / grpcio / playwright are optional dependencies (the ``[ws]``,
+# ``[grpc]`` and ``[browser]`` extras) used only by the long-tail contract
+# transports, all behind import guards. They ship partial / absent type stubs,
+# and the pre-commit mypy hook runs in an isolated venv without them installed —
+# both cases produce missing-import noise we silence here once for the whole
+# project so mypy behaves identically whether or not the extras are installed
+# (precedent: ``botocore.*`` / ``google.*`` / ``opentelemetry.*``). ``grpc`` is
+# only ever imported top-level (``import grpc``; submodules such as ``grpc.aio``
+# are reached via attribute access), so no ``grpc.*`` submodule pattern is used.
+[[tool.mypy.overrides]]
+module = ["websockets.*", "grpc", "playwright.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

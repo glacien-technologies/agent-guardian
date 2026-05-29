@@ -41,6 +41,7 @@ __all__ = [
     "TyperPrompter",
     "WizardDefaults",
     "build_contract_dict",
+    "load_openapi_shapes",
     "run_wizard",
     "write_contract_yaml",
 ]
@@ -138,21 +139,46 @@ def _is_secret_ref(value: str) -> bool:
     return SECRET_REF_PATTERN.match(value.strip()) is not None
 
 
-def build_contract_dict(defaults: WizardDefaults) -> dict[str, Any]:
+def build_contract_dict(
+    defaults: WizardDefaults,
+    *,
+    openapi_shapes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build a contract *mapping* from ``defaults`` (no prompting).
 
     Used both by the ``--yes`` path and as the assembly step the interactive
     wizard funnels its gathered answers through. The result is validated by
     constructing a :class:`Contract`, so an invalid combination fails loudly
     here rather than at load time.
+
+    When ``openapi_shapes`` is supplied (the ``--from-openapi`` flow, produced by
+    :func:`agent_guardian.contract.openapi.generate_http_shapes`), the
+    spec-derived ``transport`` / ``request`` / ``response`` blocks are spliced in
+    *over* the defaults so the operator's spec drives the wire shape instead of
+    probe-and-infer. The non-shape answers (name, environment, auth, session,
+    RoE) still come from ``defaults`` / the gathered wizard answers.
     """
+    transport: dict[str, Any] = {"kind": "http", "url": defaults.url}
+    response: dict[str, Any] = {"output_path": defaults.output_path}
+    request: dict[str, Any] | None = None
+    if openapi_shapes is not None:
+        # The OpenAPI fragment supplies the wire shape; merge it over the
+        # default transport/response and adopt the generated request body.
+        transport = {**transport, **dict(openapi_shapes.get("transport") or {})}
+        response = {**response, **dict(openapi_shapes.get("response") or {})}
+        spec_request = openapi_shapes.get("request")
+        if isinstance(spec_request, dict) and spec_request:
+            request = dict(spec_request)
+
     target: dict[str, Any] = {
         "name": defaults.name,
         "environment": defaults.environment,
-        "transport": {"kind": "http", "url": defaults.url},
-        "response": {"output_path": defaults.output_path},
+        "transport": transport,
+        "response": response,
         "session": {"mode": defaults.session_mode},
     }
+    if request is not None:
+        target["request"] = request
 
     auth = _build_auth(defaults)
     if auth is not None:
@@ -210,6 +236,40 @@ def write_contract_yaml(document: dict[str, Any], out: Path) -> Path:
     return out
 
 
+def load_openapi_shapes(
+    spec_path: Path,
+    *,
+    operation_path: str | None = None,
+    method: str = "post",
+) -> dict[str, Any]:
+    """Load an OpenAPI ``spec_path`` (YAML/JSON) and derive HTTP contract shapes.
+
+    Thin wrapper the ``init --from-openapi`` flow uses: it reads + parses the
+    spec (YAML is a JSON superset, so :func:`yaml.safe_load` handles both),
+    then hands the parsed mapping to
+    :func:`agent_guardian.contract.openapi.generate_http_shapes`, returning its
+    ``{"transport": ..., "request": ..., "response": ...}`` fragment.
+
+    Raises:
+        FileNotFoundError: the spec file does not exist.
+        ValueError: the file is not a YAML/JSON mapping, or
+            :func:`generate_http_shapes` could not derive shapes (no servers /
+            paths / JSON-body operation — the message names the missing piece).
+    """
+    from agent_guardian.contract.openapi import generate_http_shapes
+
+    if not spec_path.is_file():
+        raise FileNotFoundError(f"OpenAPI spec not found: {spec_path}")
+    try:
+        spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        _LOG.debug("wizard: OpenAPI spec %s is not valid YAML/JSON (%s)", spec_path, exc)
+        raise ValueError(f"OpenAPI spec {spec_path} is not valid YAML/JSON: {exc}") from exc
+    if not isinstance(spec, dict):
+        raise ValueError(f"OpenAPI spec {spec_path} must be a mapping at the top level")
+    return generate_http_shapes(spec, path=operation_path, method=method)
+
+
 def run_wizard(
     out: Path,
     *,
@@ -217,6 +277,7 @@ def run_wizard(
     prompter: Prompter | None = None,
     defaults: WizardDefaults | None = None,
     probe: Any = None,
+    openapi_shapes: dict[str, Any] | None = None,
 ) -> Path:
     """Author a contract at ``out`` — non-interactively (``yes``) or via prompts.
 
@@ -226,27 +287,45 @@ def run_wizard(
     ``probe`` callable is supplied, sends a benign prompt so the user can pick
     the ``output_path`` from the live JSON shape.
 
+    When ``openapi_shapes`` is supplied (the ``--from-openapi`` flow, see
+    :func:`load_openapi_shapes`), the spec-derived transport / request /
+    response shapes are spliced into the document instead of being probed/asked,
+    while the remaining answers (name, auth, session, RoE) still come from the
+    ``--yes`` defaults or the interactive prompts. The interactive path skips the
+    URL and output-path questions when the spec already supplied them.
+
     Returns the path written.
     """
     base = defaults or WizardDefaults()
     if yes:
-        document = build_contract_dict(base)
+        document = build_contract_dict(base, openapi_shapes=openapi_shapes)
         return write_contract_yaml(document, out)
 
     p = prompter or TyperPrompter()
-    gathered = _interactive_gather(p, base)
-    document = build_contract_dict(gathered)
+    gathered = _interactive_gather(p, base, from_openapi=openapi_shapes is not None)
+    document = build_contract_dict(gathered, openapi_shapes=openapi_shapes)
     written = write_contract_yaml(document, out)
     p.echo(f"contract written to {written}")
     return written
 
 
-def _interactive_gather(p: Prompter, base: WizardDefaults) -> WizardDefaults:
-    """Drive the prompter through the wizard questions, returning the answers."""
+def _interactive_gather(
+    p: Prompter, base: WizardDefaults, *, from_openapi: bool = False
+) -> WizardDefaults:
+    """Drive the prompter through the wizard questions, returning the answers.
+
+    When ``from_openapi`` is set, the URL and ``output_path`` come from the spec
+    fragment (spliced in by :func:`build_contract_dict`), so those two questions
+    are skipped — the operator only confirms the surrounding answers.
+    """
     p.echo("AgentGuardian contract wizard — HTTP target (the only transport today).")
 
     name = p.ask("Target name", default=base.name)
-    url = p.ask("Target URL (transport.url)", default=base.url)
+    if from_openapi:
+        p.echo("URL + request/response shapes derived from the OpenAPI spec.")
+        url = base.url
+    else:
+        url = p.ask("Target URL (transport.url)", default=base.url)
     environment = p.ask("Environment (prod|staging|clone)", default=base.environment)
 
     auth_kind = p.ask("Auth kind (none|api_key|bearer)", default=base.auth_kind)
@@ -255,7 +334,7 @@ def _interactive_gather(p: Prompter, base: WizardDefaults) -> WizardDefaults:
         # NEVER a raw secret — only a ${backend:key} reference.
         auth_value_ref = _ask_secret_ref(p, base.auth_value_ref)
 
-    output_path = _ask_output_path(p, base.output_path)
+    output_path = base.output_path if from_openapi else _ask_output_path(p, base.output_path)
     session_mode = p.ask(
         "Session mode (stateless|server_session|client_history)",
         default=base.session_mode,

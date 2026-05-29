@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 
 from agent_guardian.contract.errors import SecretResolutionError
 from agent_guardian.contract.schema import Contract
 from agent_guardian.contract.secrets import (
+    ALL_BACKENDS,
+    DEFAULT_BACKENDS,
     SecretRef,
     SecretResolver,
     iter_secret_refs,
@@ -134,15 +139,270 @@ def test_resolve_file_missing_is_loud(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# reserved backends
+# backend allowlist (vault / sops are opt-in)
 # --------------------------------------------------------------------------
 
 
+def test_default_backends_are_env_and_file() -> None:
+    assert DEFAULT_BACKENDS == ("env", "file")
+    assert set(ALL_BACKENDS) == {"env", "file", "vault", "sops"}
+
+
 @pytest.mark.parametrize("backend", ["vault", "sops"])
-def test_reserved_backend_not_implemented(backend: str) -> None:
-    ref = SecretRef(f"${{{backend}:path/to/secret}}")
-    with pytest.raises(NotImplementedError):
+def test_optin_backend_disabled_by_default_is_loud(backend: str) -> None:
+    # The default resolver only enables env + file; a vault/sops ref must fail
+    # loudly rather than silently reaching out to infrastructure.
+    ref = SecretRef(f"${{{backend}:path/to/secret#field}}")
+    with pytest.raises(SecretResolutionError, match="is not enabled"):
         resolve_secret(ref)
+
+
+def test_disabling_env_backend_is_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AG_X", "v")
+    resolver = SecretResolver(backends=("file",))
+    with pytest.raises(SecretResolutionError, match="is not enabled"):
+        resolver.resolve(SecretRef("${env:AG_X}"))
+
+
+# --------------------------------------------------------------------------
+# vault backend (KV v2 + KV v1, error shapes)
+# --------------------------------------------------------------------------
+
+
+def _vault_resolver(**kw: object) -> SecretResolver:
+    return SecretResolver(
+        backends=("env", "file", "vault"),
+        vault_addr="https://vault.example:8200",
+        vault_token="s.testtoken",
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+@respx.mock
+def test_vault_kv_v2_shape() -> None:
+    # KV v2 nests the secret fields under data.data.
+    respx.get("https://vault.example:8200/v1/secret/data/acme").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"data": {"api_key": "kv2-secret"}, "metadata": {"version": 3}}},
+        )
+    )
+    resolver = _vault_resolver()
+    assert resolver.resolve(SecretRef("${vault:secret/data/acme#api_key}")) == "kv2-secret"
+
+
+@respx.mock
+def test_vault_kv_v1_fallback_shape() -> None:
+    # KV v1 puts fields directly under data.
+    respx.get("https://vault.example:8200/v1/kv/acme").mock(
+        return_value=httpx.Response(200, json={"data": {"token": "kv1-secret"}})
+    )
+    resolver = _vault_resolver()
+    assert resolver.resolve(SecretRef("${vault:kv/acme#token}")) == "kv1-secret"
+
+
+@respx.mock
+def test_vault_leading_slash_in_path_is_normalised() -> None:
+    respx.get("https://vault.example:8200/v1/secret/data/x").mock(
+        return_value=httpx.Response(200, json={"data": {"data": {"f": "ok"}}})
+    )
+    resolver = _vault_resolver()
+    assert resolver.resolve(SecretRef("${vault:/secret/data/x#f}")) == "ok"
+
+
+def test_vault_missing_addr_is_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VAULT_ADDR", raising=False)
+    monkeypatch.delenv("VAULT_TOKEN", raising=False)
+    resolver = SecretResolver(backends=("vault",), vault_token="s.tok")
+    with pytest.raises(SecretResolutionError, match="VAULT_ADDR"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#f}"))
+
+
+def test_vault_missing_token_is_loud(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VAULT_TOKEN", raising=False)
+    resolver = SecretResolver(backends=("vault",), vault_addr="https://v.example")
+    with pytest.raises(SecretResolutionError, match="VAULT_TOKEN"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#f}"))
+
+
+def test_vault_addr_token_fall_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VAULT_ADDR", "https://env-vault.example")
+    monkeypatch.setenv("VAULT_TOKEN", "s.fromenv")
+    with respx.mock:
+        route = respx.get("https://env-vault.example/v1/secret/data/x").mock(
+            return_value=httpx.Response(200, json={"data": {"data": {"f": "v"}}})
+        )
+        resolver = SecretResolver(backends=("vault",))
+        assert resolver.resolve(SecretRef("${vault:secret/data/x#f}")) == "v"
+    assert route.calls.last.request.headers["X-Vault-Token"] == "s.fromenv"
+
+
+@pytest.mark.parametrize("bad", ["secret/data/x", "#f", "secret/data/x#"])
+def test_vault_malformed_ref_is_loud(bad: str) -> None:
+    resolver = _vault_resolver()
+    with pytest.raises(SecretResolutionError, match="secret/path#field"):
+        resolver.resolve(SecretRef(f"${{vault:{bad}}}"))
+
+
+@respx.mock
+def test_vault_missing_field_is_loud() -> None:
+    respx.get("https://vault.example:8200/v1/secret/data/x").mock(
+        return_value=httpx.Response(200, json={"data": {"data": {"other": "v"}}})
+    )
+    resolver = _vault_resolver()
+    with pytest.raises(SecretResolutionError, match="no field 'api_key'"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#api_key}"))
+
+
+@respx.mock
+def test_vault_unexpected_shape_is_loud() -> None:
+    respx.get("https://vault.example:8200/v1/secret/data/x").mock(
+        return_value=httpx.Response(200, json={"not_data": {}})
+    )
+    resolver = _vault_resolver()
+    with pytest.raises(SecretResolutionError, match="unexpected shape"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#f}"))
+
+
+@respx.mock
+def test_vault_http_error_is_loud() -> None:
+    respx.get("https://vault.example:8200/v1/secret/data/x").mock(
+        return_value=httpx.Response(403, json={"errors": ["permission denied"]})
+    )
+    resolver = _vault_resolver()
+    with pytest.raises(SecretResolutionError, match="could not read vault secret"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#f}"))
+
+
+@respx.mock
+def test_vault_connect_error_is_loud() -> None:
+    respx.get("https://vault.example:8200/v1/secret/data/x").mock(
+        side_effect=httpx.ConnectError("refused")
+    )
+    resolver = _vault_resolver()
+    with pytest.raises(SecretResolutionError, match="could not read vault secret"):
+        resolver.resolve(SecretRef("${vault:secret/data/x#f}"))
+
+
+# --------------------------------------------------------------------------
+# sops backend (monkeypatched subprocess)
+# --------------------------------------------------------------------------
+
+_SOPS_YAML = "creds:\n  api:\n    key: sops-secret\nflat: top-level\n"
+
+
+def _sops_file(tmp_path: Path) -> Path:
+    f = tmp_path / "enc.yaml"
+    f.write_text("placeholder-ciphertext\n", encoding="utf-8")
+    return f
+
+
+def _patch_sops(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stdout: str = _SOPS_YAML,
+    returncode: int = 0,
+    stderr: str = "",
+    raise_fnf: bool = False,
+) -> None:
+    def _fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+        if raise_fnf:
+            raise FileNotFoundError(argv[0])
+        if returncode != 0:
+            raise subprocess.CalledProcessError(returncode, argv, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr("agent_guardian.contract.secrets.subprocess.run", _fake_run)
+
+
+def test_sops_nested_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    assert resolver.resolve(SecretRef(f"${{sops:{f}#creds.api.key}}")) == "sops-secret"
+
+
+def test_sops_top_level_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    assert resolver.resolve(SecretRef(f"${{sops:{f}#flat}}")) == "top-level"
+
+
+def test_sops_relative_to_file_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch)
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "enc.yaml").write_text("x\n", encoding="utf-8")
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops", file_root=tmp_path)
+    assert resolver.resolve(SecretRef("${sops:secrets/enc.yaml#flat}")) == "top-level"
+
+
+def test_sops_binary_absent_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # No sops_bin injected and none on PATH -> shutil.which returns None.
+    monkeypatch.setattr("agent_guardian.contract.secrets.shutil.which", lambda _name: None)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",))
+    with pytest.raises(SecretResolutionError, match="requires the 'sops' CLI"):
+        resolver.resolve(SecretRef(f"${{sops:{f}#flat}}"))
+
+
+def test_sops_binary_not_executable_is_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_sops(monkeypatch, raise_fnf=True)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/nonexistent/sops")
+    with pytest.raises(SecretResolutionError, match="could not be executed"):
+        resolver.resolve(SecretRef(f"${{sops:{f}#flat}}"))
+
+
+def test_sops_decrypt_failure_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch, returncode=1, stderr="no key could decrypt the data")
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    with pytest.raises(SecretResolutionError, match="failed to decrypt"):
+        resolver.resolve(SecretRef(f"${{sops:{f}#flat}}"))
+
+
+def test_sops_missing_file_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    missing = tmp_path / "nope.yaml"
+    with pytest.raises(SecretResolutionError, match="does not exist"):
+        resolver.resolve(SecretRef(f"${{sops:{missing}#flat}}"))
+
+
+@pytest.mark.parametrize("bad", ["enc.yaml", "#flat", "enc.yaml#"])
+def test_sops_malformed_ref_is_loud(bad: str) -> None:
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    with pytest.raises(SecretResolutionError, match="dotted key to read"):
+        resolver.resolve(SecretRef(f"${{sops:{bad}}}"))
+
+
+def test_sops_missing_key_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    with pytest.raises(SecretResolutionError, match="stopped at segment 'missing'"):
+        resolver.resolve(SecretRef(f"${{sops:{f}#creds.missing}}"))
+
+
+def test_sops_structured_value_serialised(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A dotted key that lands on a mapping is JSON-serialised rather than
+    # str(dict)-leaked.
+    _patch_sops(monkeypatch)
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    out = resolver.resolve(SecretRef(f"${{sops:{f}#creds.api}}"))
+    assert out == '{"key": "sops-secret"}'
+
+
+def test_sops_invalid_yaml_output_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_sops(monkeypatch, stdout="key: : : not valid yaml\n  - broken")
+    f = _sops_file(tmp_path)
+    resolver = SecretResolver(backends=("sops",), sops_bin="/usr/bin/sops")
+    with pytest.raises(SecretResolutionError, match="not valid YAML/JSON"):
+        resolver.resolve(SecretRef(f"${{sops:{f}#flat}}"))
 
 
 # --------------------------------------------------------------------------

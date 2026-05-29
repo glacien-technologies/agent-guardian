@@ -129,6 +129,14 @@ class ContractTargetAdapter(TargetAdapter):
 
             if response.error is not None:
                 err = response.error
+                # Adaptive rate limiting: a RATE_LIMIT fault means the target is
+                # telling us we are pacing too fast. Feed it to the controller
+                # BEFORE surfacing the error so the token bucket backs off
+                # (honouring any server ``retry_after``) for subsequent turns.
+                # ``observe_response`` is a no-op for any non-rate-limit fault,
+                # so we can blanket-feed it without branching on the category.
+                if self._roe is not None:
+                    self._roe.observe_response(response)
                 raise RuntimeError(f"transport error: {err.category.value}: {err.message}")
 
             self._record_tool_calls(response)
