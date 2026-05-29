@@ -99,34 +99,89 @@ def _build_result(finding: Finding) -> dict[str, Any]:
     }
 
 
+# Stage 1B — contract-provenance keys lifted from ``scan.audit`` onto
+# ``runs[0].properties``. ``None``/absent values are omitted so the SARIF stays
+# clean for partially-populated audit records.
+_AUDIT_PROVENANCE_KEYS = (
+    "contract_sha256",
+    "contract_version",
+    "authorization_ref",
+    "environment",
+)
+
+# Stage 1B — budget/tool-suppression counters lifted from ``scan.audit`` into
+# ``runs[0].invocation.properties``. ``None``/absent values are omitted.
+_AUDIT_INVOCATION_KEYS = (
+    "budgets_granted",
+    "budgets_consumed",
+    "suppressed_tool_attempts",
+    "started_at",
+)
+
+
+def _merge_contract_provenance(properties: dict[str, Any], audit: dict[str, Any]) -> None:
+    """Lift contract-provenance keys from ``audit`` onto run ``properties``.
+
+    Mutates ``properties`` in place. Keys absent from / ``None`` in ``audit``
+    are skipped so we never emit null provenance fields.
+    """
+    for key in _AUDIT_PROVENANCE_KEYS:
+        value = audit.get(key)
+        if value is not None:
+            properties[key] = value
+
+
+def _build_invocation(audit: dict[str, Any]) -> dict[str, Any]:
+    """Build the ``runs[0].invocation`` block from ``audit``.
+
+    ``executionSuccessful`` is always ``True`` (the scan ran to completion;
+    finding-level outcomes live in ``results``). Budget/suppression counters are
+    nested under ``properties`` and omitted when absent / ``None``.
+    """
+    invocation_props: dict[str, Any] = {}
+    for key in _AUDIT_INVOCATION_KEYS:
+        value = audit.get(key)
+        if value is not None:
+            invocation_props[key] = value
+    return {"executionSuccessful": True, "properties": invocation_props}
+
+
 def emit_sarif(scan: Scan) -> dict[str, Any]:
-    """Return a SARIF 2.1.0 log object describing ``scan``."""
+    """Return a SARIF 2.1.0 log object describing ``scan``.
+
+    When ``scan.audit`` is present (Stage 1B), contract provenance is merged
+    onto ``runs[0].properties`` and a ``runs[0].invocation`` block carrying the
+    RoE budget envelope is added. When ``scan.audit`` is ``None`` the output is
+    byte-for-byte identical to the pre-Stage-1B emitter.
+    """
+    run: dict[str, Any] = {
+        "tool": {
+            "driver": {
+                "name": "agent-guardian",
+                "version": scan.package_version,
+                "informationUri": SARIF_INFO_URI,
+                "semanticVersion": scan.package_version,
+                "rules": _build_rules(list(scan.findings)),
+            }
+        },
+        "automationDetails": {"id": scan.id},
+        "results": [_build_result(f) for f in scan.findings],
+        "properties": {
+            "aivss": scan.aivss,
+            "band": scan.band.value,
+            "tier": scan.tier.value,
+            "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
+            "aivss_formula_version": scan.aivss_formula_version,
+            "probe_library_version": scan.probe_library_version,
+        },
+    }
+    if scan.audit is not None:
+        _merge_contract_provenance(run["properties"], scan.audit)
+        run["invocation"] = _build_invocation(scan.audit)
     return {
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": "agent-guardian",
-                        "version": scan.package_version,
-                        "informationUri": SARIF_INFO_URI,
-                        "semanticVersion": scan.package_version,
-                        "rules": _build_rules(list(scan.findings)),
-                    }
-                },
-                "automationDetails": {"id": scan.id},
-                "results": [_build_result(f) for f in scan.findings],
-                "properties": {
-                    "aivss": scan.aivss,
-                    "band": scan.band.value,
-                    "tier": scan.tier.value,
-                    "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
-                    "aivss_formula_version": scan.aivss_formula_version,
-                    "probe_library_version": scan.probe_library_version,
-                },
-            }
-        ],
+        "runs": [run],
     }
 
 

@@ -41,6 +41,7 @@ from agent_guardian.adapters.code import CodeAdapter
 from agent_guardian.adapters.http import HttpAdapter
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
+from agent_guardian.contract.preflight import PreflightReport
 from agent_guardian.core.sandbox import SandboxViolation
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
 from agent_guardian.llm import (
@@ -115,6 +116,13 @@ telemetry_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(telemetry_app, name="telemetry")
+
+contract_app = typer.Typer(
+    name="contract",
+    help="Work with target contracts (schema export, migration).",
+    no_args_is_help=True,
+)
+app.add_typer(contract_app, name="contract")
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +377,55 @@ def build_target_adapter(
     raise typer.BadParameter(
         f"--framework {framework!r} target mode lands in M11; not yet supported."
     )
+
+
+# ---------------------------------------------------------------------------
+# Contract-driven scan wiring (Stage 1B)
+# ---------------------------------------------------------------------------
+
+
+class _ContractScanContext:
+    """Everything the contract path contributes to a scan, built up front.
+
+    Bundles the loaded contract, the RoE controller, the contract-built target
+    adapter, and the swarm-config overrides the RoE budgets project onto the
+    engine's knobs. Kept as a small carrier so :func:`_run_scan` can stay a thin
+    splice over the unchanged non-contract path.
+    """
+
+    def __init__(self, contract_path: Path) -> None:
+        from agent_guardian.contract import contract_sha256, load_contract
+        from agent_guardian.core.roe import RoeController, authorization_gate
+        from agent_guardian.obs.otel import configure_otel, make_otel_observer
+        from agent_guardian.transports.contract_adapter import build_contract_target_adapter
+
+        self.contract = load_contract(contract_path)
+        # Defensive runtime re-check of the prod-requires-authorization invariant
+        # (the loader enforces it at parse time; a migrated/hand-built contract
+        # could in principle slip through, so we gate again here).
+        authorization_gate(self.contract)
+        self.contract_sha256 = contract_sha256(self.contract)
+        self.roe = RoeController.from_contract(self.contract)
+        self.adapter = build_contract_target_adapter(self.contract, roe=self.roe)
+        self.swarm_overrides = self.roe.swarm_overrides()
+        # OTel rides the observer + exporter seams -- both no-op unless the
+        # operator opted into the experimental GenAI conventions, so the default
+        # install pays nothing.
+        observability = self.contract.observability
+        configure_otel(observability.otel_endpoint if observability is not None else None)
+        self.observer = make_otel_observer()
+
+    def build_audit(self, scan: Scan) -> dict[str, Any]:
+        """Snapshot the RoE controller + contract identity into an audit dict."""
+        return self.roe.build_audit(
+            contract_sha256=self.contract_sha256,
+            contract_version=self.contract.version,
+            authorization_ref=self.contract.roe.authorization_ref,
+            environment=self.contract.target.environment,
+            target_name=self.contract.target.name,
+            operator=os.getenv("USER", "unknown"),
+            budgets_consumed={"tokens": scan.tokens_total},
+        ).to_dict()
 
 
 # ---------------------------------------------------------------------------
@@ -940,6 +997,169 @@ def telemetry_show() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Contract commands -- validate / init / contract sub-app (Stage 1B)
+# ---------------------------------------------------------------------------
+
+
+def _render_preflight(report: PreflightReport) -> None:
+    """Print each pre-flight stage as a coloured pass/fail line."""
+    for stage in report.stages:
+        marker = (
+            typer.style("PASS", fg=typer.colors.GREEN)
+            if stage.ok
+            else typer.style("FAIL", fg=typer.colors.RED)
+        )
+        typer.echo(f"  [{marker}] {stage.name}: {stage.detail}")
+        if not stage.ok and stage.remediation:
+            typer.echo(typer.style(f"         remediation: {stage.remediation}", dim=True))
+
+
+@app.command()
+def validate(
+    contract: Path = typer.Argument(
+        Path("agentguardian.yaml"),
+        help="Path to the contract YAML to validate.",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit the pre-flight report as JSON instead of text."
+    ),
+    stage: str | None = typer.Option(
+        None, "--stage", help="Only print this single stage's result (by name)."
+    ),
+) -> None:
+    """Run the payload-free pre-flight against a contract (Stage 1B).
+
+    Walks the seven non-adversarial stages (resolve, connect, probe, round-trip,
+    session, capability, RoE) and stops at the first failure. Exits with the
+    failing stage's exit code (``EXIT_CONFIG`` / ``EXIT_TARGET_UNREACHABLE`` /
+    ``EXIT_LLM_PROVIDER``), or ``EXIT_OK`` when every stage passes.
+    """
+    from agent_guardian.contract.preflight import run_preflight
+
+    report = asyncio.run(run_preflight(contract))
+
+    if json_out:
+        payload = report.to_dict()
+        if stage is not None:
+            payload["stages"] = [s for s in payload["stages"] if s["name"] == stage]
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        if report.redacted_contract is not None:
+            typer.echo("contract (redacted):")
+            typer.echo(json.dumps(report.redacted_contract, indent=2, sort_keys=True))
+        typer.echo("pre-flight stages:")
+        if stage is not None:
+            for s in report.stages:
+                if s.name == stage:
+                    marker = "PASS" if s.ok else "FAIL"
+                    typer.echo(f"  [{marker}] {s.name}: {s.detail}")
+        else:
+            _render_preflight(report)
+
+    if not report.ok:
+        raise typer.Exit(code=report.exit_code)
+    raise typer.Exit(code=EXIT_OK)
+
+
+@app.command()
+def init(
+    out: Path = typer.Option(
+        Path("agentguardian.yaml"),
+        "--out",
+        help="Where to write the new contract.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Non-interactive: write a minimal valid contract from defaults/flags.",
+    ),
+) -> None:
+    """Author a new target contract, then pre-flight it.
+
+    The interactive wizard (default) walks you through the HTTP target, auth,
+    response extraction, session mode, and RoE. ``--yes`` writes a minimal valid
+    contract without prompting (useful for scaffolding + CI). On success the new
+    contract is immediately run through the pre-flight so you see whether it is
+    reachable.
+    """
+    from agent_guardian.contract.preflight import run_preflight
+    from agent_guardian.contract.wizard import run_wizard
+
+    try:
+        written = run_wizard(out, yes=yes)
+    except Exception as exc:
+        typer.echo(f"could not author contract: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    typer.echo(f"contract written to {written}")
+    typer.echo("running pre-flight against the new contract...")
+    report = asyncio.run(run_preflight(written))
+    _render_preflight(report)
+    if not report.ok:
+        raise typer.Exit(code=report.exit_code)
+    raise typer.Exit(code=EXIT_OK)
+
+
+@contract_app.command("schema")
+def contract_schema(
+    out: Path = typer.Option(
+        ...,
+        "--out",
+        help="Where to write the contract JSON Schema.",
+    ),
+) -> None:
+    """Write the contract JSON Schema to a file."""
+    from agent_guardian.contract import write_contract_json_schema
+
+    write_contract_json_schema(out)
+    typer.echo(f"contract JSON Schema written to {out}")
+
+
+@contract_app.command("migrate")
+def contract_migrate(
+    file: Path = typer.Argument(..., help="Contract file to migrate."),
+    write: bool = typer.Option(
+        False, "--write", help="Write the migrated contract back to FILE (else print to stdout)."
+    ),
+) -> None:
+    """Migrate a contract toward the current schema version."""
+    import yaml
+
+    from agent_guardian.contract import migrate_contract
+    from agent_guardian.contract.errors import (
+        ContractError,
+        MigrationNeeded,
+        UnsupportedContractVersion,
+    )
+
+    if not file.is_file():
+        typer.echo(f"contract file not found: {file}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    try:
+        data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        typer.echo(f"could not read contract YAML: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    if not isinstance(data, dict):
+        typer.echo("contract file must contain a YAML mapping at the top level", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    try:
+        migrated = migrate_contract(data)
+    except (MigrationNeeded, UnsupportedContractVersion, ContractError) as exc:
+        typer.echo(f"migration failed: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    rendered = yaml.safe_dump(migrated, sort_keys=False, default_flow_style=False)
+    if write:
+        file.write_text(rendered, encoding="utf-8")
+        typer.echo(f"migrated contract written to {file}")
+    else:
+        typer.echo(rendered, nl=False)
+
+
+# ---------------------------------------------------------------------------
 # scan command -- the big one
 # ---------------------------------------------------------------------------
 
@@ -1070,6 +1290,17 @@ def scan(
             "secret-extraction, denial-of-wallet, detection-evasion)."
         ),
     ),
+    contract: Path | None = typer.Option(
+        None,
+        "--contract",
+        help=(
+            "Stage 1B -- drive the scan from a target contract (agentguardian.yaml). "
+            "The contract supplies the transport, auth, session, and Rules of "
+            "Engagement; RoE budgets map onto the swarm config and a provenance "
+            "audit is attached to the report. Mutually exclusive with the "
+            "target / --system-prompt / --endpoint / --framework modes."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -1112,6 +1343,7 @@ def scan(
                 pretext=pretext,
                 indirect=indirect,
                 owasp_llm=owasp_llm,
+                contract=contract,
             )
         )
     except KeyboardInterrupt:
@@ -1146,6 +1378,7 @@ async def _run_scan(
     pretext: bool = False,
     indirect: bool = False,
     owasp_llm: bool = False,
+    contract: Path | None = None,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -1194,21 +1427,46 @@ async def _run_scan(
         typer.echo(f"llm config error: {exc}", err=True)
         return EXIT_LLM_PROVIDER
 
-    try:
-        adapter = build_target_adapter(
-            target=target,
-            system_prompt_path=system_prompt,
-            endpoint=endpoint,
-            framework=framework,
-            target_llm=target_llm,
-            target_model=_normalise_model_name(eff_attacker),
-        )
-    except typer.BadParameter as exc:
-        typer.echo(f"target error: {exc}", err=True)
-        return EXIT_CONFIG
-    except FileNotFoundError as exc:
-        typer.echo(f"target unreachable: {exc}", err=True)
-        return EXIT_TARGET_UNREACHABLE
+    # Stage 1B -- a --contract run replaces the four legacy target modes with a
+    # contract-built adapter + RoE controller + OTel observer. The non-contract
+    # path below is left byte-for-byte unchanged.
+    contract_ctx: _ContractScanContext | None = None
+    if contract is not None:
+        if any((target, system_prompt, endpoint, framework)):
+            typer.echo(
+                "--contract is mutually exclusive with target / --system-prompt / "
+                "--endpoint / --framework.",
+                err=True,
+            )
+            return EXIT_CONFIG
+        from agent_guardian.contract.errors import ContractError
+        from agent_guardian.core.roe import RoeAuthorizationError
+
+        try:
+            contract_ctx = _ContractScanContext(contract)
+        except RoeAuthorizationError as exc:
+            typer.echo(f"authorization error: {exc}", err=True)
+            return EXIT_CONFIG
+        except ContractError as exc:
+            typer.echo(f"contract error: {exc}", err=True)
+            return EXIT_CONFIG
+        adapter: TargetAdapter = contract_ctx.adapter
+    else:
+        try:
+            adapter = build_target_adapter(
+                target=target,
+                system_prompt_path=system_prompt,
+                endpoint=endpoint,
+                framework=framework,
+                target_llm=target_llm,
+                target_model=_normalise_model_name(eff_attacker),
+            )
+        except typer.BadParameter as exc:
+            typer.echo(f"target error: {exc}", err=True)
+            return EXIT_CONFIG
+        except FileNotFoundError as exc:
+            typer.echo(f"target unreachable: {exc}", err=True)
+            return EXIT_TARGET_UNREACHABLE
 
     # 7. Build swarm.
     scan_id = f"cli-{uuid.uuid4().hex[:12]}"
@@ -1255,6 +1513,18 @@ async def _run_scan(
         # free-tier Gemini) and the swarm then produced fake "EXCELLENT" scores
         # against an empty memory.
     )
+
+    # Stage 1B -- project the contract's RoE budgets onto the engine's knobs.
+    # ``swarm_overrides`` only carries keys the contract actually set, so this
+    # never clobbers anything the contract left unspecified.
+    observer: Any = None
+    if contract_ctx is not None:
+        import dataclasses
+
+        if contract_ctx.swarm_overrides:
+            swarm_config = dataclasses.replace(swarm_config, **contract_ctx.swarm_overrides)
+        observer = contract_ctx.observer
+
     swarm = SwarmCommander(
         config=swarm_config,
         target=adapter,
@@ -1262,6 +1532,7 @@ async def _run_scan(
         evaluator_llm=evaluator_llm,
         commander_llm=commander_llm,
         rng_seed=seed,
+        observer=observer,
     )
 
     # 8. Run -- optionally with TUI.
@@ -1300,6 +1571,17 @@ async def _run_scan(
             type(exc).__name__,
             exc,
         )
+
+    # Stage 1B -- attach the RoE/contract provenance audit before any report is
+    # rendered so SARIF emits its invocation + contract_sha256 block. The Scan is
+    # frozen, so we copy with the audit set. We also persist a JSONL audit trail.
+    if contract_ctx is not None:
+        audit = contract_ctx.build_audit(scan_result)
+        scan_result = scan_result.model_copy(update={"audit": audit})
+        audit_path = Path.home() / ".agentguardian" / "scans" / scan_id / "audit.jsonl"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_path.write_text(json.dumps(audit, sort_keys=True) + "\n", encoding="utf-8")
+        typer.echo(f"contract audit written to {audit_path}")
 
     # 9. Render + persist report.
     if output_path is None:

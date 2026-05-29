@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -90,6 +90,14 @@ class Scan(BaseModel):
     # hand-built fixtures predating the runtime budget cap still construct.
     budget: BudgetReport | None = None
     completeness: ScanCompleteness | None = None
+    # Stage 1B — contract provenance + RoE invocation envelope. A plain dict
+    # (``AuditRecord.to_dict()`` payload) carrying ``contract_sha256``,
+    # ``contract_version``, ``authorization_ref``, ``environment`` plus the
+    # budget/tool-suppression counters surfaced into SARIF's invocation block.
+    # Stored as a raw dict (not the model) so this module stays free of any
+    # ``core.roe`` import — that would create an import cycle. Optional so
+    # existing Scan construction + fixtures are unaffected.
+    audit: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")
