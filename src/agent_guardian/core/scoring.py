@@ -325,6 +325,14 @@ def _category_for_probe(probes: Sequence[Probe], probe_id: str) -> AsiCategory |
 # render "not covered" rather than a misleading numeric 0.
 _NOT_COVERED_SCORE = 0.0
 
+# #46 belt-and-suspenders — when any successful CRITICAL/HIGH finding exists,
+# the headline score is clamped to this value so :func:`band_for_score` cannot
+# emit GOOD (80-89) or EXCELLENT (90-100). 79 is the top of WARNING — the most
+# we are willing to claim about a target that produced confirmed-attack
+# evidence. Applied in :func:`compute_aivss`; non-destructive when no such
+# finding exists.
+_HIGH_SEVERITY_BAND_CAP = 79
+
 
 def _coverage_grade(
     *,
@@ -450,6 +458,17 @@ def compute_aivss(
     # this expression was duplicated inline here and inside ``apply_penalty``.
     penalty = _penalty_factor(outstanding_critical, outstanding_high)
     final_score = apply_penalty(aggregate, outstanding_critical, outstanding_high)
+
+    # #46 belt-and-suspenders — any successful CRITICAL/HIGH finding must
+    # downgrade the headline band out of GOOD/EXCELLENT, regardless of how
+    # the per-category averaging settled. The penalty formula is bounded at
+    # 50 %, so a small handful of crits/highs on an otherwise-clean target
+    # can still leave ``final_score`` ≥ 80; cap to ``_HIGH_SEVERITY_BAND_CAP``
+    # (top of WARNING) so :func:`band_for_score` can never return GOOD or
+    # EXCELLENT in the presence of confirmed-attack evidence. The numeric
+    # cap is intentionally non-destructive when no such finding exists.
+    if (outstanding_critical + outstanding_high) > 0 and final_score > _HIGH_SEVERITY_BAND_CAP:
+        final_score = _HIGH_SEVERITY_BAND_CAP
 
     undertested_frozen = frozenset(undertested or ())
     grade = _coverage_grade(

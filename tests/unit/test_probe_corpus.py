@@ -66,9 +66,9 @@ def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
     assert not missing, f"probes missing owasp_scenario: {sorted(missing)}"
 
 
-def test_corpus_size_is_ninety_two() -> None:
+def test_corpus_size_is_ninety_five() -> None:
     """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap +
-    2 LLM02 output-handling probes = 92.
+    2 LLM02 output-handling probes = 95.
 
     The 11 coverage-gap additions closed the CSA category gaps for
     ``checker-out-of-the-loop`` (4 probes under asi06) and
@@ -84,7 +84,7 @@ def test_corpus_size_is_ninety_two() -> None:
     :class:`OutputHandlingAgent` post-judge oracle treats as HIGH ASI09
     evidence.
     """
-    assert len(load_all_probes()) == 92
+    assert len(load_all_probes()) == 95
 
 
 def test_corpus_version_stamp() -> None:

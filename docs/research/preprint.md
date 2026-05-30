@@ -40,7 +40,7 @@ for compliance-sensitive environments and signs every evidence pack
 with both HMAC-SHA256 and Ed25519 so downstream consumers can verify
 that a scan was produced by the documented pipeline. This paper
 describes the architecture, the AIVSS formula, the seed-probe corpus
-(92 probes across ASI01–ASI10), and the experimental setup we will use
+(95 probes across ASI01–ASI10), and the experimental setup we will use
 to publish the first public scorecards once the soft-beta cohort
 concludes.
 

@@ -200,6 +200,47 @@ that list is "not in the OSS package today"; the
 marketing site's longer integration grid covers the commercial
 platform.
 
+## Why does the same target read a different AIVSS in `--mode smart` than in `--mode full`?
+
+That is expected and the gate catches it. The three modes are an
+explicit thoroughness-vs-cost trade-off (see
+[Scan modes](../concepts/scan-modes.md)) — `full` runs every probe to
+completion, `smart` honours an early-stop on a stable signal, `fast`
+caps turns/probes. So on the same target the *numeric* AIVSS can
+swing — in our internal regression run the same defenceless target
+read AIVSS=66 in REAL `--mode full`, 41 in `smart`, and 55 in `fast`.
+
+What is guaranteed is that **smart / fast cannot mint a `GOOD` or
+`EXCELLENT` verdict that `full` would not have given** (#44). When the
+mode runs below its completeness threshold (FAST 60 % / SMART 80 % /
+FULL 95 %), the swarm sets `mode_authoritative=False`, the band is
+forced to `NOT_EVALUATED`, `--fail-under` fails the run with a
+non-zero exit, and a stderr warning fires. The flag rides inside the
+signature on the JSON report, so a downstream consumer can also tell
+a partial-coverage scan from a real assessment.
+
+Practical rules:
+
+- **For a CI gate**, always run `--mode full` and key your
+  `--fail-under` against `band` (or `scan.mode_authoritative`), not
+  the raw `aivss` number — a partial-mode run is designed to fail
+  fail-under so you can never silently green-light an under-tested
+  scan.
+- **For a fast pre-flight in development**, `--mode fast` /
+  `--mode smart` is fine to surface obvious issues — just treat its
+  AIVSS as a *floor on risk*, not an authoritative grade.
+- The `mode_authoritative` field is in the signed JSON report
+  (`jq -r '.mode_authoritative' scan.json`) and in the `audit` block
+  on every SARIF / Markdown / JUnit emission.
+
+The gate is enforced in `core/swarm.py:_phase_finalise`; the
+completeness thresholds live on `SwarmConfig`. A successful
+CRITICAL / HIGH finding additionally clamps the headline band out of
+`GOOD` / `EXCELLENT` regardless of mode (#46 belt-and-suspenders) —
+see `core/scoring.py:_HIGH_SEVERITY_BAND_CAP`.
+
+---
+
 ## Why does my stub scan say `AIVSS=100 EXCELLENT` in `last-score` but the report says `band=NOT_EVALUATED`?
 
 Up through 1.0.0rc1 there was a gap where `agent-guardian last-score`
