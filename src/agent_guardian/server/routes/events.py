@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store
 from agent_guardian.server.sse import stream_scan_events
 
 __all__ = ["router"]
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_dashboard_auth)])
 
 
 @router.get("/scan/{scan_id}/events")

@@ -145,9 +145,13 @@ def emit_json(
         # assessment from a vacuous stub run.
         "engine": dict(scan.engine) if scan.engine is not None else None,
         # Whether the verdicts came from a real evaluator + whether the numeric
-        # AIVSS is authoritative. Covered by the signature.
+        # AIVSS is authoritative + whether the scan mode itself was exhaustive
+        # (full) rather than a smart/fast early-stop. All three travel inside
+        # the signature so a downstream consumer can tell a real assessment
+        # apart from a partial-coverage one.
         "evaluation_mode": scan.evaluation_mode,
         "scoring_valid": scan.scoring_valid,
+        "mode_authoritative": scan.mode_authoritative,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),

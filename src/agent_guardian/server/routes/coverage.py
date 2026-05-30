@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from agent_guardian.core.coverage import compute_coverage_from_memory, default_memory_path
@@ -34,13 +34,14 @@ from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.probes.loader import PROBE_CORPUS_VERSION
+from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
 __all__ = ["router"]
 
 _LOG = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_dashboard_auth)])
 
 
 # ---------------------------------------------------------------------------

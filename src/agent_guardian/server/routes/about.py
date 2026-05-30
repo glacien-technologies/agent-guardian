@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_templates
 
 __all__ = ["router"]
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_dashboard_auth)])
 
 
 @router.get("/about", response_class=HTMLResponse)

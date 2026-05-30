@@ -119,6 +119,7 @@ Exactly one target mode must be specified:
 | `--indirect`                 | off     | Deliver attacker payloads via trusted-channel content (retrieved doc / tool output / email / memory / a2a) instead of a direct user ask — indirect prompt injection. |
 | `--owasp-llm`                | off     | Additionally dispatch the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion). |
 | `--contract PATH`            | —       | Drive the scan from a target contract YAML. Mutually exclusive with the other target modes.          |
+| `--otel-endpoint URL`        | env     | OTLP-HTTP endpoint (e.g. `http://localhost:4318/v1/traces`) to export OpenTelemetry GenAI spans to. Also read from `OTEL_EXPORTER_OTLP_ENDPOINT`. When `--contract` is used, the contract's `observability.otel_endpoint` takes precedence; this flag covers the non-contract scan modes. |
 
 ### Examples
 

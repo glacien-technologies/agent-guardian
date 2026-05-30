@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
 __all__ = ["router"]
 
 _LOG = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_dashboard_auth)])
 
 
 @router.get("/scan/{scan_id}/findings", response_class=HTMLResponse)

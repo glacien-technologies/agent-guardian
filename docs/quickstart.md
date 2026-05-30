@@ -92,7 +92,7 @@ reports from someone else.
 Generate the marketing badge:
 
 ```bash
-agent-guardian badge $(agent-guardian last-score) --svg > badge.svg
+agent-guardian badge $(agent-guardian last-score --score-only) --svg > badge.svg
 ```
 
 Or regenerate the report in a different format from the stored scan —

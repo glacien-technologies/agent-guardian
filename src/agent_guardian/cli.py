@@ -2151,6 +2151,19 @@ def scan(
             "target / --system-prompt / --endpoint / --framework modes."
         ),
     ),
+    otel_endpoint: str | None = typer.Option(
+        None,
+        "--otel-endpoint",
+        envvar="OTEL_EXPORTER_OTLP_ENDPOINT",
+        help=(
+            "OTLP-HTTP endpoint to export OpenTelemetry GenAI spans to "
+            "(e.g. http://localhost:4318/v1/traces). When set, the scanner emits "
+            "invoke_agent / transport.send / execute_tool spans with gen_ai.* "
+            "attributes from every scan mode. When --contract is used, the "
+            "contract's observability.otel_endpoint takes precedence; this flag "
+            "covers system-prompt / code / endpoint / framework scans."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -2196,6 +2209,7 @@ def scan(
                 indirect=indirect,
                 no_owasp_llm=no_owasp_llm,
                 contract=contract,
+                otel_endpoint=otel_endpoint,
             )
         )
     except KeyboardInterrupt:
@@ -2233,6 +2247,7 @@ async def _run_scan(
     indirect: bool = False,
     no_owasp_llm: bool = False,
     contract: Path | None = None,
+    otel_endpoint: str | None = None,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -2390,6 +2405,16 @@ async def _run_scan(
         if contract_ctx.swarm_overrides:
             swarm_config = dataclasses.replace(swarm_config, **contract_ctx.swarm_overrides)
         observer = contract_ctx.observer
+    elif otel_endpoint:
+        # Non-contract scan path (system-prompt / code / endpoint / framework):
+        # honour --otel-endpoint / OTEL_EXPORTER_OTLP_ENDPOINT so GenAI traces
+        # land in the operator's OTLP collector regardless of which scan mode
+        # they used. (--contract path already wires this via the contract's
+        # observability.otel_endpoint, which takes precedence.)
+        from agent_guardian.obs.otel import configure_otel, make_otel_observer
+
+        configure_otel(otel_endpoint)
+        observer = make_otel_observer()
 
     swarm = SwarmCommander(
         config=swarm_config,

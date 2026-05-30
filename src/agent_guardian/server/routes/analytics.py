@@ -30,10 +30,11 @@ import os
 import secrets
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from agent_guardian.server.analytics import Aggregator, EventStore
+from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_templates
 from agent_guardian.telemetry.events import EventEnvelope
 
@@ -80,7 +81,9 @@ def _agg() -> tuple[Aggregator, EventStore]:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/analytics", response_class=HTMLResponse)
+@router.get(
+    "/analytics", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)]
+)
 async def analytics_view(request: Request, window: str = "30d") -> HTMLResponse:
     """Render the public community analytics dashboard."""
     window_days = _resolve_window(window)
@@ -126,7 +129,7 @@ def _window_label(window: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/analytics/hero.json")
+@router.get("/api/analytics/hero.json", dependencies=[Depends(require_dashboard_auth)])
 async def hero_json(window: str = "30d") -> JSONResponse:
     agg, _ = _agg()
     h = agg.hero_numbers(window_days=_resolve_window(window))
@@ -141,7 +144,9 @@ async def hero_json(window: str = "30d") -> JSONResponse:
     )
 
 
-@router.get("/api/analytics/aivss/distribution.json")
+@router.get(
+    "/api/analytics/aivss/distribution.json", dependencies=[Depends(require_dashboard_auth)]
+)
 async def distribution_json(window: str = "30d") -> JSONResponse:
     agg, _ = _agg()
     hist = agg.aivss_distribution(window_days=_resolve_window(window))
@@ -156,7 +161,7 @@ async def distribution_json(window: str = "30d") -> JSONResponse:
     )
 
 
-@router.get("/api/analytics/adapters.json")
+@router.get("/api/analytics/adapters.json", dependencies=[Depends(require_dashboard_auth)])
 async def adapters_json(window: str = "30d") -> JSONResponse:
     agg, _ = _agg()
     rows = agg.adapter_mix(window_days=_resolve_window(window))
@@ -176,7 +181,7 @@ async def adapters_json(window: str = "30d") -> JSONResponse:
     )
 
 
-@router.get("/api/analytics/asi.json")
+@router.get("/api/analytics/asi.json", dependencies=[Depends(require_dashboard_auth)])
 async def asi_json(window: str = "30d") -> JSONResponse:
     agg, _ = _agg()
     rows = agg.asi_breakdown(window_days=_resolve_window(window))
@@ -196,14 +201,14 @@ async def asi_json(window: str = "30d") -> JSONResponse:
     )
 
 
-@router.get("/api/analytics/python-os.json")
+@router.get("/api/analytics/python-os.json", dependencies=[Depends(require_dashboard_auth)])
 async def python_os_json(window: str = "30d") -> JSONResponse:
     agg, _ = _agg()
     cells = agg.python_os_matrix(window_days=_resolve_window(window))
     return JSONResponse({"window": window, "cells": cells})
 
 
-@router.get("/api/analytics/recent.json")
+@router.get("/api/analytics/recent.json", dependencies=[Depends(require_dashboard_auth)])
 async def recent_json(limit: int = 5) -> JSONResponse:
     agg, _ = _agg()
     limit = max(1, min(limit, 50))

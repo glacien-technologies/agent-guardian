@@ -6,7 +6,6 @@
 [![CI](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/glacien-technologies/agent-guardian/branch/main/graph/badge.svg)](https://codecov.io/gh/glacien-technologies/agent-guardian)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/glacien-technologies/agent-guardian/badge)](https://scorecard.dev/viewer/?uri=github.com/glacien-technologies/agent-guardian)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/0000/badge)](https://www.bestpractices.dev/projects/0000)
 [![Downloads](https://static.pepy.tech/badge/agent-guardian/month)](https://pepy.tech/project/agent-guardian)
 [![Docs](https://img.shields.io/badge/docs-GitHub-blue.svg)](https://github.com/glacien-technologies/agent-guardian/tree/main/docs)
 
@@ -90,7 +89,7 @@ agent-guardian scan --system-prompt prompt.txt
 agent-guardian serve
 
 # Marketing badge
-agent-guardian badge $(agent-guardian last-score) --svg > badge.svg
+agent-guardian badge $(agent-guardian last-score --score-only) --svg > badge.svg
 ```
 
 Full walkthrough: [Five-minute quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/quickstart.md).
