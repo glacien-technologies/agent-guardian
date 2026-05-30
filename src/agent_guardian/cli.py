@@ -1257,7 +1257,7 @@ def verify(
         ),
     ),
 ) -> None:
-    """Verify HMAC-SHA256 + Ed25519 signatures on a JSON report (M13).
+    """Verify HMAC-SHA256 + Ed25519 signatures on a JSON report.
 
     Verification fails closed: a signature alone proves only that the bytes
     were not tampered (integrity), not *who* signed them. To report a green
@@ -1330,12 +1330,12 @@ def publish(
     """Publish a signed scan to the public AgentGuardian leaderboard.
 
     Today this is a placeholder: the public leaderboard endpoint
-    (``https://agentguardian.ai/api/v1/leaderboard``) is Glacien-edge
+    (``https://agentguardian.io/api/v1/leaderboard``) is Glacien-edge
     infrastructure that has not yet been deployed. What the command does
     *now* still has user value:
 
     1. Locate and load the scan JSON (by ID or path).
-    2. Verify the M13 HMAC + Ed25519 signatures so we never publish a
+    2. Verify the HMAC + Ed25519 signatures so we never publish a
        tampered report.
     3. Strip transcripts and other PII-prone fields (``transcript_ref``,
        per-finding ``summary`` is already redacted at emit time).
@@ -1364,7 +1364,7 @@ def publish(
                 )
                 raise typer.Exit(code=EXIT_CONFIG)
 
-    # 2. Verify signatures (M13). We only allow publishing what's signed --
+    # 2. Verify signatures. We only allow publishing what's signed --
     #    the leaderboard's integrity story depends on it.
     from agent_guardian.reports.json_report import verify_signatures
 
@@ -1407,7 +1407,7 @@ def publish(
     # 3. Strip PII / transcript references. Per-finding ``summary`` is
     #    already redacted at emit time (json_report.py), but ``transcript_ref``
     #    can point at on-disk traces that the public leaderboard must never
-    #    see. We also drop the M13 signature block because the redacted
+    #    see. We also drop the signature block because the redacted
     #    payload is no longer the originally signed bytes.
     redacted = {k: v for k, v in payload.items() if k != "signatures"}
     findings = redacted.get("findings")

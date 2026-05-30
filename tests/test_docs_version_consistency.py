@@ -34,8 +34,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _PRE_GA_NEEDLES = ("pre-1.0", "1.0.0rc1")
 _GA_CLASSIFIER = "Development Status :: 5 - Production/Stable"
 # Files that promise the GA story to users; the changelog is explicitly
-# excluded — historical RC notes belong there.
-_GA_NARRATIVE_FILES = ("README.md", "docs/roadmap.md")
+# excluded — historical RC notes belong there. The roadmap moved from
+# ``docs/roadmap.md`` to ``docs/reference/roadmap.md`` in the Diátaxis
+# restructure.
+_GA_NARRATIVE_FILES = ("README.md", "docs/reference/roadmap.md")
 
 
 def _pyproject_text() -> str:

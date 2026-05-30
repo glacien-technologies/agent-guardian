@@ -1,13 +1,21 @@
 """Guard adapter docs against drifting back to fictional ``scan_*`` helpers.
 
-`docs/adapters/{prompt,code,http,framework}.md` previously documented a
-``from agent_guardian import scan_system_prompt`` / ``scan_code`` / ``scan_http``
-/ ``scan_framework`` surface that does not exist on the public package. The fix
-rewrote those snippets to use the real public surface — ``PromptAdapter``,
-``CodeAdapter``, ``HttpAdapter``, the six concrete framework adapter classes,
-and ``SwarmCommander`` — and this test parses every Python fenced block under
-``docs/adapters/`` and asserts every ``from agent_guardian import X`` symbol is
-in ``agent_guardian.__all__``.
+The old ``docs/adapters/{prompt,code,http,framework}.md`` quartet was split in
+the Diátaxis restructure into:
+
+* ``docs/how-to/scan-a-system-prompt.md`` (was ``adapters/prompt.md``)
+* ``docs/how-to/scan-python-source.md``  (was ``adapters/code.md``)
+* ``docs/how-to/scan-an-http-endpoint.md`` (was ``adapters/http.md``)
+* ``docs/integrations/adapters/framework.md`` (was ``adapters/framework.md``)
+* ``docs/integrations/adapters/index.md`` (was ``adapters/index.md``)
+
+All five previously documented a ``from agent_guardian import scan_system_prompt``
+/ ``scan_code`` / ``scan_http`` / ``scan_framework`` surface that does not exist
+on the public package. The fix rewrote those snippets to use the real public
+surface — ``PromptAdapter``, ``CodeAdapter``, ``HttpAdapter``, the six concrete
+framework adapter classes, and ``SwarmCommander`` — and this test parses every
+Python fenced block from those new paths and asserts every
+``from agent_guardian import X`` symbol is in ``agent_guardian.__all__``.
 """
 
 from __future__ import annotations
@@ -20,7 +28,16 @@ import pytest
 import agent_guardian
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ADAPTERS_DIR = REPO_ROOT / "docs" / "adapters"
+DOCS_DIR = REPO_ROOT / "docs"
+# The adapter how-to / integration docs live in two buckets after the
+# Diátaxis restructure. Walking both keeps the original guarantee.
+ADAPTER_DOC_PATHS = [
+    DOCS_DIR / "how-to" / "scan-a-system-prompt.md",
+    DOCS_DIR / "how-to" / "scan-python-source.md",
+    DOCS_DIR / "how-to" / "scan-an-http-endpoint.md",
+    DOCS_DIR / "integrations" / "adapters" / "index.md",
+    DOCS_DIR / "integrations" / "adapters" / "framework.md",
+]
 
 _FENCE_RE = re.compile(r"```python\n(.*?)```", re.DOTALL)
 _IMPORT_RE = re.compile(
@@ -38,7 +55,9 @@ _FICTIONAL_HELPERS = {
 
 def _iter_python_blocks() -> list[tuple[Path, str]]:
     blocks: list[tuple[Path, str]] = []
-    for doc in sorted(ADAPTERS_DIR.glob("*.md")):
+    for doc in ADAPTER_DOC_PATHS:
+        if not doc.is_file():
+            continue
         body = doc.read_text(encoding="utf-8")
         for match in _FENCE_RE.finditer(body):
             blocks.append((doc, match.group(1)))
@@ -66,7 +85,10 @@ def _parse_imports(block: str) -> list[str]:
 
 def test_adapter_docs_have_python_examples() -> None:
     blocks = _iter_python_blocks()
-    assert blocks, "no python code blocks found under docs/adapters/ — expected at least one"
+    assert blocks, (
+        "no python code blocks found under docs/how-to/scan-*.md or "
+        "docs/integrations/adapters/ — expected at least one"
+    )
 
 
 @pytest.mark.parametrize(

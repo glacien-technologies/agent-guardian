@@ -67,20 +67,25 @@ def test_mkdocs_nav_targets_all_exist() -> None:
 def test_mkdocs_nav_covers_required_pages() -> None:
     data = yaml.safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
     nav_paths = set(_collect_nav_paths(data["nav"]))
+    # The docs were reorganised into Diátaxis-style buckets (concepts /
+    # tutorials / how-to / reference / integrations / operations /
+    # security / contributing). Old flat-namespace paths still resolve via
+    # the mkdocs-redirects plugin (see ``mkdocs.yml`` plugins section), but
+    # this nav-coverage guard tracks the *new* canonical locations.
     required = {
         "index.md",
-        "why.md",
-        "quickstart.md",
-        "architecture.md",
-        "aivss-formula.md",
-        "adapters/index.md",
-        "adapters/prompt.md",
-        "adapters/code.md",
-        "adapters/http.md",
-        "adapters/framework.md",
-        "api/index.md",
-        "ethics.md",
-        "roadmap.md",
+        "concepts/why.md",
+        "tutorials/quickstart.md",
+        "concepts/architecture.md",
+        "concepts/aivss.md",
+        "integrations/adapters/index.md",
+        "how-to/scan-a-system-prompt.md",
+        "how-to/scan-python-source.md",
+        "how-to/scan-an-http-endpoint.md",
+        "integrations/adapters/framework.md",
+        "reference/api/index.md",
+        "security/ethics.md",
+        "reference/roadmap.md",
     }
     assert required.issubset(nav_paths)
 
@@ -92,18 +97,18 @@ def test_mkdocs_nav_covers_required_pages() -> None:
     "relpath",
     [
         "index.md",
-        "why.md",
-        "quickstart.md",
-        "architecture.md",
-        "aivss-formula.md",
-        "adapters/index.md",
-        "adapters/prompt.md",
-        "adapters/code.md",
-        "adapters/http.md",
-        "adapters/framework.md",
-        "api/index.md",
-        "ethics.md",
-        "roadmap.md",
+        "concepts/why.md",
+        "tutorials/quickstart.md",
+        "concepts/architecture.md",
+        "concepts/aivss.md",
+        "integrations/adapters/index.md",
+        "how-to/scan-a-system-prompt.md",
+        "how-to/scan-python-source.md",
+        "how-to/scan-an-http-endpoint.md",
+        "integrations/adapters/framework.md",
+        "reference/api/index.md",
+        "security/ethics.md",
+        "reference/roadmap.md",
     ],
 )
 def test_docs_pages_are_nonempty(relpath: str) -> None:
@@ -116,24 +121,30 @@ def test_docs_pages_are_nonempty(relpath: str) -> None:
 
 
 def test_ethics_page_contains_authorised_use_clause() -> None:
-    """The PRD §15.6 ethical-use clause is load-bearing — pin its wording."""
+    """The PRD §15.6 ethical-use clause is load-bearing — pin its wording.
 
-    body = (REPO_ROOT / "docs" / "ethics.md").read_text(encoding="utf-8")
+    Ethics doc moved from ``docs/ethics.md`` to ``docs/security/ethics.md``
+    in the Diátaxis restructure. The clause itself is unchanged.
+    """
+
+    body = (REPO_ROOT / "docs" / "security" / "ethics.md").read_text(encoding="utf-8")
     assert "for testing systems you own or are explicitly" in body
     assert "unlawful in most jurisdictions" in body
 
 
 def test_aivss_formula_page_has_worked_example() -> None:
-    body = (REPO_ROOT / "docs" / "aivss-formula.md").read_text(encoding="utf-8")
+    # AIVSS formula doc moved from ``docs/aivss-formula.md`` to
+    # ``docs/concepts/aivss.md``. The worked example pins the fixture's
+    # expected_aivss (89) from tests/golden/aivss_regression/good_t1.json.
+    # See tests/unit/test_docs_aivss_example.py for the live-recompute guard.
+    body = (REPO_ROOT / "docs" / "concepts" / "aivss.md").read_text(encoding="utf-8")
     assert "good_t1.json" in body
-    # The worked example pins the fixture's expected_aivss (89) from
-    # tests/golden/aivss_regression/good_t1.json. See
-    # tests/unit/test_docs_aivss_example.py for the live-recompute guard.
     assert "89" in body
 
 
 def test_glossary_exists_and_lists_aivss_term() -> None:
-    glossary = (REPO_ROOT / "docs" / "glossary.md").read_text(encoding="utf-8")
+    # Glossary moved from ``docs/glossary.md`` to ``docs/concepts/glossary.md``.
+    glossary = (REPO_ROOT / "docs" / "concepts" / "glossary.md").read_text(encoding="utf-8")
     assert "AIVSS" in glossary
     assert "ASI" in glossary
     assert "PAIR" in glossary

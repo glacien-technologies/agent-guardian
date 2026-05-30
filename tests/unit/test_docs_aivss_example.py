@@ -1,6 +1,7 @@
 """Guard the AIVSS-formula worked example against drift.
 
-``docs/aivss-formula.md`` walks through the ``tests/golden/aivss_regression/
+``docs/concepts/aivss.md`` (formerly ``docs/aivss-formula.md`` — moved in the
+Diátaxis restructure) walks through the ``tests/golden/aivss_regression/
 good_t1.json`` fixture end-to-end. This test re-runs the scorer on the same
 fixture and asserts the documented numbers — formula version, per-step result,
 final score — still match. Whenever the formula changes, the docs page must be
@@ -23,7 +24,7 @@ from agent_guardian.models.tier import Tier
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = REPO_ROOT / "tests" / "golden" / "aivss_regression" / "good_t1.json"
-DOC = REPO_ROOT / "docs" / "aivss-formula.md"
+DOC = REPO_ROOT / "docs" / "concepts" / "aivss.md"
 
 _TIER_MAP = {
     "T1": Tier.T1_CRITICAL,

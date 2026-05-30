@@ -1,14 +1,14 @@
 # Public disclosure history
 
-Per [Engineering Standards §9.5](../engineering-standards.md) and the policy in [`SECURITY.md`](../../SECURITY.md), AgentGuardian maintains a public log of every vulnerability report we've handled. Researchers can use this log to verify that our response times match the published policy. Adopters can use it to audit our incident-handling discipline before depending on the project.
+**TL;DR** — Every vulnerability reported to AgentGuardian and handled per the [responsible-disclosure policy](responsible-disclosure.md) is logged here once the embargo lifts. After a handful of entries the log itself becomes a trust signal — empirical evidence that the policy is real, not aspirational.
 
-After two or three handled disclosures, this log itself becomes a meaningful trust signal — empirical evidence that the SECURITY.md policy is operationally real, not aspirational.
+Per the [contributing engineering standards](../contributing/engineering-standards.md), AgentGuardian maintains a public log of every vulnerability report we've handled. Researchers can use this log to verify that our response times match the published policy. Adopters can use it to audit our incident-handling discipline before depending on the project.
 
 ## Format
 
 Each entry records the full disclosure cycle:
 
-- **Received** — date the report arrived at `security@glacien.ai`.
+- **Received** — date the report arrived at `security@glacien.ai` or via GHSA.
 - **Acknowledged** — date we sent the first substantive response (target: within five business days).
 - **Patched** — date the fix landed on `main`.
 - **Released** — date the fixed version was published to PyPI.
@@ -34,16 +34,16 @@ Security researchers who have credibly reported vulnerabilities to this project.
 
 ## How to be credited
 
-Send your report to `security@glacien.ai` per [SECURITY.md](../../SECURITY.md). When acknowledging the report, we'll ask whether you want public credit, anonymous credit (a row in the table with reporter listed as "Anonymous"), or no public mention at all. Your choice is final and we honour it for the lifetime of this log.
+Send your report per [responsible-disclosure.md](responsible-disclosure.md). When acknowledging the report, we'll ask whether you want public credit, anonymous credit (a row in the table with reporter listed as "Anonymous"), or no public mention at all. Your choice is final and we honour it for the lifetime of this log.
 
 If you prefer pseudonymous credit, give us the handle you want displayed. We won't verify the handle's real-world owner.
 
 ## Out-of-scope reports
 
-We do not log reports that are out-of-scope per [SECURITY.md](../../SECURITY.md)'s scope clause (e.g., findings in intentionally-vulnerable test fixtures, findings in third-party LLM providers we adapt to, findings in adapter code authored by the user). Out-of-scope reports get a polite redirect; they do not appear in the table above.
+We do not log reports that are out-of-scope per the [threat model](threat-model.md#out-of-scope) (e.g., findings in intentionally-vulnerable test fixtures, findings in third-party LLM providers we adapt to, findings in adapter code authored by the user). Out-of-scope reports get a polite redirect; they do not appear in the table above.
 
 ## Related documents
 
-- [`SECURITY.md`](../../SECURITY.md) — vulnerability disclosure policy and contact
-- [`docs/security/reproducible-builds.md`](reproducible-builds.md) — supply-chain integrity verification
-- [Engineering Standards §9.5](../engineering-standards.md) — the policy this log implements
+- [Responsible disclosure](responsible-disclosure.md) — vulnerability disclosure policy and contact.
+- [Supply chain](supply-chain.md) — supply-chain integrity verification (the reproducible-build protocol used to be at `docs/security/reproducible-builds.md`).
+- [Contributing — engineering standards](../contributing/engineering-standards.md) — the policy this log implements.

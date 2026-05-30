@@ -48,7 +48,7 @@ concurrently, coordinated by a Swarm Commander that re-tasks idle agents
 and stops early on convergence. Every finding is triple-tagged with
 OWASP ASI, MITRE ATLAS, and CSA Agentic-RT categories.
 
-Read the full rationale: [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/why.md).
+Read the full rationale: [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/why.md).
 
 ## How it compares
 
@@ -92,7 +92,7 @@ agent-guardian serve
 agent-guardian badge $(agent-guardian last-score --score-only) --svg > badge.svg
 ```
 
-Full walkthrough: [Five-minute quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/quickstart.md).
+Full walkthrough: [Five-minute quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/tutorials/quickstart.md).
 
 ## Run with Docker
 
@@ -161,7 +161,7 @@ for per-mode cost / wall-time numbers and recommended thresholds.
                 └─────────────────────────────────────────┘
 ```
 
-Full architecture: [docs/architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/architecture.md).
+Full architecture: [docs/architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/architecture.md).
 
 ## Status
 
@@ -170,18 +170,18 @@ swarm, the deterministic AIVSS scorer, the live dashboard, and the
 Sigstore-signed evidence pipeline are all production-ready. Active development
 continues on the v1.1 stream (see CHANGELOG and roadmap).
 
-Roadmap: [docs/roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/roadmap.md).
+Roadmap: [docs/roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/roadmap.md).
 
 ## Documentation
 
-- [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/why.md)
-- [Quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/quickstart.md)
-- [Architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/architecture.md)
-- [AIVSS formula](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/aivss-formula.md)
-- [Adapters](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/adapters/index.md)
-- [API reference](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/api/index.md)
-- [Ethics and responsible use](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/ethics.md)
-- [Roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/roadmap.md)
+- [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/why.md)
+- [Quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/tutorials/quickstart.md)
+- [Architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/architecture.md)
+- [AIVSS formula](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/aivss.md)
+- [Adapters](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/integrations/adapters/index.md)
+- [API reference](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/api/index.md)
+- [Ethics and responsible use](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/security/ethics.md)
+- [Roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/roadmap.md)
 
 ## Contributing
 
@@ -201,7 +201,7 @@ public issue.
 AgentGuardian is for testing systems you own or are explicitly
 authorised to test. Use against third-party systems without
 authorisation is unlawful in most jurisdictions and a violation of
-these terms. See [Ethics](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/ethics.md).
+these terms. See [Ethics](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/security/ethics.md).
 
 ## License
 

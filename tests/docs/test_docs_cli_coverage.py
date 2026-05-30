@@ -1,9 +1,13 @@
-"""Guard ``docs/cli.md`` against drifting away from the real Typer surface.
+"""Guard ``docs/reference/reference/cli.md`` against drifting from the real Typer surface.
 
 Walks the live ``agent_guardian.cli`` Typer app and asserts that every command
 name — and the first long flag of every option on the ``scan`` command — is
-referenced somewhere in ``docs/cli.md``. New flags landing in code without a
-corresponding doc update will fail this test in CI.
+referenced somewhere in ``docs/reference/reference/cli.md``. New flags landing in code
+without a corresponding doc update will fail this test in CI.
+
+The CLI reference page moved from ``docs/reference/cli.md`` to ``docs/reference/reference/cli.md``
+when the v1.0 docs IA was reorganised (concepts/tutorials/how-to/reference);
+the ``docs/reference/cli.md`` URL is preserved via mkdocs redirects.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import typer.main
 from agent_guardian.cli import app
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DOC = REPO_ROOT / "docs" / "cli.md"
+DOC = REPO_ROOT / "docs" / "reference" / "cli.md"
 
 
 def _commands_from_app(typer_app: typer.Typer, prefix: str = "") -> list[str]:
@@ -69,7 +73,7 @@ _SKIP_COMMAND_NAMES = frozenset(
         "scans delete",
         "scans purge",
         # ``telemetry essential`` / ``extended`` / ``reset`` / ``show`` —
-        # documented as a group under the Telemetry transparency page; cli.md
+        # documented as a group under the Telemetry transparency page; reference/cli.md
         # covers the user-facing ``enable`` / ``disable`` / ``status`` set.
         "telemetry essential",
         "telemetry extended",
@@ -82,15 +86,15 @@ _SKIP_COMMAND_NAMES = frozenset(
 @pytest.mark.parametrize("command", _commands_from_app(app))
 def test_command_documented(command: str, doc_body: str) -> None:
     if command in _SKIP_COMMAND_NAMES:
-        pytest.skip(f"{command!r} intentionally not documented in cli.md")
+        pytest.skip(f"{command!r} intentionally not documented in reference/cli.md")
     # We accept either a fenced code-block reference (``agent-guardian scan``)
-    # or an H2 anchor (``## ``scan```). Both are common in cli.md.
+    # or an H2 anchor (``## ``scan```). Both are common in reference/cli.md.
     needles = (
         f"agent-guardian {command}",
         f"`{command}`",
     )
     assert any(needle in doc_body for needle in needles), (
-        f"docs/cli.md does not reference the {command!r} command — add an H2 + "
+        f"docs/reference/cli.md does not reference the {command!r} command — add an H2 + "
         f"a code-block example before merging."
     )
 
@@ -111,6 +115,6 @@ def test_scan_flag_documented(flag: str, doc_body: str) -> None:
     if flag in _DOC_SKIP_FLAGS:
         pytest.skip(f"{flag!r} intentionally omitted from docs")
     assert flag in doc_body, (
-        f"docs/cli.md does not mention the {flag!r} option on the scan command — "
+        f"docs/reference/cli.md does not mention the {flag!r} option on the scan command — "
         f"add it to the options table."
     )

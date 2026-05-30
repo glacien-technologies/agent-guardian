@@ -1,6 +1,8 @@
 # Deprecation policy
 
-Per [Engineering Standards §9.3](../engineering-standards.md), AgentGuardian commits to a predictable deprecation cadence so downstream consumers can plan their upgrades. This page is the canonical reference for the rule, the warning shape, the timeline, and the escalation path.
+> **TL;DR.** No public API breaks within six months of a `DeprecationWarning`. Deprecations are flagged in the CHANGELOG, the docstring, and a tracking issue; removals are flagged in the CHANGELOG again. The one exception is a security fix that cannot ship without a breaking change — those go out immediately, with the security driver disclosed in the release notes.
+
+Per [Engineering Standards §9.3](engineering-standards.md), AgentGuardian commits to a predictable deprecation cadence so downstream consumers can plan their upgrades. This page is the canonical reference for the rule, the warning shape, the timeline, and the escalation path.
 
 ## The rule
 
@@ -42,7 +44,7 @@ When we deprecate a public API:
    ```
 2. **The CHANGELOG flags the deprecation** under a `Deprecated` heading in the release that introduces the warning. Keep-a-Changelog format makes this discoverable by upgrade-time readers.
 3. **The docstring is updated** with a `.. deprecated::` directive naming the same removal version. mkdocstrings renders the warning prominently in the API reference.
-4. **The migration is documented** under `docs/migration/from-vMAJOR-to-vMAJOR.md` with side-by-side before/after code.
+4. **A migration note ships in the CHANGELOG's `Deprecated` and `Removed` sections** so upgrade-time readers see the change in context. Major-version upgrades (v1.x → v2.x) get a dedicated migration page; until that page lands, all v1.x → v1.x upgrades are non-breaking per SemVer and the [CHANGELOG](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md) alone is sufficient.
 5. **A tracking issue** is opened with the `deprecation` label and the planned removal milestone attached, so the removal isn't forgotten.
 
 When the planned removal version arrives:
@@ -71,7 +73,7 @@ There is one class of exception: **security fixes that require an API change**. 
 
 ## How to request a deprecation
 
-Open a tier-3 issue (governance label) per [`governance.md`](../../governance.md). Three of four maintainer roles must concur. The issue records:
+Open a tier-3 issue (governance label) per [Governance](governance.md). Three of four maintainer roles must concur. The issue records:
 
 - What's being deprecated and why.
 - What replaces it.
@@ -86,6 +88,6 @@ The CHANGELOG sections `Deprecated` and `Removed` together form the historical r
 
 ## Related documents
 
-- [Engineering Standards §9.3 — Deprecation policy](../engineering-standards.md)
-- [`CHANGELOG.md`](../../CHANGELOG.md) — release-by-release record of deprecations and removals
-- [`governance.md`](../../governance.md) — how tier-3 decisions are made
+- [Engineering Standards §9.3 — Deprecation policy](engineering-standards.md)
+- [CHANGELOG](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md) — release-by-release record of deprecations and removals
+- [Governance](governance.md) — how tier-3 decisions are made

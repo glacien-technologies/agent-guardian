@@ -1,15 +1,14 @@
 site_name: AgentGuardian
-site_url: https://agentguardian.ai/docs/
+site_url: https://agentguardian.io/docs/
 use_directory_urls: false
-
-exclude_docs: |
-  contributing/
-  security/
-  telemetry/
-  launch-manual-blockers.md
 site_description: First open-source adversarial-swarm framework for agentic AI red-teaming.
 site_author: Glacien Pte. Ltd.
 copyright: Copyright &copy; 2026 Glacien Pte. Ltd. Apache-2.0.
+
+exclude_docs: |
+  launch-manual-blockers.md
+  scan-flow-explainer.html
+  _glossary-abbreviations.md
 
 repo_url: https://github.com/glacien-technologies/agent-guardian
 repo_name: glacien-technologies/agent-guardian
@@ -28,6 +27,8 @@ theme:
     - navigation.tracking
     - content.code.copy
     - content.code.annotate
+    - content.action.edit
+    - content.action.view
     - search.highlight
     - search.suggest
   icon:
@@ -36,6 +37,43 @@ theme:
 
 plugins:
   - search
+  - redirects:
+      redirect_maps:
+        quickstart.md: tutorials/quickstart.md
+        getting-started/first-scan.md: tutorials/first-scan.md
+        cli.md: reference/cli.md
+        architecture.md: concepts/architecture.md
+        aivss-formula.md: concepts/aivss.md
+        glossary.md: concepts/glossary.md
+        why.md: concepts/why.md
+        roadmap.md: reference/roadmap.md
+        arxiv-preprint.md: research/preprint.md
+        faq.md: faq/index.md
+        ethics.md: security/ethics.md
+        api/index.md: reference/api/index.md
+        api/cli.md: reference/api/cli.md
+        api/core.md: reference/api/core.md
+        api/models.md: reference/api/models.md
+        api/adapters.md: reference/api/adapters.md
+        adapters/index.md: integrations/adapters/index.md
+        adapters/prompt.md: how-to/scan-a-system-prompt.md
+        adapters/code.md: how-to/scan-python-source.md
+        adapters/http.md: how-to/scan-an-http-endpoint.md
+        adapters/framework.md: integrations/adapters/framework.md
+        providers/index.md: integrations/providers/index.md
+        providers/openai.md: integrations/providers/openai.md
+        providers/anthropic.md: integrations/providers/anthropic.md
+        providers/vertex.md: integrations/providers/vertex.md
+        providers/bedrock.md: integrations/providers/bedrock.md
+        providers/ollama.md: integrations/providers/ollama.md
+        guide/configuration.md: operations/configuration.md
+        guide/output-formats.md: reference/output-formats.md
+        operator-checklist.md: contributing/operator-checklist.md
+        publishing.md: contributing/releasing.md
+        site-deployment.md: contributing/site-deployment.md
+        engineering-standards.md: contributing/engineering-standards.md
+        contributing.md: contributing/index.md
+        telemetry/index.md: security/telemetry.md
   - mkdocstrings:
       handlers:
         python:
@@ -48,53 +86,8 @@ plugins:
             separate_signature: true
             merge_init_into_class: true
 
-nav:
-  - Home: index.md
-  - Getting Started:
-      - Why: why.md
-      - Install: getting-started/install.md
-      - Quickstart: quickstart.md
-      - Your first scan: getting-started/first-scan.md
-  - User Guide:
-      - Configuration: guide/configuration.md
-      - Targets & Adapters:
-          - Overview: adapters/index.md
-          - System Prompt: adapters/prompt.md
-          - Code: adapters/code.md
-          - HTTP: adapters/http.md
-          - Framework: adapters/framework.md
-      - LLM Providers:
-          - Overview: providers/index.md
-          - OpenAI: providers/openai.md
-          - Anthropic: providers/anthropic.md
-          - Google Gemini / Vertex: providers/vertex.md
-          - AWS Bedrock: providers/bedrock.md
-          - Ollama (local): providers/ollama.md
-      - Output Formats: guide/output-formats.md
-      - Operations Checklist: operator-checklist.md
-  - CLI Reference: cli.md
-  - Concepts:
-      - Architecture: architecture.md
-      - AIVSS Score: aivss-formula.md
-      - Probes: concepts/probes.md
-      - Agents & Swarm: concepts/swarm.md
-      - Scan Modes: concepts/scan-modes.md
-      - Glossary: glossary.md
-  - API Reference:
-      - Overview: api/index.md
-      - CLI: api/cli.md
-      - Models: api/models.md
-      - Adapters: api/adapters.md
-      - Core (Swarm): api/core.md
-  - Contributing:
-      - Contributing: contributing.md
-      - Releasing to PyPI: publishing.md
-      - Deploying the docs site: site-deployment.md
-      - Ethics: ethics.md
-  - Roadmap: roadmap.md
-  - Research / Citation: arxiv-preprint.md
-
 markdown_extensions:
+  - abbr
   - admonition
   - codehilite
   - pymdownx.superfences
@@ -103,11 +96,138 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path: [docs, .]
+      check_paths: true
   - attr_list
   - md_in_html
   - toc:
       permalink: true
+
+nav:
+  - Home: index.md
+
+  - Tutorials:
+      - Quickstart: tutorials/quickstart.md
+      - Your first scan: tutorials/first-scan.md
+      - Add to your CI pipeline: tutorials/ci-gate.md
+
+  - Concepts:
+      - Why AgentGuardian: concepts/why.md
+      - Architecture: concepts/architecture.md
+      - The swarm: concepts/swarm.md
+      - AIVSS scoring: concepts/aivss.md
+      - Probes: concepts/probes.md
+      - Scan modes: concepts/scan-modes.md
+      - Target tiers: concepts/tiers.md
+      - Threat coverage (OWASP / MITRE / CSA): concepts/threat-coverage.md
+      - Glossary: concepts/glossary.md
+
+  - How-to:
+      - Overview: how-to/index.md
+      - Targets:
+          - Scan a system prompt: how-to/scan-a-system-prompt.md
+          - Scan Python source: how-to/scan-python-source.md
+          - Scan an HTTP endpoint: how-to/scan-an-http-endpoint.md
+      - Framework adapters:
+          - LangGraph: how-to/wire-langgraph.md
+          - OpenAI Agents SDK: how-to/wire-openai-agents.md
+          - CrewAI: how-to/wire-crewai.md
+          - AutoGen: how-to/wire-autogen.md
+          - Strands: how-to/wire-strands.md
+          - Google ADK: how-to/wire-adk.md
+      - Observability:
+          - OpenTelemetry: how-to/set-up-opentelemetry.md
+          - Forward to SIEM: how-to/forward-to-siem.md
+      - CI integration:
+          - GitHub Actions: how-to/integrate-github-actions.md
+          - GitLab CI: how-to/integrate-gitlab-ci.md
+          - Jenkins: how-to/integrate-jenkins.md
+
+  - Integrations:
+      - LLM providers:
+          - Overview: integrations/providers/index.md
+          - OpenAI: integrations/providers/openai.md
+          - Anthropic: integrations/providers/anthropic.md
+          - Google Gemini: integrations/providers/gemini.md
+          - Google Vertex AI: integrations/providers/vertex.md
+          - AWS Bedrock: integrations/providers/bedrock.md
+          - Ollama (local): integrations/providers/ollama.md
+      - Framework adapters:
+          - Overview: integrations/adapters/index.md
+          - Framework adapter detail: integrations/adapters/framework.md
+
+  - Operations:
+      - Serve in production: operations/serve.md
+      - Deploy with Docker: operations/deploy.md
+      - Observability: operations/observability.md
+      - Performance & sizing: operations/performance.md
+      - Configuration: operations/configuration.md
+      - Environment variables: operations/env-vars.md
+      - Runbook (symptom -> fix): operations/runbook.md
+      - Upgrade & rollback: operations/upgrade.md
+
+  - Security & Trust:
+      - Overview: security/index.md
+      - Threat model: security/threat-model.md
+      - Signing & verification: security/signing.md
+      - Data flow: security/data-flow.md
+      - Supply chain & reproducible builds: security/supply-chain.md
+      - Telemetry transparency: security/telemetry.md
+      - Responsible disclosure: security/responsible-disclosure.md
+      - Disclosure history: security/disclosure-history.md
+      - Ethics & responsible use: security/ethics.md
+
+  - Reference:
+      - CLI: reference/cli.md
+      - Configuration schema: reference/contract-schema.md
+      - Output formats: reference/output-formats.md
+      - Exit codes: reference/exit-codes.md
+      - Changelog: reference/changelog.md
+      - Migration guide: reference/migration.md
+      - Roadmap: reference/roadmap.md
+      - API:
+          - Overview: reference/api/index.md
+          - CLI: reference/api/cli.md
+          - Core (Swarm): reference/api/core.md
+          - Models: reference/api/models.md
+          - Adapters: reference/api/adapters.md
+          - LLM clients: reference/api/llm.md
+          - Reports & signing: reference/api/reports.md
+          - Strategies: reference/api/strategies.md
+          - Crypto primitives: reference/api/crypto.md
+
+  - Examples:
+      - Gallery: examples/index.md
+      - LangGraph - simple chatbot (T4): examples/langgraph-simple-chatbot.md
+      - LangGraph - support + tool (T3): examples/langgraph-support-with-tool.md
+      - LangGraph - PII assistant (T1): examples/langgraph-personal-assistant-pii.md
+      - OpenAI Agents - simple chatbot (T4): examples/openai-agents-simple-chatbot.md
+      - OpenAI Agents - support + tool (T3): examples/openai-agents-support-with-tool.md
+      - OpenAI Agents - PII assistant (T1): examples/openai-agents-personal-assistant-pii.md
+      - Run the dashboard with Docker Compose: examples/docker-compose-dashboard.md
+      - Reproduce in Colab: examples/jupyter-quickstart.md
+
+  - Comparison: comparison/index.md
+
+  - FAQ & Troubleshooting:
+      - FAQ: faq/index.md
+      - Troubleshooting: faq/troubleshooting.md
+
+  - Contributing:
+      - Overview: contributing/index.md
+      - Engineering standards: contributing/engineering-standards.md
+      - Authoring a probe: contributing/probe-authoring.md
+      - Authoring an adapter: contributing/adapter-authoring.md
+      - Deprecation policy: contributing/deprecation-policy.md
+      - Releasing to PyPI: contributing/releasing.md
+      - Deploying the docs site: contributing/site-deployment.md
+      - v1.0 launch checklist: contributing/operator-checklist.md
+      - Governance: contributing/governance.md
+
+  - Research:
+      - Cite AgentGuardian: research/citation.md
+      - Preprint (draft): research/preprint.md
 
 extra:
   social:
