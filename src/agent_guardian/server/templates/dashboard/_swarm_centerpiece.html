@@ -1,0 +1,63 @@
+{# Swarm centerpiece — target node in center with violet halo + 11 satellites + dashed violet edges.
+
+   Plain inline SVG. Satellites are placed by polar coordinates around the target.
+   Per the chat description: dashed violet for active links, solid green for the completed cascade.
+   The existing /scan/<id>/swarm route is the canonical drill-in; this is a hero overview.
+#}
+<section class="dash-report-section">
+  <div class="dash-report-section__head">
+    <div>
+      <div class="dash-eyebrow">Swarm</div>
+      <h2>Eleven specialists, <em>one target.</em></h2>
+    </div>
+    <p class="dash-report-section__lede">
+      The commander dispatches per-ASI specialists in parallel; each attacks the
+      target through the same adapter. Solid edges mark completed agents;
+      dashed edges are active attacks.
+    </p>
+  </div>
+
+  <div class="dash-swarm" aria-label="Swarm centerpiece">
+    <svg class="dash-swarm__svg" viewBox="0 0 720 480" role="img"
+         aria-labelledby="dash-swarm-title">
+      <title id="dash-swarm-title">Eleven specialist agents around the target node</title>
+      <defs>
+        <radialGradient id="dashSwarmHalo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.45"/>
+          <stop offset="60%" stop-color="#8B5CF6" stop-opacity="0.10"/>
+          <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      {# Target halo + node #}
+      <circle cx="360" cy="240" r="120" fill="url(#dashSwarmHalo)"/>
+      <circle cx="360" cy="240" r="38" fill="#0F0C1A" stroke="#8B5CF6" stroke-width="1.5"/>
+      <text x="360" y="244" text-anchor="middle" fill="#FAFAFA"
+            font-family="JetBrains Mono, monospace" font-size="11">target</text>
+
+      {# Eleven satellites — fixed polar positions. Edges are drawn first so the
+         circles sit on top. Satellites carry a data-slot=0..10 attribute so the
+         existing test_server_app.py contract holds (eleven slots). #}
+      {% for s in swarm_satellites %}
+      <line x1="360" y1="240" x2="{{ s.x }}" y2="{{ s.y }}"
+            stroke="#8B5CF6"
+            stroke-dasharray="{{ '0' if s.status == 'done' else '4 6' }}"
+            stroke-opacity="{{ '0.85' if s.status == 'done' else '0.5' }}"
+            stroke-width="1.2"/>
+      {% endfor %}
+
+      {% for s in swarm_satellites %}
+      <g data-slot="{{ loop.index0 }}" data-agent="{{ s.agent }}" data-status="{{ s.status }}">
+        <circle cx="{{ s.x }}" cy="{{ s.y }}" r="14"
+                fill="{{ '#10B981' if s.status == 'done' else ('#8B5CF6' if s.status == 'running' else '#3B3A41') }}"
+                fill-opacity="0.18"
+                stroke="{{ '#10B981' if s.status == 'done' else ('#8B5CF6' if s.status == 'running' else '#9A99A1') }}"
+                stroke-width="1.4"/>
+        <text x="{{ s.x }}" y="{{ s.y + 30 }}" text-anchor="middle"
+              font-family="JetBrains Mono, monospace" font-size="10"
+              fill="#C8C6D0">{{ s.label }}</text>
+      </g>
+      {% endfor %}
+    </svg>
+  </div>
+</section>

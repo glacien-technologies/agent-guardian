@@ -1,0 +1,53 @@
+{# Score card — big number, band pill, band-axis with 5 segments + ticks + needle, penalty receipt. #}
+<article class="dash-score-card" id="dash-score-card">
+  <div class="dash-score-card__label">
+    <span class="dash-eyebrow">Aivss</span>
+    <span class="dash-score-card__sublabel">{{ score_sublabel }}</span>
+  </div>
+
+  <div class="dash-score-card__main">
+    <span class="dash-score-card__num" data-live="aivss">{{ aivss_label }}</span>
+    <span class="dash-score-card__band dash-band--{{ band_class }}" data-live="band">{{ band_label }}</span>
+  </div>
+
+  <div class="dash-band-axis" aria-hidden="true">
+    <div class="dash-band-axis__bar">
+      <span class="dash-band-axis__seg dash-band-axis__seg--critical"></span>
+      <span class="dash-band-axis__seg dash-band-axis__seg--poor"></span>
+      <span class="dash-band-axis__seg dash-band-axis__seg--warn"></span>
+      <span class="dash-band-axis__seg dash-band-axis__seg--good"></span>
+      <span class="dash-band-axis__seg dash-band-axis__seg--exc"></span>
+      {% if needle_pct is not none %}
+      <span class="dash-band-axis__needle" style="left: {{ needle_pct }}%;" data-live="needle">
+        <span class="dash-band-axis__pin"></span>
+        <span class="dash-band-axis__val">{{ aivss_label }}</span>
+      </span>
+      {% endif %}
+    </div>
+    <div class="dash-band-axis__ticks">
+      <span>0</span><span>40</span><span>60</span><span>80</span><span>90</span><span>100</span>
+    </div>
+    <div class="dash-band-axis__bands">
+      <span>Critical</span><span>Poor</span><span>Warning</span><span>Good</span><span>Excellent</span>
+    </div>
+  </div>
+
+  <table class="dash-penalty">
+    <tr>
+      <th>Aggregate (tier-weighted)</th>
+      <td>{{ aggregate_label }}</td>
+    </tr>
+    <tr>
+      <th>− Critical findings &times; {{ counts.critical }}</th>
+      <td>{{ critical_penalty_label }}</td>
+    </tr>
+    <tr>
+      <th>− High findings &times; {{ counts.high }}</th>
+      <td>{{ high_penalty_label }}</td>
+    </tr>
+    <tr class="dash-penalty__total">
+      <th>Aivss (rounded)</th>
+      <td data-live="aivss-total">{{ aivss_label }}</td>
+    </tr>
+  </table>
+</article>

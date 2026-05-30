@@ -2114,6 +2114,99 @@ def scans_purge(
 
 
 # ---------------------------------------------------------------------------
+# Dashboard URL emission helper (QA-003)
+# ---------------------------------------------------------------------------
+#
+# Every scan emits a clickable URL to the live dashboard within the first
+# two lines of stdout. The pattern is locked in DESIGN_LOCK §QA-003:
+#
+#     ▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scans/cli-3a4c1d9c2840
+#     ▸ Report when complete                   http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report
+#
+# When stdout is a TTY we wrap each URL in an ANSI OSC 8 hyperlink so
+# Warp/iTerm2/Terminal.app/VS Code render it cmd-clickable. Non-TTY callers
+# (CI, ``| tee``, ``vercel > url.txt`` patterns) see the URL as plain text so
+# downstream tooling can parse it.
+#
+# Base URL resolution:
+#   $AGENT_GUARDIAN_DASHBOARD_URL          (operator override)
+#   "http://127.0.0.1:7474"                (default — matches ``serve``)
+# Trailing slashes are stripped so the URLs always have exactly one ``/``
+# between base and path.
+#
+# Operator escape hatches:
+#   --no-publish flag           : suppresses emission entirely.
+#   AGENT_GUARDIAN_DISABLE_URL_EMISSION=1 : same as --no-publish (operator rescue).
+
+DEFAULT_DASHBOARD_URL = "http://127.0.0.1:7474"
+
+
+def _resolve_dashboard_base_url() -> str:
+    """Return the base URL for the dashboard. Strip any trailing slash."""
+    base = os.environ.get("AGENT_GUARDIAN_DASHBOARD_URL", DEFAULT_DASHBOARD_URL)
+    base = base.strip()
+    while base.endswith("/"):
+        base = base[:-1]
+    return base or DEFAULT_DASHBOARD_URL
+
+
+def _osc8(url: str, text: str) -> str:
+    """Wrap ``text`` in an OSC 8 hyperlink escape so terminals make it clickable."""
+    # OSC 8 framing:  ESC ] 8 ; params ; URI BEL  text  ESC ] 8 ; ; BEL
+    return f"\x1b]8;;{url}\x07{text}\x1b]8;;\x07"
+
+
+def _stdout_is_tty() -> bool:
+    """Best-effort TTY detection for OSC 8 emission."""
+    isatty = getattr(sys.stdout, "isatty", None)
+    return bool(isatty and isatty())
+
+
+def print_scan_urls(
+    scan_id: str,
+    *,
+    suppress: bool = False,
+    base_url: str | None = None,
+    write: Any = None,
+) -> None:
+    """Emit the two scan-URL lines to stdout.
+
+    Args:
+        scan_id: The scan id ``swarm`` will run under (e.g. ``cli-3a4c1d9c2840``).
+        suppress: When ``True`` (set by ``--no-publish`` or the
+            ``AGENT_GUARDIAN_DISABLE_URL_EMISSION`` env switch) the call is a
+            no-op. The CLI never prints a URL for a scan that isn't
+            publishable.
+        base_url: Override the resolved base URL. Useful for tests.
+        write: Optional ``write(str) -> None`` callable. Defaults to
+            ``sys.stdout.write``; tests inject a buffer.
+    """
+    if suppress or os.environ.get("AGENT_GUARDIAN_DISABLE_URL_EMISSION") == "1":
+        return
+    base = base_url if base_url is not None else _resolve_dashboard_base_url()
+    while base.endswith("/"):
+        base = base[:-1]
+    scan_url = f"{base}/scans/{scan_id}"
+    report_url = f"{base}/scans/{scan_id}/report"
+    write_fn = write if write is not None else sys.stdout.write
+    if _stdout_is_tty() and write is None:
+        track_text = _osc8(scan_url, scan_url)
+        report_text = _osc8(report_url, report_url)
+    else:
+        track_text = scan_url
+        report_text = report_url
+    # Two lines, marker-prefixed for the editorial aesthetic and grep-ability.
+    write_fn(f"▸ Scan {scan_id} — track live at  {track_text}\n")
+    write_fn(f"▸ Report when complete                {report_text}\n")
+    flush = getattr(sys.stdout, "flush", None)
+    if write is None and flush is not None:
+        # Best-effort flush — a closed stdout (e.g. in some test harnesses)
+        # is not an error worth surfacing to the operator.
+        with contextlib.suppress(Exception):
+            flush()
+
+
+# ---------------------------------------------------------------------------
 # scan command -- the big one
 # ---------------------------------------------------------------------------
 
@@ -2295,6 +2388,38 @@ def scan(
             "observability stanza still honours --otel-endpoint)."
         ),
     ),
+    publish: bool = typer.Option(
+        True,
+        "--publish/--no-publish",
+        help=(
+            "Emit the live-dashboard URL at scan start (default). Pass "
+            "--no-publish to suppress the URL entirely for sensitive scans. "
+            "The base URL comes from $AGENT_GUARDIAN_DASHBOARD_URL or "
+            "http://127.0.0.1:7474."
+        ),
+    ),
+    debug: int = typer.Option(
+        0,
+        "--debug",
+        count=True,
+        help=(
+            "Stream per-agent reflections (prompt + target_response + verdict) "
+            "to stdout in real time. Use -1x for truncated panels (the default "
+            "block format); -2x (--debug --debug) to disable truncation and "
+            "show full prompt + reasoning. Composes with the Live region — "
+            "panels print as scrollback ABOVE the swarm board, not inside it."
+        ),
+    ),
+    debug_format: str = typer.Option(
+        "text",
+        "--debug-format",
+        help=(
+            "Reflection feed format: 'text' (Rich panels) or 'json' (NDJSON, "
+            "one record per line). 'json' implicitly disables the Live "
+            "region — JSON mode auto-suppresses Rich frames so the stream is "
+            "jq-clean. Has no effect without --debug."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -2310,6 +2435,24 @@ def scan(
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG) from None
+    # QA-005 — validate --debug-format. Mutual-exclusion: 'json' format
+    # auto-suppresses the Live region (one stdout owner). 'text' is the
+    # default and composes with the Live region (panels above as
+    # scrollback).
+    debug_format_norm = (debug_format or "text").lower().strip()
+    if debug_format_norm not in ("text", "json"):
+        typer.echo(
+            f"unknown --debug-format '{debug_format}' -- must be 'text' or 'json'.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from None
+    # Clamp debug level to 0/1/2 — Typer counts unbounded but we only
+    # publish two non-zero modes (truncated / full).
+    debug_level = max(0, min(2, int(debug)))
+    # JSON-mode reflection feed implicitly disables the Live region —
+    # the operator wants a clean ``jq`` pipeline, not Rich frames.
+    effective_no_tui = no_tui or (debug_level > 0 and debug_format_norm == "json")
+
     try:
         exit_code = asyncio.run(
             _run_scan(
@@ -2328,7 +2471,7 @@ def scan(
                 fail_under=fail_under,
                 output=output,
                 output_path=output_path,
-                no_tui=no_tui,
+                no_tui=effective_no_tui,
                 config_path=config_path,
                 seed=seed,
                 goal=goal,
@@ -2341,6 +2484,9 @@ def scan(
                 no_owasp_llm=no_owasp_llm,
                 contract=contract,
                 otel_endpoint=otel_endpoint,
+                publish=publish,
+                debug_level=debug_level,
+                debug_format=debug_format_norm,
             )
         )
     except KeyboardInterrupt:
@@ -2379,6 +2525,9 @@ async def _run_scan(
     no_owasp_llm: bool = False,
     contract: Path | None = None,
     otel_endpoint: str | None = None,
+    publish: bool = True,
+    debug_level: int = 0,
+    debug_format: str = "text",
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -2417,7 +2566,31 @@ async def _run_scan(
             typer.echo(f"unknown tier '{tier}' -- must be T1, T2, T3, or T4.", err=True)
             return EXIT_CONFIG
 
-    # 6. Build LLMs + target.
+    # 6a. Pre-scan model validation (QA-001 + addendum). One cheap probe per
+    #     distinct (provider, model) tuple — typically one HTTP call even when
+    #     attacker == evaluator == commander. Caches per-session so resume /
+    #     retry doesn't re-probe. ``--no-preflight`` skips it for users who
+    #     deliberately want to dodge the probe (offline / air-gap).
+    if not no_preflight:
+        from agent_guardian.llm.validation import check_model_exists
+
+        seen_specs: set[str] = set()
+        for spec in (eff_attacker, eff_evaluator, eff_commander):
+            if spec in seen_specs:
+                continue
+            seen_specs.add(spec)
+            mv = check_model_exists(spec)
+            if not mv.valid:
+                typer.echo(mv.message, err=True)
+                if mv.status == "auth_failed":
+                    return EXIT_CONFIG
+                # Confirmed-unknown model — fail fast (QA-001).
+                return EXIT_LLM_PROVIDER
+            if mv.status == "transient" and mv.message:
+                # Provider blip — keep going, but log honestly.
+                typer.echo(f"warning: {mv.message}", err=True)
+
+    # 6b. Build LLMs + target.
     try:
         attacker_llm = build_llm(eff_attacker, role="attacker")
         evaluator_llm = build_llm(eff_evaluator, role="evaluator")
@@ -2481,6 +2654,14 @@ async def _run_scan(
 
     # 7. Build swarm.
     scan_id = f"cli-{uuid.uuid4().hex[:12]}"
+    # QA-003 — emit the live-dashboard URLs at scan start so the operator can
+    # share / open them BEFORE the swarm finishes. Runs after model + target
+    # are resolved (so we never print a URL for a scan that's about to abort)
+    # and BEFORE any heavy work (so the URL is in the first two lines of
+    # stdout, which is the published contract). ``--no-publish`` suppresses
+    # emission entirely; the ``AGENT_GUARDIAN_DISABLE_URL_EMISSION`` env switch
+    # is the operator-rescue alternative.
+    print_scan_urls(scan_id, suppress=not publish)
     # v1.1 mode resolution. ScanMode validates against the {fast,smart,full}
     # vocabulary; anything else is a user error worth surfacing as
     # EXIT_CONFIG rather than crashing the SwarmConfig constructor.
@@ -2557,9 +2738,37 @@ async def _run_scan(
         observer=observer,
     )
 
+    # QA-005 — attach the reflection sink BEFORE the TUI so the renderer
+    # wraps whatever observer is already wired (otel, store, etc.) and
+    # the TUI's attach_to() wraps the renderer in turn. The wrap chain
+    # is: TUI → AttackFeedRenderer → prior observer (otel / store /
+    # caller-supplied). All three run per event; failures in any one
+    # are suppressed so a sick sink can't break the swarm.
+    feed_renderer: Any = None
+    if debug_level > 0:
+        from agent_guardian.ui.attack_feed import (
+            AttackFeedRenderer,
+            DebugFormat,
+            DebugLevel,
+        )
+
+        level_cast: DebugLevel = 2 if debug_level >= 2 else 1
+        fmt_cast: DebugFormat = "json" if debug_format == "json" else "text"
+        feed_renderer = AttackFeedRenderer(
+            level=level_cast,
+            format=fmt_cast,
+            scan_id=scan_id,
+        )
+        feed_renderer.attach_to(swarm)
+
     # 8. Run -- optionally with TUI.
+    #    QA-002 — the Live region is the single stdout owner during a
+    #    scan. Auto-fall-back to the no-Live path when stdout is not a
+    #    TTY (CI, pipe-to-file, redirected log capture); that keeps the
+    #    operator's NDJSON observer feed clean of ANSI frames.
+    effective_no_tui = no_tui or not sys.stdout.isatty()
     try:
-        if no_tui:
+        if effective_no_tui:
             scan_result = await swarm.run()
         else:
             from agent_guardian.cli_tui import ScanTUI
@@ -2572,11 +2781,19 @@ async def _run_scan(
             tui.attach_to(swarm)
             async with tui:
                 scan_result = await swarm.run()
+    except KeyboardInterrupt:
+        # QA-002 — the ``async with tui`` context guarantees ``Live.stop()``
+        # runs (cursor restore + scrollback flush) before this handler
+        # sees the interrupt. Surface a clean operator message through
+        # the shared RichHandler-bound logger and translate to the
+        # standard ``130`` exit code.
+        _LOG.warning("scan interrupted by user; partial state preserved")
+        return EXIT_USER_INTERRUPT
     except SandboxViolation as exc:
-        typer.echo(f"sandbox violation: {exc}", err=True)
+        _LOG.error("sandbox violation: %s", exc)
         return EXIT_SANDBOX
     except LLMError as exc:
-        typer.echo(f"llm provider error: {type(exc).__name__}: {exc}", err=True)
+        _LOG.error("llm provider error: %s: %s", type(exc).__name__, exc)
         return EXIT_LLM_PROVIDER
     finally:
         # Close every LLM client + adapter we opened. Deduplicate when two
@@ -2627,18 +2844,17 @@ async def _run_scan(
     #     failure (never a silent green pass).
     authoritative = scan_result.scoring_valid
     if not authoritative:
-        engine = scan_result.engine or {}
-        typer.echo(
-            "WARNING: this scan is NON-AUTHORITATIVE. "
-            f"evaluation_mode={scan_result.evaluation_mode} "
-            f"(engine: attacker={engine.get('attacker', '?')}, "
-            f"evaluator={engine.get('evaluator', '?')}). A stub / non-LLM evaluator "
-            "cannot flag findings, so the numeric AIVSS is meaningless and the band "
-            "is reported as NOT_EVALUATED. Re-run with a real --model (e.g. "
-            "openai:gpt-4o, anthropic:claude-haiku-4-5, gemini:gemini-2.5-flash) for "
-            "an authoritative assessment.",
-            err=True,
-        )
+        # QA-004 — branch the NON-AUTHORITATIVE banner on (evaluation_mode,
+        # coverage_pct, mode_threshold) instead of unconditionally blaming a
+        # stub evaluator. A real-LLM scan with thin coverage now gets copy
+        # that names the actual coverage % + threshold + actionable
+        # remediation rather than the misleading "re-run with a real --model"
+        # the user already supplied.
+        from agent_guardian.reports.warnings import build_authoritativeness_warning
+
+        warning_text = build_authoritativeness_warning(scan_result)
+        if warning_text is not None:
+            typer.echo(warning_text, err=True)
 
     # 9. Render + persist report. The canonical scan.json is always written via
     #    the signed/redacted ``write_json`` path so the persisted artifact is
@@ -2695,8 +2911,13 @@ async def _run_scan(
     # Coverage warning: when a scan launched less than the authoritative-mode
     # floor, surface it on stderr so a CI gate downstream knows the scan was
     # thinly tested (and we never silently pass a slim run as full coverage).
-    if coverage_pct is not None and coverage_pct < 100.0:
-        mode_floor = {"fast": 60.0, "smart": 80.0, "full": 95.0}.get(scan_result.mode, 95.0)
+    # When the scan was already flagged non-authoritative above, the QA-004
+    # branched banner already named the coverage % + threshold; suppress this
+    # second message to avoid duplicate stderr lines about the same cause.
+    if coverage_pct is not None and coverage_pct < 100.0 and authoritative:
+        from agent_guardian.reports.warnings import MODE_AUTHORITATIVE_THRESHOLDS
+
+        mode_floor = MODE_AUTHORITATIVE_THRESHOLDS.get(scan_result.mode, 95.0)
         if coverage_pct < mode_floor:
             typer.echo(
                 f"WARNING: coverage {coverage_pct:.0f}% is below the "

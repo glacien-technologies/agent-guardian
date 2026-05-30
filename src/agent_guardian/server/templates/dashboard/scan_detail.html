@@ -1,0 +1,94 @@
+{# Live scan detail — implements the saved Briefing design.
+
+   This template is intentionally self-contained (not extending base.html) so
+   the dashboard chrome / typography is the canonical one from the saved design
+   bundle. The legacy ``scan.html`` is preserved as a rollback artifact; the
+   route picks this one.
+
+   Sections (in order):
+     1. Topbar (brand + URL pill + locality pill)
+     2. Masthead (eyebrow + editorial headline + sidebar dl)
+     3. Headline row: score card + at-a-glance grid
+     4. Swarm centerpiece
+     5. Sub-scores (six axes)
+     6. ASI breakdown (ten rows)
+     7. Findings feed (paginated, criticality-sorted; reflection slot embedded)
+     8. Reproducibility receipt
+#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>{{ page_title }} · AgentGuardian</title>
+  <link rel="stylesheet" href="/static/colors_and_type.css" />
+  <link rel="stylesheet" href="/static/dashboard.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2213%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%221.6%22%2F%3E%3C%2Fsvg%3E" />
+</head>
+<body class="dash-body" data-scan-id="{{ scan_id }}" data-is-running="{{ 'true' if is_running else 'false' }}">
+
+  {% include "dashboard/_topbar.html" %}
+
+  <main class="dash-report" id="main">
+    {% include "dashboard/_masthead.html" %}
+
+    <section class="dash-headline-row">
+      {% include "dashboard/_score_card.html" %}
+      {% include "dashboard/_at_a_glance.html" %}
+    </section>
+
+    {% include "dashboard/_swarm_centerpiece.html" %}
+    {% include "dashboard/_sub_scores.html" %}
+    {% include "dashboard/_asi_breakdown.html" %}
+    {% include "dashboard/_findings_feed.html" %}
+    {% include "dashboard/_reproducibility.html" %}
+  </main>
+
+  <footer class="dash-footer">
+    <span>AgentGuardian v{{ version }}</span>
+    <span>·</span>
+    <span>Apache-2.0</span>
+    <span>·</span>
+    <span class="dash-muted">{{ locality_label }}</span>
+  </footer>
+
+  {# Live updates over SSE. The script subscribes to /scans/<id>/live and
+     mutates the data-live=... nodes in place; no page reload. #}
+  <script>
+  (function () {
+    var body = document.body;
+    var scanId = body.getAttribute('data-scan-id');
+    if (!scanId) { return; }
+    if (body.getAttribute('data-is-running') !== 'true') { return; }
+    if (typeof EventSource === 'undefined') { return; }
+    var url = '/scans/' + encodeURIComponent(scanId) + '/live';
+    var es = new EventSource(url);
+    es.addEventListener('snapshot', function (evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        document.querySelectorAll('[data-live]').forEach(function (node) {
+          var key = node.getAttribute('data-live');
+          if (data[key] === undefined) { return; }
+          var val = data[key];
+          if (key.endsWith('-bar') && typeof val === 'number') {
+            node.style.width = val + '%';
+            return;
+          }
+          if (key === 'needle' && typeof val === 'number') {
+            node.style.left = val + '%';
+            var inner = node.querySelector('.dash-band-axis__val');
+            if (inner) inner.textContent = data['aivss'] || '';
+            return;
+          }
+          node.textContent = val;
+        });
+      } catch (err) { /* swallow */ }
+    });
+    es.addEventListener('scan_done', function () { es.close(); });
+    es.onerror = function () { /* browser will auto-reconnect */ };
+  })();
+  </script>
+
+</body>
+</html>

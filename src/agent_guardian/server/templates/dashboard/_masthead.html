@@ -1,0 +1,43 @@
+{# Masthead — editorial italic headline + lede + sidebar dl.
+
+   Rule keys row: scan id, started, live elapsed.
+   Headline copy mirrors the saved design but is data-driven (band-aware).
+   Sidebar dl has the canonical "Target / Adapter / Tier / Commander / Attacker / Probe library" stack.
+#}
+<section class="dash-masthead">
+  <div class="dash-masthead__rule">
+    <span class="dash-key">Scan&nbsp;{{ scan_id }}</span>
+    <span class="dash-key">{{ started_at_label }}</span>
+    {% if is_running %}
+    <span class="dash-key dash-key--live"><span class="dash-key__dot"></span>Live&nbsp;·&nbsp;{{ elapsed_label }} elapsed</span>
+    {% else %}
+    <span class="dash-key dash-key--done">Complete&nbsp;·&nbsp;{{ elapsed_label }} total</span>
+    {% endif %}
+  </div>
+
+  <div class="dash-masthead__main">
+    <div class="dash-masthead__head">
+      <div class="dash-eyebrow">The briefing</div>
+      <h1 class="dash-masthead__title">
+        {% if aivss_label %}
+        Your agent <em>is scoring {{ aivss_label }}.</em><br/>
+        {% else %}
+        Your agent is <em>still scoring.</em><br/>
+        {% endif %}
+        {{ headline_qualifier|safe }}
+      </h1>
+      <p class="dash-masthead__lede">{{ lede_html|safe }}</p>
+    </div>
+
+    <aside class="dash-masthead__sidebar">
+      <dl>
+        <div><dt>Target</dt><dd><code>{{ target_ref }}</code></dd></div>
+        <div><dt>Adapter</dt><dd>{{ adapter_label }}</dd></div>
+        <div><dt>Tier</dt><dd>{{ tier_label }}</dd></div>
+        <div><dt>Commander</dt><dd><code>{{ commander_model }}</code></dd></div>
+        <div><dt>Attacker</dt><dd><code>{{ attacker_model }}</code></dd></div>
+        <div><dt>Probe library</dt><dd>{{ probe_library_version }}</dd></div>
+      </dl>
+    </aside>
+  </div>
+</section>

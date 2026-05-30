@@ -1,0 +1,89 @@
+{# Findings feed — severity color-bar, mono code spans, triple-framework tags
+   (ASI / ATLAS / CSA / probe id). Paginated, default 15/page, criticality-sorted.
+
+   QA-005 reflection feed is a sibling slot, deliberately left here as a hidden
+   anchor for the future ReflectionRenderer JS to hydrate. We don't render the
+   reflection cards in this template.
+#}
+<section class="dash-report-section" id="findings">
+  <div class="dash-report-section__head">
+    <div>
+      <div class="dash-eyebrow">All findings</div>
+      <h2>All findings <em>so far.</em></h2>
+    </div>
+    <p class="dash-report-section__lede">
+      <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality.
+      Clicking an ASI cell in the breakdown above scrolls here and filters by that category.
+    </p>
+  </div>
+
+  <div class="dash-feed-toolbar" role="toolbar" aria-label="Findings filters">
+    <label class="dash-feed-search">
+      <span class="dash-sr-only">Search findings</span>
+      <input type="search" placeholder="Search summary, probe id…" data-feed-search/>
+    </label>
+    <div class="dash-feed-seg" role="group" aria-label="Severity filter">
+      <button type="button" data-feed-filter="all" class="dash-feed-seg__btn dash-feed-seg__btn--active">
+        All <span class="dash-feed-seg__ct">{{ findings_total }}</span>
+      </button>
+      <button type="button" data-feed-filter="critical" class="dash-feed-seg__btn">
+        Critical <span class="dash-feed-seg__ct dash-feed-seg__ct--crit">{{ counts.critical }}</span>
+      </button>
+      <button type="button" data-feed-filter="high" class="dash-feed-seg__btn">
+        High <span class="dash-feed-seg__ct dash-feed-seg__ct--high">{{ counts.high }}</span>
+      </button>
+      <button type="button" data-feed-filter="medium" class="dash-feed-seg__btn">
+        Medium <span class="dash-feed-seg__ct dash-feed-seg__ct--med">{{ counts.medium }}</span>
+      </button>
+      <button type="button" data-feed-filter="low" class="dash-feed-seg__btn">
+        Low <span class="dash-feed-seg__ct dash-feed-seg__ct--low">{{ counts.low }}</span>
+      </button>
+    </div>
+  </div>
+
+  <ol class="dash-feed-list" data-live="findings-list">
+    {% for f in findings_page %}
+    <li class="dash-feed-row dash-feed-row--{{ f.severity_class }}" data-finding-id="{{ f.id }}">
+      <div class="dash-feed-row__bar" aria-hidden="true"></div>
+      <div class="dash-feed-row__body">
+        <header class="dash-feed-row__head">
+          <span class="dash-sev-pill dash-sev-pill--{{ f.severity_class }}">{{ f.severity_label }}</span>
+          <span class="dash-feed-row__meta">
+            <span class="dash-key">{{ f.created_label }}</span>
+            <span class="dash-key">{{ f.asi_code }}</span>
+          </span>
+        </header>
+        <p class="dash-feed-row__summary">{{ f.summary }}</p>
+        <div class="dash-feed-row__tags">
+          <span class="dash-tag dash-tag--asi">{{ f.asi_code }}</span>
+          {% for t in f.atlas %}
+          <span class="dash-tag dash-tag--atlas">{{ t }}</span>
+          {% endfor %}
+          <span class="dash-tag dash-tag--csa">{{ f.csa_code }}</span>
+          <span class="dash-tag dash-tag--probe"><code>{{ f.probe_id }}</code></span>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  {% if pagination.total_pages > 1 %}
+  <nav class="dash-feed-pager" aria-label="Findings pagination">
+    <span class="dash-feed-pager__range">
+      Showing {{ pagination.start }}–{{ pagination.end }} of {{ pagination.total }}
+    </span>
+    <div class="dash-feed-pager__buttons">
+      {% for p in pagination.pages %}
+      <a class="dash-feed-pager__btn{% if p == pagination.current %} dash-feed-pager__btn--active{% endif %}"
+         href="?page={{ p }}">{{ p }}</a>
+      {% endfor %}
+    </div>
+  </nav>
+  {% endif %}
+
+</section>
+
+{# QA-005 — Reflection feed lives as its own section below the findings
+   feed. The JS (``reflections.js``) hydrates it from the SSE stream at
+   ``/scans/{id}/reflections.sse``. #}
+{% include "dashboard/_reflection_feed.html" %}

@@ -9,6 +9,7 @@ exclude_docs: |
   launch-manual-blockers.md
   scan-flow-explainer.html
   _glossary-abbreviations.md
+  _design/
 
 repo_url: https://github.com/glacien-technologies/agent-guardian
 repo_name: glacien-technologies/agent-guardian
@@ -115,6 +116,7 @@ nav:
   - Concepts:
       - Why AgentGuardian: concepts/why.md
       - Architecture: concepts/architecture.md
+      - Hosted dashboard (forward-looking): architecture/hosted-dashboard.md
       - The swarm: concepts/swarm.md
       - AIVSS scoring: concepts/aivss.md
       - Probes: concepts/probes.md

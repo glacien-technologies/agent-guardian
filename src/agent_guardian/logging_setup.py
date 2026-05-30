@@ -34,9 +34,99 @@ import re
 import sys
 from typing import IO, Any
 
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.theme import Theme
+
 _LOG = logging.getLogger(__name__)
 
 _CONFIGURED = False
+# Process-singleton Console (QA-002 F-1). Constructed lazily on first
+# ``get_console()`` call. ALL Rich rendering — the Live region, the URL
+# emitter, the reflection sink, and the RichHandler stdlib bridge — must
+# route through this one instance so log lines and Live updates share
+# the same stdout owner; without that, the smoking-gun border-tear
+# regression from QA-002 reappears.
+_CONSOLE: Console | None = None
+
+# QA-002 design-lock palette. Keeps brand colour (deep violet #8B5CF6),
+# status pills, severity bands, AIVSS bands, and the ten stable ASI
+# tokens in one place so the CLI Live region, log lines, and the (future
+# QA-005) reflection sink all paint with the same vocabulary.
+_AG_THEME: Theme = Theme(
+    {
+        "brand": "#8B5CF6",
+        "brand.dim": "#6366F1",
+        "status.pending": "dim",
+        "status.running": "cyan",
+        "status.done": "green",
+        "status.error": "red",
+        "status.skipped": "yellow",
+        "sev.critical": "bold red",
+        "sev.high": "red",
+        "sev.medium": "yellow",
+        "sev.low": "dim",
+        "verdict.pass": "green",
+        "verdict.fail": "red",
+        "verdict.inconclusive": "yellow",
+        "aivss.low": "green",
+        "aivss.med": "yellow",
+        "aivss.high": "red",
+        "aivss.none": "dim",
+        "asi.ASI01": "magenta",
+        "asi.ASI02": "cyan",
+        "asi.ASI03": "yellow",
+        "asi.ASI04": "blue",
+        "asi.ASI05": "red",
+        "asi.ASI06": "green",
+        "asi.ASI07": "bright_magenta",
+        "asi.ASI08": "bright_cyan",
+        "asi.ASI09": "bright_yellow",
+        "asi.ASI10": "bright_blue",
+    }
+)
+
+
+def _stderr_is_tty() -> bool:
+    """Return True iff ``sys.stderr`` looks like an interactive terminal.
+
+    Used to decide whether to install :class:`RichHandler` (TTY) or fall
+    back to the plain :class:`logging.StreamHandler` (CI, pipe, file).
+    """
+    try:
+        return bool(sys.stderr.isatty())
+    except Exception:  # pragma: no cover -- exotic stream
+        return False
+
+
+def _color_disabled() -> bool:
+    """Honour ``NO_COLOR`` (https://no-color.org/) — any non-empty value disables colour."""
+    return bool(os.environ.get("NO_COLOR"))
+
+
+def get_console() -> Console:
+    """Return the process-singleton CLI :class:`rich.console.Console`.
+
+    First call constructs it with :data:`_AG_THEME`; subsequent calls
+    return the same instance. Tests can override by assigning
+    :data:`_CONSOLE` directly (then resetting in teardown).
+    """
+    global _CONSOLE
+    if _CONSOLE is None:
+        _CONSOLE = Console(
+            theme=_AG_THEME,
+            stderr=False,
+            no_color=_color_disabled(),
+        )
+    return _CONSOLE
+
+
+def _reset_console_for_tests() -> None:
+    """Drop the cached Console so the next ``get_console()`` constructs fresh."""
+    global _CONSOLE
+    _CONSOLE = None
+
+
 # Trace-correlation fields are stamped onto every LogRecord by the factory
 # installed in ``_install_trace_correlation_factory``. When no OTel span is
 # active they're empty strings so the formatter renders ``[trace=]`` rather
@@ -261,6 +351,50 @@ def _configure_structlog_json(level: int, stream: IO[str]) -> None:
     root.setLevel(level)
 
 
+def _should_use_rich_handler(stream: IO[str]) -> bool:
+    """Decide whether to install :class:`RichHandler` over the plain handler.
+
+    True when (a) the operator has not disabled colour via ``NO_COLOR``,
+    (b) the chosen stream is a TTY, and (c) the stream is ``sys.stderr``
+    (we don't risk rewriting an operator-supplied buffer with ANSI).
+    Tests override the singleton :data:`_CONSOLE` directly to exercise
+    the Rich path with a recording console.
+    """
+    if _color_disabled():
+        return False
+    if stream is not sys.stderr:
+        return False
+    return _stderr_is_tty()
+
+
+def _install_rich_handler(level: int) -> None:
+    """Install one :class:`RichHandler` on the root logger.
+
+    Idempotent: removes any prior handler installed by this function
+    first, then installs exactly one. Bound to :func:`get_console` so
+    log lines and the Live region share the same Console — that's the
+    whole point of QA-002's "single source of truth" lock.
+    """
+    root = logging.getLogger()
+    # Remove every existing handler (basicConfig may have added a stream
+    # handler on a prior call, or a previous RichHandler may already be
+    # attached). The redacting filter is reinstalled below by
+    # ``configure_logging`` so we don't lose secret scrubbing.
+    for existing in list(root.handlers):
+        root.removeHandler(existing)
+    handler = RichHandler(
+        console=get_console(),
+        rich_tracebacks=True,
+        show_path=False,
+        show_time=True,
+        markup=False,
+        log_time_format=_DEFAULT_DATEFMT,
+    )
+    handler.setLevel(level)
+    root.addHandler(handler)
+    root.setLevel(level)
+
+
 def _resolve_level(level: str | int | None) -> int:
     """Resolve a level spec (env var, str, int, or None) to a logging int."""
     if level is None:
@@ -308,6 +442,14 @@ def configure_logging(
         # log sink; the stdlib human-readable path stays the default for local
         # development.
         _configure_structlog_json(resolved, effective_stream)
+    elif _should_use_rich_handler(effective_stream):
+        # QA-002 — when stderr is a real TTY and the operator hasn't disabled
+        # colour, route stdlib logging through Rich so log lines (1) render
+        # with theme tokens, and (2) share the same Console as the scan's
+        # Live region. Sharing the Console is what guarantees log lines
+        # serialize ABOVE the Live frame as scrollback instead of tearing
+        # the panel border (the bug captured in the QA-002 reproducer).
+        _install_rich_handler(resolved)
     else:
         logging.basicConfig(
             level=resolved,
@@ -335,6 +477,11 @@ def is_configured() -> bool:
 
 
 def _reset_for_tests() -> None:
-    """Drop the configured flag so the next call reconfigures. Test-only."""
+    """Drop the configured flag so the next call reconfigures. Test-only.
+
+    Also drops the cached Console so each test starts with a fresh
+    Rich rendering pipeline (record buffers don't leak between tests).
+    """
     global _CONFIGURED
     _CONFIGURED = False
+    _reset_console_for_tests()

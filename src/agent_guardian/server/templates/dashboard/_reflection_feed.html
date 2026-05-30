@@ -1,0 +1,79 @@
+{# QA-005 — Reflection feed.
+
+   Renders the slot from ``_findings_feed.html`` as a live, paginated
+   stream of agent reflections. Cards are hydrated by ``reflections.js``
+   which subscribes to ``/scans/<id>/reflections.sse``. The PII
+   redaction that ran in ``memory.write_reflection`` (memory.py) is
+   passed through verbatim — we render whatever the redactor produced
+   (e.g. ``[REDACTED:PHONE_NUMBER]``) so the dashboard never re-exposes
+   anything the CLI feed already scrubbed.
+
+   The cards collapse by default to a single-line preview (agent + ASI
+   + verdict + truncated prompt). Click anywhere on the header to expand.
+   Filter chips toggle ``hidden`` on non-matching cards in place.
+#}
+<section class="dash-report-section dash-reflection-feed" id="reflections-feed"
+         data-scan-id="{{ scan_id }}" aria-label="Reflection feed">
+  <div class="dash-report-section__head">
+    <div>
+      <div class="dash-eyebrow">Reflections</div>
+      <h2>Every attack, <em>open to inspection.</em></h2>
+    </div>
+    <p class="dash-report-section__lede">
+      Each card is one turn — the prompt the attacker sent, the target's
+      reply, the evaluator's verdict, the reasoning. Filter by agent,
+      ASI, verdict, seed id, or severity. "Copy as curl" replays the
+      attack against the target endpoint locally.
+    </p>
+  </div>
+
+  <div class="dash-feed-toolbar" role="toolbar" aria-label="Reflection filters">
+    <label class="dash-feed-search">
+      <span class="dash-sr-only">Search reflections</span>
+      <input type="search" placeholder="Search prompt, response, seed id…"
+             data-refl-search aria-label="Search reflections"/>
+    </label>
+    <div class="dash-feed-seg" role="group" aria-label="Verdict filter">
+      <button type="button" data-refl-filter="all"
+              class="dash-feed-seg__btn dash-feed-seg__btn--active">All</button>
+      <button type="button" data-refl-filter="fail" class="dash-feed-seg__btn">Fail</button>
+      <button type="button" data-refl-filter="pass" class="dash-feed-seg__btn">Pass</button>
+      <button type="button" data-refl-filter="inconclusive" class="dash-feed-seg__btn">
+        Inconclusive
+      </button>
+    </div>
+    <div class="dash-feed-seg" role="group" aria-label="Chip filter">
+      <button type="button" data-refl-chip="agent" class="dash-feed-seg__btn">Agent</button>
+      <button type="button" data-refl-chip="asi" class="dash-feed-seg__btn">ASI</button>
+      <button type="button" data-refl-chip="seed" class="dash-feed-seg__btn">Seed</button>
+      <button type="button" data-refl-chip="severity" class="dash-feed-seg__btn">Severity</button>
+    </div>
+  </div>
+
+  {# Empty state when no reflections have streamed in yet. JS hides this
+     as soon as the first card lands. #}
+  <p class="dash-reflection-feed__empty" data-refl-empty>
+    Waiting for the first reflection — the swarm is still spinning up.
+  </p>
+
+  <ol class="dash-reflection-feed__list" id="reflections-list"
+      data-refl-page-size="100"
+      aria-live="polite" aria-relevant="additions"></ol>
+
+  <nav class="dash-feed-pager dash-reflection-feed__pager" hidden
+       aria-label="Reflection pagination">
+    <span class="dash-feed-pager__range" data-refl-range></span>
+    <div class="dash-feed-pager__buttons">
+      <button type="button" class="dash-feed-pager__btn" data-refl-prev>Prev</button>
+      <button type="button" class="dash-feed-pager__btn" data-refl-next>Next</button>
+    </div>
+  </nav>
+
+  {# Endpoint hint for the "copy as curl" button. The dashboard does
+     not know the target endpoint directly; the JS reads this and uses
+     it to reconstruct the curl one-liner. When unknown we fall back to
+     a placeholder the operator can edit before pasting. #}
+  <meta data-refl-endpoint content="{{ target_ref or 'http://localhost:8000' }}" hidden/>
+</section>
+
+<script src="/static/reflections.js" defer></script>

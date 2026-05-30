@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
@@ -376,6 +377,7 @@ class ReconAgent:
         model: str = "gpt-4o-mini",
         budget: AgentBudget | None = None,
         audit_rounds: int = 10,
+        on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         # The attacker LLM drives white-box profile extraction + the black-box
         # capability-audit deepening loop; wrapped in a usage-tracking decorator
@@ -392,6 +394,12 @@ class ReconAgent:
         self._model = model
         self._audit_rounds = audit_rounds
         self.budget = budget if budget is not None else AgentBudget(max_turns=25)
+        # QA-005 — same sink contract as :class:`AsiAgent`. Recon emits
+        # one reflection per audit-loop turn; the payload shape mirrors
+        # what ``memory.write_reflection`` accepts so the CLI feed and
+        # dashboard renderer can treat recon and specialist reflections
+        # uniformly.
+        self.on_reflection: Callable[[Mapping[str, Any]], None] | None = on_reflection
 
     async def run(self, target: TargetAdapter, memory: SharedMemory) -> AgentReport:
         start = time.monotonic()
@@ -529,24 +537,33 @@ class ReconAgent:
                 multi_agent_observed = True
             if _looks_like_cross_session_data(reply):
                 cross_session_data_observed = True
+            recon_reflection: dict[str, Any] = {
+                "event": "recon_audit",
+                "agent": self.name,
+                "prompt": question,
+                "target_response": reply,
+                "tool_calls": [
+                    {"name": call.name, "arguments": call.arguments} for call in turn_tool_calls
+                ],
+            }
             try:
                 await memory.write_reflection(
                     self.name,
-                    json.dumps(
-                        {
-                            "event": "recon_audit",
-                            "prompt": question,
-                            "target_response": reply,
-                            "tool_calls": [
-                                {"name": call.name, "arguments": call.arguments}
-                                for call in turn_tool_calls
-                            ],
-                        }
-                    ),
+                    json.dumps(recon_reflection),
                     embed=False,
                 )
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.warning("recon audit: write_reflection failed (%s) -- continuing", exc)
+            # QA-005 — surface the recon turn record to the same sink the
+            # specialists use; best-effort, same suppression contract.
+            if self.on_reflection is not None:
+                try:
+                    self.on_reflection(recon_reflection)
+                except Exception as exc:  # pragma: no cover -- defensive
+                    _LOG.debug(
+                        "recon audit: on_reflection sink raised %s — continuing",
+                        type(exc).__name__,
+                    )
         # OR-merge structured tool names into the declared set so downstream
         # strategies (tool exfil, recon-adaptive) see the real surface even
         # when the assistant text never named the tool in prose.

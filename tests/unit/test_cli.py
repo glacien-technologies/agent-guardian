@@ -16,7 +16,6 @@ from agent_guardian import __version__
 from agent_guardian.cli import (
     EXIT_CONFIG,
     EXIT_FAIL_UNDER,
-    EXIT_LLM_PROVIDER,
     EXIT_OK,
     app,
     build_llm,
@@ -675,6 +674,12 @@ def test_scan_with_unknown_output_format_returns_config_error(
 def test_scan_openai_without_key_returns_llm_error(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Missing API key is a configuration problem (EXIT_CONFIG=2), not a provider
+    fault (EXIT_LLM_PROVIDER=4). The QA-001 model-validation preflight detects
+    the missing credential before any provider round-trip and exits via
+    EXIT_CONFIG so operators get the right "set this env var" remediation
+    rather than a "provider failed" red herring.
+    """
     monkeypatch.delenv("AGENT_GUARDIAN_OPENAI_API_KEY", raising=False)
     prompt = tmp_path / "p.txt"
     prompt.write_text("hello", encoding="utf-8")
@@ -689,7 +694,7 @@ def test_scan_openai_without_key_returns_llm_error(
             "--no-tui",
         ],
     )
-    assert result.exit_code == EXIT_LLM_PROVIDER
+    assert result.exit_code == EXIT_CONFIG
 
 
 def test_scan_low_budget_does_not_abort_preflight(runner: CliRunner, tmp_path: Path) -> None:

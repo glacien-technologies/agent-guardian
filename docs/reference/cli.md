@@ -154,6 +154,9 @@ Exactly one target mode must be specified:
 | `--no-owasp-llm`             | off     | Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion). Default: those four DO run alongside the ten ASI specialists, raising the parallel cap from 10 to 14. |
 | `--contract PATH`            | —       | Drive the scan from a target contract YAML. Mutually exclusive with the other target modes.          |
 | `--otel-endpoint URL`        | env     | OTLP-HTTP endpoint (e.g. `http://localhost:4318/v1/traces`) to export OpenTelemetry GenAI spans to. Also read from `OTEL_EXPORTER_OTLP_ENDPOINT`. When `--contract` is used, the contract's `observability.otel_endpoint` takes precedence; this flag covers the non-contract scan modes. |
+| `--publish` / `--no-publish` | on      | Emit the live-dashboard URL at scan start (default). Use `--no-publish` to suppress the URL entirely for sensitive scans. The base URL comes from `$AGENT_GUARDIAN_DASHBOARD_URL` or `http://127.0.0.1:7474`. |
+| `--debug`                    | off     | Stream per-agent reflections (prompt + target response + verdict) to stdout. Repeat (`--debug --debug`) to disable the default 240-char truncation on prompt / target-response / reasoning sections. Composes with the Live region — panels print as scrollback ABOVE the swarm board, not inside it. |
+| `--debug-format TEXT`        | `text`  | Reflection feed format — `text` (Rich panels) or `json` (NDJSON, one record per line). `json` implicitly disables the Live region so the stream is `jq`-clean. Has no effect without `--debug`. |
 
 ### Worked examples
 

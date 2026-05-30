@@ -1,80 +1,76 @@
-"""Rich progress panel for the AgentGuardian CLI (PRD §8.5, M10).
+"""Rich Live progress board for the AgentGuardian CLI (PRD §8.5, QA-002).
 
-A minimal terminal "swarm board" — one row per agent, header with scan
-metadata, footer with the latest provisional AIVSS. Driven by
-:class:`~agent_guardian.core.swarm.SwarmEvent` callbacks fired by the
-:class:`~agent_guardian.core.swarm.SwarmCommander`.
+A single :class:`rich.live.Live` region owns stdout for the entire scan
+lifetime. The Live's renderable is built fresh each tick from a
+:class:`~agent_guardian.ui.dashboard.DashboardState` via
+:func:`~agent_guardian.ui.dashboard.make_dashboard`, so there is exactly
+one swarm-board panel on screen at any moment — the duplicate-frame
+regression captured in the QA-002 reproducer cannot happen by
+construction.
 
-M10 ships the simple version intentionally: a single Rich :class:`Live`
-panel that refreshes a :class:`Table` on every event. The fancier
-Textual-based TUI from PRD §8.5 (with per-agent progress bars and a
-live findings sidebar) is deferred to v1.1. The current widget is
-sufficient for "I want to watch the swarm work" and stays out of the
-way when ``--no-tui`` is set.
+Logging is routed through ``rich.logging.RichHandler`` bound to the
+*same* :class:`~rich.console.Console` this Live region owns (see
+``agent_guardian.logging_setup.get_console``). That sharing is what
+makes ``_LOG.info("hello")`` render ABOVE the Live frame as scrollback
+rather than tearing the panel border.
+
+For non-TTY targets (CI, ``stdout`` piped to a file, ``--no-tui``,
+``NO_COLOR``) the caller skips the Live region entirely; the swarm
+observer still fires, and the operator gets NDJSON via the existing
+observer path.
 """
 
 from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Iterable
 from types import TracebackType
 
 from rich.console import Console
 from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
 from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
+from agent_guardian.logging_setup import get_console
+from agent_guardian.ui.dashboard import AGENT_ROWS, AgentStatus, DashboardState, make_dashboard
 
 __all__ = ["ScanTUI"]
 
 
-# Stable presentation order — matches PRD §3 + the recon agent at the top.
-_AGENT_ROWS: tuple[tuple[str, str], ...] = (
-    ("recon-agent", "n/a"),
-    ("goal-hijack-agent", "ASI01"),
-    ("tool-abuse-agent", "ASI02"),
-    ("privilege-agent", "ASI03"),
-    ("supply-chain-agent", "ASI04"),
-    ("code-exec-agent", "ASI05"),
-    ("memory-poison-agent", "ASI06"),
-    ("a2a-agent", "ASI07"),
-    ("cascade-agent", "ASI08"),
-    ("trust-exploit-agent", "ASI09"),
-    ("drift-agent", "ASI10"),
-)
-
-
-_STATUS_COLOURS: dict[str, str] = {
-    "waiting": "dim white",
-    "running": "yellow",
-    "done": "green",
-    "skipped": "dim cyan",
-    "error": "red",
-}
+# Map SwarmEvent kinds to the state transitions on a row. Centralised so
+# the event handler stays a thin shim and the table of behaviours is
+# easy to audit.
+_RECON_AGENT = "recon-agent"
 
 
 class ScanTUI:
-    """Async-friendly progress board for one swarm run.
+    """Async-friendly Live region for one swarm run (QA-002).
 
     Use as an async context manager. Call :meth:`attach_to` before
     entering — the TUI subscribes by wrapping the existing swarm
     observer so any caller-supplied observer keeps firing.
     """
 
-    def __init__(self, scan_id: str, target_ref: str, tier: str) -> None:
+    def __init__(
+        self,
+        scan_id: str,
+        target_ref: str,
+        tier: str,
+        *,
+        console: Console | None = None,
+        refresh_per_second: int = 4,
+    ) -> None:
         self.scan_id = scan_id
         self.target_ref = target_ref
         self.tier = tier
-        self._statuses: dict[str, str] = {name: "waiting" for name, _ in _AGENT_ROWS}
-        self._findings: dict[str, int] = {name: 0 for name, _ in _AGENT_ROWS}
-        self._provisional_aivss: int | None = None
-        self._decision: str = "—"
+        self._console = console if console is not None else get_console()
+        self._refresh_per_second = refresh_per_second
+        self._state = DashboardState(
+            scan_id=scan_id,
+            target_ref=target_ref,
+            tier=tier,
+        )
         self._start: float = time.monotonic()
         self._live: Live | None = None
-        self._console = Console()
 
     # ------------------------------------------------------------------
     # Attachment + lifecycle
@@ -95,7 +91,14 @@ class ScanTUI:
 
     async def __aenter__(self) -> ScanTUI:
         self._start = time.monotonic()
-        self._live = Live(self._render(), console=self._console, refresh_per_second=4)
+        self._state.elapsed_seconds = 0.0
+        self._live = Live(
+            make_dashboard(self._state),
+            console=self._console,
+            refresh_per_second=self._refresh_per_second,
+            transient=False,
+            vertical_overflow="visible",
+        )
         self._live.start()
         return self
 
@@ -106,7 +109,10 @@ class ScanTUI:
         tb: TracebackType | None,
     ) -> None:
         if self._live is not None:
-            self._live.update(self._render())
+            # One final render so the closing frame reflects the latest
+            # state (e.g. final AIVSS) before Live restores the cursor.
+            self._state.elapsed_seconds = time.monotonic() - self._start
+            self._live.update(make_dashboard(self._state))
             self._live.stop()
             self._live = None
 
@@ -115,73 +121,68 @@ class ScanTUI:
     # ------------------------------------------------------------------
 
     def handle_event(self, event: SwarmEvent) -> None:
-        """Update internal state from one :class:`SwarmEvent`."""
+        """Update :class:`DashboardState` from one :class:`SwarmEvent`."""
         kind = event.kind
         agent = event.agent or ""
+        new_status: AgentStatus | None = None
+
         if kind == "recon_start":
-            self._statuses["recon-agent"] = "running"
+            self._state.agent_status[_RECON_AGENT] = "running"
         elif kind == "recon_done":
-            self._statuses["recon-agent"] = "done"
+            self._state.agent_status[_RECON_AGENT] = "done"
         elif kind == "agent_start" and agent:
-            self._statuses[agent] = "running"
+            self._state.agent_status[agent] = "running"
+            new_status = "running"
+        elif kind == "agent_progress" and agent:
+            # Idempotent — agent_progress lets the swarm forward turn
+            # counters (when available). Treat missing keys as no-op.
+            turn = event.payload.get("turn") if isinstance(event.payload, dict) else None
+            max_turns = event.payload.get("max_turns") if isinstance(event.payload, dict) else None
+            if isinstance(turn, int) and isinstance(max_turns, int):
+                self._state.agent_turns[agent] = (turn, max_turns)
         elif kind == "agent_done" and agent:
-            self._statuses[agent] = "done"
-            findings = event.payload.get("findings_count")
+            self._state.agent_status[agent] = "done"
+            findings = event.payload.get("findings_count") if event.payload else None
             if isinstance(findings, int):
-                self._findings[agent] = findings
+                self._state.agent_findings[agent] = findings
+            new_status = "done"
         elif kind == "agent_skipped" and agent:
-            self._statuses[agent] = "skipped"
+            self._state.agent_status[agent] = "skipped"
+            new_status = "skipped"
         elif kind == "checkpoint":
             if event.provisional_aivss is not None:
-                self._provisional_aivss = event.provisional_aivss
+                self._state.provisional_aivss = event.provisional_aivss
             if event.decision is not None:
-                self._decision = event.decision.value
+                self._state.decision = event.decision.value
+            # Optional budget fields the checkpoint emitter may include.
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            tokens_spent = payload.get("tokens_spent")
+            tokens_cap = payload.get("tokens_cap")
+            usd_spent = payload.get("usd_spent")
+            usd_cap = payload.get("usd_cap")
+            if isinstance(tokens_spent, int):
+                self._state.budget_tokens_spent = tokens_spent
+            if isinstance(tokens_cap, int):
+                self._state.budget_tokens_cap = tokens_cap
+            if isinstance(usd_spent, (int, float)):
+                self._state.budget_usd_spent = float(usd_spent)
+            if isinstance(usd_cap, (int, float)):
+                self._state.budget_usd_cap = float(usd_cap)
         elif kind == "scan_done":
             if event.provisional_aivss is not None:
-                self._provisional_aivss = event.provisional_aivss
-            for name in list(self._statuses.keys()):
-                if self._statuses[name] == "running":
-                    self._statuses[name] = "done"
+                self._state.provisional_aivss = event.provisional_aivss
+            # Any agent still flagged running at scan-done is implicitly
+            # complete (the swarm may not emit per-agent done in some
+            # early-stop paths).
+            for name, _ in AGENT_ROWS:
+                if self._state.agent_status.get(name) == "running":
+                    self._state.agent_status[name] = "done"
 
+        # Mark unused locals as intentional; mypy --strict otherwise
+        # warns about the unused ``new_status`` branches when the
+        # caller chooses not to consume them yet (future-proofing).
+        _ = new_status
+
+        self._state.elapsed_seconds = time.monotonic() - self._start
         if self._live is not None:
-            self._live.update(self._render())
-
-    # ------------------------------------------------------------------
-    # Rendering
-    # ------------------------------------------------------------------
-
-    def _render(self) -> Panel:
-        elapsed = time.monotonic() - self._start
-        table = Table(expand=True, show_lines=False, padding=(0, 1))
-        table.add_column("Agent", no_wrap=True)
-        table.add_column("ASI", justify="center", no_wrap=True)
-        table.add_column("Status", justify="left", no_wrap=True)
-        table.add_column("Findings", justify="right", no_wrap=True)
-
-        for name, asi in _AGENT_ROWS:
-            status = self._statuses.get(name, "waiting")
-            colour = _STATUS_COLOURS.get(status, "white")
-            table.add_row(
-                name,
-                asi,
-                Text(status, style=colour),
-                str(self._findings.get(name, 0)),
-            )
-
-        provisional = "—" if self._provisional_aivss is None else str(self._provisional_aivss)
-        header_lines: Iterable[str] = (
-            f"scan_id: {self.scan_id}",
-            f"target:  {self.target_ref}",
-            f"tier:    {self.tier}",
-            f"elapsed: {elapsed:0.1f}s",
-        )
-        header = Text("\n".join(header_lines), style="bold")
-        footer = Text(
-            f"provisional AIVSS: {provisional}   decision: {self._decision}",
-            style="bold magenta",
-        )
-        body = Table.grid(expand=True)
-        body.add_row(header)
-        body.add_row(table)
-        body.add_row(footer)
-        return Panel(body, title="AgentGuardian — swarm board", border_style="cyan")
+            self._live.update(make_dashboard(self._state))

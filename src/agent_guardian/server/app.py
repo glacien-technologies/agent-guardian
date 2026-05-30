@@ -156,6 +156,7 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         findings,
         health,
         home,
+        reflections,
         scan,
         swarm,
         transcripts,
@@ -172,6 +173,10 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(coverage.router)
     app.include_router(analytics.router)
+    # QA-005 — per-agent attack transparency. Tails memory.jsonl and
+    # streams each reflection record as an SSE event to the dashboard's
+    # ``reflections.js`` consumer.
+    app.include_router(reflections.router)
     # Health/metrics last so its endpoints are the "infra" tail of the
     # OpenAPI surface (not that we expose OpenAPI publicly).
     app.include_router(health.router)

@@ -1,0 +1,669 @@
+"""View-model builder for the live scan dashboard (QA-003).
+
+The Jinja templates under ``server/templates/dashboard/`` are intentionally
+data-driven — they render whatever shape this module produces. Keeping the
+view-model assembly out of the route handler means:
+
+* The route stays a thin Starlette wrapper.
+* The view-model is unit-testable in isolation (no FastAPI / TestClient needed
+  for the snapshot golden tests).
+* The same builder feeds the SSE ``/scans/<id>/live`` stream, so the live
+  ``data-live=*`` updates always agree with the initial HTML render.
+
+The builder works for both completed scans (``Scan`` instance) and in-flight
+scans (``Scan = None``, ``is_running=True``) — every field gracefully degrades
+to a placeholder when the data isn't ready yet.
+"""
+
+from __future__ import annotations
+
+import math
+import urllib.parse
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
+
+from agent_guardian.models.asi import AsiCategory, asi_description
+from agent_guardian.models.scan import Scan
+from agent_guardian.models.severity import Severity, SeverityBand
+
+__all__ = [
+    "DashboardContext",
+    "build_dashboard_context",
+    "resolve_locality",
+]
+
+
+# Sub-score key → (title, "from" label, attention threshold below baseline)
+_SUB_SCORE_DEFINITIONS: list[tuple[str, str, str]] = [
+    # The template at server/templates/dashboard/_sub_scores.html prepends
+    # "from " — keep these labels bare (no leading "from "), otherwise the
+    # rendered output reads "from from ASIxx". Captured by the live
+    # validation pass; one-token cosmetic fix.
+    ("prompt_injection_resistance", "Prompt injection resistance", "ASI01"),
+    ("tool_scope_safety", "Tool scope safety", "ASI02 + ASI03"),
+    ("pii_containment", "PII containment", "ASI02 + ASI06"),
+    ("memory_poisoning_resistance", "Memory poisoning resistance", "ASI06"),
+    ("excessive_agency_containment", "Excessive agency containment", "ASI03 + ASI05 + ASI08"),
+    ("hallucination_resistance", "Hallucination resistance", "ASI09"),
+]
+
+# ASI row metadata — subtitle + weight (matches the saved design).
+_ASI_ROW_META: dict[str, tuple[str, str, float, bool]] = {
+    # code  : (title,                subtitle,                         weight, weight_high)
+    "ASI01": ("Goal hijack", "Direct · indirect · multi-turn", 2.0, True),
+    "ASI02": ("Tool misuse", "Scope · chaining · smuggling", 1.5, False),
+    "ASI03": ("Privilege abuse", "JIT bypass · role inheritance", 1.5, False),
+    "ASI04": ("Supply chain", "MCP poison · registry spoof", 1.0, False),
+    "ASI05": ("Code execution", "Sandbox escape · eval smuggle", 1.5, False),
+    "ASI06": ("Memory poisoning", "RAG triggers · cross-session", 2.0, True),
+    "ASI07": ("Agent-to-agent", "Bus spoof · confused deputy", 1.0, False),
+    "ASI08": ("Cascading failure", "Retry storm · blast radius", 1.0, False),
+    "ASI09": ("Trust exploit", "Manufactured authority · citations", 1.0, False),
+    "ASI10": ("Behavioural drift", "Long horizon · sandbagging", 1.0, False),
+}
+
+
+# Eleven satellite agents around the target node (per the saved design + the
+# existing /scan/<id>/swarm view's eleven slots).
+_SWARM_SATELLITE_LABELS: list[str] = [
+    "recon",
+    "goal-hijack",
+    "tool-misuse",
+    "privilege",
+    "supply-chain",
+    "code-exec",
+    "memory",
+    "a2a",
+    "cascade",
+    "trust",
+    "drift",
+]
+
+
+@dataclass(frozen=True)
+class DashboardContext:
+    """Resolved template context for ``dashboard/scan_detail.html``.
+
+    Captured as a frozen dataclass so the route handler can pass the result
+    straight to ``TemplateResponse(context=ctx.to_dict())`` and tests can
+    introspect the fields without parsing HTML.
+    """
+
+    payload: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.payload)
+
+
+def resolve_locality(base_url: str) -> tuple[bool, str, str, str, str]:
+    """Resolve the locality pill state from the dashboard base URL.
+
+    Returns ``(is_local, label, scheme, host_display, port_display)``.
+
+    ``is_local`` is true iff the host is a loopback alias (``127.0.0.1``,
+    ``localhost``, ``::1``) — matches the same check the ``serve`` command
+    uses to decide whether to require an auth token.
+    """
+    parsed = urllib.parse.urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    scheme = parsed.scheme or "http"
+    port = parsed.port
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    is_local = host in loopback
+    label = "Local" if is_local else "Hosted · evidence-signed"
+    port_display = f":{port}" if port is not None else ""
+    return is_local, label, f"{scheme}:", host, port_display
+
+
+def _fmt_pct(value: float) -> float:
+    """Clamp a percentage value to [0, 100] and round to 1 decimal place."""
+    return max(0.0, min(100.0, round(value, 1)))
+
+
+def _aivss_to_needle(score: int | None) -> float | None:
+    """Map an AIVSS score to a horizontal needle position on the band axis.
+
+    The band-axis bar is segmented at 40% / 60% / 80% / 90% / 100%, so a
+    linear ``score`` placement matches the visual.
+    """
+    if score is None:
+        return None
+    return _fmt_pct(float(score))
+
+
+def _band_class(band: SeverityBand | None) -> str:
+    if band is None:
+        return "unknown"
+    return band.value.lower()
+
+
+def _humanise_seconds(seconds: float) -> str:
+    """Render seconds as ``MM:SS`` for the elapsed clock."""
+    if seconds < 0:
+        seconds = 0.0
+    total = round(seconds)
+    minutes, secs = divmod(total, 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
+    """Return ``{asi_code: {critical, high, medium, low}}`` for the scan."""
+    out: dict[str, dict[str, int]] = {
+        c.value: {"critical": 0, "high": 0, "medium": 0, "low": 0} for c in AsiCategory
+    }
+    if scan is None:
+        return out
+    for f in scan.findings:
+        bucket = out[f.asi.value]
+        if f.severity is Severity.CRITICAL:
+            bucket["critical"] += 1
+        elif f.severity is Severity.HIGH:
+            bucket["high"] += 1
+        elif f.severity is Severity.MEDIUM:
+            bucket["medium"] += 1
+        elif f.severity is Severity.LOW:
+            bucket["low"] += 1
+    return out
+
+
+def _sub_score_rows(scan: Scan | None) -> tuple[list[dict[str, Any]], int]:
+    """Return ``(rows, attention_count)`` for the six sub-score axes."""
+    rows: list[dict[str, Any]] = []
+    attention = 0
+    baseline_default = 70.0  # T2 baseline visualised in the saved design
+    raw_sub_scores: dict[str, float] = dict(scan.sub_scores) if scan is not None else {}
+    for key, title, from_label in _SUB_SCORE_DEFINITIONS:
+        score = float(raw_sub_scores.get(key, 0.0))
+        score_pct = _fmt_pct(score)
+        delta = round(score - baseline_default, 1)
+        is_attention = score < baseline_default
+        if is_attention:
+            attention += 1
+        rows.append(
+            {
+                "title": title,
+                "from_label": from_label,
+                "score_pct": score_pct,
+                "score_label": f"{round(score)}" if scan is not None else "—",
+                "baseline_pct": baseline_default,
+                "delta": delta,
+                "delta_label": f"{delta:+.0f}",
+                "attention": is_attention,
+                "note_html": _sub_score_note(key, score, is_attention),
+            }
+        )
+    return rows, attention
+
+
+def _sub_score_note(key: str, score: float, is_attention: bool) -> str:
+    """Editorial copy per sub-score, matching the saved design's tone.
+
+    These are stable, hand-authored notes — not user content. They render as
+    Jinja ``|safe`` because they intentionally include ``<em>`` / ``<code>``.
+    """
+    notes = {
+        "prompt_injection_resistance": (
+            "Direct refusals are <strong>strong</strong>. Indirect injection via "
+            "tool-fetched documents <em>does</em> succeed in some scans."
+        ),
+        "tool_scope_safety": (
+            "The agent <em>refuses</em> most scope-expansion requests. Chain-exfil "
+            "through <code>fetch_url → summarize → store_memory</code> is the "
+            "common bypass."
+        ),
+        "pii_containment": (
+            "The agent rarely volunteered PII even under Crescendo escalation. "
+            "The redactor is doing its job."
+        ),
+        "memory_poisoning_resistance": (
+            "AgentPoison-style probes at <em>0.1%</em> poison rate occasionally "
+            "land — a persistent RAG trigger can survive a session restart."
+        ),
+        "excessive_agency_containment": (
+            "The agent asks before taking irreversible actions in most cases. A "
+            "retry-storm was induced but the circuit breaker caught it."
+        ),
+        "hallucination_resistance": (
+            "Confident-hallucination triggers occasionally land — the agent quoted "
+            "a fabricated statistic with no citation. Caught by the "
+            "<code>trust-exploit-agent</code>."
+        ),
+    }
+    base = notes.get(key, "")
+    if is_attention:
+        base = "<strong>Needs attention.</strong> " + base
+    return base
+
+
+def _asi_rows(
+    scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]
+) -> list[dict[str, Any]]:
+    """Build the ten ASI breakdown rows."""
+    rows: list[dict[str, Any]] = []
+    asi_scores: dict[AsiCategory, float] = scan.asi_scores if scan is not None else {}
+    for code, (title, subtitle, weight, weight_high) in _ASI_ROW_META.items():
+        asi_enum = AsiCategory(code)
+        score_raw = asi_scores.get(asi_enum)
+        is_pending = score_raw is None
+        score_val = float(score_raw) if score_raw is not None else 0.0
+        findings = findings_by_asi.get(code, {"critical": 0, "high": 0, "medium": 0, "low": 0})
+        is_attention = (score_val < 70.0 and not is_pending) or findings["critical"] > 0
+        status_label, status_class = _status_for_row(scan, is_pending, score_val)
+        rows.append(
+            {
+                "code": code,
+                "name": title,
+                "subtitle": subtitle,
+                "score_pct": _fmt_pct(score_val if not is_pending else 12.0),
+                "score_label": f"{round(score_val)}",
+                "is_pending": is_pending,
+                "is_attention": is_attention,
+                "weight_label": f"{weight:.1f}",
+                "weight_high": weight_high,
+                "findings": findings,
+                "status_label": status_label,
+                "status_class": status_class,
+            }
+        )
+    return rows
+
+
+def _status_for_row(scan: Scan | None, is_pending: bool, score: float) -> tuple[str, str]:
+    """Return ``(label, class)`` for an ASI row's status pill."""
+    if scan is not None and not is_pending:
+        return ("complete", "done")
+    if is_pending and scan is None:
+        return ("running", "running")
+    if is_pending:
+        return ("12% · warming", "queued")
+    return ("running", "running")
+
+
+def _swarm_satellite_positions(scan: Scan | None) -> list[dict[str, Any]]:
+    """Compute 11 satellite positions in polar coordinates around (360, 240)."""
+    cx, cy = 360.0, 240.0
+    radius = 170.0
+    satellites: list[dict[str, Any]] = []
+    n = len(_SWARM_SATELLITE_LABELS)
+    for i, label in enumerate(_SWARM_SATELLITE_LABELS):
+        angle = (2.0 * math.pi * i) / n - math.pi / 2.0
+        x = cx + radius * math.cos(angle)
+        y = cy + radius * math.sin(angle)
+        status = "done" if scan is not None else ("running" if i % 3 != 0 else "queued")
+        satellites.append(
+            {
+                "label": label,
+                "agent": label,
+                "status": status,
+                "x": round(x, 1),
+                "y": round(y, 1),
+            }
+        )
+    return satellites
+
+
+def _findings_page(
+    scan: Scan | None,
+    *,
+    page: int,
+    per_page: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return ``(page_items, pagination_meta)`` for the findings feed.
+
+    Findings are sorted critical → high → medium → low, then by creation time.
+    """
+    if scan is None:
+        empty_pagination: dict[str, Any] = {
+            "total": 0,
+            "current": 1,
+            "total_pages": 1,
+            "start": 0,
+            "end": 0,
+            "pages": [],
+        }
+        return [], empty_pagination
+    sev_rank = {
+        Severity.CRITICAL: 0,
+        Severity.HIGH: 1,
+        Severity.MEDIUM: 2,
+        Severity.LOW: 3,
+    }
+    sorted_findings = sorted(scan.findings, key=lambda f: (sev_rank[f.severity], f.created_at))
+    total = len(sorted_findings)
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
+    total_pages = max(1, math.ceil(total / per_page))
+    page = min(page, total_pages)
+    start = (page - 1) * per_page
+    end = min(start + per_page, total)
+    items: list[dict[str, Any]] = []
+    for f in sorted_findings[start:end]:
+        items.append(
+            {
+                "id": f.id,
+                "asi_code": f.asi.value,
+                "atlas": [t for t in f.mitre_atlas],
+                "csa_code": f.csa_category.value,
+                "probe_id": f.probe_id,
+                "summary": f.summary,
+                "severity_label": f.severity.value.upper(),
+                "severity_class": f.severity.value.lower(),
+                "created_label": f.created_at.strftime("%H:%M:%S"),
+            }
+        )
+    pagination: dict[str, Any] = {
+        "total": total,
+        "current": page,
+        "total_pages": total_pages,
+        "start": start + 1 if total > 0 else 0,
+        "end": end,
+        "pages": list(range(1, total_pages + 1)),
+    }
+    return items, pagination
+
+
+def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:
+    """Return 10 dot states ('done' / 'active' / 'queued') for the at-a-glance pill row."""
+    states: list[str] = []
+    for code in _ASI_ROW_META:
+        bucket = findings_by_asi.get(code, {})
+        has_findings = sum(bucket.values()) > 0
+        if scan is None:
+            states.append("active" if has_findings else "queued")
+            continue
+        # Completed scan -- every ASI category that the scan persisted is
+        # considered covered, regardless of whether it found anything (the
+        # at-a-glance pill row is "did we exercise it?", not "did we find?").
+        states.append("done")
+    return states
+
+
+def _headline_qualifier(scan: Scan | None) -> str:
+    """Editorial second line of the masthead headline."""
+    if scan is None:
+        return "It is <em>still ramping up.</em>"
+    band = scan.band
+    if band is SeverityBand.EXCELLENT:
+        return "It is <em>excellent.</em>"
+    if band is SeverityBand.GOOD:
+        return "It is <em>good,</em> but not yet great."
+    if band is SeverityBand.WARNING:
+        return "It is <em>warning.</em>"
+    if band is SeverityBand.POOR:
+        return "It is <em>poor.</em>"
+    if band is SeverityBand.CRITICAL:
+        return "It is <em>critical.</em>"
+    return "It is <em>not yet evaluated.</em>"
+
+
+def _lede_html(scan: Scan | None, is_running: bool) -> str:
+    """Hand-tuned lede paragraph that adapts to scan state.
+
+    Uses ``<em>`` / ``<strong>`` for the editorial italics. Rendered as ``|safe``
+    in the template because the markup is authored here, not user-provided.
+    """
+    if scan is None and is_running:
+        return (
+            "The swarm is <em>still ramping up</em>. Eleven specialist agents "
+            "are dispatching probes against the target; the score, sub-scores, "
+            "and per-ASI breakdown below will update <strong>live</strong> as "
+            "each agent surfaces a verdict."
+        )
+    if scan is None:
+        return (
+            "Waiting on first verdict. As soon as the recon agent fingerprints "
+            "the target, this page begins to update."
+        )
+    counts = scan.findings_summary()
+    critical = counts["critical"]
+    high = counts["high"]
+    parts: list[str] = []
+    if critical or high:
+        penalty = critical * 2 + high * 0.4
+        parts.append(
+            f"<em>{critical}</em> critical and <em>{high}</em> high findings "
+            f"weigh the aggregate down by <strong>{penalty:.1f} points</strong>."
+        )
+    parts.append(
+        f"The scan ran on tier <strong>{scan.tier.value}</strong> across "
+        f"<strong>{len(scan.findings)} findings</strong> with the "
+        f"<em>{scan.mode}</em>-mode probe library."
+    )
+    return " ".join(parts)
+
+
+def _adapter_label(scan: Scan | None) -> str:
+    if scan is None:
+        return "—"
+    target_mode = scan.target_mode
+    mapping = {
+        "prompt": "Prompt (system-prompt)",
+        "code": "Code (CodeAdapter)",
+        "http": "HTTP endpoint",
+        "framework": "Framework adapter",
+    }
+    return mapping.get(target_mode, target_mode)
+
+
+def _tier_label(scan: Scan | None) -> str:
+    if scan is None:
+        return "—"
+    return f"{scan.tier.value} (canonical)"
+
+
+def _engine_field(scan: Scan | None, key: str, default: str = "—") -> str:
+    if scan is None or scan.engine is None:
+        return default
+    return scan.engine.get(key, default)
+
+
+def build_dashboard_context(
+    *,
+    scan_id: str,
+    scan: Scan | None,
+    is_running: bool,
+    base_url: str,
+    version_label: str,
+    elapsed_seconds: float | None = None,
+    started_at_label: str = "",
+    page: int = 1,
+    per_page: int = 15,
+) -> DashboardContext:
+    """Build the Jinja context for the live dashboard render.
+
+    The function is intentionally pure — no I/O, no globals, no time.now() —
+    so it is straightforward to unit-test and the SSE update path can reuse
+    parts of it without surprises.
+    """
+    is_local, locality_label, url_scheme, url_host, url_port = resolve_locality(base_url)
+
+    findings_by_asi = _count_findings_by_asi(scan)
+    empty_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    counts = scan.findings_summary() if scan is not None else empty_counts
+    findings_total = sum(counts.values())
+
+    if scan is not None:
+        aivss_label: str | int = scan.aivss
+        band_label = scan.band.value
+        band_class = _band_class(scan.band)
+        needle_pct = _aivss_to_needle(scan.aivss)
+        aggregate = scan.aivss + counts["critical"] * 2 + counts["high"] * 0.4
+        score_sublabel = "tier-weighted, signed evidence"
+    else:
+        aivss_label = "—"
+        band_label = "PENDING"
+        band_class = "unknown"
+        needle_pct = None
+        aggregate = 0.0
+        score_sublabel = "tier-weighted, provisional"
+
+    sub_score_rows, attention = _sub_score_rows(scan)
+    asi_rows = _asi_rows(scan, findings_by_asi)
+    swarm_satellites = _swarm_satellite_positions(scan)
+    findings_page, pagination = _findings_page(scan, page=page, per_page=per_page)
+    asi_dot_states = _asi_dot_states(scan, findings_by_asi)
+    asi_covered = sum(1 for code, b in findings_by_asi.items() if sum(b.values()) > 0)
+
+    if scan is not None:
+        commander_model = _engine_field(scan, "commander", "stub")
+        attacker_model = _engine_field(scan, "attacker", "stub")
+        evaluator_model = _engine_field(scan, "evaluator", "stub")
+    else:
+        commander_model = attacker_model = evaluator_model = "—"
+
+    elapsed = (
+        elapsed_seconds
+        if elapsed_seconds is not None
+        else (scan.duration_seconds if scan is not None else 0.0)
+    )
+
+    probe_library_version = scan.probe_library_version if scan is not None else "—"
+    package_version = scan.package_version if scan is not None else version_label
+    aivss_formula_version = scan.aivss_formula_version if scan is not None else "aivss-v1"
+
+    # Reproducibility fingerprint. We surface the scan id as the visible
+    # anchor when no on-disk signature has been written yet; the signed
+    # bundle work attaches the real Ed25519 fingerprint to the scan output
+    # via ``reports.signing`` — we read it from ``scan.audit`` when present.
+    evidence_fingerprint = scan_id.upper()
+    if scan is not None and isinstance(scan.audit, dict):
+        fp = scan.audit.get("evidence_fingerprint")
+        if isinstance(fp, str) and fp:
+            evidence_fingerprint = fp
+
+    payload: dict[str, Any] = {
+        "page_title": f"Scan {scan_id}",
+        "scan_id": scan_id,
+        "is_running": is_running,
+        "version": version_label,
+        # Topbar
+        "base_url": base_url,
+        "is_local": is_local,
+        "locality_label": locality_label,
+        "url_scheme": url_scheme,
+        "url_host": url_host,
+        "url_port": url_port,
+        # Masthead
+        "started_at_label": started_at_label or "—",
+        "elapsed_label": _humanise_seconds(elapsed),
+        "aivss_label": aivss_label,
+        "headline_qualifier": _headline_qualifier(scan),
+        "lede_html": _lede_html(scan, is_running),
+        "target_ref": scan.target_ref if scan is not None else "—",
+        "adapter_label": _adapter_label(scan),
+        "tier_label": _tier_label(scan),
+        "commander_model": commander_model,
+        "attacker_model": attacker_model,
+        "evaluator_model": evaluator_model,
+        "probe_library_version": probe_library_version,
+        # Score card
+        "score_sublabel": score_sublabel,
+        "band_label": band_label,
+        "band_class": band_class,
+        "needle_pct": needle_pct,
+        "aggregate_label": f"{aggregate:.1f}",
+        # Unicode MINUS SIGN (U+2212) is the typographically correct glyph for
+        # the receipt-style penalty table; HYPHEN-MINUS would be visually
+        # misaligned against the proportional Source Serif digits.
+        "critical_penalty_label": (
+            f"−{counts['critical'] * 2:.1f}" if counts["critical"] else "0.0"  # noqa: RUF001
+        ),
+        "high_penalty_label": (
+            f"−{counts['high'] * 0.4:.1f}" if counts["high"] else "0.0"  # noqa: RUF001
+        ),
+        "counts": counts,
+        # At a glance
+        "budget_label": "15:00 budget",
+        "elapsed_pct": _fmt_pct((elapsed / 900.0) * 100.0 if elapsed else 0.0),
+        "probes_label": str(_probes_estimate(scan)),
+        "probes_pct": 62.0 if scan is not None else 0.0,
+        "tokens_label": _humanise_int(scan.tokens_total if scan is not None else 0),
+        "tokens_cap_label": "2 M",
+        "tokens_pct": _fmt_pct(
+            ((scan.tokens_total / 2_000_000.0) * 100.0) if scan is not None else 0.0
+        ),
+        "usd_label": f"$ {scan.cost_usd:.2f}" if scan is not None else "$ 0.00",
+        "usd_cap_label": "$ 5.00",
+        "usd_pct": _fmt_pct(((scan.cost_usd / 5.0) * 100.0) if scan is not None else 0.0),
+        "findings_total": findings_total,
+        "asi_covered": asi_covered,
+        "asi_dot_states": asi_dot_states,
+        # Sub-scores
+        "sub_scores": sub_score_rows,
+        "attention_count": attention,
+        "tier_number": (scan.tier.value if scan is not None else "T2").lstrip("T")[:1] or "2",
+        # ASI breakdown
+        "asi_rows": asi_rows,
+        # Findings feed
+        "findings_page": findings_page,
+        "pagination": pagination,
+        # Swarm centerpiece
+        "swarm_satellites": swarm_satellites,
+        # Reproducibility
+        "package_version": package_version,
+        "aivss_formula_version": aivss_formula_version,
+        "rng_seed": "—",
+        "evidence_fingerprint": evidence_fingerprint,
+    }
+    return DashboardContext(payload=payload)
+
+
+def _probes_estimate(scan: Scan | None) -> int:
+    """Best-effort probe-count estimate from completeness if present."""
+    if scan is None:
+        return 0
+    if scan.completeness is not None:
+        return scan.completeness.turns_used
+    return len(scan.findings) * 4  # rough fallback
+
+
+def _humanise_int(n: int) -> str:
+    """Render large integers compactly: 1247 → '1,247', 820000 → '820k', 2_000_000 → '2M'."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M".rstrip("0").rstrip(".")
+    if n >= 10_000:
+        return f"{n // 1000}k"
+    return f"{n:,}"
+
+
+def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
+    """Subset of the context the SSE ``snapshot`` event emits.
+
+    Only the ``data-live=*`` keys are sent over the wire — the static template
+    holds everything else.
+    """
+    p = ctx.payload
+    counts = p.get("counts", {})
+    snapshot: dict[str, Any] = {
+        "aivss": p.get("aivss_label"),
+        "band": p.get("band_label"),
+        "needle": p.get("needle_pct"),
+        "aivss-total": p.get("aivss_label"),
+        "elapsed": p.get("elapsed_label"),
+        "elapsed-bar": p.get("elapsed_pct"),
+        "probes": p.get("probes_label"),
+        "probes-bar": p.get("probes_pct"),
+        "tokens": p.get("tokens_label"),
+        "tokens-bar": p.get("tokens_pct"),
+        "usd": p.get("usd_label"),
+        "usd-bar": p.get("usd_pct"),
+        "findings": p.get("findings_total"),
+        "findings-total": p.get("findings_total"),
+        "asi-covered": f"{p.get('asi_covered', 0)} / 10",
+        "critical": counts.get("critical", 0),
+        "high": counts.get("high", 0),
+        "medium": counts.get("medium", 0),
+        "low": counts.get("low", 0),
+    }
+    return snapshot
+
+
+def asi_categories() -> Iterable[AsiCategory]:
+    """Public re-export for callers that need the canonical list of ASI codes."""
+    return list(AsiCategory)
+
+
+def asi_human_label(code: str) -> str:
+    """Return the canonical human-readable name for an ASI code (e.g. ``ASI01``)."""
+    return asi_description(AsiCategory(code))

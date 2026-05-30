@@ -1,0 +1,52 @@
+{# At-a-glance — 6 cells: elapsed/budget, probes fired, tokens, dollars, findings, ASI dots. #}
+<article class="dash-glance-card">
+  <div class="dash-eyebrow dash-eyebrow--inline">At a glance</div>
+  <div class="dash-glance-grid">
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="elapsed">{{ elapsed_label }}</span>
+      <span class="dash-glance__lab">elapsed&nbsp;/ {{ budget_label }}</span>
+      <div class="dash-thinbar"><span style="width: {{ elapsed_pct }}%;" data-live="elapsed-bar"></span></div>
+    </div>
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="probes">{{ probes_label }}</span>
+      <span class="dash-glance__lab">probes fired</span>
+      <div class="dash-thinbar"><span style="width: {{ probes_pct }}%;" data-live="probes-bar"></span></div>
+    </div>
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="tokens">{{ tokens_label }}</span>
+      <span class="dash-glance__lab">tokens of <em>{{ tokens_cap_label }}</em> cap</span>
+      <div class="dash-thinbar"><span style="width: {{ tokens_pct }}%;" data-live="tokens-bar"></span></div>
+    </div>
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="usd">{{ usd_label }}</span>
+      <span class="dash-glance__lab">of {{ usd_cap_label }} cap</span>
+      <div class="dash-thinbar"><span style="width: {{ usd_pct }}%;" data-live="usd-bar"></span></div>
+    </div>
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="findings">{{ findings_total }}</span>
+      <span class="dash-glance__lab">findings <em>so far</em></span>
+      <div class="dash-glance__breakdown">
+        <span class="dash-sb dash-sb--crit"><span data-live="critical">{{ counts.critical }}</span> critical</span>
+        <span class="dash-sb dash-sb--high"><span data-live="high">{{ counts.high }}</span> high</span>
+        <span class="dash-sb dash-sb--med"><span data-live="medium">{{ counts.medium }}</span> medium</span>
+        <span class="dash-sb dash-sb--low"><span data-live="low">{{ counts.low }}</span> low</span>
+      </div>
+    </div>
+
+    <div class="dash-glance">
+      <span class="dash-glance__num" data-live="asi-covered">{{ asi_covered }}&thinsp;/&thinsp;10</span>
+      <span class="dash-glance__lab">ASI categories <em>covered</em></span>
+      <div class="dash-glance__pillrow" aria-label="ASI coverage dots">
+        {% for state in asi_dot_states %}
+        <span class="dash-dot dash-dot--{{ state }}" data-asi-dot></span>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+</article>

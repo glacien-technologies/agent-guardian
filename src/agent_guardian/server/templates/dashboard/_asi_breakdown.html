@@ -1,0 +1,66 @@
+{# ASI breakdown — 10 rows: Code, Category w/ subtitle, score bar, AIVSS, Weight, Findings chips, Status pill. #}
+<section class="dash-report-section">
+  <div class="dash-report-section__head">
+    <div>
+      <div class="dash-eyebrow">Per category</div>
+      <h2>Owasp ASI <em>01 through 10.</em></h2>
+    </div>
+    <p class="dash-report-section__lede">
+      The ten categories of the OWASP Top 10 for Agentic Applications 2026.
+      Score is computed from per-probe pass rates weighted by severity.
+    </p>
+  </div>
+
+  <table class="dash-asi-table" data-live="asi-table">
+    <thead>
+      <tr>
+        <th class="dash-th-code">Code</th>
+        <th class="dash-th-name">Category</th>
+        <th class="dash-th-bar">Score</th>
+        <th class="dash-th-num">Aivss</th>
+        <th class="dash-th-tier">Weight</th>
+        <th class="dash-th-fnd">Findings</th>
+        <th class="dash-th-status">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in asi_rows %}
+      <tr class="{% if row.is_pending %}dash-row--pending{% elif row.is_attention %}dash-row--attention{% endif %}"
+          data-asi-code="{{ row.code }}">
+        <td class="dash-td-code">{{ row.code }}</td>
+        <td class="dash-td-name">
+          <strong>{{ row.name }}</strong>
+          <span class="dash-muted">{{ row.subtitle }}</span>
+        </td>
+        <td class="dash-td-bar">
+          <span class="dash-hbar{% if row.is_pending %} dash-hbar--pending{% endif %}">
+            <span style="width: {{ row.score_pct }}%;"></span>
+          </span>
+        </td>
+        <td class="dash-td-num{% if row.is_pending %} dash-td-num--pending{% endif %}">
+          {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
+        </td>
+        <td class="dash-td-tier">
+          <span class="dash-weight{% if row.weight_high %} dash-weight--high{% endif %}">
+            &times;&thinsp;{{ row.weight_label }}
+          </span>
+        </td>
+        <td class="dash-td-fnd">
+          <span class="dash-ct{% if row.findings.critical %} dash-ct--crit{% endif %}">
+            {% if row.findings.critical %}{{ row.findings.critical }}{% else %}—{% endif %}
+          </span>
+          <span class="dash-ct{% if row.findings.high %} dash-ct--high{% endif %}">
+            {% if row.findings.high %}{{ row.findings.high }}{% else %}—{% endif %}
+          </span>
+          <span class="dash-ct{% if row.findings.medium %} dash-ct--med{% endif %}">
+            {% if row.findings.medium %}{{ row.findings.medium }}{% else %}—{% endif %}
+          </span>
+        </td>
+        <td class="dash-td-status">
+          <span class="dash-status dash-status--{{ row.status_class }}">{{ row.status_label }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

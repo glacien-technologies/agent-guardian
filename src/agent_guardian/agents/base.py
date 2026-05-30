@@ -37,6 +37,7 @@ import re
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -380,6 +381,7 @@ class AsiAgent(ABC):
         budget: AgentBudget | None = None,
         rng: random.Random | None = None,
         target_findings_override: int | None = None,
+        on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         # Wrap both LLM clients in usage-tracking decorators so every
         # ``.complete(...)`` call folds its returned :class:`LLMUsage` into
@@ -435,6 +437,15 @@ class AsiAgent(ABC):
         # instead of the synthetic agent-name+category id and the static
         # ``default_severity``.
         self._seed_index: dict[str, ProbeSeed] = {}
+        # QA-005 — per-turn reflection sink. Set by SwarmCommander at
+        # agent construction; called with the verbatim ``turn_record``
+        # dict immediately after the memory writer accepts it (so the
+        # PII redaction the memory writer applied propagates to the
+        # CLI's AttackFeedRenderer and the dashboard's SSE stream). The
+        # sink may raise — we suppress so a sick observer never breaks
+        # the attack loop. ``None`` (the default) keeps legacy callers
+        # silent.
+        self.on_reflection: Callable[[Mapping[str, Any]], None] | None = on_reflection
 
     @property
     def effective_target_findings(self) -> int:
@@ -1073,6 +1084,25 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
+
+            # QA-005 — surface the just-persisted turn record to the
+            # CLI's reflection sink (LiveBlockSink / NdjsonSink) and,
+            # via the SwarmObserver, to the dashboard SSE stream. We
+            # call after memory.write_reflection so any operator-side
+            # consumer sees the same PII-redacted shape that landed on
+            # disk. The hook is best-effort: a raising sink does NOT
+            # halt the swarm.
+            if self.on_reflection is not None:
+                try:
+                    self.on_reflection(turn_record)
+                except Exception as exc:  # pragma: no cover — defensive
+                    _LOG.debug(
+                        "agent %s turn %d: on_reflection sink raised %s: %s — continuing",
+                        agent_name,
+                        turns,
+                        type(exc).__name__,
+                        exc,
+                    )
 
             # Record the seed-id so the dedup index in SharedMemory knows
             # this category-attempt was tried. Strategies that do not

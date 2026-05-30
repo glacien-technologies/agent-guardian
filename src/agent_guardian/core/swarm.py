@@ -46,7 +46,7 @@ import re
 import sys
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -90,6 +90,7 @@ from agent_guardian.models.severity import Severity, SeverityBand, band_for_scor
 from agent_guardian.models.swarm_brief import AgentBrief, SwarmBrief
 from agent_guardian.models.tier import Tier
 from agent_guardian.probes.loader import PROBE_CORPUS_VERSION
+from agent_guardian.reports import warnings as _warnings
 
 __all__ = [
     "CheckpointDecision",
@@ -190,6 +191,14 @@ EventKind = Literal[
     "agent_skipped",
     "checkpoint",
     "scan_done",
+    # QA-005 — per-agent attack transparency. Emitted from each agent
+    # immediately after ``memory.write_reflection`` so the CLI's
+    # :class:`AttackFeedRenderer` and the dashboard's ``/scans/{id}
+    # /reflections.sse`` stream see prompt / target-response / verdict
+    # in real time. Payload is the verbatim ``turn_record`` dict the
+    # agent loop already builds (no extra PII pass — redaction lives
+    # in the memory writer the payload was forged for).
+    "reflection",
 ]
 
 
@@ -454,10 +463,16 @@ class SwarmCommander:
     # gates and dashboard tiles refuse to gate-pass on it. Thresholds
     # reflect the user-facing expectation that FULL = thorough, SMART
     # = enough-for-a-PR, FAST = smoke-test — not a numeric calibration.
+    # Per-mode authoritative-coverage thresholds. Delegated to
+    # :mod:`agent_guardian.reports.warnings` (the single source of truth
+    # shared with the CLI's NON-AUTHORITATIVE banner emitter — QA-004). The
+    # ScanMode-keyed view here is a derived projection so existing call
+    # sites (``self._MIN_AUTHORITATIVE_COMPLETENESS[ScanMode.FULL]``) keep
+    # working without churn.
     _MIN_AUTHORITATIVE_COMPLETENESS: ClassVar[dict[ScanMode, float]] = {
-        ScanMode.FAST: 60.0,
-        ScanMode.SMART: 80.0,
-        ScanMode.FULL: 95.0,
+        ScanMode.FAST: _warnings.MODE_AUTHORITATIVE_THRESHOLDS["fast"],
+        ScanMode.SMART: _warnings.MODE_AUTHORITATIVE_THRESHOLDS["smart"],
+        ScanMode.FULL: _warnings.MODE_AUTHORITATIVE_THRESHOLDS["full"],
     }
 
     def __init__(
@@ -617,6 +632,7 @@ class SwarmCommander:
                 # recon_wall_seconds wait_for below, not this cap.
                 max_turns=25,
             ),
+            on_reflection=self._make_reflection_sink("recon-agent"),
         )
         recon_report: AgentReport | None = None
         try:
@@ -896,6 +912,7 @@ class SwarmCommander:
                 budget=AgentBudget(**agent_budget_kwargs),
                 rng=random.Random(self.rng_seed + len(agents)),
                 target_findings_override=self.config.target_findings_per_agent,
+                on_reflection=self._make_reflection_sink(cls.name or cls.__name__),
             )
             # v1.1 -- in FAST mode, subset the agent's seeds to the
             # top-N most-effective probes. SMART/FULL leave the full
@@ -2272,6 +2289,35 @@ class SwarmCommander:
         except Exception as exc:
             # Observers must not crash the swarm; log and continue.
             _LOG.warning("observer raised %s: %s", type(exc).__name__, exc)
+
+    def _make_reflection_sink(self, agent_name: str) -> Callable[[Mapping[str, Any]], None]:
+        """Return a per-agent callback that forwards turn records as
+        ``SwarmEvent(kind="reflection")`` to whatever observer is
+        wired up (CLI sink, dashboard SSE, both).
+
+        The closure captures the agent name so the observer side never
+        needs to peek into the payload to attribute the record. We
+        copy the payload into a fresh dict so the agent loop can keep
+        mutating ``turn_record`` (it doesn't today, but the contract
+        keeps it future-proof). The closure swallows observer
+        failures upstream of the agent — the agent's own catch is a
+        second defensive layer.
+        """
+        # Local alias so the closure doesn't capture ``self`` cycles
+        # any longer than the agent's lifetime.
+        emit = self._emit
+
+        def _sink(payload: Mapping[str, Any]) -> None:
+            emit(
+                SwarmEvent(
+                    kind="reflection",
+                    timestamp=_utcnow(),
+                    agent=agent_name,
+                    payload=dict(payload),
+                )
+            )
+
+        return _sink
 
 
 # ---------------------------------------------------------------------------
