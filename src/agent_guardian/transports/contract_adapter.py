@@ -319,8 +319,11 @@ def _fingerprint_from_contract(contract: Contract, endpoint: str) -> TargetFinge
     """Derive the static attack-surface fingerprint from a contract.
 
     ``has_tools`` and ``declared_tools`` come from ``target.tools.expected`` when
-    the contract declares any; everything else stays at the conservative
-    black-box default the recon agent refines during phase 1.
+    the contract declares any; ``is_multi_agent`` honours the explicit contract
+    declaration (``target.is_multi_agent: true`` — GAP-2) so a multi-agent
+    orchestrator opens the ASI06/07/10 lanes from turn 0 without waiting for
+    recon to observe a ``transfer_to_agent`` call. Everything else stays at the
+    conservative black-box default the recon agent refines during phase 1.
     """
     tools = contract.target.tools
     declared_tools: list[str] = [t.name for t in tools.expected] if tools else []
@@ -328,6 +331,8 @@ def _fingerprint_from_contract(contract: Contract, endpoint: str) -> TargetFinge
         mode="http",
         ref=endpoint or contract.target.name,
         has_tools=bool(declared_tools),
+        is_multi_agent=contract.target.is_multi_agent,
+        multi_agent_detected=contract.target.is_multi_agent,
         declared_tools=declared_tools,
         notes="Stage 1B — contract-driven HTTP transport.",
     )

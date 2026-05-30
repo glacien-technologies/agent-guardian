@@ -100,10 +100,11 @@ def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     # probes; the production-hardening pass added 11 more (ASI04/06/09
     # coverage for poisoned checkpoints, sign-off spoofing, validator
     # bypass, denial-of-wallet, recursion / fan-out abuse, etc.); the
-    # M2 LLM02 specialist pass added 2 output-handling canary probes for
-    # a total of 92. The corpus-version stamp is also printed.
+    # M2 LLM02 specialist pass added 2 output-handling canary probes;
+    # GAP-3 (2026-05-30) added 1 ASI03 cross-tenant PII probe for a
+    # current total of 96. The corpus-version stamp is also printed.
     assert "Probe corpus version" in result.stdout
-    assert "Found 95 probes" in result.stdout
+    assert "Found 96 probes" in result.stdout
     # At least one ID from each category should appear.
     for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
         assert asi in result.stdout

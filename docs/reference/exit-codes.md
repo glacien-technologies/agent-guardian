@@ -72,8 +72,11 @@ by a one-line, copy-paste-fixable error. Cross-references:
 ## `3` — `EXIT_TARGET_UNREACHABLE`
 
 For `scan --endpoint`, the pre-scan reachability pre-flight (two POSTs,
-2-second timeout each) failed with `ConnectError` or `Timeout`. The CLI
+5-second timeout each) failed with `ConnectError` or `Timeout`. The CLI
 exits early rather than burning the LLM budget on per-probe timeouts.
+Any HTTP response — including `422` from a schema-protected FastAPI
+endpoint, `404`, or `5xx` — counts as reachable; this exit code only
+fires on transport-level failures.
 
 For `scan --system-prompt PATH`, the file does not exist.
 
@@ -81,9 +84,9 @@ Remedy options:
 
 - Confirm the endpoint URL and that the target is up
   (`curl -X POST <endpoint>`).
-- If you knowingly want to skip the pre-flight (e.g. the target requires
-  a body that an empty POST rejects with `400`, which would otherwise
-  pass), use `--no-preflight`.
+- The default preflight body is `{"input": "ping"}`. If your target
+  requires a completely different body shape and you don't want the
+  preflight at all, use `--no-preflight`.
 - For `--system-prompt`, check the file path.
 
 ## `4` — `EXIT_LLM_PROVIDER`

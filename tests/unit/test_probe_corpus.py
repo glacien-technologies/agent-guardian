@@ -66,9 +66,9 @@ def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
     assert not missing, f"probes missing owasp_scenario: {sorted(missing)}"
 
 
-def test_corpus_size_is_ninety_five() -> None:
+def test_corpus_size_is_ninety_six() -> None:
     """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap +
-    2 LLM02 output-handling probes = 95.
+    2 LLM02 output-handling probes + 1 ASI03 cross-tenant PII = 96.
 
     The 11 coverage-gap additions closed the CSA category gaps for
     ``checker-out-of-the-loop`` (4 probes under asi06) and
@@ -83,8 +83,13 @@ def test_corpus_size_is_ninety_five() -> None:
     deterministic ``AG_*_CANARY`` tokens that the
     :class:`OutputHandlingAgent` post-judge oracle treats as HIGH ASI09
     evidence.
+
+    GAP-3 (2026-05-30) added ``ASI03-PII-001``
+    (``cross-tenant-pii-read``), closing the cross-tenant PII probe
+    gap surfaced by the testbench reconcile (finbot LLM02 +
+    travel_concierge LLM02 both NOT_REACHED in baseline).
     """
-    assert len(load_all_probes()) == 95
+    assert len(load_all_probes()) == 96
 
 
 def test_corpus_version_stamp() -> None:

@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import time
+from typing import Any
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.agents.base import AgentBudget, AgentReport
@@ -86,6 +87,45 @@ _MULTI_AGENT_HINTS = (
     "coordinator",
     "subordinate",
 )
+
+# Tool-call names that constitute structured (non-prose) evidence of a
+# multi-agent orchestration. Google ADK ships ``transfer_to_agent`` as the
+# canonical sub-agent handoff; LangGraph supervisors emit
+# ``route_to_agent`` / ``agent_handoff`` for the same shape. Matched on the
+# tool *name* (case-insensitive, prefix-anchored for ``transfer_to_*``) so a
+# single structured ``tool_calls`` entry in the recon transcript flips
+# ``is_multi_agent`` — substring matching against assistant prose is
+# unreliable (the orchestrator often replies in the sub-agent's voice with
+# no orchestration vocabulary at all). See GAP-2 in /tmp/ag_gaplist.
+_MULTI_AGENT_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "transfer_to_agent",
+        "agent_handoff",
+        "route_to_agent",
+        "delegate_to_agent",
+        "handoff_to_agent",
+    }
+)
+_MULTI_AGENT_TOOL_PREFIXES: tuple[str, ...] = (
+    "transfer_to_",
+    "handoff_to_",
+)
+
+
+def _looks_like_multi_agent_tool_call(name: str) -> bool:
+    """True iff ``name`` is a structured multi-agent handoff tool.
+
+    Matches the explicit allowlist (``transfer_to_agent``, ``agent_handoff``,
+    ``route_to_agent``, …) and the prefix patterns (``transfer_to_*``,
+    ``handoff_to_*``). Case-insensitive; whitespace-tolerant.
+    """
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in _MULTI_AGENT_TOOL_NAMES:
+        return True
+    return any(normalized.startswith(prefix) for prefix in _MULTI_AGENT_TOOL_PREFIXES)
+
 
 _CROSS_SESSION_DATA_HINTS = (
     "remember",
@@ -226,6 +266,67 @@ async def _extract_tool_names(reply: str, llm: BaseLLM, model: str) -> list[str]
     return _clean_tool_names(names)
 
 
+async def _probe_agents_discovery(target: TargetAdapter) -> int:
+    """Best-effort GET ``<endpoint-sibling>/agents``; return count or 0.
+
+    GAP-2 helper. ADK / LangGraph orchestrators on the testbench expose a
+    ``GET /agents`` discovery endpoint that returns a JSON list of sub-agents.
+    We treat any 2xx JSON-list / dict-with-``agents`` response as positive
+    evidence of multi-agent orchestration. Anything else (non-HttpAdapter
+    target, missing endpoint, 4xx/5xx, timeout, non-JSON, empty list) returns
+    0 and the caller leaves ``is_multi_agent`` unchanged.
+
+    Never raises — recon must not abort on a discovery hiccup.
+    """
+    from agent_guardian.adapters.http import HttpAdapter
+
+    if not isinstance(target, HttpAdapter):
+        return 0
+    endpoint = target.endpoint
+    # Sibling the discovery URL off the chat endpoint: strip the trailing
+    # path segment (typically ``/chat``) and append ``/agents``. For a root
+    # path (no segment) we point at ``<base>/agents``.
+    from urllib.parse import urlparse, urlunparse
+
+    try:
+        parsed = urlparse(endpoint)
+    except ValueError:
+        return 0
+    path = parsed.path or "/"
+    # Drop the last non-empty segment (e.g. "/foo/chat" -> "/foo"); keep
+    # the root when there is no segment to drop.
+    segments = [s for s in path.split("/") if s]
+    base_segments = segments[:-1] if segments else []
+    discovery_path = "/" + "/".join([*base_segments, "agents"])
+    discovery_url = urlunparse(parsed._replace(path=discovery_path, query="", fragment=""))
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3.0)) as client:
+            resp = await client.get(discovery_url)
+    except (httpx.HTTPError, ValueError):  # pragma: no cover -- defensive
+        return 0
+    if resp.status_code >= 400:
+        return 0
+    try:
+        data = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return 0
+    # Accept either a bare list (``[{"name": ...}, ...]``) or a dict whose
+    # ``agents`` / ``sub_agents`` key holds the list.
+    candidates: list[Any] = []
+    if isinstance(data, list):
+        candidates = list(data)
+    elif isinstance(data, dict):
+        for key in ("agents", "sub_agents", "subAgents"):
+            value = data.get(key)
+            if isinstance(value, list):
+                candidates = list(value)
+                break
+    return len(candidates)
+
+
 def _fingerprint_from_profile(
     base: TargetFingerprint, profile: TargetProfile, *, source: str
 ) -> TargetFingerprint:
@@ -349,6 +450,14 @@ class ReconAgent:
         external_systems_observed = base.external_systems_detected
         multi_agent_observed = base.multi_agent_detected
         cross_session_data_observed = base.cross_session_data_detected
+        # Structured multi-agent signal (GAP-2). Inherits the adapter-declared
+        # ``is_multi_agent`` (e.g. CrewAI / AutoGen framework adapters set it
+        # ``True`` up front); recon flips it ``True`` on a ``transfer_to_agent``
+        # / ``handoff_to_*`` / ``route_to_agent`` tool call appearing in any
+        # turn of the capability audit. Distinct from ``multi_agent_observed``
+        # which is the heuristic prose signal — this one is structured
+        # evidence and OR-ed into BOTH fingerprint fields below.
+        is_multi_agent_observed = base.is_multi_agent
         # Tool handles discovered from the tool-inventory probe reply. Starts
         # from whatever the adapter pre-declared (usually empty for code
         # targets behind a plain run() entry point) and is replaced by the
@@ -398,6 +507,14 @@ class ReconAgent:
                     if name and name.lower() not in observed_tool_names_seen:
                         observed_tool_names_seen.add(name.lower())
                         observed_tool_names.append(name)
+                    # Structured multi-agent signal (GAP-2). An ADK
+                    # ``transfer_to_agent`` / LangGraph ``route_to_agent``
+                    # call is unambiguous evidence of orchestration; flip
+                    # both the heuristic and the structured field so
+                    # ASI06 / ASI07 / ASI10 lanes open.
+                    if _looks_like_multi_agent_tool_call(name):
+                        is_multi_agent_observed = True
+                        multi_agent_observed = True
             if _looks_like_tools(reply):
                 has_tools_observed = True
                 if not declared_tools_observed and not observed_tool_names:
@@ -440,6 +557,19 @@ class ReconAgent:
                     declared_tools_observed.append(name)
                     existing_lower.add(name.lower())
 
+        # GAP-2: best-effort `/agents` discovery probe. When the target is an
+        # HttpAdapter and recon has not already confirmed multi-agent, sibling
+        # the chat endpoint to ``/agents`` and look for a JSON list. The ADK
+        # testbench (and any orchestrator that ships a discovery endpoint)
+        # answers with ``[{"name": "..."}]`` / ``{"agents": [...]}``; on any
+        # failure mode (404, timeout, non-JSON) we silently leave the flag.
+        if not is_multi_agent_observed:
+            discovered = await _probe_agents_discovery(target)
+            if discovered:
+                is_multi_agent_observed = True
+                multi_agent_observed = True
+                notes_parts.append(f"recon: /agents discovery found {discovered} sub-agents")
+
         # Black-box intent: structure the audit transcript with the LLM (no
         # substring matching). Heuristic surface flags above are kept as the
         # reliable boolean signal; the profile adds intent + may confirm flags.
@@ -456,10 +586,12 @@ class ReconAgent:
             has_tools=has_tools_observed or (audit.has_tools if audit else False),
             has_memory=has_memory_observed or (audit.has_memory if audit else False),
             touches_pii=base.touches_pii,
-            is_multi_agent=base.is_multi_agent or (audit.is_multi_agent if audit else False),
+            is_multi_agent=is_multi_agent_observed or (audit.is_multi_agent if audit else False),
             external_systems_detected=external_systems_observed
             or (audit.external_systems if audit else False),
-            multi_agent_detected=multi_agent_observed or (audit.is_multi_agent if audit else False),
+            multi_agent_detected=multi_agent_observed
+            or is_multi_agent_observed
+            or (audit.is_multi_agent if audit else False),
             cross_session_data_detected=cross_session_data_observed
             or (audit.cross_session_data if audit else False),
             framework=base.framework,

@@ -530,22 +530,50 @@ def _is_placeholder_endpoint(url: str) -> bool:
     return any(host.endswith(suffix) for suffix in _PLACEHOLDER_HOST_SUFFIXES)
 
 
-async def _endpoint_reachability_preflight(endpoint: str) -> bool:
+async def _endpoint_reachability_preflight(
+    endpoint: str,
+    *,
+    sample_body: dict[str, Any] | None = None,
+) -> bool:
     """Probe ``endpoint`` twice with a short timeout. Return True iff reachable.
 
     Used before an ``--endpoint`` scan so an unreachable target fails fast with
     :data:`EXIT_TARGET_UNREACHABLE` instead of spending the LLM budget on
-    every-probe timeouts. Any response (even 404/500) counts as "reachable";
-    only connect/timeout failures across both attempts mark the target down.
+    every-probe timeouts.
+
+    Body selection (in order of preference):
+
+    1. ``sample_body`` if supplied — used verbatim. Intended for the
+       contract-driven path which knows the on-wire shape.
+    2. Otherwise a minimal ``{"input": "ping"}`` JSON body, which matches the
+       de-facto convention most agent ``/chat`` endpoints accept. This avoids
+       the spurious ``422 Unprocessable Entity`` that FastAPI returns when the
+       endpoint declares a required body model and we POST an empty payload.
+
+    Any HTTP response — including ``4xx`` (yes, even ``422``) — counts as
+    "reachable". A schema-protected ``422`` proves the target is up and
+    answering; it is an operator-config concern, not a transport fault.
+    The only failure mode that marks the target down is a connect/timeout
+    error across BOTH attempts. The timeout is generous (5s) to absorb Cloud
+    Run cold starts.
     """
     import httpx
 
     attempts = 0
-    timeout = httpx.Timeout(2.0)
+    # 5s timeout per attempt x 2 attempts = 10s budget. Generous on purpose:
+    # Cloud Run / Lambda cold starts on a first POST routinely take 3-5s, and
+    # we'd rather wait an extra few seconds than mis-classify a cold target
+    # as unreachable.
+    timeout = httpx.Timeout(5.0)
+    body: dict[str, Any] = sample_body if sample_body is not None else {"input": "ping"}
     async with httpx.AsyncClient(timeout=timeout) as client:
         for _ in range(2):
             try:
-                await client.post(endpoint, content=b"")
+                await client.post(endpoint, json=body)
+                # Any HTTP response (200, 404, 422, 500, …) means the listener
+                # is up. 422 from a schema-protected FastAPI endpoint is the
+                # canonical "reachable, schema-protected" case — log it but do
+                # NOT treat it as unreachable.
                 return True
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
                 _LOG.debug(

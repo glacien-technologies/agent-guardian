@@ -23,6 +23,7 @@ from agent_guardian.agents.detection_evasion_agent import DetectionEvasionAgent
 from agent_guardian.agents.drift import DriftAgent
 from agent_guardian.agents.fuzzing_agent import FuzzingAgent
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
+from agent_guardian.agents.identity_leak import IdentityLeakAgent
 from agent_guardian.agents.memory_poison import MemoryPoisonAgent
 from agent_guardian.agents.output_handling_agent import OutputHandlingAgent
 from agent_guardian.agents.privilege import PrivilegeAgent
@@ -44,7 +45,24 @@ M2_SPECIALIST_AGENTS: tuple[type[AsiAgent], ...] = (
     OutputHandlingAgent,  # LLM02
 )
 
+
+# GAP-4 always-on extras. These agents are dispatched alongside the core
+# ASI01-10 slate on EVERY scan (no opt-in flag) because they own probe
+# families that previously had no home — silenced by the only agent that
+# would have run them. Each declares an ASI category but a probe-id-prefix
+# filter in :meth:`seeds_for_category` so they do not duplicate work from the
+# broader ASI owner. See ``/tmp/ag_gaplist/LOCATE_BRIEF.md`` for the full
+# rationale.
+#
+# Entries here must NOT also appear in ``M2_SPECIALIST_AGENTS`` (the
+# OWASP-LLM specialists are an opt-in slate gated by
+# ``SwarmConfig.include_m2_agents``).
+GAP_FILL_AGENTS: tuple[type[AsiAgent], ...] = (
+    IdentityLeakAgent,  # GAP-4 — ASI03-PII-* cross-tenant identity leak
+)
+
 __all__ = [
+    "GAP_FILL_AGENTS",
     "M2_SPECIALIST_AGENTS",
     "A2AAgent",
     "AgentBudget",
@@ -57,6 +75,7 @@ __all__ = [
     "DriftAgent",
     "FuzzingAgent",
     "GoalHijackAgent",
+    "IdentityLeakAgent",
     "Judge",
     "JudgeRubric",
     "MemoryPoisonAgent",

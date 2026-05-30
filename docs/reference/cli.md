@@ -135,7 +135,7 @@ Exactly one target mode must be specified:
 | `--attacker-model TEXT`      | —       | Override the attacker-role model only.                                                               |
 | `--evaluator-model TEXT`     | —       | Override the evaluator-role model only.                                                              |
 | `--framework-ref MODULE:ATTR`| —       | With `--framework`: dotted Python reference to the framework-native object to wrap (e.g. `my_app.graph:graph`). |
-| `--no-preflight`             | off     | Skip the pre-scan reachability check for `--endpoint` mode. The default preflight POSTs an empty body twice with a 2s timeout. |
+| `--no-preflight`             | off     | Skip the pre-scan reachability check for `--endpoint` mode. The default preflight POSTs `{"input": "ping"}` twice with a 5s timeout; any HTTP response (including 422) counts as reachable. |
 | `--tier TEXT`                | auto    | Force tier — one of `T1`, `T2`, `T3`, `T4`.                                                          |
 | `--budget-usd FLOAT`         | —       | Runtime USD cap; soft-stops new attack turns at 80 % and reserves the remaining budget for the report. |
 | `--fail-under INT`           | —       | Exit `1` if the final AIVSS score is below this value. Useful in CI gates. Non-authoritative scans (stub model or `--mode fast`) always count as failures here. |

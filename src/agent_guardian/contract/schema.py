@@ -803,6 +803,15 @@ class Target(BaseModel):
     session: Session = Field(default_factory=Session)
     identity: Identity | None = None
     tools: Tools | None = None
+    # GAP-2: explicit multi-agent declaration. When ``True`` the contract is
+    # asserting the target is a multi-agent orchestrator (sub-agents,
+    # supervisor / commander pattern, ADK transfer_to_agent, LangGraph
+    # router…). The recon fingerprint OR-merges this with the structured
+    # tool-call evidence (``transfer_to_agent`` / ``route_to_agent`` etc.)
+    # and either signal opens the ASI06 / ASI07 / ASI10 lanes that would
+    # otherwise be silenced on a plain HTTP target. Defaults ``False`` so
+    # existing contracts remain valid.
+    is_multi_agent: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

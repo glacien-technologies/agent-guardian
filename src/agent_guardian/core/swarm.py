@@ -840,14 +840,24 @@ class SwarmCommander:
             self.config.total_tokens,
         )
         agents: list[AsiAgent] = []
+        # GAP-4 — always-on extras (currently IdentityLeakAgent for the
+        # ASI03-PII-* lane). Kept out of ``_ASI_AGENT_CLASSES`` so the 1:1
+        # ASI01..ASI10 invariant of that tuple is preserved; appended here
+        # on every scan because the lane has no other owner.
+        from agent_guardian.agents import GAP_FILL_AGENTS
+
         # M2 — optionally append the OWASP-LLM specialists to the slate. Kept
         # out of _ASI_AGENT_CLASSES so the default agentic-risk scan is
         # unchanged; included only when the operator targets the LLM risk set.
-        agent_classes: tuple[type[AsiAgent], ...] = _ASI_AGENT_CLASSES
+        agent_classes: tuple[type[AsiAgent], ...] = (*_ASI_AGENT_CLASSES, *GAP_FILL_AGENTS)
         if self.config.include_m2_agents:
             from agent_guardian.agents import M2_SPECIALIST_AGENTS
 
-            agent_classes = (*_ASI_AGENT_CLASSES, *M2_SPECIALIST_AGENTS)
+            agent_classes = (
+                *_ASI_AGENT_CLASSES,
+                *GAP_FILL_AGENTS,
+                *M2_SPECIALIST_AGENTS,
+            )
         per_agent_tokens = max(1, self.config.total_tokens // (len(agent_classes) + 3))
         # #40 — enabling the OWASP-LLM specialist agents alongside the core
         # ASI01-10 slate shrinks each agent's per-slice token budget unless the

@@ -69,7 +69,14 @@ Specific techniques:
         )
 
     def is_applicable(self, fingerprint: TargetFingerprint) -> bool:
-        return fingerprint.has_memory
+        # Conventional memory poisoning needs persistent / conversational
+        # state, but multi-agent orchestrators carry orchestration memory
+        # (sub-agent routing tables, supervisor context, shared scratchpad)
+        # that an LLM10-style plant can corrupt even when the per-turn
+        # transcript looks stateless — open the lane on either signal so
+        # ADK / LangGraph / CrewAI orchestrators are not silently skipped
+        # on HTTP targets (GAP-2).
+        return fingerprint.has_memory or fingerprint.is_multi_agent
 
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
         from agent_guardian.strategies.crescendo import CrescendoStrategy

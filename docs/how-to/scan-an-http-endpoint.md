@@ -36,10 +36,13 @@ refuses to send because the auth transports are not yet wired
 
 - AgentGuardian installed (`pip install agent-guardian`).
 - A reachable target URL. AgentGuardian preflights the endpoint
-  before the scan by POSTing an empty body twice with a 2s timeout; if
-  both attempts fail with ConnectError/Timeout the scan exits **64**
-  (`EXIT_TARGET_UNREACHABLE`) instead of burning LLM budget
-  (cli.py:2020–2029). Pass `--no-preflight` to skip the check.
+  before the scan by POSTing a minimal `{"input": "ping"}` body twice
+  with a 5s timeout; if both attempts fail with ConnectError/Timeout the
+  scan exits **64** (`EXIT_TARGET_UNREACHABLE`) instead of burning LLM
+  budget. Any HTTP response (including `422` from a schema-protected
+  FastAPI endpoint) counts as reachable. Pass `--no-preflight` to skip
+  the check entirely if your target needs a custom body shape that the
+  default `ping` does not satisfy.
 - An attacker + evaluator model API key for an authoritative score
   (`--model openai:gpt-4o-mini` etc.). Without it, the scan runs but
   the AIVSS is `NOT_EVALUATED`.
@@ -196,7 +199,7 @@ a contract or the Python constructor.
 
 | Symptom                                                                  | Cause + fix
 | :----------------------------------------------------------------------- | :----------
-| Exit 64 / `EXIT_TARGET_UNREACHABLE`                                      | Preflight POST failed twice. Run the URL through `curl -v` to confirm DNS/TLS/listener, or pass `--no-preflight` if your target rejects empty bodies but is otherwise reachable.
+| Exit 64 / `EXIT_TARGET_UNREACHABLE`                                      | Preflight POST failed twice (connect refused / DNS / TLS / read timeout across both attempts). Run the URL through `curl -v` to confirm DNS/TLS/listener. Note: `422` and other 4xx/5xx responses count as **reachable** — only transport-level failures trigger this exit code.
 | `NotImplementedError: bedrock/vertex/agentcore call() not yet wired`     | Auth transport not in v1.0 (adapters/http.py:55). Track [roadmap](../reference/roadmap.md) M9.
 | `LLMResponseFormatError: generic_shape: path '...' produced no value`     | The `response_jsonpath` didn't resolve. Capture a real response and re-test the path against it (adapters/http_shapes/generic_shape.py:46).
 

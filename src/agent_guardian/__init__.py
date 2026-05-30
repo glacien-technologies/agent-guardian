@@ -34,6 +34,7 @@ from agent_guardian.agents.cascade import CascadeAgent
 from agent_guardian.agents.code_exec import CodeExecAgent
 from agent_guardian.agents.drift import DriftAgent
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
+from agent_guardian.agents.identity_leak import IdentityLeakAgent
 from agent_guardian.agents.memory_poison import MemoryPoisonAgent
 from agent_guardian.agents.privilege import PrivilegeAgent
 from agent_guardian.agents.recon import ReconAgent
@@ -220,6 +221,7 @@ __all__ = [
     "HmacSignatureBlock",
     "HttpAdapter",
     "HttpShape",
+    "IdentityLeakAgent",
     "Judge",
     "JudgeRubric",
     "JudgeVerdict",
