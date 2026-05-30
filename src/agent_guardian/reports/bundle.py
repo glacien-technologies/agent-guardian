@@ -11,6 +11,13 @@ scoring + evidence-pack tooling consumes one standard artifact:
 
 Reuses :func:`reports.sarif.write_sarif` for the SARIF run and
 :func:`reports.canonical.to_canonical_json` for stable manifest bytes.
+
+PoV reproducer scripts and evidence transcripts can carry attacker-reflected
+secrets (the whole point of an adversarial swarm is to *make* the target leak
+keys), so when ``redact=True`` (the default) every file written under
+``pov/`` and ``evidence/`` is routed through the shared :class:`PiiRedactor`
+before it lands on disk — otherwise the bundle would silently bypass every
+other report-surface's redaction guarantee.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ import hashlib
 import logging
 from pathlib import Path
 
+from agent_guardian.core.redact import PiiRedactor
 from agent_guardian.models.scan import Scan
 from agent_guardian.reports.canonical import to_canonical_json
 from agent_guardian.reports.sarif import write_sarif
@@ -26,6 +34,9 @@ from agent_guardian.reports.sarif import write_sarif
 __all__ = ["write_bundle"]
 
 _LOG = logging.getLogger(__name__)
+
+# Module-level redactor — pattern bank compiled once, reused across calls.
+_REDACTOR = PiiRedactor()
 
 
 def _sha256(path: Path) -> str:
@@ -40,12 +51,21 @@ def write_bundle(
     *,
     pov_scripts: dict[str, str] | None = None,
     evidence: dict[str, dict[str, str]] | None = None,
+    redact: bool = True,
 ) -> Path:
     """Write a ``bundle_<scan_id>/`` directory under ``out_dir``; return its path.
 
     ``pov_scripts`` maps finding_id -> reproducer source; ``evidence`` maps
     finding_id -> {filename: content}. Both optional — an empty bundle still
     emits ``findings.sarif`` + ``manifest.json`` so the schema is stable.
+
+    ``redact`` (default True) routes every PoV script + evidence transcript
+    through :class:`PiiRedactor` before it's written to disk. A swarm can
+    capture attacker-reflected credentials (AKIA…, sk-…, Bearer …) inside a
+    reproducer's ``TRIGGER = …`` line — without this scrub the bundle would
+    silently bypass the redaction every other report surface enforces. The
+    same ``redact`` value is propagated to the SARIF emitter so the embedded
+    findings carry the same redaction stance as the loose files.
     """
     pov_scripts = pov_scripts or {}
     evidence = evidence or {}
@@ -55,7 +75,7 @@ def write_bundle(
     written: list[Path] = []
 
     sarif_path = bundle_dir / "findings.sarif"
-    write_sarif(scan, sarif_path)
+    write_sarif(scan, sarif_path, redact=redact)
     written.append(sarif_path)
 
     if pov_scripts:
@@ -63,7 +83,8 @@ def write_bundle(
         pov_dir.mkdir(parents=True, exist_ok=True)
         for finding_id, source in pov_scripts.items():
             p = pov_dir / f"{_safe(finding_id)}.py"
-            p.write_text(source, encoding="utf-8")
+            cleaned = _REDACTOR.redact(source) if redact else source
+            p.write_text(cleaned, encoding="utf-8")
             written.append(p)
 
     for finding_id, files in evidence.items():
@@ -71,7 +92,8 @@ def write_bundle(
         ev_dir.mkdir(parents=True, exist_ok=True)
         for name, content in files.items():
             p = ev_dir / _safe(name)
-            p.write_text(content, encoding="utf-8")
+            cleaned = _REDACTOR.redact(content) if redact else content
+            p.write_text(cleaned, encoding="utf-8")
             written.append(p)
 
     manifest = {

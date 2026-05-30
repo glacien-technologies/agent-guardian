@@ -196,7 +196,7 @@ class McpTransport(Transport):
 
     # ---- JSON-RPC plumbing -------------------------------------------------
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, session_override: str | None = None) -> dict[str, str]:
         headers: dict[str, str] = {
             "content-type": "application/json",
             # MCP Streamable HTTP servers may answer with JSON or an SSE stream;
@@ -204,18 +204,33 @@ class McpTransport(Transport):
             "accept": "application/json, text/event-stream",
         }
         headers.update(self._base_headers)
-        # Replay the resumable session id (header only, per spec).
-        if self._session_id is not None:
-            headers[_SESSION_HEADER] = self._session_id
+        # Replay the resumable session id (header only, per spec). A per-call
+        # override (request.session) wins over the transport-level captured id
+        # so isolate_per_scenario can drive a fresh session without cloning the
+        # transport (see :meth:`send`).
+        replay_id = session_override if session_override is not None else self._session_id
+        if replay_id is not None:
+            headers[_SESSION_HEADER] = replay_id
         return headers
 
-    async def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _rpc(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        session_override: str | None = None,
+    ) -> dict[str, Any]:
         """POST a JSON-RPC envelope and return the ``result`` object.
 
         Applies auth (Authorization header only — never a query string), wraps
         the send in :func:`with_backoff`, maps HTTP/httpx faults onto the LLM
         error hierarchy, captures any ``Mcp-Session-Id`` response header, and
         translates a JSON-RPC ``error`` member into a :class:`TransportError`.
+
+        ``session_override`` lets a per-call request stamp a specific
+        ``Mcp-Session-Id`` (per-scenario isolation); when supplied, the
+        captured server session id is **not** updated from the response so a
+        per-turn override does not pollute transport-level state.
 
         Raises an :class:`LLMError` subclass or :class:`TransportError` on
         failure; the public :meth:`send` is what swallows these into a
@@ -230,7 +245,7 @@ class McpTransport(Transport):
         }
 
         async def _attempt() -> dict[str, Any]:
-            headers = self._build_headers()
+            headers = self._build_headers(session_override=session_override)
             ctx = AuthContext(method="POST", url=self._endpoint, headers=headers)
             await self._auth.apply(ctx)
             try:
@@ -243,8 +258,11 @@ class McpTransport(Transport):
             _raise_for_status(resp)
 
             # Capture (or refresh) the resumable session id before parsing.
+            # When the caller pinned a per-turn override, we do NOT overwrite
+            # the transport-level id — that would let a scenario-scoped session
+            # bleed into the default replay path.
             session_id = resp.headers.get(_SESSION_HEADER)
-            if session_id:
+            if session_id and session_override is None:
                 self._session_id = session_id
 
             try:
@@ -273,8 +291,13 @@ class McpTransport(Transport):
 
     # ---- MCP methods -------------------------------------------------------
 
-    async def initialize(self) -> dict[str, Any]:
-        """Run the JSON-RPC ``initialize`` handshake and store server capabilities."""
+    async def initialize(self, *, session_override: str | None = None) -> dict[str, Any]:
+        """Run the JSON-RPC ``initialize`` handshake and store server capabilities.
+
+        ``session_override`` pins the ``Mcp-Session-Id`` header so a per-scenario
+        ``send`` can drive a fresh handshake without mutating the transport's
+        captured session id.
+        """
         result = await self._rpc(
             "initialize",
             {
@@ -282,18 +305,20 @@ class McpTransport(Transport):
                 "clientInfo": {"name": _CLIENT_NAME, "version": _CLIENT_VERSION},
                 "capabilities": {},
             },
+            session_override=session_override,
         )
         capabilities = result.get("capabilities")
         self._server_capabilities = capabilities if isinstance(capabilities, dict) else {}
         self._initialized = True
         return result
 
-    async def list_tools(self) -> tuple[str, ...]:
+    async def list_tools(self, *, session_override: str | None = None) -> tuple[str, ...]:
         """Run ``tools/list``; cache and return the discovered tool names.
 
-        Full tool schemas are retained for :meth:`describe`.
+        Full tool schemas are retained for :meth:`describe`. ``session_override``
+        pins the per-call ``Mcp-Session-Id`` (see :meth:`initialize`).
         """
-        result = await self._rpc("tools/list", {})
+        result = await self._rpc("tools/list", {}, session_override=session_override)
         raw_tools = result.get("tools")
         schemas: list[dict[str, Any]] = []
         names: list[str] = []
@@ -311,18 +336,38 @@ class McpTransport(Transport):
         self._tools_listed = True
         return self._tool_names
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Run ``tools/call`` for ``name`` with ``arguments``; return the result."""
-        return await self._rpc("tools/call", {"name": name, "arguments": arguments})
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        session_override: str | None = None,
+    ) -> dict[str, Any]:
+        """Run ``tools/call`` for ``name`` with ``arguments``; return the result.
+
+        ``session_override`` pins the per-call ``Mcp-Session-Id`` so a scenario
+        with its own session can invoke a tool without bleeding state into the
+        transport's default replay path.
+        """
+        return await self._rpc(
+            "tools/call",
+            {"name": name, "arguments": arguments},
+            session_override=session_override,
+        )
 
     # ---- Transport surface -------------------------------------------------
 
-    async def _ensure_discovered(self) -> None:
-        """Lazily run the handshake + tool discovery exactly once."""
+    async def _ensure_discovered(self, *, session_override: str | None = None) -> None:
+        """Lazily run the handshake + tool discovery exactly once.
+
+        ``session_override`` is plumbed through so the *first* call's discovery
+        (handshake + tool listing) is also pinned to the per-scenario session id,
+        never falling back to a leaked transport-level id.
+        """
         if not self._initialized:
-            await self.initialize()
+            await self.initialize(session_override=session_override)
         if not self._tools_listed:
-            await self.list_tools()
+            await self.list_tools(session_override=session_override)
 
     @staticmethod
     def _extract_text(result: dict[str, Any]) -> str:
@@ -347,15 +392,30 @@ class McpTransport(Transport):
         injected ``tool_gate`` (the RoE chokepoint): if the gate denies it we
         return a benign blocked note *without* contacting the server, so a
         destructive tool is suppressed live.
+
+        When ``request.session`` is set the per-call ``Mcp-Session-Id`` header
+        is pinned to that value (and the transport-level captured id is *not*
+        overwritten from the response). This is the seam
+        :class:`~agent_guardian.transports.session.SessionMachine` uses in
+        ``server_session`` mode after :meth:`isolate_per_scenario`: each
+        forked machine carries its own session, so two parallel scenarios over
+        the same shared :class:`McpTransport` no longer bleed ``Mcp-Session-Id``
+        across each other.
         """
+        session_override = request.session if request.session else None
         try:
-            await self._ensure_discovered()
+            await self._ensure_discovered(session_override=session_override)
         except _JsonRpcError as exc:
             _LOG.debug("mcp transport: discovery JSON-RPC error (%s)", exc)
             return Response(error=exc.to_transport_error())
         except LLMError as exc:
             _LOG.debug("mcp transport: discovery failed (%s)", exc)
             return Response(error=map_llm_error(exc))
+
+        # The session id surfaced back to the caller is the override (when
+        # supplied) so the SessionMachine continues to replay the same id; only
+        # in the no-override case do we fall back to the captured server id.
+        surfaced_session = session_override if session_override is not None else self._session_id
 
         tool = self._entry_tool or (self._tool_names[0] if self._tool_names else None)
         if tool is None:
@@ -370,12 +430,12 @@ class McpTransport(Transport):
             return Response(
                 text=f"[agent-guardian] tool {tool!r} blocked by RoE; not executed",
                 tool_calls=(ToolCall(name=tool, arguments=arguments, raw=None),),
-                session=self._session_id,
+                session=surfaced_session,
             )
 
         arguments = {self._prompt_argument: request.prompt}
         try:
-            result = await self.call_tool(tool, arguments)
+            result = await self.call_tool(tool, arguments, session_override=session_override)
         except _JsonRpcError as exc:
             _LOG.debug("mcp transport: tools/call JSON-RPC error (%s)", exc)
             return Response(error=exc.to_transport_error())
@@ -392,14 +452,14 @@ class McpTransport(Transport):
                     text or f"mcp: tool {tool!r} reported isError",
                 ),
                 tool_calls=(ToolCall(name=tool, arguments=arguments, raw=result),),
-                session=self._session_id,
+                session=surfaced_session,
                 raw=result,
             )
 
         return Response(
             text=self._extract_text(result),
             tool_calls=(ToolCall(name=tool, arguments=arguments, raw=result),),
-            session=self._session_id,
+            session=surfaced_session,
             raw=result,
         )
 

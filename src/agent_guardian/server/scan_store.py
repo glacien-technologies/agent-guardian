@@ -778,6 +778,16 @@ class ScanStore:
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
+                # Back-compat shim for pre-72d4deb scans persisted before the
+                # ``mode`` field was required. Treat them as ``smart`` with
+                # ``mode_authoritative=False`` so the dashboard renders them
+                # as legacy results rather than silently claiming they were
+                # FULL-mode authoritative scans. We deliberately do NOT add a
+                # default on the Scan model itself -- that re-creates the
+                # silent-misreporting bug 72d4deb intentionally fixed.
+                if isinstance(payload, dict) and "mode" not in payload:
+                    payload["mode"] = "smart"
+                    payload.setdefault("mode_authoritative", False)
                 return Scan.model_validate(payload)
             except (OSError, json.JSONDecodeError, ValueError) as exc:
                 _LOG.warning(

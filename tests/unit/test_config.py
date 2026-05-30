@@ -222,7 +222,14 @@ def test_env_api_key_reads_openai(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_env_api_key_returns_none_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ``env_api_key`` falls back to the provider's standard env var
+    # (``OPENAI_API_KEY``) when the namespaced one is unset (see
+    # ``_STANDARD_ENV_VAR``). To exercise the "neither is set" branch we
+    # must delete *both*. Process-level .env autoload + side-effects from
+    # other tests can leave ``OPENAI_API_KEY`` populated, so this is a
+    # correctness fix for the test, not a behaviour change.
     monkeypatch.delenv("AGENT_GUARDIAN_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert env_api_key("openai") is None
 
 

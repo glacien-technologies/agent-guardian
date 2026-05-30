@@ -51,12 +51,18 @@ jobs:
       # Without it the test module errors at import time. On Windows we
       # additionally install ``pdf-fallback`` (ReportLab) in place of
       # the default ``full`` WeasyPrint path.
+      # ``--extra otel`` pulls in the OpenTelemetry SDK so the gated obs tests
+      # under tests/unit/test_obs_otel.py (active-path tracer + observer) and
+      # the consumer-side tests in tests/unit/test_obs_consumer.py actually
+      # execute. Without it ``pytest.importorskip("opentelemetry")`` skips the
+      # whole active suite silently, which means a regression in the GenAI
+      # span emission path slips through CI undetected (cluster fix item P2).
       - name: Install deps (Linux/macOS)
         if: runner.os != 'Windows'
-        run: uv sync --extra dev --extra aws
+        run: uv sync --extra dev --extra aws --extra otel
       - name: Install deps (Windows, pdf-fallback)
         if: runner.os == 'Windows'
-        run: uv sync --extra dev --extra aws --extra pdf-fallback
+        run: uv sync --extra dev --extra aws --extra otel --extra pdf-fallback
       - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
       - uses: codecov/codecov-action@v5
         # Standard §11.1 — single canonical Codecov upload. Gate on the

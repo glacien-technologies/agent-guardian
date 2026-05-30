@@ -132,6 +132,13 @@ class Scan(BaseModel):
     # scans without any undertested categories. Stored as a sorted list of the
     # raw ASI string values so the model stays JSON-round-trip safe.
     undertested: list[str] = Field(default_factory=list)
+    # v1.1 — coverage grade summarising how thoroughly the swarm exercised
+    # the target. ``A`` = every ASI category covered by real evidence;
+    # ``F`` = no coverage at all. Persisted onto the Scan so an operator can
+    # refuse a "100 / EXCELLENT" verdict on a scan whose coverage_grade is D
+    # or worse. Defaults ``"A"`` so older Scan JSON on disk deserialises
+    # unchanged.
+    coverage_grade: Literal["A", "B", "C", "D", "F"] = "A"
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")

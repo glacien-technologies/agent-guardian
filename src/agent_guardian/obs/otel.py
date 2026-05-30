@@ -31,12 +31,16 @@ leaves a documented stub for wiring that exporter.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlparse
+
+from agent_guardian.logging_setup import redact_secrets
 
 if TYPE_CHECKING:
     from agent_guardian.core.swarm import SwarmEvent, SwarmObserver
@@ -50,6 +54,7 @@ __all__ = [
     "configure_otel",
     "get_tracer",
     "make_otel_observer",
+    "set_conversation_id",
     "set_usage",
     "tool_span",
     "transport_span",
@@ -75,6 +80,8 @@ _ATTR_AGENT_NAME = "gen_ai.agent.name"
 _ATTR_CONVERSATION_ID = "gen_ai.conversation.id"
 _ATTR_TOOL_NAME = "gen_ai.tool.name"
 _ATTR_TOOL_TYPE = "gen_ai.tool.type"
+_ATTR_TOOL_CALL_ARGUMENTS = "gen_ai.tool.call.arguments"
+_ATTR_TOOL_CALL_RESULT = "gen_ai.tool.call.result"
 _ATTR_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
 _ATTR_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
 _ATTR_OPERATION_NAME = "gen_ai.operation.name"
@@ -93,6 +100,41 @@ _DEFAULT_SCHEME_PORTS: dict[str, int] = {
     "ws": 80,
     "wss": 443,
 }
+
+
+# --- Cross-cutting context vars ---------------------------------------------
+# Propagates the current conversation id (the adapter ``session``) down through
+# any span that opens while it is set. This is the mechanism that lets
+# ``transport.send`` / ``execute_tool`` spans inherit the same
+# ``gen_ai.conversation.id`` as their parent ``invoke_agent`` span without
+# threading the id through every observer / adapter signature. The swarm agent
+# loop is expected to set this when it picks up an agent's session id; the
+# observability seam reads it but never mutates the engine.
+_CURRENT_CONVERSATION_ID: ContextVar[str | None] = ContextVar(
+    "ag_otel_conversation_id", default=None
+)
+
+# Tracks the currently-open ``invoke_agent`` span so ``set_usage`` can route
+# token-usage attributes to the right span even when called from inside a
+# nested ``transport.send`` / ``execute_tool`` context (per GenAI semconv,
+# token usage belongs on the agent span, not the transport span).
+_CURRENT_INVOKE_AGENT_SPAN: ContextVar[Any | None] = ContextVar(
+    "ag_otel_invoke_agent_span", default=None
+)
+
+
+def set_conversation_id(conversation_id: str | None) -> Any:
+    """Set the active conversation id for subsequently-opened spans.
+
+    Returns the :class:`contextvars.Token` so the caller can reset it. The swarm
+    agent loop is expected to call this around the per-agent block so every
+    span the adapter / observer opens for that agent carries the same
+    ``gen_ai.conversation.id`` — no engine API change required.
+
+    Safe and side-effect-free even when the OTel gate is closed (the value is
+    only ever read by the obs seam, which is itself a no-op without OTel).
+    """
+    return _CURRENT_CONVERSATION_ID.set(conversation_id)
 
 
 # --- Span protocol ----------------------------------------------------------
@@ -192,6 +234,13 @@ def _span_kind_client() -> Any:
     return SpanKind.CLIENT
 
 
+def _resolve_conversation_id(explicit: str | None) -> str | None:
+    """Resolve the conversation id: explicit arg wins, else the ContextVar."""
+    if explicit is not None:
+        return explicit
+    return _CURRENT_CONVERSATION_ID.get()
+
+
 @contextmanager
 def agent_span(agent_name: str, conversation_id: str | None = None) -> Iterator[_SpanLike]:
     """Span for one agent invocation: ``invoke_agent {agent_name}`` (CLIENT).
@@ -200,13 +249,14 @@ def agent_span(agent_name: str, conversation_id: str | None = None) -> Iterator[
     No-op safe: yields an inert span when the gate is closed.
     """
     tracer = get_tracer()
+    resolved_conversation = _resolve_conversation_id(conversation_id)
     with tracer.start_as_current_span(
         f"invoke_agent {agent_name}", kind=_span_kind_client()
     ) as span:
         span.set_attribute(_ATTR_OPERATION_NAME, "invoke_agent")
         span.set_attribute(_ATTR_AGENT_NAME, agent_name)
-        if conversation_id is not None:
-            span.set_attribute(_ATTR_CONVERSATION_ID, conversation_id)
+        if resolved_conversation is not None:
+            span.set_attribute(_ATTR_CONVERSATION_ID, resolved_conversation)
         yield span
 
 
@@ -231,42 +281,125 @@ def _server_address_port(endpoint: str) -> tuple[str | None, int | None]:
 
 
 @contextmanager
-def transport_span(endpoint: str) -> Iterator[_SpanLike]:
+def transport_span(
+    endpoint: str,
+    *,
+    conversation_id: str | None = None,
+) -> Iterator[_SpanLike]:
     """Span for one per-turn transport send to ``endpoint`` (CLIENT).
 
-    Wraps the single network call the adapter makes per target turn. Sets
-    ``server.address`` to the HOST only (+ ``server.port`` when known), per the
-    OTel semconv — not the full URL — so host-level grouping/correlation works.
+    Wraps the single network call the adapter makes per target turn.
+
+    The span name is **host-only** (``transport.send {host}``) — NEVER the full
+    URL — so the name stays low-cardinality and, crucially, never leaks API keys
+    that some providers embed in the query string (Google's
+    ``?key=AIza...``, AWS pre-signed URLs, etc.). The host is parsed once via
+    :func:`_server_address_port`. ``url.scheme`` and a *redacted* ``url.path``
+    are stamped as attributes so an operator who needs the URL can still see it
+    without paying the cardinality cost on the span name. The raw endpoint
+    string is **never** stamped as an attribute and **never** surfaced in the
+    span name.
+
+    ``gen_ai.conversation.id`` is stamped from the explicit ``conversation_id``
+    kwarg when supplied, otherwise from the :data:`_CURRENT_CONVERSATION_ID`
+    ContextVar; this is how the consumer-side :class:`SpanCorrelator` joins our
+    transport spans with the target's own GenAI spans.
+
     No-op safe.
     """
     tracer = get_tracer()
     host, port = _server_address_port(endpoint)
-    with tracer.start_as_current_span(
-        f"transport.send {endpoint}", kind=_span_kind_client()
-    ) as span:
-        if host is not None:
-            span.set_attribute("server.address", host)
-            if port is not None:
-                span.set_attribute("server.port", port)
-        yield span
+    parsed = urlparse(endpoint)
+    span_name = f"transport.send {host}" if host is not None else "transport.send"
+    resolved_conversation = _resolve_conversation_id(conversation_id)
+    # When an explicit conversation_id is supplied, also push it into the
+    # ContextVar so any nested ``tool_span`` / ``execute_tool`` opened during
+    # the send inherits the same join key (the consumer-side correlator
+    # buckets tool spans by gen_ai.conversation.id — a tool span with no id
+    # is uncorrelated). The token is reset on exit, so this is local to the
+    # ``with`` block and cannot leak to the next caller.
+    conversation_token: Any = None
+    if conversation_id is not None:
+        conversation_token = _CURRENT_CONVERSATION_ID.set(conversation_id)
+    try:
+        with tracer.start_as_current_span(span_name, kind=_span_kind_client()) as span:
+            if host is not None:
+                span.set_attribute("server.address", host)
+                if port is not None:
+                    span.set_attribute("server.port", port)
+                if parsed.scheme:
+                    span.set_attribute("url.scheme", parsed.scheme)
+                # The path may carry session-token-shaped credentials on some
+                # providers (e.g. Vertex / Bedrock pre-signed URLs); redact
+                # before stamping so we never write a secret to a span
+                # attribute either.
+                if parsed.path:
+                    span.set_attribute("url.path", redact_secrets(parsed.path))
+            if resolved_conversation is not None:
+                span.set_attribute(_ATTR_CONVERSATION_ID, resolved_conversation)
+            yield span
+    finally:
+        if conversation_token is not None:
+            _CURRENT_CONVERSATION_ID.reset(conversation_token)
 
 
 @contextmanager
-def tool_span(tool_name: str, tool_type: str = "function") -> Iterator[_SpanLike]:
+def tool_span(
+    tool_name: str,
+    tool_type: str = "function",
+    *,
+    arguments: Any = None,
+    result: Any = None,
+) -> Iterator[_SpanLike]:
     """Span for one tool call: ``execute_tool {tool_name}``.
 
-    Sets ``gen_ai.tool.name`` and ``gen_ai.tool.type``. No-op safe.
+    Sets ``gen_ai.tool.name`` / ``gen_ai.tool.type`` and, when supplied,
+    ``gen_ai.tool.call.arguments`` / ``gen_ai.tool.call.result`` (both
+    JSON-encoded, with redaction applied so a tool argument carrying a token
+    can never leak through the span). Also stamps the inherited
+    ``gen_ai.conversation.id`` when one is in scope, so the consumer-side
+    correlator can attribute the tool call to the right session. No-op safe.
     """
     tracer = get_tracer()
+    resolved_conversation = _resolve_conversation_id(None)
     with tracer.start_as_current_span(f"execute_tool {tool_name}") as span:
         span.set_attribute(_ATTR_OPERATION_NAME, "execute_tool")
         span.set_attribute(_ATTR_TOOL_NAME, tool_name)
         span.set_attribute(_ATTR_TOOL_TYPE, tool_type)
+        if resolved_conversation is not None:
+            span.set_attribute(_ATTR_CONVERSATION_ID, resolved_conversation)
+        if arguments is not None:
+            span.set_attribute(_ATTR_TOOL_CALL_ARGUMENTS, _encode_tool_payload(arguments))
+        if result is not None:
+            span.set_attribute(_ATTR_TOOL_CALL_RESULT, _encode_tool_payload(result))
         yield span
 
 
+def _encode_tool_payload(payload: Any) -> str:
+    """JSON-encode a tool argument / result payload, with secret redaction.
+
+    Falls back to ``str(payload)`` for anything that is not JSON-serialisable
+    (e.g. a custom dataclass without a default encoder). Both paths are routed
+    through :func:`redact_secrets` so a bearer token in a tool argument never
+    lands verbatim on a span attribute.
+    """
+    try:
+        encoded = json.dumps(payload, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        encoded = str(payload)
+    return redact_secrets(encoded)
+
+
 def set_usage(input_tokens: int | None = None, output_tokens: int | None = None) -> None:
-    """Set GenAI token-usage attributes on the *current* span.
+    """Set GenAI token-usage attributes on the current ``invoke_agent`` span.
+
+    Per the GenAI semconv, token usage belongs on the agent span, not on a
+    nested transport / tool span. We prefer the :data:`_CURRENT_INVOKE_AGENT_SPAN`
+    ContextVar — set by :func:`make_otel_observer` when it opens an agent span
+    — so usage attributes land on the right span even when ``set_usage`` is
+    called from inside a :func:`transport_span` block. When no observer-owned
+    span is in scope we fall back to ``trace.get_current_span`` so the existing
+    ``with agent_span(...): set_usage(...)`` callers keep working.
 
     Best-effort: a no-op when the SDK is absent or no span is recording. NEVER
     raises. Either argument may be ``None`` to leave that attribute unset.
@@ -275,16 +408,29 @@ def set_usage(input_tokens: int | None = None, output_tokens: int | None = None)
         from opentelemetry import trace
     except ImportError:
         return None
-    span = trace.get_current_span()
+    target_span: Any = _CURRENT_INVOKE_AGENT_SPAN.get()
+    if target_span is None or not _span_is_recording(target_span):
+        target_span = trace.get_current_span()
     # ``get_current_span`` returns a non-recording INVALID span when nothing is
     # active; writing attributes to it is harmless but pointless, so skip it.
-    if not span.is_recording():
+    if not _span_is_recording(target_span):
         return None
     if input_tokens is not None:
-        span.set_attribute(_ATTR_USAGE_INPUT_TOKENS, input_tokens)
+        target_span.set_attribute(_ATTR_USAGE_INPUT_TOKENS, input_tokens)
     if output_tokens is not None:
-        span.set_attribute(_ATTR_USAGE_OUTPUT_TOKENS, output_tokens)
+        target_span.set_attribute(_ATTR_USAGE_OUTPUT_TOKENS, output_tokens)
     return None
+
+
+def _span_is_recording(span: Any) -> bool:
+    """``span.is_recording()`` if the method exists, else ``False``. Never raises."""
+    is_recording = getattr(span, "is_recording", None)
+    if is_recording is None:
+        return False
+    try:
+        return bool(is_recording())
+    except Exception:
+        return False
 
 
 # --- Observer ---------------------------------------------------------------
@@ -302,14 +448,20 @@ def make_otel_observer() -> SwarmObserver:
     **best-effort** and NEVER raises — any failure (including the SDK being
     absent) is swallowed so it can never break a scan.
 
+    Repeated ``agent_start`` for the same agent name closes any prior in-flight
+    span before opening a new one — leaking the old span would orphan it
+    forever in the exporter.
+
     When the gate is closed the tracer is the no-op tracer; we still maintain
     the bookkeeping dict but every span is inert, so the observer remains a
     cheap, safe no-op.
     """
-    # Maps agent-name -> (span, context-detach-token). The token is the value
-    # returned by ``context.attach`` so we can detach on close; ``None`` when
-    # the SDK/context API is unavailable (no-op path).
-    open_spans: dict[str, tuple[Any, Any]] = {}
+    # Maps agent-name -> (span, context-detach-token, invoke-agent-context-token).
+    # The first token is the value returned by ``context.attach`` so we can
+    # detach on close; the second is the reset-token for
+    # :data:`_CURRENT_INVOKE_AGENT_SPAN` so ``set_usage`` can route correctly.
+    # Both are ``None`` on the no-op path.
+    open_spans: dict[str, tuple[Any, Any, Any]] = {}
 
     def _start(agent: str) -> None:
         try:
@@ -319,20 +471,32 @@ def make_otel_observer() -> SwarmObserver:
             return
         if not _genai_opt_in_enabled():
             return
+        # If we already have an in-flight span for this name (a repeated
+        # ``agent_start`` without an intervening ``agent_done`` — re-entry, an
+        # engine bug, or a strategy retry) close the prior one first so it
+        # cannot leak; otherwise the prior span dangles forever in the exporter
+        # and ``set_usage`` would land on the new span's parent by mistake.
+        if agent in open_spans:
+            _LOG.debug("otel observer: replacing in-flight span for agent %r", agent)
+            _finish(agent)
         tracer = trace.get_tracer("agent_guardian.obs")
         from opentelemetry.trace import SpanKind
 
         span = tracer.start_span(f"invoke_agent {agent}", kind=SpanKind.CLIENT)
         span.set_attribute(_ATTR_OPERATION_NAME, "invoke_agent")
         span.set_attribute(_ATTR_AGENT_NAME, agent)
+        conversation_id = _CURRENT_CONVERSATION_ID.get()
+        if conversation_id is not None:
+            span.set_attribute(_ATTR_CONVERSATION_ID, conversation_id)
         token = otel_context.attach(trace.set_span_in_context(span))
-        open_spans[agent] = (span, token)
+        invoke_token = _CURRENT_INVOKE_AGENT_SPAN.set(span)
+        open_spans[agent] = (span, token, invoke_token)
 
     def _record_aivss(agent: str, aivss: int) -> None:
         entry = open_spans.get(agent)
         if entry is None:
             return
-        span, _token = entry
+        span, _token, _invoke_token = entry
         span.add_event(
             "gen_ai.provisional_aivss",
             attributes={"agent_guardian.provisional_aivss": aivss},
@@ -342,15 +506,30 @@ def make_otel_observer() -> SwarmObserver:
         entry = open_spans.pop(agent, None)
         if entry is None:
             return
-        span, token = entry
+        span, token, invoke_token = entry
+        if invoke_token is not None:
+            try:
+                _CURRENT_INVOKE_AGENT_SPAN.reset(invoke_token)
+            except ValueError:
+                # The token may have been reset already (e.g. because _start
+                # called _finish to replace an in-flight span); swallow.
+                _LOG.debug("otel observer: invoke-agent token already reset")
         if token is not None:
             try:
                 from opentelemetry import context as otel_context
             except ImportError:
                 _LOG.debug("otel context API unavailable; skipping detach")
             else:
-                otel_context.detach(token)
-        span.end()
+                try:
+                    otel_context.detach(token)
+                except Exception:
+                    _LOG.debug("otel observer: detach raised; ending span anyway", exc_info=True)
+        try:
+            span.end()
+        except Exception:
+            # ``end()`` should never raise but the SDK is third-party; swallow
+            # so a sick exporter can never break a scan.
+            _LOG.debug("otel observer: span.end() raised", exc_info=True)
 
     def observer(event: SwarmEvent) -> None:
         try:
@@ -367,7 +546,20 @@ def make_otel_observer() -> SwarmObserver:
             # Best-effort by contract: swallow everything so a sick tracing
             # backend can never break a scan. Logged at DEBUG only (never higher)
             # to avoid a noisy failure loop if the backend is persistently sick.
-            _LOG.debug("otel observer swallowed an error for event %r", event.kind, exc_info=True)
+            # We re-read ``event.kind`` inside a nested try/except so a
+            # malformed event whose ``kind`` property itself raises cannot make
+            # this handler re-raise (``getattr`` would still trigger the
+            # descriptor and propagate). A literal fallback keeps the log
+            # line useful when we can't recover the kind.
+            try:
+                kind_repr: Any = event.kind
+            except Exception:
+                kind_repr = "?"
+            _LOG.debug(
+                "otel observer swallowed an error for event %r",
+                kind_repr,
+                exc_info=True,
+            )
             return None
         return None
 
@@ -528,11 +720,11 @@ class TransportSpanMixin:
     """
 
     @staticmethod
-    def _transport_span(endpoint: str) -> Any:
+    def _transport_span(endpoint: str, *, conversation_id: str | None = None) -> Any:
         """Return the :func:`transport_span` context manager for ``endpoint``.
 
         Thin indirection so the mixin presents a single canonical method name
         for adapters; the underlying ``transport_span`` is the same module-level
         context manager (no-op when the gate is closed).
         """
-        return transport_span(endpoint)
+        return transport_span(endpoint, conversation_id=conversation_id)

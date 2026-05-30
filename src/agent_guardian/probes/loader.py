@@ -173,6 +173,8 @@ def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
                     text=text,
                     asi=probe.asi.value,
                     severity=probe.severity.value,
+                    mitre_atlas=tuple(probe.mitre_atlas),
+                    csa_category=probe.csa_category.value,
                 )
             )
     return out

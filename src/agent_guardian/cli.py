@@ -579,7 +579,7 @@ class _ContractScanContext:
     splice over the unchanged non-contract path.
     """
 
-    def __init__(self, contract_path: Path) -> None:
+    def __init__(self, contract_path: Path, *, otel_endpoint: str | None = None) -> None:
         from agent_guardian.contract import contract_sha256, load_contract
         from agent_guardian.core.roe import RoeController, authorization_gate
         from agent_guardian.obs.otel import configure_otel, make_otel_observer
@@ -596,9 +596,15 @@ class _ContractScanContext:
         self.swarm_overrides = self.roe.swarm_overrides()
         # OTel rides the observer + exporter seams -- both no-op unless the
         # operator opted into the experimental GenAI conventions, so the default
-        # install pays nothing.
+        # install pays nothing. Precedence: the contract's
+        # ``observability.otel_endpoint`` wins iff the contract sets one;
+        # otherwise we fall through to the outer CLI's ``--otel-endpoint`` flag
+        # so a contract with no observability stanza still honours the operator
+        # flag instead of silently dropping it.
         observability = self.contract.observability
-        configure_otel(observability.otel_endpoint if observability is not None else None)
+        contract_endpoint = observability.otel_endpoint if observability is not None else None
+        effective_endpoint = contract_endpoint or otel_endpoint
+        configure_otel(effective_endpoint)
         self.observer = make_otel_observer()
 
     def build_audit(self, scan: Scan) -> dict[str, Any]:
@@ -1113,34 +1119,73 @@ def serve(
     ),
     port: int = typer.Option(7474, "--port", help="Bind port."),
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        envvar="AGENT_GUARDIAN_DASHBOARD_TOKEN",
+        help=(
+            "Dashboard auth token; required for non-loopback binds unless "
+            "--insecure-no-auth is passed. The same value must be presented "
+            "by clients via the X-Dashboard-Token header (or Bearer auth)."
+        ),
+    ),
+    insecure_no_auth: bool = typer.Option(
+        False,
+        "--insecure-no-auth",
+        help=(
+            "Allow off-loopback bind WITHOUT a token. Exposes scan history "
+            "(target URLs + findings) to anyone who can reach the port. "
+            "Intended for ephemeral demos behind a trusted reverse proxy only."
+        ),
+    ),
 ) -> None:
     """Start the local dashboard at http://<host>:<port>.
 
     The dashboard defaults to loopback (127.0.0.1). Binding to a non-loopback
-    address exposes scan history (target URLs + findings) and the telemetry
-    ingest endpoint to the network; a loud warning is printed and the ingest
-    write endpoint requires a token unless explicitly opened (see
-    ``AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN`` / ``..._ALLOW_PUBLIC_INGEST``).
+    address requires either a ``--token`` (preferred) or the explicit
+    ``--insecure-no-auth`` escape hatch -- otherwise the bind is refused so a
+    misconfigured deploy can't silently expose scan history. The
+    telemetry-ingest WRITE endpoint stays disabled off-loopback unless you set
+    ``AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN`` (or
+    ``AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST=1``).
     """
     import uvicorn
 
     from agent_guardian.server.app import create_app
 
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
-    if host not in loopback_hosts:
+    is_loopback = host in loopback_hosts
+
+    if not is_loopback and not token and not insecure_no_auth:
+        typer.echo(
+            f"refusing to bind dashboard on non-loopback host {host!r} without "
+            "authentication. Pass --token <SECRET> (preferred) or "
+            "--insecure-no-auth to acknowledge the exposure. The default "
+            "127.0.0.1 bind needs no token.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    if not is_loopback:
         typer.echo(
             f"WARNING: binding the dashboard to a non-loopback host ({host}). This "
             "exposes scan history (target URLs + findings) and the telemetry-ingest "
-            "endpoint to the network. The dashboard ships NO authentication for its "
-            "read views -- only run this on a trusted network, behind your own auth "
-            "proxy. The telemetry-ingest WRITE endpoint stays disabled off-loopback "
-            "unless you set AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN (or "
-            "AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST=1).",
+            "endpoint to the network. "
+            + (
+                "Auth token is configured."
+                if token
+                else "Running with --insecure-no-auth: no token required."
+            ),
             err=True,
         )
 
     if reload:
-        # uvicorn's reload mode requires an import string, not a factory.
+        # uvicorn's reload mode imports the app factory inside a child worker,
+        # so we can't reach in and stamp app.state from here. The only way to
+        # propagate the token into the reload-worker is via the env var, which
+        # the factory reads on startup.
+        if token is not None:
+            os.environ["AGENT_GUARDIAN_DASHBOARD_TOKEN"] = token
         uvicorn.run(
             "agent_guardian.server.app:create_app",
             host=host,
@@ -1150,11 +1195,14 @@ def serve(
             log_level="info",
         )
         return
+    # Non-reload: construct the app eagerly so we can stamp the token onto
+    # app.state.dashboard_token before uvicorn starts accepting connections.
+    app_instance = create_app()
+    app_instance.state.dashboard_token = token
     uvicorn.run(
-        create_app,
+        app_instance,
         host=host,
         port=port,
-        factory=True,
         log_level="info",
     )
 
@@ -1889,6 +1937,28 @@ def _rmtree_quiet(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _rmtree_within(root: Path, target: Path) -> None:
+    """Defence-in-depth: ``shutil.rmtree`` but ONLY if ``target`` resolves
+    strictly under ``root``. Refuses to delete the root itself or anything
+    outside of it. Both paths are resolved (strict=False) so symlinks /
+    ``..`` segments cannot escape the root.
+    """
+    import shutil
+
+    try:
+        root_resolved = root.resolve(strict=False)
+        target_resolved = target.resolve(strict=False)
+    except OSError as exc:
+        raise typer.BadParameter(f"failed to resolve scan path: {exc}") from exc
+    if target_resolved == root_resolved:
+        raise typer.BadParameter(
+            "refusing to delete the scans root itself (target resolved to root)"
+        )
+    if not target_resolved.is_relative_to(root_resolved):
+        raise typer.BadParameter("invalid scan_id (must be sub-directory of scans root)")
+    shutil.rmtree(target_resolved, ignore_errors=True)
+
+
 @scan_app.command("list")
 def scans_list() -> None:
     """List stored scans (id + mtime), most recent first."""
@@ -1923,12 +1993,44 @@ def scans_delete(
     ),
 ) -> None:
     """Delete a single stored scan directory."""
+    # Up-front lexical validation -- reject anything that even *looks* like
+    # path traversal before we resolve. Catches the common attacker payloads
+    # (``../../../etc``, ``/tmp/canary``, NUL-byte injection, etc.) with a
+    # clear error before any filesystem op runs.
+    if (
+        not scan_id
+        or ".." in scan_id
+        or "\x00" in scan_id
+        or scan_id.startswith("/")
+        or os.sep in scan_id
+        or (os.altsep is not None and os.altsep in scan_id)
+    ):
+        raise typer.BadParameter("invalid scan_id (must be sub-directory of scans root)")
     root = _scans_root()
     target = root / scan_id
+    # Resolve both paths and assert containment. Resolving is required because
+    # a relative path containing ``..`` (or a symlink) can still escape after
+    # the lexical check on a path that legitimately resolves outside ``root``.
+    try:
+        root_resolved = root.resolve(strict=False)
+        target_resolved = target.resolve(strict=False)
+    except OSError as exc:
+        typer.echo(f"failed to resolve scan path: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    if target_resolved == root_resolved or not target_resolved.is_relative_to(root_resolved):
+        typer.echo(
+            "invalid scan_id (must be sub-directory of scans root)",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
     if not target.is_dir():
         typer.echo(f"scan not found: {target}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
-    _rmtree_quiet(target)
+    try:
+        _rmtree_within(root, target)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
     if target.exists():  # pragma: no cover -- defensive
         typer.echo(f"could not delete {target}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
@@ -2159,9 +2261,10 @@ def scan(
             "OTLP-HTTP endpoint to export OpenTelemetry GenAI spans to "
             "(e.g. http://localhost:4318/v1/traces). When set, the scanner emits "
             "invoke_agent / transport.send / execute_tool spans with gen_ai.* "
-            "attributes from every scan mode. When --contract is used, the "
-            "contract's observability.otel_endpoint takes precedence; this flag "
-            "covers system-prompt / code / endpoint / framework scans."
+            "attributes from every scan mode. Precedence with --contract: the "
+            "contract's observability.otel_endpoint wins iff the contract sets "
+            "one; this flag fills in otherwise (so a contract with no "
+            "observability stanza still honours --otel-endpoint)."
         ),
     ),
 ) -> None:
@@ -2312,7 +2415,7 @@ async def _run_scan(
         from agent_guardian.core.roe import RoeAuthorizationError
 
         try:
-            contract_ctx = _ContractScanContext(contract)
+            contract_ctx = _ContractScanContext(contract, otel_endpoint=otel_endpoint)
         except RoeAuthorizationError as exc:
             typer.echo(f"authorization error: {exc}", err=True)
             return EXIT_CONFIG

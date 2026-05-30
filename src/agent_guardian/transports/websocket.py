@@ -374,7 +374,18 @@ class WebSocketTransport(Transport):
             self._connection = None
 
     async def aclose(self) -> None:
-        await self.close_session()
+        """Release transport resources, cascading to the auth provider.
+
+        Closes any persistent WebSocket connection opened via
+        :meth:`open_session` and then awaits :meth:`AuthProvider.aclose` so any
+        token-fetch client the provider holds (OAuth2 / Entra) cannot leak. The
+        auth ``aclose`` runs in the ``finally`` so a socket-close error does not
+        suppress provider cleanup.
+        """
+        try:
+            await self.close_session()
+        finally:
+            await self._auth.aclose()
 
     def describe(self) -> CapabilityReport:
         """Report this WebSocket transport's static capabilities.

@@ -99,7 +99,7 @@ See `src/agent_guardian/agents/base.py` for the abstract interface (lands in M2)
 # Clone, sync dependencies (creates .venv and uv.lock)
 git clone git@github.com:glacien-technologies/agent-guardian.git
 cd agent-guardian
-uv sync --all-extras --extra dev
+uv sync --all-extras
 
 # Run the test suite
 uv run pytest

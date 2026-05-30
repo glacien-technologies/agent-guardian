@@ -172,3 +172,88 @@ def test_output_handling_agent_seeds_include_canary_probes() -> None:
     seeds = agent.seeds_for_category()
     probe_ids = {seed.probe_id for seed in seeds}
     assert any(pid.startswith("ASI09-OH-") for pid in probe_ids), probe_ids
+
+
+# The intended canary token for each output-handling seed text. A seed that
+# names a JNDI lookup MUST embed ``AG_JNDI_CANARY`` (so the deterministic
+# oracle fires on log4shell-shaped payloads); a seed that ships a <script>
+# tag MUST embed ``AG_XSS_CANARY``; etc. The mapping is keyed by a
+# distinguishing substring of the seed text — the assertion catches a future
+# JNDI seed that quietly bleeds into AG_XSS_CANARY (or worse, ships with no
+# canary at all, silently disabling the LLM02 oracle for that vector).
+_SEED_VECTOR_TO_CANARY: tuple[tuple[str, str], ...] = (
+    ("${jndi:", "AG_JNDI_CANARY"),
+    ("ANSI", "AG_ANSI_CANARY"),
+    ("[report](javascript:", "AG_JS_CANARY"),
+    ("right-to-left", "AG_RTL_CANARY"),
+    ("![logo]", "AG_IMG_CANARY"),
+    ("onerror=", "AG_IMGERR_CANARY"),
+    ("<script", "AG_XSS_CANARY"),
+)
+
+
+def _expected_canary_for(seed_text: str) -> str | None:
+    """Pick the canary the seed is intended to carry based on its payload shape."""
+    for marker, canary in _SEED_VECTOR_TO_CANARY:
+        if marker.lower() in seed_text.lower():
+            return canary
+    return None
+
+
+def test_every_asi09_oh_seed_embeds_its_intended_canary() -> None:
+    """Every ASI09-OH-* seed must embed its vector-specific canary token.
+
+    Catches the class of bug where a new YAML seed ships without (or with the
+    wrong) ``AG_*_CANARY`` token, silently disabling the LLM02 deterministic
+    oracle for that vector — the production-bug shape that motivated this
+    test. Iterates every loaded seed from ``seeds_for_asi_with_provenance``
+    so a new probe added under ``asi09/`` that lands in the OH namespace is
+    covered automatically.
+    """
+    from agent_guardian.probes.loader import seeds_for_asi_with_provenance
+
+    oh_seeds = [
+        s
+        for s in seeds_for_asi_with_provenance(AsiCategory.ASI09)
+        if s.probe_id.startswith("ASI09-OH-")
+    ]
+    assert oh_seeds, "expected at least one ASI09-OH-* seed in the corpus"
+
+    failures: list[str] = []
+    for seed in oh_seeds:
+        match = reflects_canary(seed.text)
+        if match is None:
+            failures.append(f"{seed.probe_id} seed has NO canary: text[:120]={seed.text[:120]!r}")
+            continue
+        expected = _expected_canary_for(seed.text)
+        if expected is not None and match.upper() != expected:
+            failures.append(
+                f"{seed.probe_id} seed payload shape implies {expected} but matched "
+                f"{match!r}: text[:120]={seed.text[:120]!r}"
+            )
+    assert not failures, "canary regressions:\n" + "\n".join(failures)
+
+
+def test_asi09_oh_001_jndi_seed_embeds_jndi_canary() -> None:
+    """Pin: the JNDI/log4shell seed must carry AG_JNDI_CANARY inside the lookup.
+
+    A previous regression appended ``/x`` instead of ``/AG_JNDI_CANARY``,
+    which made the deterministic oracle silently miss log4shell-shaped
+    payloads — the LLM02 contract for the JNDI vector was effectively
+    disabled. This test pins the seed text shape so a future edit cannot
+    re-introduce that bug.
+    """
+    from agent_guardian.probes.loader import seeds_for_asi_with_provenance
+
+    jndi_seeds = [
+        s
+        for s in seeds_for_asi_with_provenance(AsiCategory.ASI09)
+        if s.probe_id.startswith("ASI09-OH-") and "${jndi:" in s.text
+    ]
+    assert jndi_seeds, "expected at least one JNDI seed under ASI09-OH-*"
+    for seed in jndi_seeds:
+        match = reflects_canary(seed.text)
+        assert match is not None, f"JNDI seed missing canary: {seed.text!r}"
+        assert match.upper() == "AG_JNDI_CANARY", (
+            f"JNDI seed should embed AG_JNDI_CANARY, got {match!r}: {seed.text!r}"
+        )

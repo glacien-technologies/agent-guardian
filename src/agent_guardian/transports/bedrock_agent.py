@@ -222,8 +222,19 @@ class BedrockAgentTransport(Transport):
             return Response(error=map_llm_error(exc))
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        """Release transport resources, cascading to the auth provider.
+
+        Closes the owned :class:`httpx.AsyncClient` (if this transport built it)
+        and then awaits :meth:`AuthProvider.aclose` so any token-fetch client the
+        provider holds (SigV4 STS / OAuth2) cannot leak. The auth ``aclose``
+        runs in the ``finally`` so a client-close error does not suppress
+        provider cleanup.
+        """
+        try:
+            if self._owns_client:
+                await self._client.aclose()
+        finally:
+            await self._auth.aclose()
 
 
 def _raise_for_status(resp: httpx.Response) -> None:

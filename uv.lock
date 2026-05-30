@@ -45,6 +45,7 @@ dev = [
     { name = "python-dotenv" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "types-pyyaml" },
 ]
 docs = [
     { name = "mkdocs" },
@@ -81,11 +82,6 @@ pdf-fallback = [
 ]
 ws = [
     { name = "websockets" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -133,14 +129,12 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.4" },
     { name = "textual", specifier = ">=0.86" },
     { name = "typer", specifier = ">=0.15" },
+    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20260518" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
     { name = "weasyprint", marker = "extra == 'full'", specifier = ">=63.0" },
     { name = "websockets", marker = "extra == 'ws'", specifier = ">=12.0" },
 ]
 provides-extras = ["aws", "browser", "dev", "docs", "examples", "full", "gcp", "grpc", "otel", "pdf-fallback", "ws"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "types-pyyaml", specifier = ">=6.0.12.20260518" }]
 
 [[package]]
 name = "annotated-doc"

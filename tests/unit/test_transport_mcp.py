@@ -625,3 +625,138 @@ async def test_endpoint_property() -> None:
 def test_empty_endpoint_rejected() -> None:
     with pytest.raises(ValueError, match="non-empty endpoint"):
         McpTransport("")
+
+
+# ---------------------------------------------------------------------------
+# Per-scenario session isolation — request.session pins Mcp-Session-Id so two
+# scenarios sharing one McpTransport (the isolate_per_scenario pattern) cannot
+# bleed session ids across each other.
+# ---------------------------------------------------------------------------
+
+
+def _session_aware_router() -> Any:
+    """Like :func:`_make_router` but echoes a server-side ``Mcp-Session-Id``.
+
+    The handshake mints session id ``S-1`` on the *first* initialize (no
+    inbound header), then ``S-2`` on the next call without an inbound id. If
+    a request carries an inbound ``Mcp-Session-Id`` it is echoed back so we
+    can assert per-call replay.
+    """
+    minted: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        envelope = json.loads(request.content)
+        method = envelope["method"]
+        req_id = envelope["id"]
+        inbound = request.headers.get("Mcp-Session-Id")
+        if inbound is None:
+            new_id = f"S-{len(minted) + 1}"
+            minted.append(new_id)
+            response_session = new_id
+        else:
+            response_session = inbound
+        headers = {"Mcp-Session-Id": response_session}
+        if method == "initialize":
+            return httpx.Response(200, json=_rpc_result(req_id, _INIT_RESULT), headers=headers)
+        if method == "tools/list":
+            return httpx.Response(200, json=_rpc_result(req_id, {"tools": _TOOLS}), headers=headers)
+        if method == "tools/call":
+            name = envelope["params"]["name"]
+            return httpx.Response(
+                200,
+                json=_rpc_result(req_id, {"content": [{"type": "text", "text": f"ran {name}"}]}),
+                headers=headers,
+            )
+        return httpx.Response(400, json=_rpc_error(req_id, -32601, "method not found"))
+
+    return _handler
+
+
+@respx.mock
+async def test_request_session_pins_mcp_session_id_and_does_not_pollute_transport() -> None:
+    """The bug: ``isolate_per_scenario`` shares one transport across scenarios,
+    so a scenario-A session captured into ``self._session_id`` would replay on
+    scenario B. The fix threads ``request.session`` into every JSON-RPC POST
+    and *does not* overwrite the captured server id when an override is set.
+    """
+    route = respx.post(ENDPOINT).mock(side_effect=_session_aware_router())
+    t = McpTransport(ENDPOINT, entry_tool="echo", max_retries=0)
+
+    # Scenario A drives request.session="SESS-A" through the shared transport.
+    resp_a = await t.send(Request(prompt="from A", session="SESS-A"))
+    assert resp_a.ok
+    # The surfaced session is the per-turn override, NOT a server-minted id.
+    assert resp_a.session == "SESS-A"
+    # Every POST carried Mcp-Session-Id: SESS-A.
+    for call in route.calls:
+        assert call.request.headers.get("Mcp-Session-Id") == "SESS-A"
+
+    # CRUCIAL: the transport-level captured id was NOT polluted by scenario A's
+    # per-turn override. (Before the fix, the response's Mcp-Session-Id would
+    # have written into self._session_id and leaked to scenario B.)
+    assert t._session_id is None
+
+    # Snapshot the call count so we can isolate scenario B's POSTs below
+    # (``route.calls`` accumulates across the whole test).
+    calls_before_b = len(route.calls)
+
+    # Scenario B drives request.session="SESS-B" through the SAME transport.
+    resp_b = await t.send(Request(prompt="from B", session="SESS-B"))
+    assert resp_b.ok
+    assert resp_b.session == "SESS-B"
+    # Every POST issued after scenario B began carried SESS-B — never SESS-A.
+    scenario_b_calls = list(route.calls)[calls_before_b:]
+    assert scenario_b_calls, "scenario B should have issued at least one POST"
+    posted_ids = [call.request.headers.get("Mcp-Session-Id") for call in scenario_b_calls]
+    assert all(sid == "SESS-B" for sid in posted_ids), posted_ids
+    assert "SESS-A" not in posted_ids
+
+    await t.aclose()
+
+
+@respx.mock
+async def test_request_session_isolation_via_session_machines() -> None:
+    """End-to-end: two SessionMachines forked off the same McpTransport via
+    ``isolate_per_scenario`` (server_session mode) must drive their own
+    sessions across the wire, even when both share the underlying transport.
+    """
+    from agent_guardian.transports.session import SessionMachine, SessionMode
+
+    route = respx.post(ENDPOINT).mock(side_effect=_session_aware_router())
+    t = McpTransport(ENDPOINT, entry_tool="echo", max_retries=0)
+
+    # Seed each forked machine with a distinct initial session id so the
+    # per-machine state is what hits the transport. SessionMachine in
+    # SERVER_SESSION mode stamps Request.session on every turn.
+    machine_a = SessionMachine(t, mode=SessionMode.SERVER_SESSION, session="SCENARIO-A")
+    machine_b = SessionMachine(t, mode=SessionMode.SERVER_SESSION, session="SCENARIO-B")
+
+    await machine_a.send("turn-a-1")
+    await machine_b.send("turn-b-1")
+
+    # Inspect the wire: every request from machine_a carried SCENARIO-A and
+    # every request from machine_b carried SCENARIO-B. (Before the fix, machine
+    # B's POST would replay the captured SCENARIO-A.)
+    a_ids: list[str | None] = []
+    b_ids: list[str | None] = []
+    for call in route.calls:
+        body = json.loads(call.request.content)
+        sid = call.request.headers.get("Mcp-Session-Id")
+        # discovery (initialize/tools/list) + tools/call all happen on machine_a's
+        # first send; machine_b's send happens AFTER discovery so only tools/call
+        # is repeated. We bucket by header.
+        if sid == "SCENARIO-A":
+            a_ids.append(body["method"])
+        elif sid == "SCENARIO-B":
+            b_ids.append(body["method"])
+
+    assert "tools/call" in a_ids
+    assert "tools/call" in b_ids
+    # No POST went out without an explicit per-scenario id once a SessionMachine
+    # was driving turns.
+    assert all(
+        call.request.headers.get("Mcp-Session-Id") in {"SCENARIO-A", "SCENARIO-B"}
+        for call in route.calls
+    )
+
+    await t.aclose()

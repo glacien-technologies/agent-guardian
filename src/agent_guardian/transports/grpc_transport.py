@@ -314,6 +314,17 @@ class GrpcTransport(Transport):
         )
 
     async def aclose(self) -> None:
-        if self._owns_channel and self._channel is not None:
-            await self._channel.close()
-            self._channel = None
+        """Release transport resources, cascading to the auth provider.
+
+        Closes the owned gRPC channel (if this transport built it) and then
+        awaits :meth:`AuthProvider.aclose` so any token-fetch client the
+        provider holds (OAuth2 / Entra) cannot leak. The auth ``aclose`` runs
+        in the ``finally`` so a channel-close error does not suppress provider
+        cleanup.
+        """
+        try:
+            if self._owns_channel and self._channel is not None:
+                await self._channel.close()
+                self._channel = None
+        finally:
+            await self._auth.aclose()

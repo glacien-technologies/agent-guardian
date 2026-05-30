@@ -28,6 +28,12 @@
     </div>
     <div class="score-band">
       {% if scan %}<span class="pill pill-band-{{ scan.band.value|lower }}">{{ scan.band.value }}</span>{% endif %}
+      {% if scan and scan.coverage_grade %}
+        <span class="pill pill-coverage pill-coverage-{{ scan.coverage_grade|lower }}" title="Coverage grade — A=full, F=none">coverage {{ scan.coverage_grade }}</span>
+      {% endif %}
+      {% if scan and scan.undertested %}
+        <span class="pill pill-thinly-tested" title="One or more ASI categories were launched but exercised too thinly to read absence of findings as safety evidence.">thinly tested</span>
+      {% endif %}
     </div>
   </div>
 

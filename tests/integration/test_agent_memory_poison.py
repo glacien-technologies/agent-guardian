@@ -39,7 +39,16 @@ async def test_memory_poison_finds_findings_when_memory_present(
     assert report.findings_count >= 1
     findings = memory.findings_by_asi(AsiCategory.ASI06)
     assert findings
-    assert findings[0].csa_category == CsaCategory.MEMORY_CONTEXT_MANIPULATION
+    # Post-72d4deb invariant: csa_category is sourced from the probe seed YAML
+    # (not the agent class default). The MemoryPoisonAgent draws from ASI06
+    # probes whose seeds carry one of three CSA categories. We assert that the
+    # finding carries one of those allowed categories rather than enshrining a
+    # specific RNG-dependent pick (the agent's RNG selects which probe to fire).
+    assert findings[0].csa_category in {
+        CsaCategory.MEMORY_CONTEXT_MANIPULATION,
+        CsaCategory.KNOWLEDGE_BASE_POISONING,
+        CsaCategory.CHECKER_OUT_OF_THE_LOOP,
+    }
     assert "Memory Manipulation" in findings[0].mitre_atlas
 
 

@@ -507,3 +507,80 @@ def test_emit_json_with_coverage_still_signs_and_verifies(tmp_path: Path) -> Non
         expected_hmac_secret="real-signing-secret",
     )
     assert result.ok
+
+
+# ----------------------------------------------------------------------
+# P2 — verify_signatures must always populate `error` on anchor failure
+# ----------------------------------------------------------------------
+#
+# Previous logic: the two anchored-failure error messages were gated behind
+# additional conditions (``anchored or ed25519_anchor_failed``,
+# ``anchored``). If only one anchor was supplied and it alone failed —
+# the most common operator mistake — neither branch fired and
+# ``error`` was ``None``. The CLI prints ``error:`` only when truthy, so
+# an operator pinning the wrong pubkey saw a bare red ``ok=False`` with
+# no human-readable explanation.
+
+
+def test_verify_signatures_wrong_ed25519_pin_alone_reports_error(tmp_path: Path) -> None:
+    """Supply ONLY a wrong ed25519 pin on a clean report. Old code: error=None.
+    New code: error mentions 'pinned' / 'Ed25519'."""
+    scan = make_scan()
+    path = tmp_path / "report.json"
+    write_json(scan, path, secret="real-signing-secret")
+    # A different report under a fresh keys_dir produces a different pubkey.
+    decoy = tmp_path / "decoy.json"
+    write_json(scan, decoy, keys_dir=tmp_path / "decoy-keys")
+    wrong_pubkey = _embedded_pubkey(decoy)
+    assert wrong_pubkey != _embedded_pubkey(path)
+
+    result = verify_signatures(path, expected_ed25519_pubkey=wrong_pubkey)
+    assert result.ed25519_anchor_failed
+    assert not result.ok
+    assert result.error is not None, (
+        "verify_signatures must populate `error` when an anchor fails — the "
+        "CLI only prints `error:` on a truthy message."
+    )
+    assert "pinned" in result.error.lower() or "ed25519" in result.error.lower()
+
+
+def test_verify_signatures_wrong_hmac_secret_alone_reports_error(tmp_path: Path) -> None:
+    """Supply ONLY a wrong HMAC secret. Old code: error=None when ed25519 was
+    not anchored. New code: error mentions tamper / wrong secret."""
+    scan = make_scan()
+    path = tmp_path / "report.json"
+    write_json(scan, path, secret="real-signing-secret")
+    # Tamper the report so HMAC fails even if the right secret were used —
+    # this exercises the "HMAC verification FAILED" branch end-to-end.
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["aivss"] = 0
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    result = verify_signatures(path, expected_hmac_secret="real-signing-secret")
+    assert result.hmac_anchor_failed
+    assert not result.ok
+    assert result.error is not None
+    lowered = result.error.lower()
+    assert "tamper" in lowered or "wrong secret" in lowered or "hmac" in lowered
+
+
+def test_verify_signatures_both_anchors_fail_combined_message(tmp_path: Path) -> None:
+    """Both anchors wrong: a combined message names both failed channels so
+    the operator doesn't have to re-run with one at a time to diagnose."""
+    scan = make_scan()
+    path = tmp_path / "report.json"
+    write_json(scan, path, secret="real-signing-secret")
+    decoy = tmp_path / "decoy.json"
+    write_json(scan, decoy, keys_dir=tmp_path / "decoy-keys")
+    wrong_pubkey = _embedded_pubkey(decoy)
+
+    result = verify_signatures(
+        path,
+        expected_ed25519_pubkey=wrong_pubkey,
+        expected_hmac_secret="WRONG-secret",
+    )
+    assert result.hmac_anchor_failed
+    assert result.ed25519_anchor_failed
+    assert not result.ok
+    assert result.error is not None
+    assert "BOTH" in result.error or ("HMAC" in result.error and "Ed25519" in result.error)

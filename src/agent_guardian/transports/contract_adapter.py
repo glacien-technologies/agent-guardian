@@ -52,6 +52,7 @@ engine expects a callable that can.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.core.roe import EgressRefused
@@ -103,6 +104,12 @@ class ContractTargetAdapter(TargetAdapter):
         # ``endpoint`` is exposed by HttpTransport; fall back gracefully for any
         # future transport that does not surface one.
         self._endpoint: str = str(getattr(transport, "endpoint", "transport"))
+        # Precompute the bare host once so the observability seam never even
+        # sees a URL that might carry an embedded ``?key=...`` API secret. The
+        # ``transport_span`` helper redacts defensively, but parsing the host
+        # here means a future obs change cannot accidentally re-leak the
+        # credential through the span name. ``None`` for in-process sentinels.
+        self._endpoint_host: str | None = urlparse(self._endpoint).hostname
         # When the transport screens tools *live* (an McpTransport with its
         # ``_tool_gate`` wired to ``roe.record_tool_call``), the gate has already
         # recorded every tool decision before the call returns. The post-hoc
@@ -177,7 +184,11 @@ class ContractTargetAdapter(TargetAdapter):
         if self._roe is not None:
             await self._roe.acquire()
 
-        with transport_span(self._endpoint):
+        # The transport span wraps ONLY the network call; tool-call spans land
+        # outside it so they are parented by the surrounding ``invoke_agent``
+        # span (per GenAI semconv, ``execute_tool`` is sibling-of /
+        # child-of-invoke_agent, never child-of-transport.send).
+        with transport_span(self._endpoint, conversation_id=session):
             response = await self._send(prompt, session)
 
             # Adaptive rate limiting: feed EVERY response to the controller so an
@@ -191,12 +202,21 @@ class ContractTargetAdapter(TargetAdapter):
                 err = response.error
                 raise RuntimeError(f"transport error: {err.category.value}: {err.message}")
 
-            self._record_tool_calls(response)
+            # set_usage routes through the ContextVar to the surrounding
+            # ``invoke_agent`` span — NOT the transport span — even when called
+            # from inside this ``with transport_span(...)`` block. Per GenAI
+            # semconv, ``gen_ai.usage.*`` belongs on the agent span.
             set_usage(
                 input_tokens=response.usage.prompt_tokens,
                 output_tokens=response.usage.completion_tokens,
             )
-            return response.text
+
+        # Tool-call spans are opened AFTER the transport span has closed so
+        # they are not parented by ``transport.send``. With an active
+        # ``invoke_agent`` span in scope (set by ``make_otel_observer``) they
+        # are correctly parented by it instead.
+        self._record_tool_calls(response)
+        return response.text
 
     def _record_tool_calls(self, response: Response) -> None:
         """Screen + trace each tool call the target surfaced in its reply.
@@ -219,14 +239,35 @@ class ContractTargetAdapter(TargetAdapter):
         opens a span for the surfaced (allowed) calls to avoid double-counting the
         audit. A blocked MCP tool is suppressed by the gate and never executed, so
         the suppressed-attempt count is already correct.
+
+        Span policy: a span is only opened for an *allowed* tool. A blocked
+        tool gets no ``execute_tool`` span — emitting one would imply the tool
+        ran, which is misleading observability. On the live-gate path the
+        ``McpTransport`` has already recorded the blocked tool name in
+        :attr:`RoeController.observed_blocklisted_tools` *before* this method
+        runs (see :func:`McpTransport._send`), so we check membership there to
+        decide whether to span.
         """
         for call in response.tool_calls:
-            allowed = True
-            if self._roe is not None and not self._live_tool_gate:
+            if self._live_tool_gate:
+                # The MCP live gate ran ``record_tool_call`` for us already;
+                # consult its outcome via the recorded blocklist set so we do
+                # not span a tool that was actually blocked (a span here would
+                # falsely imply the tool executed). ``self._roe`` is required
+                # to wire the live gate, but ``getattr`` keeps the type-checker
+                # happy and is a no-op when missing.
+                blocked_names: frozenset[str] = (
+                    self._roe.observed_blocklisted_tools if self._roe is not None else frozenset()
+                )
+                allowed = call.name not in blocked_names
+            elif self._roe is not None:
                 allowed = self._roe.record_tool_call(call.name)
-            if allowed:
-                with tool_span(call.name):
-                    pass
+            else:
+                allowed = True
+            if not allowed:
+                continue
+            with tool_span(call.name, arguments=call.arguments):
+                pass
 
     async def aclose(self) -> None:
         await self._transport.aclose()

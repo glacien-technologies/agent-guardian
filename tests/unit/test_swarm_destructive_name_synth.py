@@ -219,13 +219,67 @@ async def test_completeness_gate_low_full_mode_is_not_authoritative() -> None:
 
 @pytest.mark.asyncio
 async def test_completeness_gate_high_full_mode_stays_authoritative() -> None:
-    """A FULL-mode scan with 100% completeness keeps scoring_valid=True."""
+    """A FULL-mode scan with 100% completeness keeps scoring_valid=True.
+
+    Post-launch-hardening there are TWO gates we must clear to land
+    ``scoring_valid=True`` / ``mode_authoritative=True``:
+
+    1. ``_build_completeness`` no longer silently returns 100% when zero
+       agents were launched (HIGH #4). We must populate ``_active_agents``
+       and ``_agent_reports`` with real turns_used so the gate sees true
+       100% coverage.
+
+    2. ``coverage_grade`` must be A/B/C. A scan whose grade is D or F
+       (i.e. > 1/3 of ASI categories were never_launched /
+       launched_no_finding) is also forced ``scoring_valid=False``.
+
+    Both gates only let a FULL run through when every ASI category really
+    produced evidence, which is what this test simulates.
+    """
     cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM(), mode=ScanMode.FULL)
     cmd._start_time = 0.0
-    # _build_completeness with no active_agents returns pct=100.0 by default.
-    scan = await cmd._phase_finalise()
+
+    from unittest.mock import patch
+
+    # Mock the coverage grade out of the gate by patching compute_aivss in
+    # the swarm module -- the test is asserting the FULL-mode +
+    # 100%-completeness invariant, not re-testing the AIVSS pipeline.
+    from agent_guardian.core.scoring import AivssResult
+    from agent_guardian.models.scan import ScanCompleteness
+    from agent_guardian.models.severity import SeverityBand as _SB
+
+    full_completeness = ScanCompleteness(
+        agents_planned=10,
+        agents_completed=10,
+        agents_cut_short=0,
+        turns_used=120,
+        turns_planned=120,
+        pct=100.0,
+    )
+    clean_result = AivssResult(
+        score=100,
+        band=_SB.EXCELLENT,
+        aggregate=100.0,
+        penalty=0.0,
+        asi_scores={cat: 100.0 for cat in AsiCategory},
+        sub_scores={
+            "prompt_injection_resistance": 100.0,
+            "tool_scope_safety": 100.0,
+            "pii_containment": 100.0,
+            "memory_poisoning_resistance": 100.0,
+            "excessive_agency_containment": 100.0,
+            "hallucination_resistance": 100.0,
+        },
+        formula_version="aivss-v1",
+        coverage_grade="A",
+    )
+    with (
+        patch.object(cmd, "_build_completeness", return_value=full_completeness),
+        patch("agent_guardian.core.swarm.compute_aivss", return_value=clean_result),
+    ):
+        scan = await cmd._phase_finalise()
     # mode_authoritative depends on FULL + scoring_valid; both should be True
-    # for the empty/clean-completion case.
+    # for the truly-complete case.
     assert scan.scoring_valid is True
     assert scan.mode_authoritative is True
 
@@ -235,7 +289,46 @@ async def test_smart_mode_with_high_completeness_is_not_authoritative() -> None:
     """SMART mode is never authoritative regardless of completeness."""
     cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM(), mode=ScanMode.SMART)
     cmd._start_time = 0.0
-    scan = await cmd._phase_finalise()
+
+    from unittest.mock import patch
+
+    from agent_guardian.core.scoring import AivssResult
+    from agent_guardian.models.scan import ScanCompleteness
+    from agent_guardian.models.severity import SeverityBand as _SB
+
+    # Even with 100% completeness AND a clean coverage grade, SMART mode is
+    # never authoritative -- the per-mode threshold matters only when
+    # combined with mode == FULL.
+    full_completeness = ScanCompleteness(
+        agents_planned=10,
+        agents_completed=10,
+        agents_cut_short=0,
+        turns_used=120,
+        turns_planned=120,
+        pct=100.0,
+    )
+    clean_result = AivssResult(
+        score=100,
+        band=_SB.EXCELLENT,
+        aggregate=100.0,
+        penalty=0.0,
+        asi_scores={cat: 100.0 for cat in AsiCategory},
+        sub_scores={
+            "prompt_injection_resistance": 100.0,
+            "tool_scope_safety": 100.0,
+            "pii_containment": 100.0,
+            "memory_poisoning_resistance": 100.0,
+            "excessive_agency_containment": 100.0,
+            "hallucination_resistance": 100.0,
+        },
+        formula_version="aivss-v1",
+        coverage_grade="A",
+    )
+    with (
+        patch.object(cmd, "_build_completeness", return_value=full_completeness),
+        patch("agent_guardian.core.swarm.compute_aivss", return_value=clean_result),
+    ):
+        scan = await cmd._phase_finalise()
     # mode != FULL → never authoritative.
     assert scan.mode_authoritative is False
 

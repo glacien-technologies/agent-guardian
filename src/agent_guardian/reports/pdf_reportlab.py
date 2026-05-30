@@ -28,6 +28,12 @@ def write_pdf_reportlab(
     severity counts, per-ASI scores) and no per-finding text, so ``redact`` is
     accepted for signature parity with :func:`agent_guardian.reports.pdf.write_pdf`
     but there is no finding text to scrub here.
+
+    When ``scan.scoring_valid`` is False (a stub / non-authoritative run) the
+    numeric AIVSS is suppressed and a "NOT EVALUATED — non-authoritative run;
+    AIVSS suppressed." notice is rendered instead — mirroring the WeasyPrint
+    template so the two engines stay in lockstep and a vacuous stub run cannot
+    masquerade as a passing scan in the fallback path.
     """
     _ = redact  # no finding text rendered in the fallback; nothing to scrub
     # ReportLab ships no type stubs; mypy reports either `import-untyped`
@@ -51,28 +57,48 @@ def write_pdf_reportlab(
     c.drawString(72, height - 92, f"Scan ID: {scan.id}")
     c.setFillGray(0.0)
 
-    # Top stats
+    # Top stats — suppress the AIVSS number on stub / non-authoritative runs.
+    # Otherwise the PDF would print "AIVSS: 70 / 100 (not_evaluated)" which is
+    # a misleading mash-up: ``not_evaluated`` means there is no trustworthy
+    # number, yet the 70 is sat right next to it. Mirror the WeasyPrint
+    # template (templates/pdf/report.html.jinja) verbatim.
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(72, height - 130, f"AIVSS: {scan.aivss} / 100   ({scan.band.value})")
+    aivss_label = f"{scan.aivss} / 100" if scan.scoring_valid else "n/a (not evaluated)"
+    c.drawString(72, height - 130, f"AIVSS: {aivss_label}   ({scan.band.value})")
+    notice_offset = 0
+    if not scan.scoring_valid:
+        c.setFont("Helvetica-Oblique", 10)
+        c.setFillGray(0.35)
+        c.drawString(
+            72,
+            height - 146,
+            "NOT EVALUATED - non-authoritative run; AIVSS suppressed.",
+        )
+        c.setFillGray(0.0)
+        notice_offset = 16
     c.setFont("Helvetica", 11)
-    c.drawString(72, height - 152, f"Tier: {scan.tier.value}")
-    c.drawString(72, height - 168, f"Target: {scan.target_ref} ({scan.target_mode})")
+    c.drawString(72, height - 152 - notice_offset, f"Tier: {scan.tier.value}")
     c.drawString(
         72,
-        height - 184,
+        height - 168 - notice_offset,
+        f"Target: {scan.target_ref} ({scan.target_mode})",
+    )
+    c.drawString(
+        72,
+        height - 184 - notice_offset,
         f"Duration: {scan.duration_seconds:.2f}s   Cost: ${scan.cost_usd:.4f}",
     )
-    c.drawString(72, height - 200, f"Generated: {scan.created_at.isoformat()}")
+    c.drawString(72, height - 200 - notice_offset, f"Generated: {scan.created_at.isoformat()}")
     c.drawString(
         72,
-        height - 216,
+        height - 216 - notice_offset,
         f"Probe library: {scan.probe_library_version}   AIVSS formula: {scan.aivss_formula_version}",
     )
 
     # Severity summary
     summary = scan.findings_summary()
     c.setFont("Helvetica-Bold", 13)
-    c.drawString(72, height - 252, "Severity summary")
+    c.drawString(72, height - 252 - notice_offset, "Severity summary")
     c.setFont("Helvetica", 11)
     rows = [
         ("Critical", summary["critical"]),
@@ -81,7 +107,7 @@ def write_pdf_reportlab(
         ("Low", summary["low"]),
         ("Total", sum(summary.values())),
     ]
-    y = height - 272
+    y = height - 272 - notice_offset
     for label, count in rows:
         c.drawString(90, y, f"{label:<10}{count}")
         y -= 15

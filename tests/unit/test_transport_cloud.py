@@ -881,3 +881,143 @@ def test_azure_extract_thread_id_none() -> None:
     # No thread_id / thread.id present → None (so session falls back to request).
     assert AzureFoundryAgentTransport._extract_thread_id({"thread": {"no_id": 1}}) is None
     assert AzureFoundryAgentTransport._extract_thread_id({}) is None
+
+
+# ===========================================================================
+# aclose() cascades to AuthProvider.aclose — regression for the
+# OAuth2 / Entra token-fetch httpx client leak across the four transports.
+# ===========================================================================
+#
+# All four data-plane transports (Vertex, Bedrock, WebSocket, gRPC) own their
+# data-plane client AND are handed an auth provider that owns a *separate*
+# token-fetch httpx.AsyncClient. The transport's aclose() must cascade into
+# AuthProvider.aclose() (mirroring HttpTransport.aclose at http.py:340-353) so a
+# `try/finally:` even runs the auth cleanup when the data-plane close raises.
+# Each test below builds the transport with a stub auth that owns a real
+# httpx.AsyncClient, then asserts that client is closed after aclose().
+
+
+class _ClientOwningAuth(AuthProvider):
+    """Auth provider that owns an :class:`httpx.AsyncClient` (like OAuth2 / Entra).
+
+    Mirrors :class:`OAuth2ClientCredentialsAuth` / :class:`AzureEntraAuth`: the
+    provider holds a separate token-fetch httpx.AsyncClient that must be closed
+    via :meth:`AuthProvider.aclose`. If the transport's :meth:`aclose` does not
+    cascade, this client leaks.
+    """
+
+    def __init__(self) -> None:
+        # A real, never-used client — we only assert it is closed, not used.
+        self._client = httpx.AsyncClient()
+
+    async def apply(self, ctx: AuthContext) -> None:
+        ctx.headers["x-fake-auth"] = "1"
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    @property
+    def is_client_closed(self) -> bool:
+        return self._client.is_closed
+
+
+async def test_vertex_aclose_cascades_to_auth_aclose() -> None:
+    auth = _ClientOwningAuth()
+    t = VertexAgentTransport(
+        project=VERTEX_PROJECT,
+        location=VERTEX_LOCATION,
+        engine_id=VERTEX_ENGINE,
+        auth=auth,
+    )
+    assert not auth.is_client_closed
+    await t.aclose()
+    assert auth.is_client_closed, "VertexAgentTransport.aclose must cascade to auth.aclose"
+
+
+async def test_bedrock_aclose_cascades_to_auth_aclose() -> None:
+    auth = _ClientOwningAuth()
+    t = BedrockAgentTransport(
+        region=BEDROCK_REGION,
+        agent_id=BEDROCK_AGENT,
+        agent_alias_id=BEDROCK_ALIAS,
+        auth=auth,
+    )
+    assert not auth.is_client_closed
+    await t.aclose()
+    assert auth.is_client_closed, "BedrockAgentTransport.aclose must cascade to auth.aclose"
+
+
+async def test_websocket_aclose_cascades_to_auth_aclose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # WebSocketTransport probes for ``websockets`` at construction time; stub a
+    # tiny shim so the constructor doesn't insist on the optional dependency.
+    from types import ModuleType, SimpleNamespace
+
+    ws_mod = ModuleType("websockets")
+    ws_mod.exceptions = SimpleNamespace(ConnectionClosed=type("ConnClosed", (Exception,), {}))  # type: ignore[attr-defined]
+    ws_mod.connect = lambda *a, **k: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(__import__("sys").modules, "websockets", ws_mod)
+
+    from agent_guardian.transports.websocket import WebSocketTransport
+
+    auth = _ClientOwningAuth()
+    t = WebSocketTransport(url="wss://example.com/ws", auth=auth)
+    assert not auth.is_client_closed
+    await t.aclose()
+    assert auth.is_client_closed, "WebSocketTransport.aclose must cascade to auth.aclose"
+
+
+async def test_grpc_aclose_cascades_to_auth_aclose(monkeypatch: pytest.MonkeyPatch) -> None:
+    # GrpcTransport probes for ``grpc`` at construction time; stub a minimal shim.
+    from types import ModuleType, SimpleNamespace
+
+    grpc_mod = ModuleType("grpc")
+    grpc_mod.StatusCode = SimpleNamespace()  # type: ignore[attr-defined]
+    grpc_mod.RpcError = type("RpcError", (Exception,), {})  # type: ignore[attr-defined]
+    grpc_mod.ssl_channel_credentials = lambda: "fake-creds"  # type: ignore[attr-defined]
+    grpc_mod.aio = SimpleNamespace(  # type: ignore[attr-defined]
+        AioRpcError=type("AioRpcError", (Exception,), {}),
+        secure_channel=lambda target, creds: SimpleNamespace(),
+        insecure_channel=lambda target: SimpleNamespace(),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "grpc", grpc_mod)
+
+    from agent_guardian.transports.grpc_transport import GrpcTransport
+
+    auth = _ClientOwningAuth()
+    # No channel opened (lazy in _ensure_channel), so aclose's data-plane branch
+    # is the no-op path — what matters is the auth cascade still runs.
+    t = GrpcTransport(
+        target="example.com:443",
+        service_method="/svc.Echo/Call",
+        auth=auth,
+    )
+    assert not auth.is_client_closed
+    await t.aclose()
+    assert auth.is_client_closed, "GrpcTransport.aclose must cascade to auth.aclose"
+
+
+class _RaisingDataPlaneAuth(_ClientOwningAuth):
+    """Like :class:`_ClientOwningAuth`, but used with a transport whose data-plane
+    close raises — proves the ``finally`` runs the auth cleanup anyway."""
+
+
+async def test_vertex_aclose_runs_auth_aclose_even_if_data_plane_raises() -> None:
+    auth = _RaisingDataPlaneAuth()
+    t = VertexAgentTransport(
+        project=VERTEX_PROJECT,
+        location=VERTEX_LOCATION,
+        engine_id=VERTEX_ENGINE,
+        auth=auth,
+    )
+
+    async def _boom() -> None:
+        raise RuntimeError("simulated data-plane close failure")
+
+    # Replace the owned adapter's aclose with a raising stub.
+    t._adapter.aclose = _boom  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="simulated data-plane close failure"):
+        await t.aclose()
+    # The provider-owned token client must still be closed.
+    assert auth.is_client_closed

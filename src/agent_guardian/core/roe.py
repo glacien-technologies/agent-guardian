@@ -290,8 +290,20 @@ class RoeController:
         allowlist = frozenset(tools.allowlist) if tools and tools.allowlist else frozenset()
         blocklist = frozenset(tools.blocklist) if tools and tools.blocklist else frozenset()
         # The target host is "self" — prompts to it are never external egress.
+        # Transport schema classes spell the network locator three different ways:
+        #   * ``url``      — HttpTransport, McpTransport, WebSocketTransport,
+        #                    BrowserTransport, GrpcTransport
+        #   * ``base_url`` — OpenAiResponsesTransport, AnthropicMessagesTransport
+        #   * ``endpoint`` — AzureFoundryAgentTransport
+        # BedrockAgentTransport / VertexAgentTransport / SdkTransport / Subprocess
+        # are hostless by design (their host is derived from region/project or is
+        # an in-process callable) and fall through to ``target_host = None``.
         transport = contract.target.transport
-        target_url = getattr(transport, "url", None)
+        target_url = (
+            getattr(transport, "url", None)
+            or getattr(transport, "base_url", None)
+            or getattr(transport, "endpoint", None)
+        )
         target_host = urlparse(str(target_url)).hostname if target_url is not None else None
         return cls(
             max_rps=roe.rate.max_rps,

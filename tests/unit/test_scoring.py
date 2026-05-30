@@ -374,7 +374,14 @@ def test_sub_score_map_uses_only_known_asi_categories() -> None:
 
 
 def test_compute_aivss_records_undertested_categories() -> None:
-    """The undertested set is preserved on AivssResult without altering the score."""
+    """The undertested set is preserved + the aggregate band is clamped to WARNING.
+
+    Per-category ``asi_scores`` are intentionally left at the raw (annotation-
+    only) 100.0 so the report's per-category table still reads honestly. The
+    aggregate band, however, is clamped out of GOOD/EXCELLENT by the
+    ``_UNDERTESTED_BAND_CAP`` sibling cap so a thinly-tested run cannot quietly
+    read as EXCELLENT (#46).
+    """
     result = compute_aivss(
         findings=[],
         probes=[],
@@ -382,9 +389,14 @@ def test_compute_aivss_records_undertested_categories() -> None:
         undertested={AsiCategory.ASI05, AsiCategory.ASI08},
     )
     assert result.undertested == frozenset({AsiCategory.ASI05, AsiCategory.ASI08})
-    # Score unchanged: undertested is annotation-only.
-    assert result.score == 100
+    # Per-category asi_scores remain at 100.0: undertested is annotation-only
+    # for the raw scores.
     assert result.asi_scores[AsiCategory.ASI05] == 100.0
+    # Headline score is clamped out of GOOD/EXCELLENT.
+    assert result.score <= 79, (
+        f"undertested must clamp the band out of GOOD/EXCELLENT; got {result.score}"
+    )
+    assert result.band not in {SeverityBand.GOOD, SeverityBand.EXCELLENT}
 
 
 def test_compute_aivss_undertested_defaults_empty() -> None:
@@ -542,3 +554,68 @@ def test_compute_aivss_defended_critical_does_not_trigger_band_cap() -> None:
     # No outstanding crit -> cap should not fire. With 9 clean ASIs the score
     # comfortably exceeds 79.
     assert result.score > 79
+
+
+# --- Empty / all-excluded slate cannot quietly score 100 (P1 fix) -------
+
+
+def test_tier_weighted_aggregate_excluding_all_categories_floors_to_zero() -> None:
+    """All categories excluded -> nothing tested -> aggregate is 0.0, not 100.0.
+
+    The previous fallback returned 100.0 when every category was excluded
+    (denominator == 0). That silently composed with the empty-plan
+    completeness fallback into a 100/EXCELLENT gate-pass for a zero-agent
+    plan. The fallback now returns the not-covered floor so a downstream
+    gate (completeness + coverage_grade=F) can refuse the verdict.
+    """
+    from agent_guardian.core.scoring import _tier_weighted_aggregate_excluding
+
+    scores = dict.fromkeys(AsiCategory, 100.0)
+    aggregate = _tier_weighted_aggregate_excluding(scores, Tier.T2_HIGH, exclude=set(AsiCategory))
+    assert aggregate == 0.0
+
+
+def test_compute_aivss_all_categories_never_launched_is_not_excellent() -> None:
+    """Pass ``never_launched`` covering every ASI -> aggregate falls to 0, not 100.
+
+    Regression for the empty-plan + tier-aggregate fallback chain: when
+    nothing was launched, the score must reflect that.
+    """
+    result = compute_aivss(
+        findings=[],
+        probes=[],
+        tier=Tier.T2_HIGH,
+        never_launched=set(AsiCategory),
+    )
+    assert result.score == 0
+    assert result.band not in {SeverityBand.GOOD, SeverityBand.EXCELLENT}
+    # Coverage grade is F because the entire slate never launched.
+    assert result.coverage_grade == "F"
+
+
+def test_compute_aivss_undertested_caps_band_in_isolation() -> None:
+    """Pure undertested-only scan must not read as GOOD/EXCELLENT.
+
+    Mirrors the ``_HIGH_SEVERITY_BAND_CAP`` invariant for the sibling
+    ``_UNDERTESTED_BAND_CAP``: per-category asi_scores stay at 100.0 (raw
+    annotation-only), but the headline band is clamped out of the top tiers.
+    """
+    result = compute_aivss(
+        findings=[],
+        probes=[],
+        tier=Tier.T3_STANDARD,
+        undertested=list(AsiCategory),
+    )
+    # Per-category scores untouched (annotation-only).
+    for cat in AsiCategory:
+        assert result.asi_scores[cat] == 100.0
+    # But the headline band must NOT read as EXCELLENT.
+    assert result.band not in {SeverityBand.GOOD, SeverityBand.EXCELLENT}
+    assert result.score <= 79
+
+
+def test_undertested_band_cap_does_not_fire_when_undertested_empty() -> None:
+    """The undertested band cap is non-destructive when nothing is undertested."""
+    result = compute_aivss(findings=[], probes=[], tier=Tier.T4_LOW)
+    assert result.score == 100
+    assert result.band is SeverityBand.EXCELLENT

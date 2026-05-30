@@ -62,7 +62,25 @@ def _badge_line(scan: Scan) -> str:
         f"**AIVSS** `{aivss_label}` "
         f"&nbsp;|&nbsp; **Band** `{band}` "
         f"({colour}) "
-        f"&nbsp;|&nbsp; **Tier** `{scan.tier.value}`"
+        f"&nbsp;|&nbsp; **Tier** `{scan.tier.value}` "
+        f"&nbsp;|&nbsp; **Coverage** `{scan.coverage_grade}`"
+    )
+
+
+def _undertested_badge_line(scan: Scan) -> str:
+    """A "thinly tested" notice when the scan annotated undertested categories.
+
+    Empty string when there are no undertested categories so the markdown
+    layout stays unchanged for ordinary scans (#46).
+    """
+    if not scan.undertested:
+        return ""
+    pretty = ", ".join(f"`{_html_escape(cat)}`" for cat in scan.undertested)
+    return (
+        "> **Thinly tested** — the following categor"
+        f"{'y was' if len(scan.undertested) == 1 else 'ies were'} launched but "
+        "exercised too thinly to read absence of findings as safety evidence: "
+        f"{pretty}.\n"
     )
 
 
@@ -161,13 +179,21 @@ def emit_markdown(scan: Scan, *, top_n: int = TOP_FINDINGS_DEFAULT, redact: bool
         f"- **Probe library:** `{scan.probe_library_version}` "
         f"&nbsp;|&nbsp; **AIVSS formula:** `{scan.aivss_formula_version}`\n",
         f"- **Generated:** `{scan.created_at.isoformat()}`\n",
-        "\n## Severity summary\n\n",
-        _summary_table(scan),
-        "\n",
-        _asi_section(scan, findings),
-        "\n",
-        _top_findings_section(findings, top_n),
     ]
+    undertested_notice = _undertested_badge_line(scan)
+    if undertested_notice:
+        parts.append("\n")
+        parts.append(undertested_notice)
+    parts.extend(
+        [
+            "\n## Severity summary\n\n",
+            _summary_table(scan),
+            "\n",
+            _asi_section(scan, findings),
+            "\n",
+            _top_findings_section(findings, top_n),
+        ]
+    )
     if scan.audit is not None:
         audit_md = _audit_section(scan.audit)
         if audit_md:

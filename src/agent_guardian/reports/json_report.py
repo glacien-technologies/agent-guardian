@@ -152,6 +152,12 @@ def emit_json(
         "evaluation_mode": scan.evaluation_mode,
         "scoring_valid": scan.scoring_valid,
         "mode_authoritative": scan.mode_authoritative,
+        # #46 / coverage signal — the list of "thinly tested" categories and
+        # the overall coverage grade (A..F). Travel inside the signature so a
+        # downstream consumer can refuse a "100 / EXCELLENT" verdict on a scan
+        # whose coverage_grade is D or worse without re-deriving it.
+        "undertested": list(scan.undertested),
+        "coverage_grade": scan.coverage_grade,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
         else scan.created_at.isoformat(),
@@ -346,17 +352,30 @@ def verify_signatures(
     # other channel anchored. (Supplying both anchors thus requires both.)
     hmac_anchor_failed = hmac_secret is not None and not hmac_ok
     ed25519_anchor_failed = expected_ed25519_pubkey is not None and not ed_ok
+    # Build an operator-facing error message for every failure mode. The
+    # earlier (gated) version only emitted a message when ``anchored`` was
+    # True — so a wrong pubkey pin on a clean report (the most common
+    # operator mistake) silently produced ``error=None`` even though
+    # ``ok`` was False. Every anchored-but-failed branch now produces an
+    # explicit message so the CLI ``error:`` line surfaces the problem.
     error: str | None = None
-    if hmac_anchor_failed and (anchored or ed25519_anchor_failed):
+    if hmac_anchor_failed and ed25519_anchor_failed:
         error = (
-            "HMAC verification FAILED with the supplied secret — the report does "
-            "not match this signing secret (tamper or wrong secret); refusing to trust"
+            "BOTH anchors FAILED: HMAC did not match the supplied secret AND "
+            "Ed25519 did not match the pinned public key — tamper, wrong "
+            "secret, wrong pin, or forgery; refusing to trust"
         )
-    elif ed25519_anchor_failed and anchored:
+    elif hmac_anchor_failed:
+        error = (
+            "HMAC verification FAILED with the supplied secret — the report "
+            "does not match this signing secret (tamper or wrong secret); "
+            "refusing to trust"
+        )
+    elif ed25519_anchor_failed:
         error = (
             "Ed25519 verification FAILED against the pinned public key — the "
-            "report was signed by a different key (forgery or wrong pin); refusing "
-            "to trust"
+            "report was signed by a different key (forgery or wrong pin); "
+            "refusing to trust"
         )
     elif not anchored and (hmac_ok or ed_ok):
         error = (

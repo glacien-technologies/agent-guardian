@@ -178,6 +178,13 @@ dev = [
   # real environment variables; the dev extra is the path of least
   # friction for local hacking.
   "python-dotenv>=1.0",
+  # PyYAML type stubs — required for ``mypy --strict`` to type-check the
+  # YAML probe loader and meta-version reader without ``Any`` blow-up.
+  # Single-sourced here in the PEP 621 ``dev`` extra so ``pip install -e
+  # '.[dev]'`` and ``uv sync --extra dev`` install an identical dev env;
+  # the legacy PEP 735 ``[dependency-groups].dev`` table that used to also
+  # declare this was deleted to remove the dual-source-of-truth.
+  "types-pyyaml>=6.0.12.20260518",
 ]
 
 # Until the ``agentguardian.ai`` apex DNS lands we point every PyPI URL slot at
@@ -217,6 +224,11 @@ artifacts = [
   # Bundled SARIF 2.1.0 JSON Schema used by reports.sarif._validate_sarif
   # for runtime contract validation of emitted SARIF logs.
   "src/agent_guardian/reports/sarif-2.1.0.schema.json",
+  # PEP 561 marker — declared explicitly so a future hatchling default that
+  # tightens non-.py inclusion cannot silently drop it. The empty file flips
+  # on inline-annotation consumption for mypy/pyright in downstream projects,
+  # which is the contract the ``Typing :: Typed`` classifier promises.
+  "src/agent_guardian/py.typed",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -335,8 +347,3 @@ addopts = "-ra --strict-markers --strict-config"
 [tool.coverage.run]
 source = ["src/agent_guardian"]
 branch = true
-
-[dependency-groups]
-dev = [
-    "types-pyyaml>=6.0.12.20260518",
-]

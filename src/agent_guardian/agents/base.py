@@ -1236,6 +1236,28 @@ class AsiAgent(ABC):
                     seed_probe_id,
                     seed.severity,
                 )
+        # Provenance: prefer the source probe's authored MITRE ATLAS list +
+        # CSA category over the agent class-default so the Finding reflects
+        # what the YAML actually claimed. An ASI06 HITL probe must surface
+        # ``checker-out-of-the-loop``, not the umbrella agent default. An
+        # empty ``seed.mitre_atlas`` keeps the agent default (Finding.
+        # mitre_atlas requires min_length=1). An unknown CSA string never
+        # crashes the agent — we log + fall back.
+        mitre_techniques: list[MitreTechnique] = list(self.default_mitre_techniques)
+        if seed is not None and seed.mitre_atlas:
+            mitre_techniques = list(seed.mitre_atlas)
+        csa_category = self.default_csa_category
+        if seed is not None and seed.csa_category:
+            try:
+                csa_category = CsaCategory(seed.csa_category)
+            except ValueError:
+                _LOG.warning(
+                    "agent %s: probe %s carried unknown csa_category %r — "
+                    "falling back to default_csa_category",
+                    self.name or type(self).__name__,
+                    seed_probe_id,
+                    seed.csa_category,
+                )
         summary = (verdict.reasoning or "target compromised").strip()
         if len(summary) > 240:
             summary = summary[:237] + "..."
@@ -1249,8 +1271,8 @@ class AsiAgent(ABC):
             id=finding_id,
             probe_id=probe_id,
             asi=self.asi_category,
-            mitre_atlas=list(self.default_mitre_techniques),
-            csa_category=self.default_csa_category,
+            mitre_atlas=mitre_techniques,
+            csa_category=csa_category,
             severity=severity,
             attempt_count=attempt_count,
             success=True,

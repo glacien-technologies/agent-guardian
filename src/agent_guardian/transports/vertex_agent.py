@@ -149,5 +149,16 @@ class VertexAgentTransport(Transport):
             return Response(error=map_llm_error(exc))
 
     async def aclose(self) -> None:
-        if self._owns_adapter:
-            await self._adapter.aclose()
+        """Release transport resources, cascading to the auth provider.
+
+        Closes the owned :class:`HttpAdapter` (if this transport built it) and
+        then awaits :meth:`AuthProvider.aclose` so any token-fetch client the
+        provider holds (GCP OAuth2 / Entra) cannot leak. The auth ``aclose``
+        runs in the ``finally`` so an adapter-close error does not suppress
+        provider cleanup.
+        """
+        try:
+            if self._owns_adapter:
+                await self._adapter.aclose()
+        finally:
+            await self._auth.aclose()

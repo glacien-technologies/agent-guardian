@@ -87,6 +87,15 @@ class ProbeSeed:
     # strategy can later emit a richer Finding without re-loading the probe.
     asi: str | None = None
     severity: str | None = None
+    # Authored MITRE ATLAS techniques + CSA category from the source probe
+    # YAML. Threaded through so :meth:`AsiAgent._build_finding` can stamp the
+    # probe's authored framework mapping onto a Finding instead of the agent
+    # class-default. Empty tuple / ``None`` means the agent default applies
+    # (e.g. PAIR refinement turns generated from the attacker LLM, with no
+    # backing corpus probe). ``tuple`` keeps the ``frozen=True`` dataclass
+    # hashable.
+    mitre_atlas: tuple[str, ...] = ()
+    csa_category: str | None = None
 
 
 def seed_text(seed: ProbeSeed | str) -> str:

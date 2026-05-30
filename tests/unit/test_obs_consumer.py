@@ -482,3 +482,93 @@ def test_target_span_record_is_directly_constructible() -> None:
     )
     assert record.is_tool_call is True
     assert record.attributes == {}
+
+
+# ---------------------------------------------------------------------------
+# End-to-end correlation: spans we EMIT must be ingestible by the consumer.
+#
+# This closes the cluster's P1 finding — without ``gen_ai.conversation.id`` on
+# the transport.send span the correlator's primary query
+# (``SpanCorrelator.tool_calls_for(session)``) was structurally unreachable
+# even when both sides used the same SDK. The test below is a true end-to-end:
+# it drives the real :func:`agent_guardian.obs.otel.transport_span` and
+# :func:`tool_span` to populate an in-memory exporter, hand-converts the
+# exported spans into OTLP/JSON shape, and asserts the correlator can answer
+# ``tool_calls_for(session)``.
+# ---------------------------------------------------------------------------
+import pytest  # noqa: E402  - kept after module-level functions for clarity.
+
+
+@pytest.fixture
+def _active_tracer(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    pytest.importorskip("opentelemetry")
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    monkeypatch.setenv("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_latest_experimental")
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    class _AlreadyDone:
+        def do_once(self, func: object) -> bool:
+            return False
+
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER", provider, raising=False)
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER_SET_ONCE", _AlreadyDone(), raising=False)
+    exporter.clear()
+    yield exporter
+    exporter.clear()
+
+
+def _span_to_otlp_json(span: Any) -> dict[str, Any]:
+    """Convert one in-memory ReadableSpan to the OTLP/JSON wire shape."""
+    attributes_list = []
+    for key, value in (span.attributes or {}).items():
+        if isinstance(value, bool):
+            attributes_list.append({"key": key, "value": {"boolValue": value}})
+        elif isinstance(value, int):
+            attributes_list.append({"key": key, "value": {"intValue": str(value)}})
+        elif isinstance(value, float):
+            attributes_list.append({"key": key, "value": {"doubleValue": value}})
+        else:
+            attributes_list.append({"key": key, "value": {"stringValue": str(value)}})
+    return {
+        "name": span.name,
+        "startTimeUnixNano": str(span.start_time or 0),
+        "endTimeUnixNano": str(span.end_time or 0),
+        "attributes": attributes_list,
+    }
+
+
+class TestEndToEndConversationCorrelation:
+    """transport.send + tool spans we emit are correlator-ingestible."""
+
+    def test_transport_span_carries_conversation_id_to_correlator(self, _active_tracer) -> None:  # type: ignore[no-untyped-def]
+        from agent_guardian.obs.otel import tool_span, transport_span
+
+        # Emit a transport.send + an execute_tool span, both stamped with the
+        # same conversation id (which is how the real adapter wires it).
+        with (
+            transport_span("https://target.example/chat", conversation_id="sess-abc"),
+            tool_span("send_email"),
+        ):
+            pass
+
+        finished = list(_active_tracer.get_finished_spans())
+        assert len(finished) == 2
+
+        # Convert to OTLP/JSON and feed the consumer.
+        payload = {
+            "resourceSpans": [
+                {"scopeSpans": [{"spans": [_span_to_otlp_json(s) for s in finished]}]}
+            ]
+        }
+        corr = ingest_otlp_json(payload)
+
+        # The correlator must answer with the tools that were called for the
+        # session — the very query that was structurally unreachable before
+        # the conversation id reached transport.send.
+        assert corr.tool_calls_for("sess-abc") == ["send_email"]

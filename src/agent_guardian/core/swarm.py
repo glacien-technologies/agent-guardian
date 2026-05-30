@@ -1492,7 +1492,14 @@ class SwarmCommander:
         # agents (so agents_completed is ~0 on a normal early-stop) even though
         # real attacking happened -- turns_used/turns_planned reflects that
         # honestly, while agents_completed / agents_cut_short remain as detail.
-        pct = (turns_used / turns_planned * 100.0) if turns_planned else 100.0
+        #
+        # Zero planned turns means the swarm launched no attack agents at all
+        # (e.g. recon ruled every agent class out, or the slate was empty for
+        # some other reason). That is NOT 100% complete -- it is 0%, and the
+        # completeness gate in ``_phase_finalise`` will then route the band to
+        # NOT_EVALUATED. Reporting "100% complete" on a zero-agent plan was the
+        # silent fallback that let an empty scan compose into a gate-pass.
+        pct = (turns_used / turns_planned * 100.0) if turns_planned else 0.0
         return ScanCompleteness(
             agents_planned=planned,
             agents_completed=completed,
@@ -1978,6 +1985,22 @@ class SwarmCommander:
                     result.score,
                 )
             scoring_valid = False
+        # Coverage-grade gate: a scan whose coverage grade is D or F never
+        # produced enough evidence to claim authoritativeness, even if the
+        # completeness percentage happened to clear the per-mode threshold.
+        # This catches the case where 60-90% of the categories were never
+        # launched (no agent_report) but those that DID run completed their
+        # turn budget — turns_used/turns_planned could still clear the gate
+        # while the assessment as a whole tested almost nothing.
+        if result.coverage_grade in ("D", "F"):
+            if scoring_valid:
+                _LOG.warning(
+                    "finalise: coverage_grade=%s — forcing scoring_valid=False "
+                    "(numeric AIVSS=%d retained for debugging only)",
+                    result.coverage_grade,
+                    result.score,
+                )
+            scoring_valid = False
         effective_band = result.band if scoring_valid else SeverityBand.NOT_EVALUATED
         if not scoring_valid and evaluation_mode in ("stub", "mixed"):
             _LOG.warning(
@@ -2093,6 +2116,7 @@ class SwarmCommander:
             mode=effective_mode.value,
             mode_authoritative=mode_authoritative,
             undertested=undertested_values,
+            coverage_grade=result.coverage_grade,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
             budget=self._build_budget_report(),
             completeness=completeness_snapshot,

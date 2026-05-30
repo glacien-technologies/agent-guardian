@@ -30,6 +30,7 @@ We use ``tomllib`` (stdlib on 3.11+) so the test has no external deps.
 from __future__ import annotations
 
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 SRC_ROOT = REPO_ROOT / "src" / "agent_guardian"
+DIST_DIR = REPO_ROOT / "dist"
 
 
 def _load_pyproject() -> dict[str, object]:
@@ -60,7 +62,14 @@ def test_project_table_basics() -> None:
 
 
 def test_required_classifiers_present() -> None:
-    """Pin the classifiers users filter on at https://pypi.org/search/."""
+    """Pin the classifiers users filter on at https://pypi.org/search/.
+
+    Also enforces the ``Typing :: Typed`` <-> PEP 561 marker contract: if the
+    classifier promises inline type info, the package MUST ship the
+    ``py.typed`` marker — otherwise mypy/pyright in downstream projects skip
+    the package and the classifier is a lie. The wheel-content half of the
+    invariant is covered by ``test_wheel_ships_py_typed_marker`` below.
+    """
 
     project = _load_pyproject()["project"]
     classifiers = set(project["classifiers"])  # type: ignore[index]
@@ -79,6 +88,64 @@ def test_required_classifiers_present() -> None:
     }
     missing = required - classifiers
     assert not missing, f"pyproject classifiers missing: {missing}"
+
+    # PEP 561 contract: ``Typing :: Typed`` requires a ``py.typed`` marker
+    # next to the top-level package. Without it, mypy and pyright skip the
+    # package's inline annotations entirely.
+    if "Typing :: Typed" in classifiers:
+        marker = SRC_ROOT / "py.typed"
+        assert marker.is_file(), (
+            f"'Typing :: Typed' classifier is declared but PEP 561 marker "
+            f"is missing at {marker}. Create the empty file so mypy/pyright "
+            f"in downstream projects pick up the inline annotations."
+        )
+
+
+def test_wheel_artifacts_include_py_typed_marker() -> None:
+    """Defensive: ensure the wheel build config explicitly lists ``py.typed``.
+
+    Hatchling's default sdist/wheel inclusion picks up ``py.typed`` next to a
+    package today, but the project's wheel-target config already enumerates
+    every non-.py artifact (YAML probes, WOFF2 fonts, JSON schema, HTML
+    templates) explicitly so future hatchling tightening can't silently drop
+    them. The PEP 561 marker is held to the same standard.
+    """
+
+    data = _load_pyproject()
+    wheel_artifacts = data["tool"]["hatch"]["build"]["targets"]["wheel"]["artifacts"]  # type: ignore[index]
+    assert isinstance(wheel_artifacts, list)
+    assert "src/agent_guardian/py.typed" in wheel_artifacts, (
+        "Wheel-target artifacts list does not name ``src/agent_guardian/py.typed`` "
+        "explicitly — relying on hatchling's implicit pickup is fragile when "
+        "every other non-.py artifact in the package is listed by hand."
+    )
+
+
+def test_built_wheel_contains_py_typed_marker() -> None:
+    """If a wheel has been built into ``dist/``, it must ship the marker.
+
+    This catches the case where hatchling's default packaging silently drops
+    the empty file (e.g. via a sdist-then-wheel rebuild path). When no wheel
+    is present (fresh clone / CI before build), the test skips — the
+    pyproject-side ``test_wheel_artifacts_include_py_typed_marker`` already
+    guards the config so we only need this when a built artifact exists.
+    """
+
+    if not DIST_DIR.is_dir():
+        pytest.skip("dist/ directory absent; nothing built yet")
+    wheels = sorted(DIST_DIR.glob("agent_guardian-*.whl"))
+    if not wheels:
+        pytest.skip("no built wheel under dist/ to inspect")
+    # Inspect the most recently modified wheel — that's the one a maintainer
+    # would publish after this test runs.
+    wheel = max(wheels, key=lambda p: p.stat().st_mtime)
+    with zipfile.ZipFile(wheel) as zf:
+        names = set(zf.namelist())
+    assert "agent_guardian/py.typed" in names, (
+        f"built wheel {wheel.name} does not contain ``agent_guardian/py.typed`` — "
+        f"the PEP 561 marker was dropped during the build. Rebuild after "
+        f"confirming the marker is listed in [tool.hatch.build.targets.wheel].artifacts."
+    )
 
 
 def test_discoverability_keywords_present() -> None:
@@ -185,6 +252,84 @@ def test_structlog_is_not_a_ghost_runtime_dep() -> None:
             "src/ imports structlog but it is not declared as a runtime dep. "
             "Add ``structlog>=24.4`` to ``[project.dependencies]``."
         )
+
+
+# --------------------------------------------------------------------- dev extras
+
+
+def test_dev_dependencies_have_single_source_of_truth() -> None:
+    """Dev deps must live in PEP 621 ``[project.optional-dependencies].dev`` only.
+
+    History: a parallel PEP 735 ``[dependency-groups].dev`` table was added
+    that declared ``types-pyyaml`` only there, not in the PEP 621 ``dev``
+    extra. Result: ``pip install -e '.[dev]'`` and ``uv sync --extra dev
+    --no-default-groups`` gave divergent environments (pip didn't see
+    ``types-pyyaml``, uv installed and then would uninstall it depending on
+    flags). This test pins the resolution: every PEP 735 dev-group spec must
+    also appear in the PEP 621 ``dev`` extra so the two tools agree.
+
+    Specifically, we hard-require ``types-pyyaml`` to be in the PEP 621
+    ``dev`` extra because mypy --strict needs the stub package to type-check
+    the YAML probe loader, and that's the dependency that got lost.
+    """
+
+    data = _load_pyproject()
+    optional = data["project"]["optional-dependencies"]  # type: ignore[index]
+    assert isinstance(optional, dict)
+    dev_extra = optional.get("dev")
+    assert isinstance(dev_extra, list), "[project.optional-dependencies].dev must exist"
+
+    def _pkg_name(spec: str) -> str:
+        # Strip version specifier + extras to get the bare distribution name.
+        head = re.split(r"[<>=!~;\[\s]", spec, maxsplit=1)[0]
+        return head.strip().lower()
+
+    dev_extra_names = {_pkg_name(s) for s in dev_extra}
+    assert "types-pyyaml" in dev_extra_names, (
+        "``types-pyyaml`` is required in [project.optional-dependencies].dev "
+        "so ``pip install -e '.[dev]'`` ships the PyYAML stubs mypy --strict "
+        "needs. It must not live only in a PEP 735 [dependency-groups] table."
+    )
+
+    groups = data.get("dependency-groups")
+    if groups is None:
+        # Preferred steady state: PEP 735 table removed entirely once every
+        # spec is in the PEP 621 ``dev`` extra.
+        return
+
+    # If a PEP 735 ``[dependency-groups]`` table exists, every spec inside it
+    # must also be in the PEP 621 ``dev`` extra. Otherwise the two installers
+    # will silently diverge again.
+    assert isinstance(groups, dict)
+    pep735_dev = groups.get("dev", [])
+    assert isinstance(pep735_dev, list)
+    pep735_names = {_pkg_name(s) for s in pep735_dev}
+    drift = pep735_names - dev_extra_names
+    assert not drift, (
+        "PEP 735 [dependency-groups].dev declares packages that are NOT in "
+        "[project.optional-dependencies].dev — pip and uv installs will "
+        f"diverge. Drift: {sorted(drift)}. Single-source-of-truth in the "
+        "PEP 621 extra."
+    )
+
+
+def test_contributing_uv_sync_invocation_is_valid() -> None:
+    """CONTRIBUTING.md's local-dev setup must use a uv invocation uv accepts.
+
+    ``uv sync --all-extras --extra dev`` is rejected because ``--all-extras``
+    already includes the ``dev`` extra; the canonical form once all dev tools
+    live in the PEP 621 ``dev`` extra is just ``uv sync --all-extras``.
+    """
+
+    body = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    assert "uv sync --all-extras" in body, (
+        "CONTRIBUTING.md must document ``uv sync --all-extras`` as the local-dev setup command."
+    )
+    # The historical broken form must be gone.
+    assert "uv sync --all-extras --extra dev" not in body, (
+        "CONTRIBUTING.md still recommends ``uv sync --all-extras --extra dev``, "
+        "which uv rejects. Update to plain ``uv sync --all-extras``."
+    )
 
 
 # --------------------------------------------------------------------- docker

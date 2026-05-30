@@ -152,7 +152,15 @@ def test_doctor(runner: CliRunner) -> None:
 def test_serve_invokes_uvicorn_with_factory(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``agent-guardian serve`` must hand the app factory to uvicorn."""
+    """``agent-guardian serve`` must hand a constructed FastAPI app to uvicorn.
+
+    Post a8c8ee6, the non-reload path constructs the app eagerly so the CLI
+    can stamp ``app.state.dashboard_token`` BEFORE uvicorn starts accepting
+    connections — otherwise the dashboard token would not be available on the
+    very first request. This means ``factory=True`` is intentionally NOT
+    passed in the non-reload path. The reload path still uses an import
+    string + factory (see ``test_serve_reload_passes_import_string``).
+    """
     captured: dict[str, object] = {}
 
     def fake_run(target: object, **kwargs: object) -> None:
@@ -160,6 +168,7 @@ def test_serve_invokes_uvicorn_with_factory(
         captured["kwargs"] = kwargs
 
     import uvicorn
+    from fastapi import FastAPI
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     result = runner.invoke(app, ["serve", "--host", "127.0.0.1", "--port", "9999"])
@@ -168,7 +177,10 @@ def test_serve_invokes_uvicorn_with_factory(
     assert isinstance(kwargs, dict)
     assert kwargs["host"] == "127.0.0.1"
     assert kwargs["port"] == 9999
-    assert kwargs["factory"] is True
+    # Non-reload path: target is a constructed FastAPI app with a stamped
+    # dashboard_token, NOT an import string + factory=True.
+    assert "factory" not in kwargs
+    assert isinstance(captured["target"], FastAPI)
 
 
 def test_serve_reload_passes_import_string(

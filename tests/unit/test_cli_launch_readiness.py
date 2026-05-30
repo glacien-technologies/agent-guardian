@@ -385,6 +385,54 @@ def test_scans_delete_missing_errors(runner: CliRunner) -> None:
     assert result.exit_code == EXIT_CONFIG
 
 
+# Regression: ``scans delete`` must refuse path-traversal scan_ids and leave
+# canary files outside the scans root intact. Pre-fix, ``root / "../canary"``
+# resolved to a sibling dir and ``shutil.rmtree`` wiped it.
+def test_scans_delete_rejects_path_traversal(runner: CliRunner, tmp_path: Path) -> None:
+    canary_dir = tmp_path / "canary_dir"
+    canary_dir.mkdir(parents=True, exist_ok=True)
+    sentinel = canary_dir / "SENTINEL"
+    sentinel.write_text("do-not-delete", encoding="utf-8")
+
+    # Also seed a legit scan so the scans root exists. Not strictly required.
+    scans_dir = tmp_path / ".agentguardian" / "scans"
+    scans_dir.mkdir(parents=True, exist_ok=True)
+
+    # Various traversal payloads -- absolute paths, ``..`` segments, sep chars.
+    payloads = [
+        "../canary_dir",
+        "../../canary_dir",
+        "../../../etc",
+        "/tmp/canary_dir",
+        "subdir/payload",
+    ]
+    for payload in payloads:
+        result = runner.invoke(app, ["scans", "delete", payload])
+        assert result.exit_code == EXIT_CONFIG, (
+            f"payload {payload!r} should have been refused: {_combined_output(result)}"
+        )
+        assert canary_dir.exists(), f"payload {payload!r} wiped the canary dir"
+        assert sentinel.exists(), f"payload {payload!r} wiped the sentinel file"
+        assert sentinel.read_text(encoding="utf-8") == "do-not-delete"
+
+
+def test_scans_delete_rejects_nul_in_scan_id(runner: CliRunner, tmp_path: Path) -> None:
+    """NUL byte in scan_id is rejected before any filesystem op."""
+    result = runner.invoke(app, ["scans", "delete", "good\x00name"])
+    assert result.exit_code == EXIT_CONFIG
+
+
+def test_scans_delete_rejects_absolute_path(runner: CliRunner, tmp_path: Path) -> None:
+    """An absolute scan_id is rejected lexically before resolve()."""
+    canary = tmp_path / "outside_canary"
+    canary.mkdir()
+    (canary / "SENTINEL").write_text("keep", encoding="utf-8")
+    result = runner.invoke(app, ["scans", "delete", str(canary)])
+    assert result.exit_code == EXIT_CONFIG
+    assert canary.exists()
+    assert (canary / "SENTINEL").exists()
+
+
 def test_parse_relative_age_units() -> None:
     assert _parse_relative_age("30d") == timedelta(days=30)
     assert _parse_relative_age("2w") == timedelta(weeks=2)
