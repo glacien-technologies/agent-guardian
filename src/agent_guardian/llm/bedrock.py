@@ -249,6 +249,22 @@ class BedrockClient(BaseLLM):
     provider = "bedrock"
     default_max_concurrency = 5
 
+    # Class-level flag so the "seed not supported" debug warning is emitted
+    # at most once per process — protects log volume during long swarm runs
+    # where every replay would otherwise re-log the same notice.
+    _seed_warning_emitted: bool = False
+
+    def _maybe_warn_seed_ignored(self, request: LLMRequest) -> None:
+        if request.seed is None:
+            return
+        if BedrockClient._seed_warning_emitted:
+            return
+        BedrockClient._seed_warning_emitted = True
+        _LOG.debug(
+            "bedrock: provider does not support seed; ignoring "
+            "(deterministic replay unavailable for this provider)"
+        )
+
     def __init__(
         self,
         *,
@@ -338,6 +354,7 @@ class BedrockClient(BaseLLM):
         return {str(k): str(v) for k, v in aws_request.headers.items()}
 
     async def _send(self, request: LLMRequest) -> LLMResponse:
+        self._maybe_warn_seed_ignored(request)
         body = build_bedrock_payload(request)
         body_json = json.dumps(body)
         # Strip a ``bedrock:`` provider prefix if the caller passed the
@@ -371,7 +388,11 @@ class BedrockClient(BaseLLM):
         except ValueError as exc:
             _LOG.warning("bedrock invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"bedrock: invalid JSON: {exc}") from exc
-        response = map_bedrock_response(request.model, data)
+        # Pass the unprefixed Bedrock model id (without the optional
+        # ``bedrock:`` provider tag) so the resulting LLMResponse.model
+        # matches what Bedrock itself reports — downstream cost lookup
+        # and receipts key off the bare id, not the spec string.
+        response = map_bedrock_response(bedrock_model_id, data)
         _LOG.debug(
             "bedrock response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
             response.text[:80],

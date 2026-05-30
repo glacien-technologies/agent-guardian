@@ -92,5 +92,8 @@ def make_scan(
         asi_scores=asi_scores,
         duration_seconds=12.5,
         cost_usd=0.04,
+        # #4 — ``mode`` is now required; fixture pins it to FULL so the
+        # synthesized Scan resembles a real authoritative run.
+        mode="full",
         created_at=datetime(2026, 5, 26, 12, 0, tzinfo=UTC),
     )

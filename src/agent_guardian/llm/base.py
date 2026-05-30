@@ -40,8 +40,22 @@ class LLMMessage(BaseModel):
 class LLMRequest(BaseModel):
     """Provider-agnostic completion request.
 
-    ``seed`` is the deterministic-replay knob: providers that support it (OpenAI,
-    Ollama) will pass it through; others ignore it.
+    ``seed`` is the deterministic-replay knob. Provider support matrix:
+
+    ============  ==========  =================================================
+    Provider      Forwarded?  Notes
+    ============  ==========  =================================================
+    openai        yes         ``seed`` top-level field
+    ollama        yes         ``options.seed``
+    gemini        yes         ``generationConfig.seed`` (AI Studio v1beta)
+    vertex        yes         ``generationConfig.seed`` (Vertex AI v1)
+    anthropic     no          ignored; debug-logs once-per-process
+    bedrock       no          ignored; debug-logs once-per-process
+    ============  ==========  =================================================
+
+    Providers that ignore the seed will still complete the request — the
+    framework warns once (debug level) so swarm replay can fall back to the
+    same-prompt-same-temperature heuristic without log spam.
     """
 
     messages: list[LLMMessage]

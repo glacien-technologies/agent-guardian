@@ -13,7 +13,7 @@ from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
-from agent_guardian.strategies.base import ProbeSeed
+from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["CascadeAgent"]
 
@@ -61,6 +61,18 @@ Specific techniques:
             ],
             severity=self.default_severity,
         )
+
+    def strategy_stack(self, ctx: StrategyContext) -> Strategy:
+        """Use Crescendo (multi-turn benign-to-malicious escalation).
+
+        #25 — the agent's ``attack_specialization`` paragraph documents
+        Crescendo as the default escalation strategy, but the base-class
+        default is :class:`~agent_guardian.strategies.pair.PAIRStrategy`.
+        Without this override the agent runs PAIR while advertising Crescendo.
+        """
+        from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+        return CrescendoStrategy(ctx)
 
     def judge_rubric(self) -> JudgeRubric:
         return JudgeRubric(

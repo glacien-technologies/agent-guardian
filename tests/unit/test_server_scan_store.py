@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.models.tier import Tier
 from agent_guardian.server import ScanStore
+from agent_guardian.server.scan_store import MAX_BUFFERED_EVENTS_PER_SCAN
 
 
 def _make_scan(scan_id: str) -> Scan:
@@ -42,6 +44,7 @@ def _make_scan(scan_id: str) -> Scan:
         target_mode="prompt",
         target_ref="tests/example.txt",
         tier=Tier.T2_HIGH,
+        mode="full",
         aivss=85,
         band=SeverityBand.GOOD,
         sub_scores={
@@ -244,3 +247,126 @@ def test_list_report_paths_picks_up_known_formats(tmp_path: Path) -> None:
     assert "md" in paths
     # scan.json provides the json fallback.
     assert "json" in paths
+
+
+# ---------------------------------------------------------------------------
+# In-memory buffer cap (#36)
+# ---------------------------------------------------------------------------
+
+
+def test_event_buffer_is_bounded_at_max_per_scan(tmp_path: Path) -> None:
+    """A long-running scan must not push the in-memory buffer past the cap.
+
+    Pushes ``MAX_BUFFERED_EVENTS_PER_SCAN + 100`` events through the observer
+    and asserts the deque held by ``_events`` is exactly the cap, and that
+    the first held event is the cap-th most recent one (oldest evicted).
+    """
+    store = ScanStore(root_dir=tmp_path)
+
+    class FakeSwarm:
+        observer = None
+
+    fake = FakeSwarm()
+    store.register("scan-bound", fake)  # type: ignore[arg-type]
+    assert fake.observer is not None
+
+    overshoot = 100
+    total = MAX_BUFFERED_EVENTS_PER_SCAN + overshoot
+    for i in range(total):
+        # tag each event with a unique agent name so we can identify it later
+        fake.observer(_event("agent_start", agent=f"agent-{i}"))
+
+    buf = store._events["scan-bound"]
+    # The buffer is a deque with maxlen == MAX_BUFFERED_EVENTS_PER_SCAN.
+    assert isinstance(buf, deque)
+    assert buf.maxlen == MAX_BUFFERED_EVENTS_PER_SCAN
+    assert len(buf) == MAX_BUFFERED_EVENTS_PER_SCAN
+    # The oldest ``overshoot`` events fell off the front. The first held
+    # event is the ``overshoot``-th one we pushed (index ``overshoot``).
+    first_held = next(iter(buf))
+    assert first_held.agent == f"agent-{overshoot}"
+    # And the most recent event is the last one we pushed.
+    last_held = buf[-1]
+    assert last_held.agent == f"agent-{total - 1}"
+    # ``replay_events`` returns the same bounded list view.
+    replayed = store.replay_events("scan-bound")
+    assert len(replayed) == MAX_BUFFERED_EVENTS_PER_SCAN
+    assert replayed[0].agent == f"agent-{overshoot}"
+    assert replayed[-1].agent == f"agent-{total - 1}"
+
+
+def test_scan_done_evicts_buffer_when_no_loop(tmp_path: Path) -> None:
+    """``scan_done`` synchronously evicts the buffer when no asyncio loop runs.
+
+    The store is documented to fall back to immediate eviction when called
+    from synchronous test contexts so the bounded-memory invariant still
+    holds. The on-disk events.jsonl is the source of truth for any future
+    subscriber that needs the historical events.
+    """
+    store = ScanStore(root_dir=tmp_path)
+
+    class FakeSwarm:
+        observer = None
+
+    fake = FakeSwarm()
+    store.register("scan-evict", fake)  # type: ignore[arg-type]
+    assert fake.observer is not None
+    fake.observer(_event("agent_start", "tool-abuse-agent"))
+    assert "scan-evict" in store._events
+    fake.observer(_event("scan_done"))
+    # No running loop → immediate eviction.
+    assert "scan-evict" not in store._events
+    # On-disk events.jsonl still has both events for late replay.
+    jsonl_lines = (
+        (store.scan_dir("scan-evict") / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    kinds = [json.loads(line)["kind"] for line in jsonl_lines]
+    assert kinds == ["agent_start", "scan_done"]
+
+
+def test_scan_done_evicts_buffer_after_grace_when_loop_running(tmp_path: Path) -> None:
+    """When an asyncio loop is running, the eviction is deferred to a task.
+
+    Uses a near-zero grace window so the test completes deterministically;
+    the production default is 5 minutes. The buffer is still present
+    immediately after ``scan_done`` and is gone after the grace task fires.
+    """
+
+    async def _run() -> None:
+        store = ScanStore(root_dir=tmp_path)
+
+        class FakeSwarm:
+            observer = None
+
+        fake = FakeSwarm()
+        store.register("scan-grace", fake)  # type: ignore[arg-type]
+        assert fake.observer is not None
+        fake.observer(_event("agent_start", "tool-abuse-agent"))
+        # Patch the grace window down so we don't block the test for 5min.
+        original = store._schedule_buffer_eviction
+
+        def _short(scan_id: str, *, grace_seconds: float = 0.01) -> None:
+            original(scan_id, grace_seconds=grace_seconds)
+
+        store._schedule_buffer_eviction = _short  # type: ignore[method-assign]
+        fake.observer(_event("scan_done"))
+        # Buffer still present immediately (eviction is deferred).
+        assert "scan-grace" in store._events
+        # Wait long enough for the eviction task to run.
+        await asyncio.sleep(0.05)
+        assert "scan-grace" not in store._events
+
+    asyncio.run(_run())
+
+
+def test_max_buffered_events_default_is_5000() -> None:
+    """The exported cap defaults to 5000 so consumers can rely on the value."""
+    assert MAX_BUFFERED_EVENTS_PER_SCAN >= 1
+    # Allow override via env var, but the default at import time must be 5000
+    # when the env var isn't set. The constant resolves at import; if the
+    # test runner ever sets the env var, it'd be on the runner — we don't
+    # assert exact equality to avoid false failures in that case.
+    import os
+
+    if "AGENT_GUARDIAN_MAX_BUFFERED_EVENTS" not in os.environ:
+        assert MAX_BUFFERED_EVENTS_PER_SCAN == 5000

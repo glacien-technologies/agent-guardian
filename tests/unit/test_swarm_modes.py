@@ -256,18 +256,20 @@ def test_scan_model_round_trips_mode(mode: str) -> None:
     assert deserialised.mode == mode
 
 
-def test_scan_model_defaults_to_smart_for_legacy_json() -> None:
-    """Old Scan JSON files (no `mode` key) must still deserialise.
+def test_scan_model_rejects_payload_without_mode() -> None:
+    """#4 — ``mode`` is required: a payload without it fails validation.
 
-    The default is "smart" -- it most accurately reflects the
-    behaviour the v1.0 swarm actually had (early-stop enabled,
-    full corpus). This keeps the analytics dashboard honest when
-    re-loading historical scans.
+    The previous behaviour silently defaulted to "smart", which let hand-
+    built scans (and any legacy JSON loaded by report/verify) record the
+    wrong scan-mode on the persisted report. The swarm always passes mode
+    explicitly, so callers must too.
     """
+    from pydantic import ValidationError
+
     payload = _make_scan("smart").model_dump()
     payload.pop("mode")  # simulate v1.0 JSON
-    deserialised = Scan.model_validate(payload)
-    assert deserialised.mode == "smart"
+    with pytest.raises(ValidationError):
+        Scan.model_validate(payload)
 
 
 @pytest.mark.parametrize("mode", ["fast", "smart", "full"])
@@ -336,6 +338,69 @@ def test_telemetry_event_defaults_mode_to_smart() -> None:
     }
     event = ScanCompletedEvent.model_validate(base)
     assert event.mode == "smart"
+
+
+# ---------------------------------------------------------------------------
+# #44 — mode_authoritative gate
+# ---------------------------------------------------------------------------
+
+
+def _scan_with_mode(mode: str, *, mode_authoritative: bool = True) -> Scan:
+    return Scan(
+        id="scan-mode-auth",
+        package_version="1.1.0",
+        aivss_formula_version="aivss-v1",
+        probe_library_version="2026.05",
+        target_mode="prompt",
+        target_ref="test://target",
+        tier=Tier.T3_STANDARD,
+        aivss=75,
+        band=SeverityBand.GOOD,
+        sub_scores={},
+        findings=[],
+        asi_scores={c: 100.0 for c in AsiCategory},
+        duration_seconds=42.0,
+        cost_usd=0.01,
+        tokens_total=1000,
+        mode=mode,  # type: ignore[arg-type]
+        mode_authoritative=mode_authoritative,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def test_scan_full_mode_is_authoritative_by_default() -> None:
+    """A FULL-mode swarm sets ``mode_authoritative=True`` on the resulting Scan.
+
+    Spec: only FULL produces an authoritative numeric AIVSS; FAST/SMART are
+    intentionally thin and their score reflects how much was tested, not how
+    safe the agent is (#44). The model defaults the flag to True so older
+    JSON deserialises unchanged.
+    """
+    scan = _scan_with_mode("full")
+    assert scan.mode_authoritative is True
+
+
+def test_scan_fast_mode_persists_false_authoritative() -> None:
+    """FAST-mode scans persist ``mode_authoritative=False`` (#44)."""
+    scan = _scan_with_mode("fast", mode_authoritative=False)
+    assert scan.mode_authoritative is False
+    # Round-trip through JSON.
+    deserialised = Scan.model_validate(scan.model_dump())
+    assert deserialised.mode_authoritative is False
+
+
+def test_scan_serialised_with_non_authoritative_flag_in_fast_mode() -> None:
+    """A Scan persisted from a FAST/SMART swarm carries mode_authoritative=False (#44).
+
+    Structural assertion (no live swarm): the Scan model lets callers persist
+    ``mode_authoritative=False`` for any non-FULL mode, and the field round-
+    trips through JSON for the persisted artifact.
+    """
+    scan = _scan_with_mode("fast", mode_authoritative=False)
+    persisted = scan.model_dump_json()
+    payload = Scan.model_validate_json(persisted)
+    assert payload.mode == "fast"
+    assert payload.mode_authoritative is False
 
 
 # ---------------------------------------------------------------------------

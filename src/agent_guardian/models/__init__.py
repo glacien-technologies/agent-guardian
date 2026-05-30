@@ -12,18 +12,29 @@ from agent_guardian.models.probe import (
     load_probes_from_dir,
 )
 from agent_guardian.models.scan import Scan
+from agent_guardian.models.scenario import (
+    AgentOrigin,
+    DeliveryVector,
+    Scenario,
+    ScenarioBatch,
+    ScenarioType,
+)
 from agent_guardian.models.severity import (
     Severity,
     SeverityBand,
     band_for_score,
     colour_for_band,
 )
+from agent_guardian.models.swarm_brief import AgentBrief, SubGoal, SwarmBrief
 from agent_guardian.models.tier import ObservedSurface, Tier
 
 __all__ = [
     "NAMED_TECHNIQUES",
+    "AgentBrief",
+    "AgentOrigin",
     "AsiCategory",
     "CsaCategory",
+    "DeliveryVector",
     "Finding",
     "JudgeVerdict",
     "MitreTechnique",
@@ -31,8 +42,13 @@ __all__ = [
     "Probe",
     "ProbeValidationError",
     "Scan",
+    "Scenario",
+    "ScenarioBatch",
+    "ScenarioType",
     "Severity",
     "SeverityBand",
+    "SubGoal",
+    "SwarmBrief",
     "Tier",
     "asi_description",
     "band_for_score",

@@ -39,6 +39,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from collections import deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -48,9 +50,50 @@ from typing import Any
 from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
 from agent_guardian.models.scan import Scan
 
-__all__ = ["ScanStore", "ScanSummary"]
+__all__ = ["MAX_BUFFERED_EVENTS_PER_SCAN", "ScanStore", "ScanSummary"]
 
 _LOG = logging.getLogger(__name__)
+
+
+def _resolve_max_buffered_events() -> int:
+    """Resolve the per-scan in-memory event buffer cap.
+
+    The default (``5000``) keeps memory bounded for a long-running uvicorn
+    process whose dashboard is open to several hundred concurrently active
+    scans. Operators who run very long swarms can raise the cap with the
+    ``AGENT_GUARDIAN_MAX_BUFFERED_EVENTS`` env var; invalid values fall back
+    to the default so a typo can't silently disable bounding.
+    """
+    raw = os.environ.get("AGENT_GUARDIAN_MAX_BUFFERED_EVENTS")
+    if raw is None:
+        return 5000
+    try:
+        value = int(raw)
+    except ValueError:
+        _LOG.warning(
+            "scan_store: ignoring non-integer AGENT_GUARDIAN_MAX_BUFFERED_EVENTS=%r",
+            raw,
+        )
+        return 5000
+    if value <= 0:
+        _LOG.warning(
+            "scan_store: ignoring non-positive AGENT_GUARDIAN_MAX_BUFFERED_EVENTS=%d",
+            value,
+        )
+        return 5000
+    return value
+
+
+# Per-scan cap on the in-memory ring buffer of :class:`SwarmEvent` records.
+# events.jsonl on disk remains the authoritative replay source for any
+# subscriber that connects after older events have been evicted.
+MAX_BUFFERED_EVENTS_PER_SCAN: int = _resolve_max_buffered_events()
+
+
+# Grace window after ``scan_done`` before the in-memory event buffer is
+# dropped. Late SSE subscribers within this window get an in-memory replay;
+# subscribers beyond it must read from disk (events.jsonl).
+SCAN_DONE_BUFFER_GRACE_SECONDS: float = 300.0
 
 
 @dataclass(frozen=True)
@@ -96,10 +139,16 @@ class ScanStore:
         self._root = root_dir or _default_root_dir()
         self._running: dict[str, SwarmCommander] = {}
         self._queues: dict[str, asyncio.Queue[SwarmEvent]] = {}
-        # ``_events`` buffers every event so a late SSE subscriber can
-        # replay what it missed without re-reading the JSONL file. M12
-        # keeps this trivial; an LRU bound is a future refinement.
-        self._events: dict[str, list[SwarmEvent]] = {}
+        # ``_events`` buffers the most recent events per scan so a late SSE
+        # subscriber can replay what it missed without re-reading the JSONL
+        # file. The buffer is a ring (``deque(maxlen=...)``) so a long-running
+        # scan can't push memory unboundedly — old events fall off the front
+        # and the on-disk events.jsonl remains the authoritative replay
+        # source for any subscriber that needs the full history.
+        self._events: dict[str, deque[SwarmEvent]] = {}
+        # Tracks the post-``scan_done`` eviction timers so cancellation /
+        # re-scheduling works deterministically.
+        self._eviction_tasks: dict[str, asyncio.Task[None]] = {}
 
     # ------------------------------------------------------------------
     # Roots / paths
@@ -124,14 +173,17 @@ class ScanStore:
         but doesn't reset the existing queue.
         """
         self._running[scan_id] = swarm
-        self._events.setdefault(scan_id, [])
+        self._events.setdefault(scan_id, deque(maxlen=MAX_BUFFERED_EVENTS_PER_SCAN))
         scan_dir = self.scan_dir(scan_id)
         scan_dir.mkdir(parents=True, exist_ok=True)
         jsonl_path = scan_dir / "events.jsonl"
 
         def _observer(event: SwarmEvent) -> None:
-            # Buffer the event in memory.
-            self._events.setdefault(scan_id, []).append(event)
+            # Buffer the event in memory. The deque auto-evicts the oldest
+            # entry once the buffer hits MAX_BUFFERED_EVENTS_PER_SCAN so a
+            # long-running scan can't push the in-memory state unboundedly.
+            buffer = self._events.setdefault(scan_id, deque(maxlen=MAX_BUFFERED_EVENTS_PER_SCAN))
+            buffer.append(event)
             # Best-effort enqueue to the asyncio queue if it has been
             # materialised (i.e. someone is listening over SSE).
             queue = self._queues.get(scan_id)
@@ -155,12 +207,54 @@ class ScanStore:
                     exc,
                 )
             # On scan_done, drop the running registration so subsequent
-            # /scan/{id} reads fall through to the on-disk replay.
+            # /scan/{id} reads fall through to the on-disk replay. Schedule
+            # the in-memory buffer for eviction after a short grace window so
+            # late SSE subscribers have a chance to replay the final events
+            # in-memory; once the timer fires, the on-disk events.jsonl is
+            # the only replay source (which is the documented contract).
             if event.kind == "scan_done":
                 self._running.pop(scan_id, None)
+                self._schedule_buffer_eviction(scan_id)
 
         # Replace any previously attached observer.
         swarm.observer = _observer
+
+    def _schedule_buffer_eviction(
+        self,
+        scan_id: str,
+        *,
+        grace_seconds: float = SCAN_DONE_BUFFER_GRACE_SECONDS,
+    ) -> None:
+        """Schedule eviction of ``self._events[scan_id]`` after a grace window.
+
+        If no event loop is running (e.g. tests calling the observer
+        synchronously from sync code), evict immediately — the on-disk
+        events.jsonl is the source of truth for any late subscriber.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop — evict now; preserves the bounded-memory invariant
+            # even in synchronous test contexts.
+            self._events.pop(scan_id, None)
+            return
+
+        async def _evict() -> None:
+            try:
+                await asyncio.sleep(grace_seconds)
+            except asyncio.CancelledError:  # pragma: no cover — shutdown path
+                raise
+            finally:
+                self._events.pop(scan_id, None)
+                self._eviction_tasks.pop(scan_id, None)
+
+        # Cancel any previously scheduled eviction so a second scan_done
+        # event (shouldn't happen, but defend) doesn't leak a stray task.
+        prev = self._eviction_tasks.pop(scan_id, None)
+        if prev is not None and not prev.done():
+            prev.cancel()
+        task = loop.create_task(_evict())
+        self._eviction_tasks[scan_id] = task
 
     def get_running(self, scan_id: str) -> SwarmCommander | None:
         return self._running.get(scan_id)

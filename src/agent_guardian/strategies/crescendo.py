@@ -18,16 +18,19 @@ adversarial input rather than a forwarded refusal.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from agent_guardian.strategies.base import (
     NextPrompt,
+    ProbeSeed,
     Strategy,
     StrategyContext,
     StrategyDone,
     StrategyResult,
     Turn,
     attacker_complete,
+    seed_probe_id,
     seed_text,
 )
 
@@ -68,6 +71,10 @@ class CrescendoStrategy(Strategy):
 
     name = "crescendo"
 
+    # Hard cap on the number of seed rotations after a stable refusal loop —
+    # bounds total turn cost when every seed produces a level-0 stall.
+    _MAX_SEED_RESTARTS = 2
+
     def __init__(
         self,
         ctx: StrategyContext,
@@ -87,6 +94,14 @@ class CrescendoStrategy(Strategy):
 
         self._level = 0
         self._refused_last = False
+        # Track which seed indices we've already opened with so a stable
+        # refusal on seed N can rotate to seed N+1 instead of bailing.
+        self._seeds_used: set[int] = set()
+        self._restart_count = 0
+        # When non-None, the next opener call uses this specific seed index
+        # instead of rng.choice (so a restart deterministically picks the
+        # next unused seed rather than re-rolling the same one).
+        self._forced_seed_index: int | None = None
 
     async def generate_next(
         self, history: list[Turn], target_response: str | None
@@ -94,12 +109,34 @@ class CrescendoStrategy(Strategy):
         if self._turn_count >= self.ctx.max_turns:
             return StrategyDone(reason="exhausted")
 
-        if not history or target_response is None:
-            # First turn — ask attacker for a benign opener on the same topic.
-            # If the attacker refuses (Gemini-style "I can't help with..."),
-            # fall back to a static seed so we still send a real adversarial
-            # probe rather than forwarding the refusal text to the target.
-            seed = self._pick_seed()
+        if not history or target_response is None or self._forced_seed_index is not None:
+            # First turn (or seed-rotation restart) — ask the attacker for a
+            # benign opener on the same topic. If the attacker refuses, fall
+            # back to a static seed so we still send a real adversarial probe
+            # rather than forwarding the refusal text to the target.
+            #
+            # When ``_forced_seed_index`` is set (because a prior stable
+            # refusal triggered a seed rotation) we pick that exact seed
+            # rather than rolling rng.choice again, so each restart explores
+            # a NEW seed deterministically.
+            seed: ProbeSeed | str | None
+            if self._forced_seed_index is not None and self.ctx.seeds:
+                idx = self._forced_seed_index % len(self.ctx.seeds)
+                seed = self.ctx.seeds[idx]
+                self._seeds_used.add(idx)
+                self._forced_seed_index = None
+                # Re-seed parent_probe_id bookkeeping for the new branch.
+                pid = seed_probe_id(seed)
+                if pid:
+                    self._parent_probe_id = pid
+            else:
+                seed = self._pick_seed()
+                if seed is not None and self.ctx.seeds:
+                    # Best-effort: mark which index rng.choice landed on so
+                    # later restarts skip it. ``list.index`` works for both
+                    # ProbeSeed (identity) and raw-string seeds.
+                    with contextlib.suppress(ValueError):
+                        self._seeds_used.add(list(self.ctx.seeds).index(seed))
             seed_meta = self._build_seed_metadata(seed)
             attacker_text, refused = await attacker_complete(
                 self.ctx.attacker_llm,
@@ -116,12 +153,24 @@ class CrescendoStrategy(Strategy):
                     "crescendo: attacker refused benign opener (count=%d) — falling back to seed",
                     self._attacker_refused_count,
                 )
-                # Prefer the static seed text over the refusal text.
-                text = (
-                    seed_text(seed) if seed is not None else self._fallback_seed_text()
-                ) or self.ctx.goal
+                # Prefer the static seed text over the refusal text. If no
+                # seed is configured AND no corpus fallback exists, the
+                # category is genuinely untestable — emit StrategyDone rather
+                # than sending the raw malicious goal to the target.
+                text = seed_text(seed) if seed is not None else self._fallback_seed_text()
+                if not text:
+                    _LOG.debug(
+                        "crescendo: no seed available for opener — StrategyDone(no_seed_available)"
+                    )
+                    return StrategyDone(reason="exhausted")
             else:
-                text = attacker_text or (seed_text(seed) if seed is not None else self.ctx.goal)
+                text = attacker_text or (seed_text(seed) if seed is not None else "")
+                if not text:
+                    _LOG.debug(
+                        "crescendo: opener produced empty text and no seed — "
+                        "StrategyDone(no_seed_available)"
+                    )
+                    return StrategyDone(reason="exhausted")
                 _LOG.debug("crescendo: turn 1 benign opener generated (text[:60]=%r)", text[:60])
             self._level = 0
             self._refused_last = False
@@ -148,8 +197,27 @@ class CrescendoStrategy(Strategy):
                 self._level,
             )
             # Stable refusal loop: if we were already at 0 AND refused last turn
-            # AND just refused again, give up.
+            # AND just refused again, try rotating to a fresh seed before
+            # giving up — a different opener may unlock the target where the
+            # current one stalled. Bounded by ``_MAX_SEED_RESTARTS`` to keep
+            # total turn cost in check.
             if self._refused_last and prev_level == 0 and self._level == 0:
+                next_idx = self._next_unused_seed_index()
+                if next_idx is not None and self._restart_count < self._MAX_SEED_RESTARTS:
+                    self._restart_count += 1
+                    self._forced_seed_index = next_idx
+                    self._level = 0
+                    self._refused_last = False
+                    _LOG.debug(
+                        "crescendo: stable refusal at level 0 — rotating to seed idx=%d "
+                        "(restart=%d/%d)",
+                        next_idx,
+                        self._restart_count,
+                        self._MAX_SEED_RESTARTS,
+                    )
+                    # Re-enter the opener path immediately so the caller sees
+                    # the new seed on this same generate_next() call.
+                    return await self.generate_next(history, None)
                 _LOG.debug("crescendo: stable refusal loop at level 0 — StrategyDone(refused)")
                 return StrategyDone(reason="refused")
             self._refused_last = True
@@ -204,3 +272,17 @@ class CrescendoStrategy(Strategy):
     def _is_refusal(self, text: str) -> bool:
         lowered = text.lower()
         return any(marker in lowered for marker in self.refusal_markers)
+
+    def _next_unused_seed_index(self) -> int | None:
+        """Return the smallest seed index not yet opened with, or ``None``.
+
+        Used by the seed-rotation branch of the stable-refusal handler: when
+        seed N produces a level-0 stall we want to try seed N+1 next rather
+        than re-rolling rng.choice (which could pick the same seed again).
+        """
+        if not self.ctx.seeds:
+            return None
+        for idx in range(len(self.ctx.seeds)):
+            if idx not in self._seeds_used:
+                return idx
+        return None

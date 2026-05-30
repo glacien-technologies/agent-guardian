@@ -31,6 +31,7 @@ from agent_guardian.reports.pdf import (
 from agent_guardian.reports.sarif import (
     SARIF_SCHEMA,
     SARIF_VERSION,
+    ReportError,
     emit_sarif,
     write_sarif,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "SARIF_VERSION",
     "SCHEMA_VERSION",
     "PdfFeatureUnavailable",
+    "ReportError",
     "VerifyResult",
     "available_pdf_engines",
     "emit_json",

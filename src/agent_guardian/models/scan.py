@@ -78,9 +78,18 @@ class Scan(BaseModel):
     tokens_total: int = Field(default=0, ge=0)
     # v1.1 — which scan-mode produced this report. ``"full"`` is the v1.1+
     # default; v1.0rc1 scans persist as ``"smart"`` for back-compat
-    # (matches v1.0's actual behaviour). Defaults to ``"smart"`` here so
-    # any older Scan JSON on disk continues to deserialise.
-    mode: Literal["fast", "smart", "full"] = "smart"
+    # (matches v1.0's actual behaviour). REQUIRED (no default): the swarm
+    # commander always passes ``mode`` explicitly; hand-built fixtures must
+    # therefore also be explicit so we never silently misreport a scan's
+    # thoroughness profile (#4).
+    mode: Literal["fast", "smart", "full"]
+    # v1.1 — ``True`` when the scan's mode is FULL (the only mode whose
+    # numeric AIVSS is intended to be quoted as authoritative). FAST/SMART
+    # runs persist their numeric score for trend-tracking but ``--fail-under``
+    # must refuse to gate-pass on them (the score reflects how much was
+    # tested, not how safe the agent is). Defaults to ``True`` so older Scan
+    # JSON on disk deserialises unchanged (#44).
+    mode_authoritative: bool = True
     # Why the scan ended. ``"completed"`` is the normal full run; ``"budget"``
     # means the USD cap's soft-stop fired; ``"early_stop"`` is the variance
     # gate; ``"cancelled"`` is an operator cancel. Defaults keep older Scan
@@ -115,6 +124,14 @@ class Scan(BaseModel):
     # treat such a scan as a failure rather than a pass. Defaults ``True`` so
     # existing real-model scans + fixtures are unaffected.
     scoring_valid: bool = True
+    # v1.1 — ASI categories the scan launched but exercised so thinly that the
+    # absence of findings is *not* evidence of safety: zero findings + fewer
+    # than 5 judged turns + scan mode != FULL. Surfaced as a first-class
+    # category state so dashboards / report renderers can say "thinly tested"
+    # rather than letting an empty list read as "clean" (#46). Empty list for
+    # scans without any undertested categories. Stored as a sorted list of the
+    # raw ASI string values so the model stays JSON-round-trip safe.
+    undertested: list[str] = Field(default_factory=list)
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")

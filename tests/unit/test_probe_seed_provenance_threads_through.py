@@ -54,6 +54,8 @@ def _stub_scan(scan_id: str) -> Scan:
         asi_scores={cat: 100.0 for cat in AsiCategory},
         duration_seconds=0.0,
         cost_usd=0.0,
+        # #4 — ``mode`` is required on Scan.
+        mode="full",
         created_at=datetime.now(tz=timezone.utc),
     )
 

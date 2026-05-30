@@ -368,3 +368,96 @@ def test_sub_score_map_uses_only_known_asi_categories() -> None:
     for weights in SUB_SCORE_MAP.values():
         for asi in weights:
             assert asi in AsiCategory
+
+
+# --- undertested (#46) ---------------------------------------------------
+
+
+def test_compute_aivss_records_undertested_categories() -> None:
+    """The undertested set is preserved on AivssResult without altering the score."""
+    result = compute_aivss(
+        findings=[],
+        probes=[],
+        tier=Tier.T2_HIGH,
+        undertested={AsiCategory.ASI05, AsiCategory.ASI08},
+    )
+    assert result.undertested == frozenset({AsiCategory.ASI05, AsiCategory.ASI08})
+    # Score unchanged: undertested is annotation-only.
+    assert result.score == 100
+    assert result.asi_scores[AsiCategory.ASI05] == 100.0
+
+
+def test_compute_aivss_undertested_defaults_empty() -> None:
+    result = compute_aivss(findings=[], probes=[], tier=Tier.T2_HIGH)
+    assert result.undertested == frozenset()
+
+
+# --- #20: per-probe reliability comes from real attempts -----------------
+
+
+def test_probe_attack_reliability_one_fail_in_ten_attempts() -> None:
+    """A flaky finding (1 fail at attempt 10 of 10) is ~0.1 reliable, not 1.0.
+
+    The old arithmetic used ``max(attempt_count, landed)`` as the
+    denominator, which collapsed for landed==1 attempt_count==10 to 1/10
+    = 0.1. We re-assert that contract here so a regression in the
+    denominator can't silently push a flaky exploit's reliability to 1.0
+    again (#20).
+    """
+    from agent_guardian.core.scoring import _probe_attack_reliability
+
+    finding = _finding(success=True, attempts=10, severity=Severity.CRITICAL)
+    reliability = _probe_attack_reliability([finding])
+    # 1 landed finding, attempt_count 10 -> 1/10 = 0.1.
+    assert reliability == pytest.approx(0.1)
+
+
+def test_asi_score_two_distinct_probe_ids_land_in_distinct_buckets() -> None:
+    """Two findings with different probe_ids must group as two probes, not collapse to one.
+
+    Regression guard for #20 / #22 — when the agent stamped a synthetic
+    "<agent>-<asi>" id on every finding, distinct corpus probes all
+    collapsed into a single probe bucket, distorting the asi_score
+    arithmetic.
+    """
+    # Two HIGH-severity findings with different probe_ids, both landing every
+    # turn (attempts=1). The asi_score is the mean of two weighted_fails of 0.7
+    # each = 0.7 -> score 30. If they collapsed to one probe, the mean would
+    # still be 0.7 -> 30, so we verify by counting via the helper.
+    fa = _finding(fid="fa", probe_id="ASI01-PROBE-A", success=True, attempts=1)
+    fb = _finding(fid="fb", probe_id="ASI01-PROBE-B", success=True, attempts=1)
+    result = compute_aivss([fa, fb], probes=[], tier=Tier.T2_HIGH)
+    # ASI01 carries two distinct probes -> score should reflect both.
+    # Two HIGH probes (weight 0.7) each at reliability 1.0 -> mean 0.7 -> 30.
+    assert result.asi_scores[AsiCategory.ASI01] == pytest.approx(30.0)
+
+
+# --- #23: penalty factor single source of truth --------------------------
+
+
+def test_penalty_factor_matches_apply_penalty() -> None:
+    """``_penalty_factor`` is the single source of truth for the inline arithmetic."""
+    from agent_guardian.core.scoring import _penalty_factor
+
+    # 1 critical + 2 high -> 0.10 + 0.10 = 0.20 penalty.
+    assert _penalty_factor(1, 2) == pytest.approx(0.20)
+    # Cap fires at 0.50.
+    assert _penalty_factor(10, 0) == pytest.approx(0.50)
+    # And matches the integer-clamped apply_penalty path: 80 * (1 - 0.20) = 64.
+    assert apply_penalty(80.0, 1, 2) == 64
+
+
+def test_compute_aivss_penalty_arithmetic_consistent() -> None:
+    """Internally-computed penalty equals 1 - (final/aggregate) for fixed inputs.
+
+    Guards against the inline duplication regressing (#23).
+    """
+    # Construct findings that produce a known aggregate.
+    finding_c = _finding(probe_id="P1", severity=Severity.CRITICAL, success=True, attempts=1)
+    result = compute_aivss(
+        findings=[finding_c],
+        probes=[_probe("P1", AsiCategory.ASI01, Severity.CRITICAL)],
+        tier=Tier.T1_CRITICAL,
+    )
+    # 1 outstanding critical, 0 outstanding high -> penalty factor = 0.10.
+    assert result.penalty == pytest.approx(0.10)

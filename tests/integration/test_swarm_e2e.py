@@ -189,7 +189,12 @@ async def test_swarm_runs_end_to_end_against_defended_target(
     }
     assert scan.package_version
     assert scan.aivss_formula_version == "aivss-v1"
-    assert scan.probe_library_version == "0.0.0-placeholder"
+    # #13 — the report records the real bundled probe-corpus version, not the
+    # old "0.0.0-placeholder" string. PROBE_CORPUS_VERSION is the single
+    # source of truth.
+    from agent_guardian.probes.loader import PROBE_CORPUS_VERSION
+
+    assert scan.probe_library_version == PROBE_CORPUS_VERSION
     assert scan.cost_usd == 0.0
     # Token counts must be visible even under the stub harness — the
     # wrapper folds StubLLM's deterministic LLMUsage into the per-agent

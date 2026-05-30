@@ -315,6 +315,19 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
             raise typer.BadParameter(
                 f"Bedrock requested for {role} but credentials are missing: {exc}"
             ) from exc
+    if provider == "vertex":
+        # #15 — Vertex AI is request-builder-only until M9 lands OAuth2 SA
+        # auth. Refuse with a clear M9-pending message instead of letting the
+        # spec fall through to the generic "Unknown provider" error, which
+        # mismatches the ``doctor`` surface and the ``llm.vertex`` module's
+        # own claim of provider support.
+        raise typer.BadParameter(
+            f"Vertex AI requested for {role} but provider authentication is M9-"
+            "pending (request-builder + response-mapper only). See "
+            "docs/providers/vertex.md for the M9 roadmap. Use openai:<model>, "
+            "anthropic:<model>, gemini:<model>, ollama:<model>, or bedrock:<id> "
+            "in the meantime."
+        )
     raise typer.BadParameter(
         f"Unknown provider '{provider}' for model spec '{spec}' (role={role})."
     )
@@ -552,7 +565,17 @@ def version() -> None:
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    check_connectivity: bool = typer.Option(
+        False,
+        "--check-connectivity",
+        help=(
+            "Probe each detected provider with a minimal request to validate the key + "
+            "reach the endpoint. Default OFF: key detection alone is zero-cost; "
+            "connectivity costs one tiny call per provider (~0 tokens)."
+        ),
+    ),
+) -> None:
     """Verify install, available LLM keys, and runtime prerequisites."""
     typer.echo(f"agent-guardian {__version__}")
     typer.echo("CLI: ok")
@@ -560,15 +583,34 @@ def doctor() -> None:
     # Python + platform.
     typer.echo(f"python: {sys.version.split()[0]}")
 
-    # Detect available LLM keys.
-    found_keys = []
-    for provider in ("openai", "anthropic", "gemini", "bedrock", "vertex"):
+    # Detect available LLM keys. #15 — Vertex is request-builder-only until
+    # M9 ships OAuth2 SA auth; we still surface it here so the operator can
+    # see the env key landed, but we label it so they don't think a Vertex
+    # scan is supported (it isn't yet -- ``build_llm`` raises a clear
+    # M9-pending error if they try).
+    found_keys: list[str] = []
+    for provider in ("openai", "anthropic", "gemini", "bedrock"):
         if env_api_key(provider):
             found_keys.append(provider)
+    if env_api_key("vertex"):
+        found_keys.append("vertex (request-builder-only, M9-pending)")
     if found_keys:
-        typer.echo(f"llm keys detected: {', '.join(found_keys)}")
+        typer.echo(
+            "llm keys detected: "
+            + ", ".join(found_keys)
+            + (
+                ""
+                if check_connectivity
+                else " (NOT validated -- pass --check-connectivity to probe each provider)"
+            )
+        )
     else:
         typer.echo("llm keys detected: none (use --model stub for offline scans)")
+
+    # Optional connectivity probe. Each provider gets a tiny request that
+    # validates auth + reaches the endpoint without burning meaningful tokens.
+    if check_connectivity and found_keys:
+        _probe_provider_connectivity()
 
     # Sandbox readiness -- try to import.
     try:
@@ -584,6 +626,75 @@ def doctor() -> None:
     typer.echo(f"state dir: {_state_dir()}")
     cwd_config = Path.cwd() / ".agentguardian.yaml"
     typer.echo("config (cwd): " + (str(cwd_config) if cwd_config.is_file() else "<not present>"))
+
+
+def _probe_provider_connectivity() -> None:
+    """Issue one minimal validation request per detected provider (#38).
+
+    Reports per-provider outcome on stdout: ``ok`` (200), ``auth-fail`` (401/
+    403), ``network-fail`` (any other error). Each probe uses a tight timeout
+    so a missing endpoint can't hang the ``doctor`` command. Bedrock is left
+    out of the loop today (its AWS SDK probe is heavier and surfaces its own
+    SigV4 errors at first use); the operator can run ``aws sts get-caller-
+    identity`` for the equivalent check.
+    """
+    import httpx
+
+    timeout = httpx.Timeout(5.0)
+    # OpenAI: GET /v1/models is the canonical key-validation endpoint.
+    if env_api_key("openai"):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {env_api_key('openai')}"},
+                )
+            typer.echo(f"openai connectivity: {_connectivity_label(resp.status_code)}")
+        except httpx.HTTPError as exc:
+            _LOG.warning("doctor: openai connectivity probe failed (%s)", exc)
+            typer.echo("openai connectivity: network-fail")
+    # Anthropic: POST /v1/messages max_tokens=1 (smallest possible billed call).
+    if env_api_key("anthropic"):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": env_api_key("anthropic") or "",
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-haiku-4-5",
+                        "max_tokens": 1,
+                        "messages": [{"role": "user", "content": "x"}],
+                    },
+                )
+            typer.echo(f"anthropic connectivity: {_connectivity_label(resp.status_code)}")
+        except httpx.HTTPError as exc:
+            _LOG.warning("doctor: anthropic connectivity probe failed (%s)", exc)
+            typer.echo("anthropic connectivity: network-fail")
+    # Gemini: GET /v1beta/models?key=... lists the available model surface.
+    if env_api_key("gemini"):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                resp = client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": env_api_key("gemini") or ""},
+                )
+            typer.echo(f"gemini connectivity: {_connectivity_label(resp.status_code)}")
+        except httpx.HTTPError as exc:
+            _LOG.warning("doctor: gemini connectivity probe failed (%s)", exc)
+            typer.echo("gemini connectivity: network-fail")
+
+
+def _connectivity_label(status_code: int) -> str:
+    """Map an HTTP status code to a human-friendly doctor connectivity tag."""
+    if 200 <= status_code < 300:
+        return "ok"
+    if status_code in (401, 403):
+        return "auth-fail"
+    return f"http-{status_code}"
 
 
 @app.command("list-agents")
@@ -1818,12 +1929,23 @@ async def _run_scan(
     )
 
     # --fail-under: a non-authoritative scan is ALWAYS a failure (it tested
-    # nothing); otherwise compare the numeric AIVSS against the floor.
+    # nothing); otherwise compare the numeric AIVSS against the floor. A
+    # FAST/SMART scan (#44) is also non-authoritative as a gate input: its
+    # numeric score reflects how much was tested, not how safe the agent is,
+    # so we refuse to gate-pass on it and emit a loud stderr warning.
     if fail_under is not None:
         if not authoritative:
             typer.echo(
                 f"--fail-under {fail_under}: FAILED -- scan is non-authoritative "
                 "(NOT_EVALUATED); a stub/unscored run never passes a gate.",
+                err=True,
+            )
+            return EXIT_FAIL_UNDER
+        if not scan_result.mode_authoritative:
+            typer.echo(
+                f"WARNING: --fail-under {fail_under}: this scan was run in "
+                f"--mode {scan_result.mode}; quoted score {scan_result.aivss} is "
+                "not authoritative -- re-run with --mode full for a real gate.",
                 err=True,
             )
             return EXIT_FAIL_UNDER

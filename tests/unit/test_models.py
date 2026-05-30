@@ -359,6 +359,7 @@ def test_scan_accepts_engine_and_stub_provenance() -> None:
         asi_scores={cat: 100.0 for cat in AsiCategory},
         duration_seconds=1.0,
         cost_usd=0.0,
+        mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
         evaluation_mode="stub",
         scoring_valid=False,
@@ -399,6 +400,8 @@ def _make_scan(
         asi_scores={cat: 100.0 for cat in AsiCategory},
         duration_seconds=12.3,
         cost_usd=0.04,
+        # #4 — ``mode`` is required.
+        mode="full",
         created_at=datetime(2026, 5, 26, 12, 0, tzinfo=UTC),
     )
 

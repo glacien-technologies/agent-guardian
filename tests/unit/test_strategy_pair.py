@@ -65,24 +65,26 @@ def test_parse_critique_embedded_in_text() -> None:
     assert rewrite == "R"
 
 
-def test_parse_critique_missing_rewrite_falls_back() -> None:
+def test_parse_critique_missing_rewrite_returns_empty() -> None:
+    # No `rewrite` field — parser returns ("", "") so the caller falls back
+    # to a corpus seed rather than forwarding the raw attacker prose.
     blob = '{"critique": "only critique"}'
     critique, rewrite = _parse_critique_payload(blob)
-    # rewrite missing → fall back to whole text.
-    assert rewrite == blob
+    assert rewrite == ""
     assert critique == ""
 
 
-def test_parse_critique_garbage_falls_back_to_text() -> None:
+def test_parse_critique_garbage_returns_empty() -> None:
+    # Non-JSON prose must NOT be forwarded as the next attack.
     critique, rewrite = _parse_critique_payload("not json at all")
     assert critique == ""
-    assert rewrite == "not json at all"
+    assert rewrite == ""
 
 
-def test_parse_critique_empty_rewrite_falls_back() -> None:
+def test_parse_critique_empty_rewrite_returns_empty() -> None:
     blob = '{"critique": "x", "rewrite": ""}'
     critique, rewrite = _parse_critique_payload(blob)
-    assert rewrite == blob
+    assert rewrite == ""
     assert critique == ""
 
 
@@ -123,22 +125,31 @@ async def test_critique_emits_rewrite(tmp_path: Path) -> None:
     assert second.metadata["critique_count"] == 1
 
 
-async def test_malformed_json_falls_back_gracefully(tmp_path: Path) -> None:
+async def test_malformed_json_falls_back_to_corpus_seed(tmp_path: Path) -> None:
+    """Malformed attacker output must NOT be forwarded as the next attack.
+
+    Regression: previously the strategy passed unstructured attacker prose
+    (e.g. ``"not json {"``) through to the target as if it were a real
+    adversarial payload. The fixed behaviour is to fall back to a corpus
+    seed so the next turn still carries a real probe.
+    """
     llm = (
         StubScript()
         .respond_to("rewrite it to be more effective", "not json {")
         .default("{}")
         .build()
     )
-    ctx = _ctx(tmp_path, llm=llm)
+    ctx = _ctx(tmp_path, llm=llm, seeds=["CORPUS-SEED-A", "CORPUS-SEED-B"])
     p = PAIRStrategy(ctx)
     first = await p.generate_next([], None)
     assert isinstance(first, NextPrompt)
     history = [Turn(prompt=first.text, response="refused")]
     second = await p.generate_next(history, "refused")
     assert isinstance(second, NextPrompt)
-    # Falls back to the raw response text.
-    assert "not json" in second.text
+    # Garbage attacker prose must NOT reach the target.
+    assert "not json" not in second.text
+    # Instead the strategy must reach into the corpus seeds.
+    assert second.text in {"CORPUS-SEED-A", "CORPUS-SEED-B"}
 
 
 # --- max_critiques exhaustion ------------------------------------------
@@ -220,6 +231,29 @@ async def test_attacker_refusal_uses_seed_as_rewrite(tmp_path: Path) -> None:
     assert "I cannot" not in second.text
     assert second.text in {"FALLBACK-A", "FALLBACK-B"}
     assert second.metadata.get("attacker_refused") is True
+
+
+async def test_non_json_prose_does_not_reach_target(tmp_path: Path) -> None:
+    """Regression for fix #26 — garbage attacker prose must not be forwarded.
+
+    A non-refusal but non-JSON attacker reply (e.g. ``"Sure, here's a great
+    rewrite for you to try."``) must NOT be sent verbatim to the target as
+    the next attack. The strategy must instead reach into the corpus seeds.
+    """
+    prose = "Sure! Here is a great rewrite for you to try."
+    llm = StubScript().respond_to("rewrite it to be more effective", prose).default("{}").build()
+    ctx = _ctx(tmp_path, llm=llm, seeds=["CORPUS-PROBE-X", "CORPUS-PROBE-Y"])
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [Turn(prompt=first.text, response="I cannot help.")]
+    second = await p.generate_next(history, "I cannot help.")
+    assert isinstance(second, NextPrompt)
+    # The attacker's raw prose must NOT appear in the next prompt.
+    assert prose not in second.text
+    assert "great rewrite" not in second.text
+    # The next prompt must be a corpus seed.
+    assert second.text in {"CORPUS-PROBE-X", "CORPUS-PROBE-Y"}
 
 
 async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:

@@ -260,6 +260,7 @@ def test_scan_model_defaults_are_backcompat() -> None:
         asi_scores={},
         duration_seconds=1.0,
         cost_usd=0.0,
+        mode="full",
         created_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
     )
     assert scan.stopped_reason == "completed"
@@ -289,6 +290,7 @@ def test_emit_json_includes_budget_and_completeness_blocks() -> None:
         asi_scores={},
         duration_seconds=1.0,
         cost_usd=0.009,
+        mode="full",
         stopped_reason="budget",
         budget=BudgetReport(cap_usd=0.01, spent_usd=0.009, pct_of_cap=0.9, finalise_truncated=True),
         completeness=ScanCompleteness(

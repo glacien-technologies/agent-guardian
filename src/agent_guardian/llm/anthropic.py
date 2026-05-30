@@ -43,6 +43,22 @@ class AnthropicClient(BaseLLM):
     provider = "anthropic"
     default_max_concurrency = 5
 
+    # Class-level flag so the "seed not supported" debug warning is emitted
+    # at most once per process — protects log volume during long swarm runs
+    # where every replay would otherwise re-log the same notice.
+    _seed_warning_emitted: bool = False
+
+    def _maybe_warn_seed_ignored(self, request: LLMRequest) -> None:
+        if request.seed is None:
+            return
+        if AnthropicClient._seed_warning_emitted:
+            return
+        AnthropicClient._seed_warning_emitted = True
+        _LOG.debug(
+            "anthropic: provider does not support seed; ignoring "
+            "(deterministic replay unavailable for this provider)"
+        )
+
     def _build_payload(self, request: LLMRequest) -> dict[str, Any]:
         system_parts: list[str] = []
         messages: list[dict[str, Any]] = []
@@ -98,6 +114,7 @@ class AnthropicClient(BaseLLM):
         )
 
     async def _send(self, request: LLMRequest) -> LLMResponse:
+        self._maybe_warn_seed_ignored(request)
         url = f"{(self.base_url or _DEFAULT_BASE_URL).rstrip('/')}/v1/messages"
         _LOG.debug(
             "anthropic call: model=%s n_messages=%d max_tokens=%s temperature=%s",

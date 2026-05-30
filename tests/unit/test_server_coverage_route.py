@@ -41,6 +41,8 @@ from agent_guardian.server.routes.coverage import (
     _paginate_findings,
     _PseudoScan,
     _sort_findings,
+    _unique_probes_for_asi,
+    _unique_probes_total,
 )
 
 # ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ def _make_scan(scan_id: str, findings: list[Finding], *, aivss: int = 72) -> Sca
         target_mode="code",
         target_ref="tests/stub:run",
         tier=Tier.T3_STANDARD,
+        mode="full",
         aivss=aivss,
         band=SeverityBand.WARNING if aivss < 80 else SeverityBand.GOOD,
         sub_scores={
@@ -493,3 +496,135 @@ def test_owasp_row_completed_scan_no_attempts_defaults_to_good(tmp_path: Path) -
     assert len(row.cells) == 10
     # Every cell has attempts=0 so the "scan_done + 0 attempts" branch fires.
     assert all(c.state == "good" for c in row.cells)
+
+
+# ---------------------------------------------------------------------------
+# Attempts vs unique probes (#43)
+# ---------------------------------------------------------------------------
+
+
+def test_unique_probes_total_dedupes_repeats() -> None:
+    """Multi-turn strategies fire the same probe many times — the count
+    of *distinct* probes must dedupe."""
+    coverage = {
+        "attempts_total": 5,
+        "probes_attempted": ["ASI01-GH-001", "ASI01-GH-002"],
+    }
+    # The roll-up writes a sorted unique list; helper returns 2.
+    assert _unique_probes_total(coverage) == 2
+    # Defensive: a non-unique sequence still collapses.
+    coverage_dup = {
+        "probes_attempted": ["ASI01-GH-001", "ASI01-GH-001", "ASI02-TA-001"],
+    }
+    assert _unique_probes_total(coverage_dup) == 2
+    # Empty / missing
+    assert _unique_probes_total({}) == 0
+    assert _unique_probes_total({"probes_attempted": []}) == 0
+
+
+def test_unique_probes_for_asi_filters_by_prefix() -> None:
+    """The per-ASI distinct-probe count filters ``probes_attempted`` by code."""
+    coverage = {
+        "probes_attempted": [
+            "ASI01-GH-001",
+            "ASI01-GH-002",
+            "ASI02-TA-001",
+            "ASI10-DR-007",
+        ],
+    }
+    assert _unique_probes_for_asi(coverage, AsiCategory.ASI01) == 2
+    assert _unique_probes_for_asi(coverage, AsiCategory.ASI02) == 1
+    assert _unique_probes_for_asi(coverage, AsiCategory.ASI03) == 0
+    assert _unique_probes_for_asi(coverage, AsiCategory.ASI10) == 1
+    # Non-string entries are ignored (defensive — should never happen in
+    # practice but the helper must not crash on malformed coverage dicts).
+    bad = {"probes_attempted": ["ASI01-GH-001", None, 42, "ASI01-GH-002"]}
+    assert _unique_probes_for_asi(bad, AsiCategory.ASI01) == 2
+
+
+def test_owasp_row_carries_attempts_and_unique_probes() -> None:
+    """Each OWASP cell now exposes BOTH the raw attempt count and the
+    distinct-probe count so the template can surface either lens."""
+    scan = _make_scan("s", [_f("a", asi=AsiCategory.ASI01)])
+    coverage = {
+        "agents": {"goal-hijack-agent": 7},  # 7 attempts on ASI01
+        "probes_attempted": [
+            "ASI01-GH-001",
+            "ASI01-GH-002",
+            "ASI01-GH-003",
+            "ASI02-TA-001",
+        ],
+    }
+    row = _build_owasp_row(scan, coverage=coverage, scan_done=True)
+    asi01 = row.cells[0]
+    assert asi01.name == "ASI01"
+    assert asi01.attempts == 7
+    assert asi01.unique_probes == 3
+    # ASI02 had no attempts in this coverage (no goal-hijack-agent entry
+    # for it) but does have one unique probe id — surface them both.
+    asi02 = row.cells[1]
+    assert asi02.name == "ASI02"
+    assert asi02.attempts == 0
+    assert asi02.unique_probes == 1
+
+
+def test_coverage_route_exposes_both_attempts_and_unique_probes(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The coverage view must surface BOTH ``attempts fired`` (raw count) and
+    ``unique probes`` (distinct seeds) so the dashboard doesn't conflate
+    re-fires with breadth of coverage (review finding #43)."""
+    findings = [_f("c1", severity=Severity.CRITICAL, asi=AsiCategory.ASI01)]
+    scan = _make_scan("sc-tiles", findings, aivss=72)
+    # Hand-craft a memory.jsonl where one probe was fired 3 times: that
+    # writes 3 attempts but only 1 unique probe id.
+    memory = [
+        # 3 attempts on the same seed_id ASI01-GH-001
+        _reflection("goal-hijack-agent", "ASI01", "pair"),
+        _reflection("goal-hijack-agent", "ASI01", "pair"),
+        _reflection("goal-hijack-agent", "ASI01", "pair"),
+        # Plus 1 attempt on a distinct seed (different ASI for clarity)
+        _reflection("tool-abuse-agent", "ASI02", "tap"),
+    ]
+    # Override the seed_id of the second reflection bucket so two unique
+    # probe ids are seen across 4 attempts.
+    memory[3]["payload"]["content"] = json.dumps(
+        {
+            "agent": "tool-abuse-agent",
+            "asi_category": "ASI02",
+            "strategy": "tap",
+            "seed_id": "ASI02-TA-001",
+            "mitre_techniques": ["AML.T0054"],
+            "csa_category": "agent-critical-system-interaction",
+        }
+    )
+    _persist_scan_and_memory(store, scan, memory)
+
+    resp = client.get("/scan/sc-tiles/coverage")
+    assert resp.status_code == 200
+    body = resp.text
+    # Both labels appear on the page.
+    assert ">attempts fired<" in body
+    assert ">unique probes<" in body
+    # The old conflated label must not leak — the rename is the user-visible
+    # part of this fix.
+    assert ">probes fired<" not in body
+    # 4 attempts (raw judged turns), 2 unique probes (distinct seed ids).
+    # The template formats both with thousands-separator, so check for the
+    # literal numbers in the tile body.
+    assert ">4<" in body  # attempts fired
+    assert ">2<" in body  # unique probes
+
+
+def test_coverage_context_keys_present(client: TestClient, store: ScanStore) -> None:
+    """Direct render-context probe — the route must pass both keys regardless
+    of whether the template is rebuilt. Locks in the contract so a future
+    template refresh can rely on either binding."""
+    scan = _make_scan("sc-ctx", [], aivss=100)
+    _persist_scan_and_memory(store, scan, [])
+    resp = client.get("/scan/sc-ctx/coverage")
+    assert resp.status_code == 200
+    # Indirect assertion: both tile labels must be present in the rendered
+    # body — confirms both context keys are wired through.
+    assert "attempts fired" in resp.text
+    assert "unique probes" in resp.text

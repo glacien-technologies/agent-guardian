@@ -88,6 +88,7 @@ from agent_guardian.models.scan import BudgetReport, Scan, ScanCompleteness
 from agent_guardian.models.severity import Severity, SeverityBand, band_for_score
 from agent_guardian.models.swarm_brief import AgentBrief, SwarmBrief
 from agent_guardian.models.tier import Tier
+from agent_guardian.probes.loader import PROBE_CORPUS_VERSION
 
 __all__ = [
     "CheckpointDecision",
@@ -265,6 +266,20 @@ class SwarmConfig:
     # secret-extraction, denial-of-wallet, detection-evasion) alongside the
     # core ASI01-10 slate. Default OFF so the agentic-risk scan is unchanged.
     include_m2_agents: bool = False
+    # #20 — per-agent finding cap. ``None`` (default) keeps each agent's
+    # class-level ``target_findings`` (3 for ASI agents, 2 for cascade). An
+    # operator scanning a defenceless target can raise this so each agent
+    # surfaces more than three fail findings before terminating with
+    # ``"success"`` — otherwise the score is coarse because the cap pins
+    # measured reliability to whatever the first three turns produced.
+    target_findings_per_agent: int | None = None
+    # #40 — explicit token-budget override marker. ``None`` (the default)
+    # means the operator did not override ``total_tokens``; ``True`` means a
+    # custom value was supplied. The Commander only emits the per-agent slice
+    # shrinkage warning when ``include_m2_agents`` is enabled *and* this is
+    # still ``None`` (the default), so an operator who scaled the budget on
+    # purpose isn't pestered.
+    total_tokens_explicit: bool = False
 
     def __post_init__(self) -> None:
         """Apply the scan-mode preset to any un-overridden knobs.
@@ -818,6 +833,21 @@ class SwarmCommander:
 
             agent_classes = (*_ASI_AGENT_CLASSES, *M2_SPECIALIST_AGENTS)
         per_agent_tokens = max(1, self.config.total_tokens // (len(agent_classes) + 3))
+        # #40 — enabling the OWASP-LLM specialist agents alongside the core
+        # ASI01-10 slate shrinks each agent's per-slice token budget unless the
+        # operator also raises ``total_tokens``. Warn loudly when both are at
+        # default so the slate's increased coverage isn't silently undermined
+        # by thinner per-agent budgets.
+        if self.config.include_m2_agents and not self.config.total_tokens_explicit:
+            baseline_tokens = max(1, self.config.total_tokens // (len(_ASI_AGENT_CLASSES) + 3))
+            _LOG.warning(
+                "include_m2_agents=True with default total_tokens=%d: per-agent slice "
+                "shrinks from ~%d to ~%d. Raise total_tokens to keep each specialist "
+                "at the original budget.",
+                self.config.total_tokens,
+                baseline_tokens,
+                per_agent_tokens,
+            )
         # Each ASI agent gets ~150k tokens by default (per PRD §14.2). We
         # derive the per-agent slice from total_tokens so test overrides
         # propagate cleanly.
@@ -839,6 +869,7 @@ class SwarmCommander:
                 evaluator_model=self.config.evaluator_model,
                 budget=AgentBudget(**agent_budget_kwargs),
                 rng=random.Random(self.rng_seed + len(agents)),
+                target_findings_override=self.config.target_findings_per_agent,
             )
             # v1.1 -- in FAST mode, subset the agent's seeds to the
             # top-N most-effective probes. SMART/FULL leave the full
@@ -1265,12 +1296,19 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     def _donate_budget(self, completed: AsiAgent) -> None:
-        """Annotate the ASI category with the fewest findings.
+        """Donate ``completed`` agent's leftover tokens to the lowest-coverage agent.
 
-        For M8 we surface the donation intent as an observer event; the
-        in-flight strategies don't read the donated tokens (every agent
-        has its own AgentBudget). When the BudgetController wiring lands,
-        the donation becomes a real cross-agent transfer.
+        #45 — previously this only logged the intent; the receiver's
+        :class:`AgentBudget` was untouched, so a slow ASI category never saw the
+        extra tokens the design promised. Now we look up the still-running
+        :class:`AsiAgent` for the target category in :attr:`_active_agents` and
+        atomically transfer ``tokens_remaining`` onto its
+        :class:`AgentBudget` so the receiver's strategy loop can keep going
+        when it would otherwise hit ``"budget"`` termination.
+
+        Donation is a best-effort signal: if the lowest-coverage category's
+        agent already finished (or was never launched), no transfer happens
+        and the donation is logged as a no-op.
         """
         remaining = max(0, completed.budget.tokens_remaining)
         if remaining <= 0:
@@ -1283,13 +1321,45 @@ class SwarmCommander:
         finding_counts = {cat: len(self.memory.findings_by_asi(cat)) for cat in AsiCategory}
         # Pick the lowest count (ties broken by AsiCategory enum order).
         target_cat = min(finding_counts.keys(), key=lambda c: finding_counts[c])
-        _LOG.debug(
+        # Resolve the receiver: a still-running agent for the target category.
+        # We never donate to ``completed`` itself or to a category whose agent
+        # already finished (its budget is moot once the strategy loop exits).
+        # ``_agent_reports`` may include ``completed`` here (the caller appends
+        # the report *before* invoking us), so we exclude the donor by identity.
+        completed_name = completed.name or type(completed).__name__
+        finished_names = {r.agent for r in self._agent_reports if r.agent != completed_name}
+        receiver: AsiAgent | None = None
+        for candidate in self._active_agents:
+            if candidate is completed:
+                continue
+            if candidate.asi_category is not target_cat:
+                continue
+            candidate_name = candidate.name or type(candidate).__name__
+            if candidate_name in finished_names:
+                continue
+            receiver = candidate
+            break
+        if receiver is None:
+            _LOG.debug(
+                "budget donate: from=%s tokens=%d target=%s -- no live receiver, dropped",
+                completed_name,
+                remaining,
+                target_cat.value,
+            )
+            return
+        # Atomic transfer: zero out the donor's slice and credit the receiver.
+        # AgentBudget is a plain dataclass, so mutating ``tokens_remaining`` is
+        # the canonical way to move tokens between slices.
+        receiver.budget.tokens_remaining += remaining
+        completed.budget.tokens_remaining = 0
+        _LOG.info(
             "budget donate: from=%s to=%s tokens=%d (target_asi_findings=%d, "
-            "reason=lowest-coverage)",
-            completed.name or type(completed).__name__,
-            target_cat.value,
+            "reason=lowest-coverage, receiver_now=%d)",
+            completed_name,
+            receiver.name or type(receiver).__name__,
             remaining,
             finding_counts[target_cat],
+            receiver.budget.tokens_remaining,
         )
 
     # ------------------------------------------------------------------
@@ -1543,6 +1613,36 @@ class SwarmCommander:
             created_at=_utcnow(),
         )
 
+    def _undertested_categories(self, findings: Sequence[Finding]) -> set[AsiCategory]:
+        """ASI categories the scan *launched* but exercised too thinly (#46).
+
+        Definition: zero findings AND fewer than 5 judged turns AND scan mode
+        is not FULL. The category's numeric score is unchanged (absence of
+        findings still reads as 100 — see :func:`compute_aivss`); we just
+        annotate the result so the report renderer can flag "thinly tested"
+        next to the headline number.
+
+        FULL-mode scans are never undertested: FULL runs the whole probe
+        corpus + 12 turns + no early-stop, so an empty findings list there
+        legitimately reads as "no observed weakness".
+        """
+        if (self.config.mode or ScanMode.FULL) is ScanMode.FULL:
+            return set()
+        finding_categories: set[AsiCategory] = {f.asi for f in findings}
+        result: set[AsiCategory] = set()
+        for report in self._agent_reports:
+            cat = report.asi_category
+            if cat is None or cat in finding_categories:
+                continue
+            # Skip categories the scan couldn't even attempt -- those are
+            # already covered by ``_not_covered_categories`` and would otherwise
+            # be double-annotated.
+            if report.turns == 0:
+                continue
+            if report.turns < 5:
+                result.add(cat)
+        return result
+
     def _not_covered_categories(self) -> set[AsiCategory]:
         """ASI categories the scan produced no real evidence for (#4 / #20).
 
@@ -1722,7 +1822,19 @@ class SwarmCommander:
         # or every turn egress-refused) are scored not-covered (0.0), never a
         # clean 100. A synthesized finding above already covers its category.
         not_covered = self._not_covered_categories() - {f.asi for f in findings}
-        result: AivssResult = compute_aivss(findings, probes=[], tier=tier, not_covered=not_covered)
+        # #46 — annotate categories the scan *launched* but exercised so thinly
+        # that the absence of findings is not safety evidence: zero findings,
+        # fewer than 5 judged turns, and the scan was not FULL. Score is
+        # unchanged; the list surfaces a "thinly tested" state for the report
+        # renderer and dashboard tile.
+        undertested = self._undertested_categories(findings)
+        result: AivssResult = compute_aivss(
+            findings,
+            probes=[],
+            tier=tier,
+            not_covered=not_covered,
+            undertested=undertested,
+        )
         # #1 — detect whether a real LLM produced the verdicts. A stub
         # evaluator/attacker can never flag a finding, so the numeric AIVSS is
         # vacuous: mark the scan non-authoritative and present NOT_EVALUATED
@@ -1761,6 +1873,15 @@ class SwarmCommander:
             attacker_out += int(tok.get("attacker_output", 0))
             evaluator_in += int(tok.get("evaluator_input", 0))
             evaluator_out += int(tok.get("evaluator_output", 0))
+        # #41 — fold the PoV-gate / critic-rubric evaluator spend into the
+        # reported totals. The finalise-phase paid work runs through
+        # ``self._finalise_evaluator_llm`` (wrapped in
+        # :class:`UsageTrackingLLM`); previously its tokens went into
+        # ``self._finalise_usage`` and never flowed into ``tokens_total`` /
+        # ``cost_usd``, so the reported scan cost under-reported finalise
+        # spend by exactly the PoV-gate cost.
+        evaluator_in += self._finalise_usage.prompt_tokens
+        evaluator_out += self._finalise_usage.completion_tokens
         commander_in = self._commander_usage.prompt_tokens
         commander_out = self._commander_usage.completion_tokens
         tokens_total = (
@@ -1779,11 +1900,33 @@ class SwarmCommander:
         )
 
         duration = time.monotonic() - self._start_time
+        # #44 — only FULL-mode scans produce an authoritative numeric AIVSS:
+        # FAST/SMART runs are intentionally thin and their score reflects how
+        # much was tested, not how safe the agent is. Persist the flag on the
+        # Scan + emit a stderr warning so downstream tools (--fail-under,
+        # dashboards) can refuse a non-authoritative gate-pass.
+        effective_mode = self.config.mode or ScanMode.FULL
+        mode_authoritative = effective_mode is ScanMode.FULL
+        if not mode_authoritative:
+            _LOG.warning(
+                "finalise: mode=%s is NON-AUTHORITATIVE -- numeric AIVSS=%d is "
+                "preserved for trend-tracking, but --fail-under must refuse to "
+                "gate-pass on it. Re-run with --mode full for an authoritative "
+                "score.",
+                effective_mode.value,
+                result.score,
+            )
+        # #46 — convert undertested set to sorted list of value strings for the
+        # JSON-friendly Scan field.
+        undertested_values: list[str] = sorted(c.value for c in result.undertested)
         scan = Scan(
             id=self.config.scan_id,
             package_version=__version__,
             aivss_formula_version=AIVSS_FORMULA_VERSION,
-            probe_library_version="0.0.0-placeholder",
+            # #13 — surface the real bundled probe-corpus version (was hard-
+            # coded "0.0.0-placeholder", which made every signed report claim
+            # the same un-versioned probe set even after a corpus refresh).
+            probe_library_version=PROBE_CORPUS_VERSION,
             target_mode=fingerprint.mode,
             target_ref=fingerprint.ref,
             target_inferred_goal=fingerprint.inferred_goal,
@@ -1799,7 +1942,9 @@ class SwarmCommander:
             tokens_total=tokens_total,
             # __post_init__ guarantees mode is non-None; the `or FULL`
             # is a belt-and-braces narrowing for Pyright.
-            mode=(self.config.mode or ScanMode.FULL).value,
+            mode=effective_mode.value,
+            mode_authoritative=mode_authoritative,
+            undertested=undertested_values,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
             budget=self._build_budget_report(),
             completeness=self._build_completeness(),

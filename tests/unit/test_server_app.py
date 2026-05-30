@@ -76,6 +76,8 @@ def _make_scan(scan_id: str = "scan-abc", findings: list[Finding] | None = None)
         asi_scores={cat: 75.0 for cat in AsiCategory},
         duration_seconds=12.5,
         cost_usd=0.0,
+        # #4 — ``mode`` is required.
+        mode="full",
         created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
     )
 

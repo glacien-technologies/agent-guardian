@@ -379,6 +379,7 @@ class AsiAgent(ABC):
         evaluator_model: str = "gpt-4o-mini",
         budget: AgentBudget | None = None,
         rng: random.Random | None = None,
+        target_findings_override: int | None = None,
     ) -> None:
         # Wrap both LLM clients in usage-tracking decorators so every
         # ``.complete(...)`` call folds its returned :class:`LLMUsage` into
@@ -423,6 +424,28 @@ class AsiAgent(ABC):
         # each turn boundary and exits cleanly. ``Any`` so we don't have to
         # import ``asyncio.Event`` here just for the type annotation.
         self._cancel_event: Any = None
+        # #20 — per-agent finding cap is configurable so a defenceless target
+        # can produce more than the back-compat default of ``target_findings``.
+        # ``None`` (no override) keeps the class-level default. Surfaced as a
+        # public attribute so SwarmCommander can pass it through SwarmConfig.
+        self._target_findings_override: int | None = target_findings_override
+        # #20 / #21 / #22 — probe-corpus provenance: built lazily in ``run()``
+        # from the resolved seed pool so ``_build_finding`` can stamp the real
+        # ``ProbeSeed.probe_id`` and ``ProbeSeed.severity`` onto a finding
+        # instead of the synthetic agent-name+category id and the static
+        # ``default_severity``.
+        self._seed_index: dict[str, ProbeSeed] = {}
+
+    @property
+    def effective_target_findings(self) -> int:
+        """Per-agent finding cap actually used by :meth:`should_terminate`.
+
+        Returns the constructor override when set; otherwise the class-level
+        ``target_findings`` default (3). Public so tests can introspect.
+        """
+        if self._target_findings_override is not None:
+            return self._target_findings_override
+        return self.target_findings
 
     # ------------------------------------------------------------------
     # Subclass hooks
@@ -489,7 +512,7 @@ class AsiAgent(ABC):
         * ``self.budget.tokens_remaining <= 0`` → ``"budget"``
         * ``elapsed_seconds >= self.budget.wall_seconds_remaining`` → ``"budget"``
         """
-        if findings_count >= self.target_findings:
+        if findings_count >= self.effective_target_findings:
             return True, "success"
         if turns >= self.budget.max_turns:
             return True, "exhausted"
@@ -728,6 +751,10 @@ class AsiAgent(ABC):
                 )
 
         combined_seeds = list(standard_seeds) + goal_specific_seeds
+        # #20 / #21 / #22 — index seeds by probe_id so ``_build_finding`` can
+        # stamp the real probe id + the probe's authored severity onto each
+        # finding via the ``seed_id`` already carried in strategy metadata.
+        self._seed_index = {seed.probe_id: seed for seed in combined_seeds}
         if goal_specific_seeds:  # pragma: no cover — goal-specific generation tested separately
             _LOG.info(
                 "agent %s: combined seeds standard=%d goal_specific=%d total=%d",
@@ -1075,6 +1102,7 @@ class AsiAgent(ABC):
                     response=target_response,
                     verdict=verdict,
                     attempt_count=turns,
+                    strategy_metadata=strat_meta,
                 )
                 try:
                     await memory.write_finding(finding)
@@ -1170,10 +1198,44 @@ class AsiAgent(ABC):
         response: str,
         verdict: JudgeVerdict,
         attempt_count: int,
+        strategy_metadata: dict[str, object] | None = None,
     ) -> Finding:
-        """Construct a :class:`Finding` from a successful attack turn."""
+        """Construct a :class:`Finding` from a successful attack turn.
+
+        Resolves probe-corpus provenance from ``strategy_metadata`` (the dict
+        :meth:`Strategy._build_seed_metadata` populates via the agent's
+        :class:`StrategyContext`): ``seed_id`` is the source probe id, and the
+        agent's :attr:`_seed_index` maps it back to the original
+        :class:`ProbeSeed` so we can stamp the probe's authored severity onto
+        the finding rather than the agent's static ``default_severity``
+        (#21 / #22). When no seed metadata is present (e.g. PAIR refinement
+        turns), we fall back to the legacy synthetic id + ``default_severity``.
+        """
         finding_id = f"f-{uuid.uuid4().hex[:12]}"
-        probe_id = f"{self.name or type(self).__name__}-{self.asi_category.value}"
+        meta = strategy_metadata or {}
+        seed_id_val = meta.get("seed_id")
+        seed_probe_id = str(seed_id_val) if seed_id_val else ""
+        seed = self._seed_index.get(seed_probe_id) if seed_probe_id else None
+        # #22 — use the real probe id from the seed pool when available, only
+        # fall back to the synthetic ``<agent>-<asi>`` id when this is a
+        # strategy-internal turn that wasn't seeded by any corpus probe (e.g.
+        # PAIR refinement turns generated from the attacker LLM).
+        probe_id = seed_probe_id or f"{self.name or type(self).__name__}-{self.asi_category.value}"
+        # #21 — prefer the probe's authored severity over the agent default so
+        # a LOW-severity probe produces a LOW finding even when fired by an
+        # agent whose default is HIGH.
+        severity = self.default_severity
+        if seed is not None and seed.severity:
+            try:
+                severity = Severity(seed.severity)
+            except ValueError:  # pragma: no cover — corrupt seed metadata
+                _LOG.warning(
+                    "agent %s: probe %s carried unparseable severity %r — "
+                    "falling back to default_severity",
+                    self.name or type(self).__name__,
+                    seed_probe_id,
+                    seed.severity,
+                )
         summary = (verdict.reasoning or "target compromised").strip()
         if len(summary) > 240:
             summary = summary[:237] + "..."
@@ -1189,7 +1251,7 @@ class AsiAgent(ABC):
             asi=self.asi_category,
             mitre_atlas=list(self.default_mitre_techniques),
             csa_category=self.default_csa_category,
-            severity=self.default_severity,
+            severity=severity,
             attempt_count=attempt_count,
             success=True,
             confidence=verdict.confidence,

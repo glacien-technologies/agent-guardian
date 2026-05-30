@@ -66,9 +66,17 @@ def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
     assert not missing, f"probes missing owasp_scenario: {sorted(missing)}"
 
 
-def test_corpus_size_is_seventy_nine() -> None:
-    """Phase B ships 50 original + 29 OWASP-aligned probes = 79."""
-    assert len(load_all_probes()) == 79
+def test_corpus_size_is_ninety() -> None:
+    """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap probes = 90.
+
+    The 11 coverage-gap additions close the CSA category gaps for
+    ``checker-out-of-the-loop`` (4 probes under asi06) and
+    ``resource-service-exhaustion`` (4 probes under asi09), add 2 T4-floor
+    seeds under asi09 so the corpus exercises the lowest target tier, and
+    add a poisoned-checkpoint vector under asi04 to keep the per-ASI count
+    even at >=8.
+    """
+    assert len(load_all_probes()) == 90
 
 
 def test_corpus_version_stamp() -> None:

@@ -130,10 +130,11 @@ class PAIRStrategy(Strategy):
         else:
             critique, rewrite = _parse_critique_payload(attacker_text)
             # If parse failed and we couldn't recover any rewrite, fall back
-            # to the raw response text — the strategy continues, garbage in /
-            # garbage out, and the M7 agent layer will surface that on judge
-            # verdict.
-            text = rewrite.strip() or attacker_text.strip() or prev.prompt
+            # to a corpus seed BEFORE the raw response text. Forwarding raw
+            # attacker prose as the next attack would send unstructured
+            # garbage (often the attacker's own preamble / refusal-shaped
+            # text) to the target instead of a real adversarial probe.
+            text = rewrite.strip() or self._fallback_seed_text() or prev.prompt
             refusal_text = None
             _LOG.debug(
                 "pair: refine produced rewrite[:60]=%r (critique[:40]=%r)",
@@ -162,9 +163,10 @@ class PAIRStrategy(Strategy):
 def _parse_critique_payload(text: str) -> tuple[str, str]:
     """Extract (critique, rewrite) from the attacker's JSON-shaped output.
 
-    On parse failure we treat the entire response as the rewrite and the
-    critique as an empty string — the strategy keeps moving rather than
-    aborting.
+    On parse failure we return ``("", "")`` — the caller treats an empty
+    rewrite as "no usable critique payload" and falls back to a corpus
+    seed rather than forwarding raw attacker prose (which is frequently
+    refusal-shaped or off-topic preamble) to the target.
     """
     stripped = text.strip()
     parsed = _try_json(stripped)
@@ -178,8 +180,10 @@ def _parse_critique_payload(text: str) -> tuple[str, str]:
         rewrite = str(parsed.get("rewrite", "")).strip()
         if rewrite:
             return critique, rewrite
-    # Total fallback — treat the whole reply as the rewrite.
-    return "", stripped
+    # Total fallback — no usable rewrite. Returning an empty rewrite signals
+    # the caller to use the corpus-seed fallback instead of forwarding the
+    # raw attacker prose as the next attack.
+    return "", ""
 
 
 def _try_json(text: str) -> Any:

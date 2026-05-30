@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_guardian.reports.sarif import (
     SARIF_SCHEMA,
     SARIF_VERSION,
+    ReportError,
     emit_sarif,
     write_sarif,
 )
@@ -118,3 +121,72 @@ def test_emit_sarif_redact_false_leaves_raw() -> None:
     )
     log = emit_sarif(make_scan(findings=[leaky]), redact=False)
     assert "user@example.com" in json.dumps(log)
+
+
+# --- finding #33: runtime SARIF 2.1.0 schema validation -----------------
+
+
+def test_emit_sarif_validates_by_default() -> None:
+    """Default emit must validate cleanly against the bundled schema.
+
+    This is the inverse of the malformed test below — a normal scan must
+    pass validation so the gate is never tripped on legitimate output.
+    """
+    # No exception means the validator returned no errors.
+    emit_sarif(make_scan())
+
+
+def test_emit_sarif_raises_report_error_on_malformed_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A payload that violates the schema must surface as ``ReportError``.
+
+    We inject a broken payload by monkey-patching :func:`_build_invocation`
+    to return a string instead of an object — SARIF 2.1.0 requires each
+    invocation to be an object with ``executionSuccessful: bool``.
+    """
+    from agent_guardian.reports import sarif as sarif_module
+    from tests.unit.reports.test_sarif_contract import _scan_with_audit
+
+    monkeypatch.setattr(sarif_module, "_build_invocation", lambda _audit: "not an object")
+    with pytest.raises(ReportError, match="SARIF schema validation failed"):
+        emit_sarif(_scan_with_audit())
+
+
+def test_emit_sarif_validate_false_skips_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``validate=False`` is the documented escape hatch — same malformed
+    payload as above must NOT raise when validation is disabled."""
+    from agent_guardian.reports import sarif as sarif_module
+    from tests.unit.reports.test_sarif_contract import _scan_with_audit
+
+    monkeypatch.setattr(sarif_module, "_build_invocation", lambda _audit: "not an object")
+    # Should not raise — validation gate is off.
+    log = emit_sarif(_scan_with_audit(), validate=False)
+    assert log["runs"][0]["invocations"] == ["not an object"]
+
+
+def test_write_sarif_raises_before_writing_on_malformed_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A schema failure must surface BEFORE any bytes hit disk —
+    otherwise we'd persist a corrupt artifact in a CI bundle."""
+    from agent_guardian.reports import sarif as sarif_module
+    from tests.unit.reports.test_sarif_contract import _scan_with_audit
+
+    monkeypatch.setattr(sarif_module, "_build_invocation", lambda _audit: "not an object")
+    out = tmp_path / "bad.sarif"
+    with pytest.raises(ReportError):
+        write_sarif(_scan_with_audit(), out)
+    assert not out.exists()
+
+
+def test_sarif_schema_loader_is_cached() -> None:
+    """The bundled schema is parsed at most once per process (lru_cache)."""
+    from agent_guardian.reports.sarif import _load_sarif_schema
+
+    a = _load_sarif_schema()
+    b = _load_sarif_schema()
+    assert a is b

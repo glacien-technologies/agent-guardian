@@ -122,7 +122,7 @@
         {% elif tile_sev.critical > 0 %}
         {{ tile_sev.critical }} unresolved <strong>critical</strong> finding{{ "s" if tile_sev.critical != 1 }} are pulling the aggregate down.
         {% else %}
-        {{ findings_total }} finding{{ "s" if findings_total != 1 }} recorded across {{ tile_probes_fired }} probe{{ "s" if tile_probes_fired != 1 }}.
+        {{ findings_total }} finding{{ "s" if findings_total != 1 }} recorded across {{ tile_unique_probes }} unique probe{{ "s" if tile_unique_probes != 1 }} ({{ tile_attempts_fired }} attempt{{ "s" if tile_attempts_fired != 1 }} total).
         {% endif %}
         {% if is_running %}The swarm is still running &mdash; this score is provisional.{% endif %}
       </p>
@@ -138,9 +138,14 @@
         </div>
       </div>
       <div class="tile">
-        <span class="tile__num">{{ "{:,}".format(tile_probes_fired) }}</span>
-        <span class="tile__lab">probes fired</span>
+        <span class="tile__num">{{ "{:,}".format(tile_attempts_fired) }}</span>
+        <span class="tile__lab">attempts fired</span>
         <span class="tile__hint">across {{ rows[0].cells|length }} ASI agents</span>
+      </div>
+      <div class="tile">
+        <span class="tile__num">{{ "{:,}".format(tile_unique_probes) }}</span>
+        <span class="tile__lab">unique probes</span>
+        <span class="tile__hint">distinct seeds attempted</span>
       </div>
       <div class="tile">
         <span class="tile__num">{% if tile_tokens_total >= 1000 %}{{ "{:.0f}k".format(tile_tokens_total / 1000) }}{% else %}{{ tile_tokens_total }}{% endif %}</span>

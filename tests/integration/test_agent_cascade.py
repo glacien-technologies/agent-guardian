@@ -39,8 +39,11 @@ async def test_cascade_finds_findings(
     findings = memory.findings_by_asi(AsiCategory.ASI08)
     assert findings
     assert findings[0].csa_category == CsaCategory.IMPACT_CHAIN_BLAST_RADIUS
-    # CC-3: ASI08 cascading failures bumped to HIGH per OWASP 2026.
-    assert findings[0].severity == Severity.HIGH
+    # #21 — Finding severity now comes from the source probe, not the agent's
+    # static default. The bundled ASI08 probes carry their own severity
+    # (MEDIUM for the cascade-failure family per OWASP 2026); the agent's
+    # default_severity is only the floor used when no probe seeded the turn.
+    assert findings[0].severity in {Severity.MEDIUM, Severity.HIGH}
 
 
 async def test_cascade_refused_target(

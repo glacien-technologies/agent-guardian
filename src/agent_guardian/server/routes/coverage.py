@@ -148,7 +148,15 @@ _SEV_ORDER: dict[Severity, int] = {
 
 @dataclass
 class Cell:
-    """One cell in the coverage matrix — the smallest unit the template renders."""
+    """One cell in the coverage matrix — the smallest unit the template renders.
+
+    ``count_label`` is the legacy ``"<n> t"`` chip the template prints
+    today; ``attempts`` and ``unique_probes`` are the orthogonal raw
+    integers so a caller / template can render either lens (attempts vs
+    distinct probes) without re-parsing the chip text. ``unique_probes``
+    is ``None`` for rows where probe attribution is not meaningful
+    (CSA / ATLAS / AIVSS / strategies — these aggregate by other axes).
+    """
 
     name: str
     sub: str | None
@@ -156,6 +164,8 @@ class Cell:
     count_label: str
     state: str  # "exc" | "good" | "attn" | "fail" | "run"
     has_warn: bool
+    attempts: int = 0
+    unique_probes: int | None = None
 
 
 @dataclass
@@ -231,6 +241,35 @@ def _attempts_for_asi(coverage: dict[str, Any], asi: AsiCategory) -> int:
     return int(coverage.get("agents", {}).get(agent, 0))
 
 
+def _unique_probes_total(coverage: dict[str, Any]) -> int:
+    """Return the count of *unique* probe ids the swarm has attempted.
+
+    The coverage roll-up's ``attempts_total`` counts every judged turn —
+    so a single probe re-fired five times by a multi-turn strategy reads
+    as ``5``. The dashboard needs the orthogonal "how many distinct
+    probes did we exercise" number too; this helper returns that count
+    by inspecting ``probes_attempted``, which the rollup writes as a
+    sorted list of seed ids (one entry per unique probe).
+    """
+    probes = coverage.get("probes_attempted") or []
+    # The rollup writes a sorted ``list`` of unique probe ids; defensive
+    # ``set()`` collapses any caller that hands in a non-unique sequence.
+    return len(set(probes))
+
+
+def _unique_probes_for_asi(coverage: dict[str, Any], asi: AsiCategory) -> int:
+    """Return the count of unique probe ids attempted for a given ASI.
+
+    Probe IDs in the corpus are namespaced by ASI code (e.g.
+    ``ASI01-GH-001``); filtering ``probes_attempted`` by the ASI prefix
+    gives the per-cell distinct-probe count without a coverage-rollup
+    schema change.
+    """
+    probes = coverage.get("probes_attempted") or []
+    prefix = f"{asi.value}-"
+    return sum(1 for pid in set(probes) if isinstance(pid, str) and pid.startswith(prefix))
+
+
 def _asi_in_progress(coverage: dict[str, Any], asi: AsiCategory, *, scan_done: bool) -> bool:
     """True iff this ASI has fired probes AND the scan hasn't finalised yet."""
     if scan_done:
@@ -270,6 +309,7 @@ def _build_owasp_row(
             state = _band_for_pct(score_pct, in_progress=in_progress)
             score_display = score_pct
         has_crit = any(f.severity is Severity.CRITICAL for f in findings_by_asi.get(asi, []))
+        unique_probes = _unique_probes_for_asi(coverage, asi)
         cells.append(
             Cell(
                 name=asi.value,
@@ -278,6 +318,8 @@ def _build_owasp_row(
                 count_label=_format_count(attempts) if attempts else _format_count(0),
                 state=state,
                 has_warn=has_crit,
+                attempts=attempts,
+                unique_probes=unique_probes,
             )
         )
     return FrameworkRow(
@@ -686,6 +728,15 @@ async def coverage_view(
             "needle_pct": aivss,  # band axis uses raw score as % offset (0\u2013100)
             "tile_findings_total": findings_total,
             "tile_sev": sev_summary,
+            # ``tile_attempts_fired`` is the raw count of judged adversarial
+            # turns; ``tile_unique_probes`` is the count of distinct probes
+            # the swarm has exercised. Surfacing both keeps the dashboard
+            # honest — a multi-turn strategy can re-fire the same probe many
+            # times, so attempts-fired alone overstates breadth of coverage.
+            # ``tile_probes_fired`` is retained as a back-compat alias for
+            # the existing template binding.
+            "tile_attempts_fired": coverage.get("attempts_total", 0),
+            "tile_unique_probes": _unique_probes_total(coverage),
             "tile_probes_fired": coverage.get("attempts_total", 0),
             "tile_tokens_total": scan.tokens_total if scan is not None else 0,
             "tile_cost": scan.cost_usd if scan is not None else 0.0,

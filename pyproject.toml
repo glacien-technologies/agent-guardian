@@ -45,6 +45,11 @@ dependencies = [
   "pyyaml>=6.0",
   "structlog>=24.4",
   "cryptography>=43.0",
+  # jsonschema validates emitted SARIF logs against the bundled SARIF 2.1.0
+  # schema (see reports.sarif._validate_sarif). Already arrives as a
+  # transitive (mcp → jsonschema), but the SARIF writer is a first-class
+  # consumer so we declare it directly to keep the contract explicit.
+  "jsonschema>=4.21",
   "exceptiongroup>=1.2; python_version<'3.11'",
 ]
 
@@ -177,6 +182,9 @@ artifacts = [
   # (Inter + JetBrains Mono, both SIL OFL — see NOTICE).
   "src/agent_guardian/reports/templates/pdf/*.jinja",
   "src/agent_guardian/reports/templates/pdf/fonts/*.woff2",
+  # Bundled SARIF 2.1.0 JSON Schema used by reports.sarif._validate_sarif
+  # for runtime contract validation of emitted SARIF logs.
+  "src/agent_guardian/reports/sarif-2.1.0.schema.json",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -256,6 +264,14 @@ follow_imports = "skip"
 # are reached via attribute access), so no ``grpc.*`` submodule pattern is used.
 [[tool.mypy.overrides]]
 module = ["websockets.*", "grpc", "playwright.*"]
+ignore_missing_imports = true
+
+# jsonschema has incomplete first-party stubs and ships none of its own. We
+# call only a tiny stable surface (Draft7Validator + ValidationError) from
+# :mod:`agent_guardian.reports.sarif`, so the missing-import + Any-return
+# noise is silenced once here rather than peppering inline ignores.
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

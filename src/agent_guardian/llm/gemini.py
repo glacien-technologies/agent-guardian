@@ -77,6 +77,11 @@ class GeminiClient(BaseLLM):
             "temperature": request.temperature,
             "maxOutputTokens": request.max_tokens,
         }
+        if request.seed is not None:
+            # Gemini accepts the deterministic seed inside ``generationConfig``
+            # (camelCase ``seed``) for AI Studio v1beta. Forward it so swarm
+            # replay buys actual determinism — not just the same prompt.
+            generation_config["seed"] = request.seed
         if request.stop is not None:
             generation_config["stopSequences"] = list(request.stop)
 
@@ -121,11 +126,12 @@ class GeminiClient(BaseLLM):
         if self.api_key:
             params["key"] = self.api_key
         _LOG.debug(
-            "gemini call: model=%s n_messages=%d max_tokens=%s temperature=%s",
+            "gemini call: model=%s n_messages=%d max_tokens=%s temperature=%s seed=%s",
             request.model,
             len(request.messages),
             request.max_tokens,
             request.temperature,
+            request.seed,
         )
         req = self._client.build_request(
             "POST",

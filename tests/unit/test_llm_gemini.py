@@ -243,3 +243,35 @@ def test_gemini_concurrency_default() -> None:
     llm = GeminiClient(api_key="k")
     # PRD §14.3 default for paid providers without a higher OpenAI-style cap.
     assert llm._semaphore._value == 5
+
+
+@respx.mock
+async def test_gemini_seed_forwarded_to_generation_config() -> None:
+    """Deterministic-replay seed must reach ``generationConfig.seed``.
+
+    Without this, swarm replay against Gemini silently falls back to
+    same-prompt-same-temperature determinism — and quietly loses the
+    reproducibility guarantee promised in :class:`LLMRequest`.
+    """
+    route = respx.post(_HAPPY_URL).mock(return_value=Response(200, json=_happy_body()))
+    req = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model="gemini-3.1-pro-preview",
+        seed=4242,
+    )
+    llm = GeminiClient(api_key="k")
+    await llm.complete(req)
+    body = json.loads(route.calls.last.request.content)
+    assert body["generationConfig"]["seed"] == 4242
+    await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_seed_omitted_when_none() -> None:
+    """When ``seed`` is None we must NOT emit the field — Gemini rejects nulls."""
+    route = respx.post(_HAPPY_URL).mock(return_value=Response(200, json=_happy_body()))
+    llm = GeminiClient(api_key="k")
+    await llm.complete(_req())
+    body = json.loads(route.calls.last.request.content)
+    assert "seed" not in body["generationConfig"]
+    await llm.aclose()

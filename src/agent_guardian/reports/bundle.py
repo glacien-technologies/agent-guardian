@@ -97,6 +97,19 @@ def write_bundle(
 
 
 def _safe(name: str) -> str:
-    """Sanitize a path component — no separators / traversal."""
+    """Sanitize a path component — no separators / traversal.
+
+    Output is bounded to 120 characters so the bundle survives the most
+    aggressive filesystem limits (eCryptfs caps single-component names at
+    143 bytes; we leave headroom). For names that would be truncated, a
+    12-char sha256 disambiguator is appended (107 + ``_`` + 12 = 120) so two
+    long finding IDs that happen to share their first 120 chars still map to
+    distinct files — the alternative is a silent overwrite.
+    """
     cleaned = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-    return cleaned[:120] or "unnamed"
+    if not cleaned:
+        return "unnamed"
+    if len(cleaned) <= 120:
+        return cleaned
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+    return cleaned[:107] + "_" + digest

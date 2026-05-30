@@ -120,8 +120,14 @@ class VertexClient(BaseLLM):
         return VERTEX_HOST_TEMPLATE.format(region=self.region)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        _ = request  # The request-builder + response-mapper are pure fns above.
+        _LOG.warning(
+            "vertex.complete called but provider is M9-pending (request-builder + "
+            "response-mapper only). See docs/providers/vertex.md."
+        )
         raise NotImplementedError(
-            "Vertex AI OAuth2 service-account authentication lands in M9. "
-            "Use StubLLM in tests, OpenAIClient / AnthropicClient / OllamaClient "
-            "in development."
+            "Vertex AI provider is M9-pending: OAuth2 service-account auth has "
+            "not been wired yet. Use openai:<model>, anthropic:<model>, gemini:"
+            "<model>, ollama:<model>, or bedrock:<id> for now. See "
+            "docs/providers/vertex.md for the M9 roadmap."
         )

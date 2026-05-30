@@ -13,6 +13,7 @@ the cost-estimate countdown only to crash on the first request.
 
 from __future__ import annotations
 
+import logging
 import re
 
 import pytest
@@ -610,5 +611,88 @@ async def test_bedrock_malformed_success_body_raises(_fake_aws_env: None) -> Non
                     model="anthropic.claude-haiku-4-5-v1:0",
                 )
             )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_response_model_strips_provider_prefix(_fake_aws_env: None) -> None:
+    """Caller-supplied ``bedrock:<id>`` spec must NOT leak into the response.
+
+    Cost lookup, receipts, and downstream telemetry all key off
+    :attr:`LLMResponse.model`, which is the bare Bedrock model id — passing
+    the spec form (with the ``bedrock:`` provider tag) through would break
+    the cost table lookup silently.
+    """
+    respx.post(_converse_url_re()).mock(return_value=_happy_response())
+    client = BedrockClient(region="us-east-1")
+    try:
+        resp = await client.complete(
+            LLMRequest(
+                messages=[LLMMessage(role="user", content="hi")],
+                model="bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0",
+            )
+        )
+        assert resp.model == "anthropic.claude-3-5-sonnet-20240620-v1:0"
+        assert not resp.model.startswith("bedrock:")
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_seed_ignored_logs_once_per_process(
+    _fake_aws_env: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bedrock does not support deterministic seed — we warn once, then stay quiet.
+
+    The per-process dedupe matters because swarm runs can issue thousands
+    of completions; if we logged every time the noise would drown real
+    issues. We reset the class-level flag here so test ordering can't
+    starve the assertion.
+    """
+    # Reset the module-level dedupe flag so the test is order-independent.
+    from agent_guardian.llm.bedrock import BedrockClient as _BC
+
+    _BC._seed_warning_emitted = False
+    respx.post(_converse_url_re()).mock(return_value=_happy_response())
+    client = BedrockClient(region="us-east-1")
+    try:
+        with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.bedrock"):
+            for _ in range(3):
+                await client.complete(
+                    LLMRequest(
+                        messages=[LLMMessage(role="user", content="hi")],
+                        model="anthropic.claude-haiku-4-5-v1:0",
+                        seed=1337,
+                    )
+                )
+        seed_warnings = [r for r in caplog.records if "does not support seed" in r.getMessage()]
+        assert len(seed_warnings) == 1, (
+            f"expected exactly one seed-ignored debug warning, got {len(seed_warnings)}"
+        )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_seed_omitted_emits_no_warning(
+    _fake_aws_env: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the caller omits seed entirely we must stay silent."""
+    from agent_guardian.llm.bedrock import BedrockClient as _BC
+
+    _BC._seed_warning_emitted = False
+    respx.post(_converse_url_re()).mock(return_value=_happy_response())
+    client = BedrockClient(region="us-east-1")
+    try:
+        with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.bedrock"):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+        seed_warnings = [r for r in caplog.records if "does not support seed" in r.getMessage()]
+        assert seed_warnings == []
     finally:
         await client.aclose()

@@ -45,6 +45,8 @@ def _stub_scan(scan_id: str) -> Scan:
         asi_scores={},
         duration_seconds=0.0,
         cost_usd=0.0,
+        # #4 — ``mode`` is required on Scan.
+        mode="full",
         created_at=datetime(2026, 5, 27, tzinfo=timezone.utc),
     )
 
