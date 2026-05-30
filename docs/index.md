@@ -19,10 +19,13 @@ MITRE ATLAS v5.4.0, and the CSA Agentic AI Red Teaming Guide.
 - Eleven specialist agents — one reconnaissance, ten ASI-aligned attackers.
 - Deterministic AIVSS score 0–100 with band, colour, and per-ASI breakdown.
 - Four target input modes: system prompt, agent code, HTTP endpoint, framework
-  adapter (LangGraph, CrewAI, AutoGen, LlamaIndex, AG2, Semantic Kernel).
+  adapter (LangGraph, CrewAI, AutoGen, OpenAI Agents, Strands, ADK).
 - Local live dashboard at `localhost:7474`.
 - Signed PDF, JSON, SARIF, and JUnit reports (Ed25519 + HMAC-SHA256).
-- Apache-2.0. No telemetry. No API-key requirement (`--model stub`).
+- Apache-2.0. Anonymous opt-out telemetry (first-scan consent prompt;
+  `agent-guardian telemetry disable` to opt out — see
+  [Telemetry transparency](telemetry/index.md)). No API-key requirement
+  (`--model stub`).
 
 ## Get started
 

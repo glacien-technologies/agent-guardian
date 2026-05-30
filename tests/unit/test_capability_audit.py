@@ -153,3 +153,71 @@ async def test_cancel_event_exits_early() -> None:
         cancel_event=cancel,
     )
     assert res.transcript == []
+
+
+# --------------------------- tool_calls_per_turn parallel transcript
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_per_turn_matches_transcript_length_for_non_http_target() -> None:
+    """A non-HTTP target (PromptAdapter-like) must produce empty tool-call tuples.
+
+    The capability audit walks ``transcript`` and ``tool_calls_per_turn`` in
+    lock-step; an off-by-one would silently break recon's evidence merge so
+    we assert the indices align even when no tool calls are surfaced.
+    """
+    res = await run_capability_audit(
+        _MemoryTarget("none"),
+        llm=StubLLM(default="DONE"),
+        model="stub",
+        max_deepen_rounds=0,
+    )
+    assert len(res.tool_calls_per_turn) == len(res.transcript)
+    # Every per-turn entry is the empty tuple for this non-HTTP target.
+    assert all(t == () for t in res.tool_calls_per_turn)
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_per_turn_threads_through_http_adapter_snapshot() -> None:
+    """A fake HttpAdapter that stashes ``_last_response.tool_calls`` is honoured.
+
+    We construct a minimal HttpAdapter subclass (bypassing the real send_once)
+    that flips ``_last_response`` per call, and assert the run_capability_audit
+    consumer drops the tool_calls into ``tool_calls_per_turn`` in the same
+    index as the corresponding transcript entry.
+    """
+    from agent_guardian.adapters.http import (
+        HttpAdapter,
+        HttpAdapterLastResponse,
+        HttpAdapterToolCall,
+    )
+
+    class _StashingHttpAdapter(HttpAdapter):
+        def __init__(self) -> None:
+            super().__init__("https://x.example", shape="openai", model="gpt-4o-mini")
+            self._turn = 0
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            self._turn += 1
+            self._last_response = HttpAdapterLastResponse(
+                text="ack",
+                tool_calls=(
+                    HttpAdapterToolCall(name=f"tool_{self._turn}", arguments={"i": self._turn}),
+                ),
+                raw=None,
+            )
+            return "ack"
+
+    adapter = _StashingHttpAdapter()
+    try:
+        res = await run_capability_audit(
+            adapter, llm=StubLLM(default="DONE"), model="stub", max_deepen_rounds=0
+        )
+    finally:
+        await adapter.aclose()
+    assert len(res.tool_calls_per_turn) == len(res.transcript)
+    # Every turn produced exactly one tool call with the per-turn name.
+    flat = [tc.name for per_turn in res.tool_calls_per_turn for tc in per_turn]
+    assert "tool_1" in flat and "tool_2" in flat
+    # Names are uniquely indexed -> at least as many tool blocks as transcript turns.
+    assert len(flat) == len(res.transcript)

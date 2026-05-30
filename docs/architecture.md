@@ -45,7 +45,7 @@ The target enters the system through one of four **adapters**:
 |  A   | System prompt      | You only have the agent's system prompt           |
 |  B   | Code               | You have the Python source of the agent           |
 |  C   | HTTP               | The agent is reachable as an HTTP endpoint        |
-|  D   | Framework          | LangGraph / CrewAI / AutoGen / LlamaIndex / etc.  |
+|  D   | Framework          | LangGraph / CrewAI / AutoGen / OpenAI Agents / Strands / ADK |
 
 Each adapter normalises its input into a **Target Profile** — the schema
 the recon agent consumes. Profile fields cover declared tools, declared
@@ -86,9 +86,15 @@ that runs the orchestration loop. Each tick it:
 3. Decides which agents to re-task, which to stop, and whether the swarm
    has converged (no new findings for N ticks).
 
-Convergence detection prevents over-spend. A typical scan hits convergence
-after 60–90 seconds against a well-defended target, or 20–30 seconds
-against a weak one.
+Convergence detection bounds over-spend on the `fast` and `smart` scan
+modes (see [Scan Modes](concepts/scan-modes.md)). Measured wall times
+against the OWASP-vulnerable-by-design target on Gemini 2.5 Flash were
+roughly **165 s (`fast`) / 190 s (`smart`) / 365 s (`full`)**. The
+default `full` mode deliberately suppresses early-stop until every
+agent has used its full turn budget — a few extra minutes of compute is
+cheaper than a misleading score quoted to a stakeholder. Use `smart`
+when you want the v1.0 convergence behaviour back, and `fast` for CI
+gating.
 
 ## Layer 3 — Score and emit
 
@@ -107,8 +113,8 @@ The scorer applies the deterministic AIVSS v0.8 formula — see
   finding.
 
 The evidence pack is then signed with Ed25519 and emitted to disk. The
-report layer (M13) renders the pack as JSON, SARIF, JUnit, Markdown, or
-PDF on demand.
+report layer renders the pack as JSON, SARIF, JUnit, Markdown, or PDF
+on demand — see [Output formats](guide/output-formats.md).
 
 ## Determinism guarantees
 

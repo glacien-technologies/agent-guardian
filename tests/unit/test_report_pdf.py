@@ -21,7 +21,26 @@ from agent_guardian.reports.pdf import (
 )
 from tests.unit._report_fixtures import make_scan
 
-HAS_WEASYPRINT = importlib.util.find_spec("weasyprint") is not None
+
+def _weasyprint_runtime_available() -> bool:
+    """Mirror ``agent_guardian.reports.pdf._has_weasyprint`` — render-time probe.
+
+    The python wheel imports without its native deps (``cairo`` / ``pango`` /
+    ``libgobject``); a stock macOS box without Homebrew has the wheel but
+    cannot render. Skip rather than fail with a dlopen ``OSError``.
+    """
+    if importlib.util.find_spec("weasyprint") is None:
+        return False
+    try:
+        import weasyprint  # type: ignore[import-untyped,unused-ignore]
+
+        weasyprint.HTML(string="<p>probe</p>").write_pdf()
+    except Exception:
+        return False
+    return True
+
+
+HAS_WEASYPRINT = _weasyprint_runtime_available()
 HAS_REPORTLAB = importlib.util.find_spec("reportlab") is not None
 
 

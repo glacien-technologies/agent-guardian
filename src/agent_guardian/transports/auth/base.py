@@ -43,6 +43,15 @@ class AuthProvider(ABC):
         """
         return False
 
+    async def aclose(self) -> None:
+        """Release any provider-owned resources (e.g. token-fetch httpx clients).
+
+        Default: a no-op. Token-fetch providers that own an :class:`httpx.AsyncClient`
+        override this to close it; transports that own their auth provider must
+        call ``aclose`` on the provider as part of their own ``aclose``.
+        """
+        return None
+
 
 class NoAuth(AuthProvider):
     """No-op provider for unauthenticated targets."""

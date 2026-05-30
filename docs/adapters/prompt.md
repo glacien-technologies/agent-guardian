@@ -4,29 +4,53 @@ Use this adapter when all you have is the agent's system prompt — no
 running endpoint, no source, no framework metadata. This is the
 lowest-fidelity mode but the easiest to get started with.
 
-## Usage
+## CLI
 
 ```bash
 agent-guardian scan --system-prompt path/to/prompt.txt
 ```
 
-Or pipe directly:
-
-```bash
-cat prompt.txt | agent-guardian scan --system-prompt -
-```
+The CLI is the recommended entry point. It wires up a `PromptAdapter`,
+the resolved LLM client, and the swarm in one call.
 
 ## Programmatic
 
-```python
-from agent_guardian import scan_system_prompt
+The library surface mirrors the CLI. Instantiate `PromptAdapter`
+directly and hand it to `SwarmCommander`:
 
-result = scan_system_prompt(
-    prompt="You are a helpful customer-support bot for ACME Corp.",
-    model="anthropic:claude-opus-4-7",
+```python
+import asyncio
+
+from agent_guardian import (
+    PromptAdapter,
+    StubLLM,
+    SwarmCommander,
+    SwarmConfig,
 )
-print(result.aivss_score, result.band)
+
+
+async def main() -> None:
+    adapter = PromptAdapter(
+        prompt="You are a helpful customer-support bot for ACME Corp.",
+        llm=StubLLM(),  # or OpenAIClient / AnthropicClient / GeminiClient / ...
+        model="stub",
+    )
+    swarm = SwarmCommander(
+        SwarmConfig(scan_id="demo"),
+        adapter,
+        attacker_llm=StubLLM(),
+        evaluator_llm=StubLLM(),
+    )
+    scan = await swarm.run()
+    print(scan.aivss, scan.band)
+
+
+asyncio.run(main())
 ```
+
+Swap `StubLLM()` for a real client (`OpenAIClient`, `AnthropicClient`,
+`GeminiClient`, `BedrockClient`, `OllamaClient`) when you want to drive
+the swarm with a hosted model.
 
 ## What gets detected
 

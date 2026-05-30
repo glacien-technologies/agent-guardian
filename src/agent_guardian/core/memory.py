@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from agent_guardian.adapters.base import TargetFingerprint
+from agent_guardian.core.redact import PiiRedactor
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.finding import Finding
 
@@ -73,6 +74,101 @@ RecordType = Literal[
 ]
 
 _HASH_EMBED_DIM = 128
+
+# Forensic mode — set AGENT_GUARDIAN_FORENSIC_MODE=1 to disable durable
+# redaction of memory.jsonl writes. The forensic mode is intended for
+# off-line replays where a trusted operator needs the raw target output
+# (transcripts, captured tokens, exfil payloads). In the default secure
+# mode every reflection / finding / fingerprint payload is run through a
+# shared :class:`PiiRedactor` instance before being persisted to JSONL so a
+# memory dump never re-emits captured secrets.
+_FORENSIC_ENV = "AGENT_GUARDIAN_FORENSIC_MODE"
+
+
+def _forensic_mode_enabled() -> bool:
+    """Read ``AGENT_GUARDIAN_FORENSIC_MODE`` and return a bool.
+
+    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive). All
+    other values (including unset) keep the secure default. Evaluated on
+    every write so unit tests can flip the env var mid-process.
+    """
+    return os.environ.get(_FORENSIC_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Module-level :class:`PiiRedactor` reused for every memory write so the
+# credential/PII regex bank is compiled once. Lazy because in early import
+# (e.g. during ``agent_guardian.__init__``) Presidio's analyser-engine init
+# adds 1-2 s of boot latency we don't want to pay unless memory is actually
+# written.
+_MEMORY_REDACTOR: PiiRedactor | None = None
+
+
+def _get_memory_redactor() -> PiiRedactor:
+    global _MEMORY_REDACTOR
+    if _MEMORY_REDACTOR is None:
+        _MEMORY_REDACTOR = PiiRedactor()
+    return _MEMORY_REDACTOR
+
+
+# Per-record-type list of payload fields that must be scrubbed before the
+# record hits durable storage. Keeping this declarative means a new record
+# type adds a single entry instead of editing the write path.
+_REDACTABLE_PAYLOAD_FIELDS: dict[RecordType, tuple[str, ...]] = {
+    "finding": ("summary", "transcript_ref", "trigger_prompt"),
+    "reflection": ("content",),
+    "fingerprint": ("notes", "inferred_goal"),
+    # attempted_seed / agent_skipped carry only enum/id values + an internal
+    # ``reason`` string; no attacker-reflected fields. Left out so the
+    # secure path is a strict superset of the forensic path semantically.
+    "attempted_seed": (),
+    "agent_skipped": ("reason",),
+}
+
+
+def _redact_payload(record_type: RecordType, payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a shallow copy of ``payload`` with sensitive fields scrubbed.
+
+    Walks the per-record-type field list. ``reflection`` payloads embed the
+    full turn record as a JSON-encoded ``content`` string, so we additionally
+    re-parse that JSON, redact the well-known leaky string fields, and re-
+    serialise. Any non-string value (or a JSON parse failure) is passed
+    through unchanged — the secure path must never drop data, only mask
+    secrets in known string fields.
+    """
+    fields = _REDACTABLE_PAYLOAD_FIELDS.get(record_type, ())
+    if not fields:
+        return payload
+    redactor = _get_memory_redactor()
+    out: dict[str, Any] = dict(payload)
+    for field_name in fields:
+        value = out.get(field_name)
+        if isinstance(value, str) and value:
+            out[field_name] = redactor.redact(value)
+    if record_type == "reflection":
+        # The turn record agents write is a JSON-encoded blob inside the
+        # ``content`` field. Re-parse it, redact the well-known leaky string
+        # fields (prompt / response / reasoning), and re-emit. Unparseable
+        # content is left as-is (already redacted by the field-level pass
+        # above).
+        content = out.get("content")
+        if isinstance(content, str) and content.startswith("{"):
+            try:
+                turn = json.loads(content)
+            except (json.JSONDecodeError, ValueError):
+                turn = None
+            if isinstance(turn, dict):
+                for inner_field in (
+                    "prompt",
+                    "target_response",
+                    "reasoning",
+                    "rationale",
+                    "attacker_refusal_text",
+                ):
+                    inner_value = turn.get(inner_field)
+                    if isinstance(inner_value, str) and inner_value:
+                        turn[inner_field] = redactor.redact(inner_value)
+                out["content"] = json.dumps(turn)
+    return out
 
 
 class MemoryFeatureUnavailable(RuntimeError):
@@ -342,7 +438,22 @@ class SharedMemory:
             os.fsync(fh.fileno())
 
     async def _write_record(self, record: MemoryRecord) -> None:
-        line = record.model_dump_json()
+        # BLOCKER #1 — durable-storage redaction. Every JSONL line is run
+        # through :class:`PiiRedactor` so a memory dump never re-emits
+        # captured secrets / PII back to disk. The in-memory indexes still
+        # carry the raw payload (this method is called *after* the in-
+        # memory index update in every write path) so live observers see
+        # the full record while the persisted artifact is scrubbed.
+        # Forensic mode (AGENT_GUARDIAN_FORENSIC_MODE=1) skips the redaction
+        # pass for off-line replays where the operator needs the raw turn
+        # text. The forensic switch is read on every write so a unit test
+        # can flip it mid-process.
+        if _forensic_mode_enabled():
+            line = record.model_dump_json()
+        else:
+            redacted_payload = _redact_payload(record.record_type, record.payload)
+            redacted = record.model_copy(update={"payload": redacted_payload})
+            line = redacted.model_dump_json()
         await asyncio.to_thread(self._append_line_sync, line)
 
     def _write_stats_snapshot_sync(self) -> None:

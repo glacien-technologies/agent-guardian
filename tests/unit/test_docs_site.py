@@ -126,7 +126,10 @@ def test_ethics_page_contains_authorised_use_clause() -> None:
 def test_aivss_formula_page_has_worked_example() -> None:
     body = (REPO_ROOT / "docs" / "aivss-formula.md").read_text(encoding="utf-8")
     assert "good_t1.json" in body
-    assert "83" in body  # the documented hand-computed score
+    # The worked example pins the fixture's expected_aivss (89) from
+    # tests/golden/aivss_regression/good_t1.json. See
+    # tests/unit/test_docs_aivss_example.py for the live-recompute guard.
+    assert "89" in body
 
 
 def test_glossary_exists_and_lists_aivss_term() -> None:

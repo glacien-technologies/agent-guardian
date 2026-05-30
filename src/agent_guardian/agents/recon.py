@@ -382,11 +382,25 @@ class ReconAgent:
             cross_session_data_observed = True
         # Heuristic surface flags over every reply (reliable boolean signal); the
         # LLM profiler below adds intent + may confirm flags. A refusal simply
-        # matches nothing here -- the profiler still reasons about it.
-        for question, reply in transcript:
+        # matches nothing here -- the profiler still reasons about it. Structured
+        # tool_calls surfaced by the HTTP adapter are OR-merged into
+        # ``declared_tools_observed`` first (real evidence beats substring
+        # matching); ``has_tools_observed`` flips on any non-empty tool block.
+        tool_calls_per_turn = audit_result.tool_calls_per_turn or [() for _ in transcript]
+        observed_tool_names: list[str] = []
+        observed_tool_names_seen: set[str] = set()
+        for idx, (question, reply) in enumerate(transcript):
+            turn_tool_calls = tool_calls_per_turn[idx] if idx < len(tool_calls_per_turn) else ()
+            if turn_tool_calls:
+                has_tools_observed = True
+                for call in turn_tool_calls:
+                    name = (call.name or "").strip()
+                    if name and name.lower() not in observed_tool_names_seen:
+                        observed_tool_names_seen.add(name.lower())
+                        observed_tool_names.append(name)
             if _looks_like_tools(reply):
                 has_tools_observed = True
-                if not declared_tools_observed:
+                if not declared_tools_observed and not observed_tool_names:
                     extracted = await _extract_tool_names(reply, self._llm, self._model)
                     if extracted:
                         declared_tools_observed = extracted
@@ -402,12 +416,29 @@ class ReconAgent:
                 await memory.write_reflection(
                     self.name,
                     json.dumps(
-                        {"event": "recon_audit", "prompt": question, "target_response": reply}
+                        {
+                            "event": "recon_audit",
+                            "prompt": question,
+                            "target_response": reply,
+                            "tool_calls": [
+                                {"name": call.name, "arguments": call.arguments}
+                                for call in turn_tool_calls
+                            ],
+                        }
                     ),
                     embed=False,
                 )
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.warning("recon audit: write_reflection failed (%s) -- continuing", exc)
+        # OR-merge structured tool names into the declared set so downstream
+        # strategies (tool exfil, recon-adaptive) see the real surface even
+        # when the assistant text never named the tool in prose.
+        if observed_tool_names:
+            existing_lower = {n.lower() for n in declared_tools_observed}
+            for name in observed_tool_names:
+                if name.lower() not in existing_lower:
+                    declared_tools_observed.append(name)
+                    existing_lower.add(name.lower())
 
         # Black-box intent: structure the audit transcript with the LLM (no
         # substring matching). Heuristic surface flags above are kept as the

@@ -425,8 +425,19 @@ class McpTransport(Transport):
         return CapabilityReport(**report_kwargs)
 
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        """Release transport resources, cascading to the auth provider.
+
+        Closes the owned data-plane :class:`httpx.AsyncClient` (if this transport
+        built it) and then awaits :meth:`AuthProvider.aclose` so any token-fetch
+        client the provider holds (MCP OAuth's separate discovery / token client)
+        cannot leak. The auth ``aclose`` runs in the ``finally`` so a
+        data-plane-close error does not suppress provider cleanup.
+        """
+        try:
+            if self._owns_client:
+                await self._client.aclose()
+        finally:
+            await self._auth.aclose()
 
 
 class _JsonRpcError(Exception):

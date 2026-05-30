@@ -39,7 +39,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [1.0.0] — 2026-05-27
 
-First stable release. Promotes the contents of `1.0.0rc1` to General Availability after the soft-beta cohort and the engineering-standards hardening pass below.
+**First stable, generally-available release.** Production/Stable status on PyPI; the package
+metadata, classifiers, and badges all reflect GA. This entry consolidates the M1–M15 build
+content plus the engineering-standards hardening pass below — `1.0.0rc1` is retained as a
+historical tag pointer at the bottom of this file but its scope is fully subsumed here.
 
 ### Added
 
@@ -72,9 +75,10 @@ First stable release. Promotes the contents of `1.0.0rc1` to General Availabilit
 
 ## [1.0.0rc1] — 2026-05-27
 
-First public release candidate. M1–M15 of the build plan are complete.
-After the soft-beta cohort concludes the operator will tag `1.0.0`
-and fire the PyPI publish workflow.
+> **Historical record only.** This release candidate was promoted to `1.0.0` (above) the
+> same day after the soft-beta hardening pass. The bullets below describe the M1–M15
+> build content that landed in the RC and is now part of GA — they are retained verbatim
+> for changelog completeness; no separate RC artifact ships from PyPI.
 
 ### Added
 

@@ -97,7 +97,7 @@ agent-guardian scan --system-prompt prompt.txt \
 
 PDF reports ship a signed JSON sidecar at `<name>.json` — that sidecar is what you pass to [`verify`](../cli.md#verify).
 
-## Signing (M13)
+## Signing
 
 When `output.sign_evidence: true` (the default), every JSON report carries two signature blocks:
 

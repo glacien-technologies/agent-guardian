@@ -19,6 +19,7 @@ install hint pointing at the right extras (``[full]`` or ``[pdf-fallback]``).
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 from pathlib import Path
 from typing import Any, Literal
@@ -28,6 +29,8 @@ from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import colour_for_band
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "PDF_ENV_VAR",
@@ -50,7 +53,37 @@ class PdfFeatureUnavailable(RuntimeError):
 
 
 def _has_weasyprint() -> bool:
-    return importlib.util.find_spec("weasyprint") is not None
+    """Return ``True`` only when WeasyPrint can render to PDF end-to-end.
+
+    The python wheel imports without its native dependencies (``cairo`` /
+    ``pango`` / ``libgobject``), so a plain ``importlib.util.find_spec`` check
+    would lie: ``write_pdf`` would later die with an unhelpful CFFI
+    ``OSError: cannot load library 'libgobject-2.0-0'`` on a stock macOS or
+    minimal-Linux box that has the python wheel but not the system libs. We
+    instead probe a minimal render once and cache the result so operators get
+    a clear ``PdfFeatureUnavailable`` (with install hint) up front and we
+    transparently fall back to ReportLab when only the wheel is present.
+    """
+    if importlib.util.find_spec("weasyprint") is None:
+        return False
+    cached: bool | None = getattr(_has_weasyprint, "_native_ok", None)
+    if cached is not None:
+        return cached
+    try:
+        import weasyprint  # type: ignore[import-not-found,import-untyped,unused-ignore]
+
+        weasyprint.HTML(string="<p>probe</p>").write_pdf()
+        ok = True
+    except Exception as exc:
+        _LOG.debug(
+            "pdf: WeasyPrint imported but native deps unavailable (%s: %s); "
+            "treating as unavailable and falling through to ReportLab.",
+            type(exc).__name__,
+            exc,
+        )
+        ok = False
+    _has_weasyprint._native_ok = ok  # type: ignore[attr-defined]
+    return ok
 
 
 def _has_reportlab() -> bool:

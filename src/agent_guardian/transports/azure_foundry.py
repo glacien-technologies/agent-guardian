@@ -186,5 +186,9 @@ class AzureFoundryAgentTransport(Transport):
             return Response(error=map_llm_error(exc))
 
     async def aclose(self) -> None:
-        if self._owns_adapter:
-            await self._adapter.aclose()
+        """Release transport resources, cascading to the auth provider."""
+        try:
+            if self._owns_adapter:
+                await self._adapter.aclose()
+        finally:
+            await self._auth.aclose()

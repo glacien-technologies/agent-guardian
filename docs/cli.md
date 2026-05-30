@@ -17,6 +17,66 @@ The CLI also auto-loads `.env` and `.env.local` from the current working directo
 
 ---
 
+## `init`
+
+Author a new target contract YAML, then immediately pre-flight it.
+
+```text
+agent-guardian init [--out PATH] [--yes] [--from-openapi PATH] [--openapi-path PATH] [--openapi-method METHOD]
+```
+
+| Option                | Default                | Description                                                                                                          |
+|-----------------------|------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `--out PATH`          | `agentguardian.yaml`   | Where to write the new contract.                                                                                     |
+| `--yes` / `-y`        | off                    | Non-interactive: write a minimal valid contract from defaults/flags. Useful for CI scaffolding.                      |
+| `--from-openapi PATH` | —                      | Pre-fill transport / request / response from an OpenAPI 3.1 spec (YAML or JSON) instead of probe-and-infer.          |
+| `--openapi-path TEXT` | —                      | With `--from-openapi`: the spec path (e.g. `/v1/chat`) whose operation to derive shapes from.                        |
+| `--openapi-method TEXT` | `post`               | With `--from-openapi` and `--openapi-path`: the HTTP method of the operation.                                        |
+
+The interactive wizard (default) walks you through HTTP target, auth,
+response extraction, session mode, and Rules of Engagement. On success
+the new contract is immediately run through pre-flight so you see
+whether it is reachable.
+
+---
+
+## `validate`
+
+Run the payload-free pre-flight against a contract.
+
+```text
+agent-guardian validate [CONTRACT] [--json] [--stage STAGE]
+```
+
+| Option / Argument | Default               | Description                                                            |
+|-------------------|-----------------------|------------------------------------------------------------------------|
+| `CONTRACT`        | `agentguardian.yaml`  | Path to the contract YAML to validate.                                 |
+| `--json`          | off                   | Emit the pre-flight report as JSON instead of human-readable text.     |
+| `--stage TEXT`    | —                     | Only print this single stage's result (by name).                       |
+
+Walks the seven non-adversarial stages (resolve, connect, probe,
+round-trip, session, capability, RoE) and stops at the first failure.
+Exits with the failing stage's exit code, or `EXIT_OK` (`0`) when
+every stage passes.
+
+---
+
+## `contract`
+
+Work with target contracts.
+
+```text
+agent-guardian contract schema --out PATH
+agent-guardian contract migrate FILE [--write]
+```
+
+| Sub-command             | Description                                                                                  |
+|-------------------------|----------------------------------------------------------------------------------------------|
+| `contract schema --out` | Write the contract JSON Schema to a file (e.g. for editor autocompletion).                   |
+| `contract migrate FILE` | Migrate a contract toward the current schema version. Use `--write` to update FILE in place. |
+
+---
+
 ## `scan`
 
 Run an adversarial swarm scan against a target.
@@ -32,7 +92,7 @@ Exactly one target mode must be specified:
 | A    | `--system-prompt PATH`        | `--system-prompt prompt.txt`                |
 | B    | positional dotted path        | `agent-guardian scan my_agent:run`          |
 | C    | `--endpoint URL`              | `--endpoint https://api.example.com/chat`   |
-| D    | `--framework KIND`            | `--framework langgraph` *(M11 — not yet wired)* |
+| D    | `--framework KIND`            | `--framework langgraph` *(adapter classes shipped; CLI dispatch lands in v1.1)* |
 
 ### Options
 
@@ -43,13 +103,22 @@ Exactly one target mode must be specified:
 | `--attacker-model TEXT`      | —       | Override the attacker-role model only.                                                               |
 | `--evaluator-model TEXT`     | —       | Override the evaluator-role model only.                                                              |
 | `--tier TEXT`                | auto    | Force tier — one of `T1`, `T2`, `T3`, `T4`.                                                          |
-| `--budget-usd FLOAT`         | —       | Cost cap; aborts before scanning if the estimate exceeds this value.                                 |
+| `--budget-usd FLOAT`         | —       | Runtime USD cap; soft-stops new attack turns at 80 % and reserves the remaining budget for the report. |
 | `--fail-under INT`           | —       | Exit `1` if the final AIVSS score is below this value. Useful in CI gates.                           |
 | `--output TEXT`              | `json`  | Report format: `json`, `sarif`, `junit`, `md`, `pdf`.                                                |
 | `--output-path PATH`         | —       | Where to write the report. Default: `~/.agentguardian/scans/<scan-id>/report.<output>`.              |
 | `--no-tui`                   | off     | Disable the Rich progress panel. Use in CI / non-interactive shells.                                 |
 | `--config PATH`              | auto    | Override config-file discovery (see [Configuration](guide/configuration.md)).                        |
 | `--seed INT`                 | `0`     | RNG seed for determinism.                                                                            |
+| `--goal TEXT`                | —       | Operator's natural-language attack goal. The Commander decomposes it into per-agent briefs and the swarm synthesises goal-specific scenarios on top of the standard pass. |
+| `--mode TEXT` / `-m`         | `full`  | Scan thoroughness — `fast` / `smart` / `full`. See [Scan modes](concepts/scan-modes.md).             |
+| `--pov-gate`                 | off     | Re-run each finding's trigger N times and drop unreproducible ones before scoring (credibility gate).|
+| `--critic`                   | off     | With `--pov-gate`, additionally score each PoV-passing finding on an LLM rubric and drop low-quality / high-false-positive findings. |
+| `--bundle PATH`              | —       | Write a checksummed SARIF+PoV bundle to this directory.                                              |
+| `--pretext`                  | off     | Wrap attacker payloads in a rotating legitimate-operations pretext (auditor / compliance / incident / onboarding). Tests refuse-on-framing. |
+| `--indirect`                 | off     | Deliver attacker payloads via trusted-channel content (retrieved doc / tool output / email / memory / a2a) instead of a direct user ask — indirect prompt injection. |
+| `--owasp-llm`                | off     | Additionally dispatch the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion). |
+| `--contract PATH`            | —       | Drive the scan from a target contract YAML. Mutually exclusive with the other target modes.          |
 
 ### Examples
 
@@ -88,8 +157,8 @@ agent-guardian scan --endpoint https://api.example.com/chat --model openai:gpt-4
 | Code | Meaning                       |
 |------|-------------------------------|
 | `0`  | OK.                           |
-| `1`  | `--fail-under` triggered (or signature verification failed for `verify` / `publish`). |
-| `2`  | Configuration error.          |
+| `1`  | `--fail-under` triggered (or signature verification failed / `UNANCHORED` for `verify` / `publish`). |
+| `2`  | Configuration error (bad flag, missing file, malformed contract — env-var validation errors map here too — see [Environment variables](operations/env-vars.md)). |
 | `3`  | Target unreachable.           |
 | `4`  | LLM provider error.           |
 | `5`  | Sandbox violation.            |
@@ -139,7 +208,7 @@ Emit an AIVSS badge — text by default, SVG with `--svg`.
 agent-guardian badge SCORE [--svg]
 ```
 
-`SCORE` is the integer AIVSS value (0–100). The colour follows the M2 band-to-colour map.
+`SCORE` is the integer AIVSS value (0–100). The colour follows the AIVSS band-to-colour map (see [AIVSS formula — severity bands](aivss-formula.md#severity-bands)).
 
 Example — pipe the last scan's score directly into an SVG badge:
 
@@ -200,13 +269,45 @@ agent-guardian report cli-abc123def456 --output md
 
 ## `verify`
 
-Verify HMAC-SHA256 + Ed25519 signatures on a signed JSON report (M13).
+Verify HMAC-SHA256 + Ed25519 signatures on a signed JSON report.
 
 ```bash
-agent-guardian verify path/to/report.json
+agent-guardian verify path/to/report.json [OPTIONS]
 ```
 
-Exits non-zero if any signature fails. PDF reports ship a signed JSON sidecar at `<name>.json` — point `verify` at that.
+| Option              | Description                                                                                                |
+|---------------------|------------------------------------------------------------------------------------------------------------|
+| `--pubkey TEXT`     | Pinned Ed25519 public key (base32, no padding). Required to anchor the Ed25519 leg.                        |
+| `--pubkey-file PATH`| Read the pinned Ed25519 public key (base32) from a file instead of `--pubkey`. Takes precedence over `--pubkey`. |
+| `--secret TEXT`     | Expected HMAC signing secret. Defaults to `AGENT_GUARDIAN_SIGNING_SECRET`. The public default secret is **never** accepted on verify. |
+
+### Trust anchor
+
+`verify` fails closed. A signature alone proves only that the bytes
+were not tampered (integrity), not *who* signed them. To report a green
+result you must supply a trust anchor — a pinned Ed25519 public key
+(`--pubkey` / `--pubkey-file`) and/or a real HMAC secret (`--secret` /
+`AGENT_GUARDIAN_SIGNING_SECRET`). Without an anchor the report is shown
+as `trust anchor: UNANCHORED` and the command exits **1**.
+
+PDF reports ship a signed JSON sidecar at `<name>.json` — point
+`verify` at that.
+
+### Worked example
+
+```bash
+REPORT=~/.agentguardian/scans/cli-abc123def456/report.json
+PUBKEY=$(jq -r .signatures.ed25519.public_key_b32 "$REPORT")
+agent-guardian verify "$REPORT" --pubkey "$PUBKEY"
+# schema:       OK
+# HMAC-SHA256:  OK
+# Ed25519:      OK
+# trust anchor: PINNED
+```
+
+The same report run without `--pubkey` (or `--secret`) prints
+`trust anchor: UNANCHORED` and exits `1` — proof the integrity-only
+path cannot be misread as authentic provenance.
 
 ---
 
@@ -229,7 +330,7 @@ The public leaderboard endpoint is not yet deployed — today the command verifi
 
 ## `telemetry`
 
-Manage opt-in usage telemetry (M15 — currently a state-flag placeholder).
+Manage anonymous opt-out telemetry (see [Telemetry transparency](telemetry/index.md) for the full data contract).
 
 ```bash
 agent-guardian telemetry enable

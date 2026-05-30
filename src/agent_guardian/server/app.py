@@ -9,7 +9,7 @@ Boot sequence
 -------------
 
 * :func:`create_app` constructs the :class:`FastAPI` instance.
-* The eight route modules in :mod:`agent_guardian.server.routes` are
+* The route modules in :mod:`agent_guardian.server.routes` are
   imported and their ``router`` objects registered.
 * The Jinja2 template environment is configured to read from
   ``server/templates/`` and given two globals -- ``version`` and a tiny
@@ -19,12 +19,21 @@ Boot sequence
   route handlers can pick it up via the FastAPI app handle. The
   factory accepts an injected store, which the test-suite uses to
   point the dashboard at a temporary scans directory.
+* A process-local :class:`MetricsRegistry` is stashed on
+  ``app.state.metrics`` and wired into the scan store so the
+  ``/metrics`` exposition reflects real activity. The registry is
+  decoupled from the store with a duck-typed sink, so the store
+  doesn't import the health module.
+* A lifespan handler closes any open ``events.jsonl`` writers on
+  uvicorn shutdown so we never leak a file descriptor on a clean exit.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -33,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from agent_guardian._version import __version__
+from agent_guardian.server.routes.health import MetricsRegistry
 from agent_guardian.server.scan_store import ScanStore
 
 __all__ = ["create_app"]
@@ -59,6 +69,24 @@ def _cors_allow_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Tear down per-scan resources on a clean shutdown.
+
+    The :class:`ScanStore` holds an LRU of open ``events.jsonl`` writers so
+    the chatty-scan observer doesn't pay open()+close() per event. We close
+    them all on shutdown so a SIGTERM-driven exit doesn't leave half-flushed
+    buffers behind for a watchdog that immediately re-reads the file.
+    """
+    yield
+    store = getattr(app.state, "scan_store", None)
+    if isinstance(store, ScanStore):
+        try:
+            store.close_all()
+        except Exception:  # pragma: no cover — shutdown best-effort
+            _LOG.exception("scan_store.close_all() raised during shutdown")
+
+
 def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     """Build the FastAPI dashboard app.
 
@@ -73,6 +101,7 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=_lifespan,
     )
 
     # Restrictive CORS. Default = no cross-origin access (the dashboard is a
@@ -102,7 +131,19 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     # Scan store -- either injected for tests or default-ed.
-    app.state.scan_store = scan_store if scan_store is not None else ScanStore()
+    store = scan_store if scan_store is not None else ScanStore()
+    app.state.scan_store = store
+
+    # Metrics registry. Process-local; reset on restart. Wired into the
+    # store so register/scan_done bump the gauge/counter/histogram.
+    metrics = MetricsRegistry()
+    app.state.metrics = metrics
+    store.set_metrics(metrics)
+
+    # Dashboard auth token (None = zero-config local dev). The CLI sets
+    # this from --token; the env var is the second source. The auth
+    # dependency reads from app.state first, env second.
+    app.state.dashboard_token = None
 
     # Routes -- import here so the factory is the single entry point.
     from agent_guardian.server.routes import (
@@ -113,6 +154,7 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         events,
         export,
         findings,
+        health,
         home,
         scan,
         swarm,
@@ -130,5 +172,8 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     app.include_router(events.router)
     app.include_router(coverage.router)
     app.include_router(analytics.router)
+    # Health/metrics last so its endpoints are the "infra" tail of the
+    # OpenAPI surface (not that we expose OpenAPI publicly).
+    app.include_router(health.router)
 
     return app

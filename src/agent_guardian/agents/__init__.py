@@ -24,6 +24,7 @@ from agent_guardian.agents.drift import DriftAgent
 from agent_guardian.agents.fuzzing_agent import FuzzingAgent
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
 from agent_guardian.agents.memory_poison import MemoryPoisonAgent
+from agent_guardian.agents.output_handling_agent import OutputHandlingAgent
 from agent_guardian.agents.privilege import PrivilegeAgent
 from agent_guardian.agents.recon import ReconAgent
 from agent_guardian.agents.secret_extraction_agent import SecretExtractionAgent
@@ -40,6 +41,7 @@ M2_SPECIALIST_AGENTS: tuple[type[AsiAgent], ...] = (
     SecretExtractionAgent,  # LLM07
     DenialOfWalletAgent,  # LLM10
     DetectionEvasionAgent,  # coverage report
+    OutputHandlingAgent,  # LLM02
 )
 
 __all__ = [
@@ -58,6 +60,7 @@ __all__ = [
     "Judge",
     "JudgeRubric",
     "MemoryPoisonAgent",
+    "OutputHandlingAgent",
     "PrivilegeAgent",
     "ReconAgent",
     "SecretExtractionAgent",

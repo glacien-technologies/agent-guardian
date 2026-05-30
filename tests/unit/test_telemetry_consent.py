@@ -23,6 +23,9 @@ from agent_guardian.telemetry.install_id import get_install_id, reset_install_id
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs against a fresh ~/.agentguardian sandbox."""
     monkeypatch.setenv("AGENT_GUARDIAN_HOME", str(tmp_path))
+    # Don't let a developer-set env var bleed into the consent tests --
+    # the prompt module reads AGENT_GUARDIAN_TELEMETRY too.
+    monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY", raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -30,17 +33,18 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_consent_default_is_essential_on() -> None:
-    """v1.0+ policy: fresh install is essential-tier ON by default.
+def test_consent_default_is_off() -> None:
+    """v1.0+ launch policy: fresh install is OFF until positive consent.
 
-    NOT_PROMPTED is the underlying state but read paths treat it as
-    essential — telemetry fires, the notice will print on first scan.
+    NOT_PROMPTED is the underlying state and every read path treats it
+    as off -- is_opted_in returns False, consent_level returns 'off',
+    and the consent prompt will run on the next interactive scan.
     """
     assert get_consent() is ConsentState.NOT_PROMPTED
-    assert is_opted_in() is True  # default-ON
-    assert is_extended() is False  # but essential-only
-    assert consent_level() == "essential"
-    assert has_been_notified() is False  # notice has not run yet
+    assert is_opted_in() is False  # OFF by default -- positive consent required
+    assert is_extended() is False
+    assert consent_level() == "off"
+    assert has_been_notified() is False  # prompt has not run yet
 
 
 def test_consent_transitions_persist_across_reads() -> None:
@@ -56,20 +60,22 @@ def test_consent_transitions_persist_across_reads() -> None:
         assert get_consent() is state
 
 
-def test_opted_out_is_the_only_off_state() -> None:
-    """is_opted_in must be False ONLY for OPTED_OUT — everything else
-    is some flavour of telemetry-on per the new default policy."""
-    for on_state in (
+def test_is_opted_in_requires_positive_tier() -> None:
+    """is_opted_in is True only for the three positive-consent tiers.
+
+    Per the launch-readiness audit, NOT_PROMPTED, OPTED_OUT and legacy
+    DEFERRED all return False -- the user has not positively consented.
+    """
+    for off_state in (
         ConsentState.NOT_PROMPTED,
-        ConsentState.ESSENTIAL,
-        ConsentState.EXTENDED,
-        ConsentState.OPTED_IN,
+        ConsentState.OPTED_OUT,
         ConsentState.DEFERRED,
     ):
+        set_consent(off_state)
+        assert is_opted_in() is False, f"{off_state} must be off"
+    for on_state in (ConsentState.ESSENTIAL, ConsentState.EXTENDED, ConsentState.OPTED_IN):
         set_consent(on_state)
-        assert is_opted_in() is True, f"{on_state} should be on"
-    set_consent(ConsentState.OPTED_OUT)
-    assert is_opted_in() is False
+        assert is_opted_in() is True, f"{on_state} must be on"
 
 
 def test_extended_only_true_for_extended_tier() -> None:
@@ -90,16 +96,20 @@ def test_extended_only_true_for_extended_tier() -> None:
 
 
 def test_consent_level_returns_three_tiers() -> None:
-    """consent_level returns one of: off / essential / extended."""
-    set_consent(ConsentState.OPTED_OUT)
-    assert consent_level() == "off"
-    for essential_state in (
+    """consent_level returns one of: off / essential / extended.
+
+    Per the launch-readiness audit NOT_PROMPTED maps to 'off' so a
+    fresh install with no recorded decision never sends telemetry.
+    """
+    for off_state in (
         ConsentState.NOT_PROMPTED,
-        ConsentState.ESSENTIAL,
+        ConsentState.OPTED_OUT,
         ConsentState.DEFERRED,
     ):
-        set_consent(essential_state)
-        assert consent_level() == "essential"
+        set_consent(off_state)
+        assert consent_level() == "off", f"{off_state} should map to off"
+    set_consent(ConsentState.ESSENTIAL)
+    assert consent_level() == "essential"
     for extended_state in (ConsentState.EXTENDED, ConsentState.OPTED_IN):
         set_consent(extended_state)
         assert consent_level() == "extended"

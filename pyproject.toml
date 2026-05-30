@@ -10,7 +10,25 @@ readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Glacien Pte. Ltd.", email = "opensource@glacien.ai" }]
-keywords = ["llm", "agent", "red-team", "security", "owasp", "mitre-atlas", "aivss", "agentic-ai"]
+keywords = [
+  "llm",
+  "agent",
+  "red-team",
+  "security",
+  "owasp",
+  "mitre-atlas",
+  "aivss",
+  "agentic-ai",
+  "prompt-injection",
+  "jailbreak",
+  "ai-safety",
+  "ai-security",
+  "llm-security",
+  "genai-security",
+  "sarif",
+  "cybersecurity",
+  "ai-red-team",
+]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
@@ -27,6 +45,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Security",
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Software Development :: Testing",
@@ -43,6 +62,13 @@ dependencies = [
   "typer>=0.15",
   "jinja2>=3.1",
   "pyyaml>=6.0",
+  # ``structlog`` is the default JSON-log renderer wired in
+  # :mod:`agent_guardian.logging_setup` (``_configure_structlog_json``). The
+  # module imports it inside ``try/except ImportError`` so the package still
+  # boots if the dep is stripped, but the JSON-formatted ops-friendly logs the
+  # dashboards and SIEM ingestion rely on need it present. Verified consumer
+  # (see ``logging_setup.py:_configure_structlog_json``); regression-tested by
+  # ``tests/test_packaging.py::test_structlog_is_not_a_ghost_runtime_dep``.
   "structlog>=24.4",
   "cryptography>=43.0",
   # jsonschema validates emitted SARIF logs against the bundled SARIF 2.1.0
@@ -154,12 +180,18 @@ dev = [
   "python-dotenv>=1.0",
 ]
 
+# Until the ``agentguardian.ai`` apex DNS lands we point every PyPI URL slot at
+# either the GitHub canonical view of the file or the Cloud Run mirror — both
+# return HTTP 200 today. Once the apex propagates we flip Homepage/Documentation
+# back to ``https://agentguardian.ai`` in a single commit; the other three URLs
+# stay on github.com because that's where the source actually lives.
 [project.urls]
-Homepage = "https://agentguardian.ai"
-Documentation = "https://agentguardian.ai/docs"
+Homepage = "https://github.com/glacien-technologies/agent-guardian"
+Documentation = "https://github.com/glacien-technologies/agent-guardian/blob/main/docs/index.md"
 Repository = "https://github.com/glacien-technologies/agent-guardian"
 Issues = "https://github.com/glacien-technologies/agent-guardian/issues"
 Changelog = "https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md"
+Source = "https://github.com/glacien-technologies/agent-guardian"
 
 [project.scripts]
 agent-guardian = "agent_guardian.cli:app"

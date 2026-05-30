@@ -129,6 +129,16 @@ class OAuth2ClientCredentialsAuth(AuthProvider):
             expires_in_f = 3600.0
         return CachedToken(access_token, time.monotonic() + expires_in_f)
 
+    async def aclose(self) -> None:
+        """Close the injected httpx client used for the token-endpoint round-trip.
+
+        Transports that own this provider call ``aclose`` here as part of their
+        own teardown so the provider's data-plane client cannot leak. Calling
+        ``aclose`` on an already-closed client is a no-op on httpx, so a second
+        invocation (idempotency) is safe.
+        """
+        await self._client.aclose()
+
     @classmethod
     def clear_cache(cls) -> None:
         """Drop all cached tokens (test helper)."""

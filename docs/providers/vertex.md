@@ -3,7 +3,7 @@
 AgentGuardian supports Gemini through two paths:
 
 - **`GeminiClient`** — the Google AI Studio API. Stable today. Simple API-key auth.
-- **`VertexClient`** — Google Vertex AI's `generateContent` endpoint. **Request/response shaping is implemented, but `complete()` currently raises `NotImplementedError`** until full service-account OAuth2 lands (tracked under M9). Use `GeminiClient` in the meantime, or wait for the M9 release.
+- **`VertexClient`** — Google Vertex AI's `generateContent` endpoint. **Request/response shaping is implemented, but `complete()` currently raises `NotImplementedError`** until full service-account OAuth2 lands (planned for v1.1). Use `GeminiClient` in the meantime, or wait for the v1.1 release.
 
 ## Gemini via Google AI Studio (stable today)
 
@@ -47,12 +47,12 @@ export GEMINI_API_KEY=...
 agent-guardian scan --system-prompt prompt.txt --model gemini:gemini-2.5-flash
 ```
 
-## Vertex AI (M9 — preview)
+## Vertex AI (preview)
 
 The `VertexClient` lives at `agent_guardian.llm.vertex` and ships:
 
 - `build_vertex_payload(LLMRequest) -> dict` — converts the swarm's request shape to Vertex's `generateContent` body.
 - `map_vertex_response(dict) -> LLMResponse` — maps Vertex's response (including `finish_reason` translation: `STOP→stop`, `MAX_TOKENS→length`, `SAFETY→content_filter`).
-- `VertexClient.complete()` — **raises `NotImplementedError` until M9 ships service-account OAuth2 auth.**
+- `VertexClient.complete()` — **raises `NotImplementedError` until v1.1 ships service-account OAuth2 auth.**
 
 Until then, use `gemini:` via Google AI Studio for Gemini-family models, or wire the underlying request/response helpers into your own Vertex-authenticated transport for advanced use cases.

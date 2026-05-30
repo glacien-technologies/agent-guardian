@@ -10,7 +10,7 @@ AgentGuardian's swarm needs an LLM for three roles — **commander** (orchestrat
 | [OpenAI](openai.md)             | `openai:<model>`         | `OPENAI_API_KEY` or `AGENT_GUARDIAN_OPENAI_API_KEY`                     | none           | Stable.                     |
 | [Anthropic](anthropic.md)       | `anthropic:<model>`      | `ANTHROPIC_API_KEY` or `AGENT_GUARDIAN_ANTHROPIC_API_KEY`               | none           | Stable.                     |
 | [Google Gemini](vertex.md)      | `gemini:<model>`         | `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `AGENT_GUARDIAN_GEMINI_API_KEY`  | none           | Stable (AI Studio API).     |
-| [Google Vertex](vertex.md)      | *(via `VertexClient`)*   | Service-account OAuth2                                                  | none           | M9 — request/response shaping only today. |
+| [Google Vertex](vertex.md)      | *(via `VertexClient`)*   | Service-account OAuth2                                                  | none           | Preview — request/response shaping only today (full transport planned for v1.1). |
 | [AWS Bedrock](bedrock.md)       | `bedrock:<bedrock-id>`   | Standard AWS credential chain (no API key)                              | `[aws]`        | Stable.                     |
 | [Ollama (local)](ollama.md)     | `ollama:<model>`         | none                                                                    | none           | Stable.                     |
 

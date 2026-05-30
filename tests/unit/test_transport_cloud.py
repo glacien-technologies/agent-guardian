@@ -17,6 +17,7 @@ import json
 import struct
 
 import httpx
+import pytest
 import respx
 
 from agent_guardian.transports.anthropic_messages import AnthropicMessagesTransport
@@ -375,6 +376,7 @@ def _bedrock_url(session_id: str) -> str:
 
 @respx.mock
 async def test_bedrock_event_stream_decode_and_session() -> None:
+    pytest.importorskip("botocore")
     frame = _encode_eventstream_chunk("hello ") + _encode_eventstream_chunk("from bedrock")
     # Match any sessions/*/text path under the agent runtime host.
     route = respx.post(
@@ -407,6 +409,7 @@ async def test_bedrock_event_stream_decode_and_session() -> None:
 
 @respx.mock
 async def test_bedrock_server_session_replay() -> None:
+    pytest.importorskip("botocore")
     frame = _encode_eventstream_chunk("ok")
     route = respx.post(url__regex=r"https://bedrock-agent-runtime\..*/text").mock(
         return_value=httpx.Response(
@@ -471,6 +474,7 @@ async def test_bedrock_401_and_500() -> None:
 
 @respx.mock
 async def test_bedrock_empty_stream_maps_to_parse() -> None:
+    pytest.importorskip("botocore")
     respx.post(url__regex=r"https://bedrock-agent-runtime\..*/text").mock(
         return_value=httpx.Response(
             200, content=b"", headers={"content-type": "application/vnd.amazon.eventstream"}
@@ -527,6 +531,7 @@ def test_bedrock_text_from_json_output_fallback() -> None:
 
 @respx.mock
 async def test_bedrock_skips_non_chunk_events() -> None:
+    pytest.importorskip("botocore")
     # A chunk plus a (manually unrecognised) trailing frame should still decode.
     frame = _encode_eventstream_chunk("only-chunk")
     respx.post(url__regex=r"https://bedrock-agent-runtime\..*/text").mock(

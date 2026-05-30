@@ -4,9 +4,9 @@
 
 If you believe you have found a security vulnerability in `agent-guardian` itself, please report it privately. **Do not file a public GitHub issue.**
 
-- **Email:** `security@glacien.ai`
-- **Public key:** [`https://glacien.ai/.well-known/security.asc`](https://glacien.ai/.well-known/security.asc) — also mirrored at the [Security Lead's GitHub profile](https://github.com/glacien-technologies). The fingerprint will be filled in here once the key is published; do not send encrypted reports until that line is no longer marked _pending_.
-  - **GPG fingerprint (Ed25519):** _pending public-beta key ceremony — see [MAINTAINERS.md](MAINTAINERS.md#active-maintainers)_
+- **Preferred channel — GitHub Security Advisories (private vulnerability reports):**
+  [Open a draft advisory](https://github.com/glacien-technologies/agent-guardian/security/advisories/new). This is the canonical reporting path: GitHub encrypts the report at rest, scopes visibility to the maintainers, and gives us a private fork for the fix.
+- **Email fallback:** `security@glacien.ai` — use this only if you cannot use the GitHub channel. Plain email is acceptable; we do not require encrypted email. (We previously documented a PGP key path here; we removed it because long-lived PGP keys are not a security improvement when GHSA gives end-to-end encryption out of the box. Sigstore keyless OIDC signs every release artifact — see "Supply-chain integrity" below.)
 - **Embargo:** We follow a **90-day coordinated-disclosure embargo** from the date you first report the issue. We will not publicly disclose details until the embargo expires or a fix is shipped, whichever comes first.
 - **Public log:** Every handled disclosure is recorded in [`docs/security/disclosure-history.md`](docs/security/disclosure-history.md) once the embargo lifts.
 

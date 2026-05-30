@@ -6,14 +6,22 @@ For decision-making rules see [`governance.md`](governance.md). For how to contr
 
 ## Active maintainers
 
-| Role | Contact | Public key (Ed25519 or GPG fingerprint) |
-|---|---|---|
-| **Tech Lead** | `tech-lead@glacien.ai` | _to be published_ |
-| **Security Lead** | `security@glacien.ai` | _to be published — see [SECURITY.md](SECURITY.md)_ |
-| **Community Lead** | `community@glacien.ai` | _to be published_ |
-| **Release Manager** | `releases@glacien.ai` | _to be published_ |
+Commit and tag signing on this project uses **Sigstore keyless OIDC** through GitHub
+Actions for release artifacts (every wheel, sdist, and SBOM is signed automatically by
+the publish workflow against the workflow identity) and **Git's native SSH signing** for
+maintainer commits on `main` (each maintainer's GitHub `signingkey` SSH public key is
+the canonical identity — verified by GitHub directly with no separate fingerprint to
+mirror here). This avoids the long-lived-PGP-key escrow problem older OSS projects hit:
+there is no symmetric secret a contributor would need to verify out-of-band.
 
-> **Onboarding note for maintainers:** before any role here is "live" the holder must (a) generate a long-lived Ed25519 signing key, (b) upload its public component to their GitHub account, (c) replace the `_to be published_` placeholder above with the fingerprint, and (d) configure `git config --global commit.gpgsign true`. Branch protection on `main` requires signed commits.
+| Role | Contact | Verification path |
+|---|---|---|
+| **Tech Lead** | `tech-lead@glacien.ai` | GitHub `Verified` badge on commits via SSH signing key |
+| **Security Lead** | `security@glacien.ai` | GitHub Security Advisories (private vulnerability reports) — see [SECURITY.md](SECURITY.md) |
+| **Community Lead** | `community@glacien.ai` | GitHub `Verified` badge on commits via SSH signing key |
+| **Release Manager** | `releases@glacien.ai` | Sigstore OIDC signature on every release artifact — verifiable via `sigstore verify` |
+
+> **Onboarding note for maintainers:** before any role here is "live" the holder must (a) upload an SSH signing key to GitHub and set it as their `signingkey`, (b) configure `git config --global commit.gpgsign true` and `git config --global gpg.format ssh`, and (c) ensure their `@glacien.ai` author email matches the brand-integrity workflow. Branch protection on `main` requires signed commits.
 
 ## On-call rotation
 
@@ -21,7 +29,7 @@ Issue triage and security-report acknowledgement rotate weekly across the four r
 
 | Week | Triage on-call | Security on-call |
 |---|---|---|
-| `YYYY-Www` | _to be filled at launch_ | _to be filled at launch_ |
+| `2026-W22` | Tech Lead | Security Lead |
 
 ## How decisions escalate
 
@@ -38,7 +46,7 @@ At least three roles are filled at all times. If a maintainer departs the holder
 
 | Period | Role | Person/Email |
 |---|---|---|
-| _none yet — project is pre-launch_ | — | — |
+| — | — | (none — original maintainers above are still active as of v1.0.0) |
 
 ---
 

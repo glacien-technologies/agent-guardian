@@ -2,11 +2,18 @@
 
 Used by every provider client. The RNG is injectable so unit tests can pass
 ``random.Random(0)`` and assert deterministic delays.
+
+The agent-loop path uses tighter defaults than the public ``with_backoff``
+ceiling: an attacker that hits a 503 cycle during a Commander early-stop should
+exit within seconds, not soak the wall-clock budget for minutes. The
+``cancel_event``-aware sleep helper interrupts the backoff promptly when a
+cancellation signal fires.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 from collections.abc import Awaitable, Callable
@@ -18,7 +25,12 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 
-__all__ = ["compute_delay", "with_backoff"]
+__all__ = [
+    "AGENT_LOOP_MAX_RETRIES",
+    "AGENT_LOOP_MAX_SECONDS",
+    "compute_delay",
+    "with_backoff",
+]
 
 _LOG = logging.getLogger(__name__)
 
@@ -29,6 +41,15 @@ _DEFAULT_RETRY_ON: tuple[type[Exception], ...] = (
     LLMTransientError,
     LLMTimeoutError,
 )
+
+# Agent-loop defaults. The public ``with_backoff`` ceiling (60s cap, up to 6
+# retries) is appropriate for one-off provider calls but turns a single 503
+# cycle into a multi-minute soak when an attacker is iterating turns and the
+# Commander has already signalled EARLY_STOP. The agent loop uses these
+# tighter numbers (~15s max delay per attempt, 3 retries) so a cancellation
+# interrupts within seconds rather than minutes.
+AGENT_LOOP_MAX_RETRIES = 3
+AGENT_LOOP_MAX_SECONDS = 15.0
 
 
 def compute_delay(
@@ -60,6 +81,58 @@ def compute_delay(
     return max(0.0, raw * (1.0 + jitter))
 
 
+async def _wrap_sleep(delay: float, sleep: Callable[[float], Awaitable[None]]) -> None:
+    """Tiny coroutine that ``await``s the injected sleep callable.
+
+    Needed because ``asyncio.create_task`` expects a coroutine, not the
+    bare ``Awaitable[None]`` the ``sleep`` parameter is typed as (tests
+    inject a generic awaitable for deterministic delays).
+    """
+    await sleep(delay)
+
+
+async def _interruptible_sleep(
+    delay: float,
+    *,
+    cancel_event: asyncio.Event | None,
+    sleep: Callable[[float], Awaitable[None]],
+) -> bool:
+    """Sleep for ``delay`` seconds, returning early when ``cancel_event`` fires.
+
+    Returns ``True`` when the full delay elapsed (i.e. no cancellation), and
+    ``False`` when the cancel event was set during the wait. When
+    ``cancel_event`` is ``None`` this is just ``await sleep(delay)`` and the
+    return is always ``True``. When the cancel event is already set on entry
+    the helper returns immediately without sleeping.
+    """
+    if cancel_event is None:
+        await sleep(delay)
+        return True
+    if cancel_event.is_set():
+        return False
+    # Race the sleep against the cancellation signal so an EARLY_STOP fires
+    # promptly even mid-backoff. We deliberately do NOT call ``cancel()`` on
+    # the sleep task -- ``asyncio.wait(FIRST_COMPLETED)`` returns as soon as
+    # either side resolves and the pending sleep is cancelled cleanly below.
+    sleep_task: asyncio.Task[None] = asyncio.create_task(_wrap_sleep(delay, sleep))
+    cancel_task: asyncio.Task[bool] = asyncio.create_task(cancel_event.wait())
+    try:
+        await asyncio.wait(
+            {sleep_task, cancel_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        for pending_task in (sleep_task, cancel_task):
+            if not pending_task.done():
+                pending_task.cancel()
+                # Cancelled / pending sleep failure is expected; suppress
+                # so cleanup never raises. The caller has already decided
+                # what to do based on ``cancel_event.is_set()``.
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await pending_task
+    return not cancel_event.is_set()
+
+
 async def with_backoff(
     coro_factory: Callable[[], Awaitable[T]],
     *,
@@ -71,6 +144,7 @@ async def with_backoff(
     retry_on: tuple[type[Exception], ...] = _DEFAULT_RETRY_ON,
     rng: random.Random | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    cancel_event: asyncio.Event | None = None,
 ) -> T:
     """Call ``coro_factory()`` with exponential backoff on retryable errors.
 
@@ -79,9 +153,27 @@ async def with_backoff(
 
     Stops after ``max_retries`` retries (so up to ``max_retries + 1`` attempts).
     Non-retryable exceptions are re-raised immediately.
+
+    When ``cancel_event`` is supplied the sleep between attempts races against
+    the event so Commander early-stop interrupts a long backoff within
+    seconds. On cancellation we re-raise the last retryable exception
+    immediately rather than starting a fresh attempt, so the caller can see
+    "we gave up because we were asked to stop".
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            if last_exc is not None:
+                _LOG.info(
+                    "retry cancelled after %d attempts: %s: %s",
+                    attempt,
+                    type(last_exc).__name__,
+                    last_exc,
+                )
+                raise last_exc
+            # No prior failure to surface; propagate as cancelled error so the
+            # caller can distinguish "asked to stop before first attempt".
+            raise asyncio.CancelledError("with_backoff cancelled before first attempt")
         try:
             return await coro_factory()
         except retry_on as exc:
@@ -114,6 +206,16 @@ async def with_backoff(
                 exc,
                 delay,
             )
-            await sleep(delay)
+            completed = await _interruptible_sleep(delay, cancel_event=cancel_event, sleep=sleep)
+            if not completed:
+                # Early-stop fired mid-backoff. Re-raise the most recent
+                # retryable error rather than spin up another attempt.
+                _LOG.info(
+                    "retry cancelled mid-backoff after %d attempts: %s: %s",
+                    attempt + 1,
+                    type(exc).__name__,
+                    exc,
+                )
+                raise exc
     assert last_exc is not None  # invariant: only reachable after a retryable raise
     raise last_exc

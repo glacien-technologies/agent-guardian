@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib
 import json
 import logging
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,15 @@ import typer
 from agent_guardian._version import __version__
 from agent_guardian.adapters.base import TargetAdapter
 from agent_guardian.adapters.code import CodeAdapter
+from agent_guardian.adapters.framework import (
+    ADKAdapter,
+    AutoGenAdapter,
+    CrewAIAdapter,
+    FrameworkAdapter,
+    LangGraphAdapter,
+    OpenAIAgentsAdapter,
+    StrandsAdapter,
+)
 from agent_guardian.adapters.http import HttpAdapter
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
@@ -80,6 +90,75 @@ EXIT_USER_INTERRUPT = 130
 
 
 # ---------------------------------------------------------------------------
+# Framework adapter registry (--framework dispatch)
+# ---------------------------------------------------------------------------
+#
+# The CLI's ``--framework KIND`` flag maps a short token (langgraph / crewai /
+# autogen / openai_agents / strands / adk) to the concrete :class:`FrameworkAdapter`
+# subclass that wraps the matching framework-native object. The actual native
+# object is supplied via ``--framework-ref MODULE:ATTR`` -- the CLI imports the
+# module and pulls the attribute, then constructs the adapter with it.
+#
+# Listed in alphabetical order so the error message is deterministic.
+
+FRAMEWORK_ADAPTERS: dict[str, type[FrameworkAdapter]] = {
+    "adk": ADKAdapter,
+    "autogen": AutoGenAdapter,
+    "crewai": CrewAIAdapter,
+    "langgraph": LangGraphAdapter,
+    "openai_agents": OpenAIAgentsAdapter,
+    "strands": StrandsAdapter,
+}
+
+
+def _resolve_framework_ref(ref: str) -> Any:
+    """Resolve ``MODULE:ATTR`` (or ``MODULE.ATTR``) to a Python object.
+
+    Used by ``--framework-ref`` so the operator can name their framework-native
+    object (compiled LangGraph, CrewAI ``Crew``, AutoGen group chat, etc.)
+    without writing a wrapper script. The colon form is preferred; the dotted
+    form is accepted for ergonomics. The module is imported normally, so any
+    side-effects of import (logging setup, env reads) fire exactly as they
+    would in the operator's own process.
+    """
+    raw = ref.strip()
+    if not raw:
+        raise typer.BadParameter(
+            "--framework-ref is empty -- expected MODULE:ATTR (e.g. 'my_app.graph:graph')."
+        )
+    if ":" in raw:
+        module_name, _, attr_path = raw.partition(":")
+    else:
+        # Dotted form: rightmost dot splits module from attr.
+        if "." not in raw:
+            raise typer.BadParameter(
+                f"--framework-ref {ref!r} is not in MODULE:ATTR (or MODULE.ATTR) form. "
+                "Example: 'my_app.graph:graph' or 'my_app.graph.graph'."
+            )
+        module_name, _, attr_path = raw.rpartition(".")
+    if not module_name or not attr_path:
+        raise typer.BadParameter(
+            f"--framework-ref {ref!r}: both module and attribute must be non-empty."
+        )
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as exc:
+        raise typer.BadParameter(
+            f"--framework-ref {ref!r}: could not import module {module_name!r} ({exc})."
+        ) from exc
+    obj: Any = module
+    for part in attr_path.split("."):
+        try:
+            obj = getattr(obj, part)
+        except AttributeError as exc:
+            raise typer.BadParameter(
+                f"--framework-ref {ref!r}: attribute path "
+                f"{attr_path!r} not found on module {module_name!r} ({exc})."
+            ) from exc
+    return obj
+
+
+# ---------------------------------------------------------------------------
 # Ordered ASI agent slate -- single source of truth for ``list-agents`` etc.
 # ---------------------------------------------------------------------------
 
@@ -112,7 +191,7 @@ app = typer.Typer(
 
 telemetry_app = typer.Typer(
     name="telemetry",
-    help="Opt-in usage telemetry (stub for M15).",
+    help="Opt-in usage telemetry (consent + status).",
     no_args_is_help=True,
 )
 app.add_typer(telemetry_app, name="telemetry")
@@ -123,6 +202,17 @@ contract_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(contract_app, name="contract")
+
+# Management sub-app for stored scans. Registered under ``scans`` (plural) to
+# avoid colliding with the top-level ``scan`` run command. Provides delete,
+# purge --older-than, and list against ``AGENT_GUARDIAN_HOME`` (default
+# ``~/.agentguardian``).
+scan_app = typer.Typer(
+    name="scans",
+    help="Manage stored scans (list, delete, purge --older-than).",
+    no_args_is_help=True,
+)
+app.add_typer(scan_app, name="scans")
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +352,7 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
             raise typer.BadParameter(
                 f"Cannot infer provider for model spec '{spec}' (role={role}). "
                 f"Use one of: stub, openai:<model>, anthropic:<model>, "
-                f"gemini:<model>, ollama:<model>."
+                f"gemini:<model>, ollama:<model>, bedrock:<id>."
             )
 
     if provider == "stub":
@@ -353,14 +443,16 @@ def build_target_adapter(
     system_prompt_path: Path | None,
     endpoint: str | None,
     framework: str | None,
+    framework_ref: str | None = None,
     target_llm: BaseLLM,
     target_model: str,
 ) -> TargetAdapter:
     """Build the right :class:`TargetAdapter` from the four CLI modes.
 
     Exactly one of ``target`` / ``system_prompt_path`` / ``endpoint`` /
-    ``framework`` must be set. ``framework`` is a placeholder today -- it
-    raises until M11 ships framework-mode auto-discovery.
+    ``framework`` must be set. ``framework`` dispatches through
+    :data:`FRAMEWORK_ADAPTERS` and pulls the framework-native object from
+    ``framework_ref`` (MODULE:ATTR).
     """
     set_modes = [bool(system_prompt_path), bool(target), bool(endpoint), bool(framework)]
     if sum(set_modes) == 0:
@@ -387,9 +479,90 @@ def build_target_adapter(
         return CodeAdapter(target)
     if endpoint:
         return HttpAdapter(endpoint=endpoint, shape="generic")
-    raise typer.BadParameter(
-        f"--framework {framework!r} target mode lands in M11; not yet supported."
-    )
+    # framework branch -- dispatch through FRAMEWORK_ADAPTERS.
+    assert framework is not None  # set_modes guard above
+    kind = framework.strip().lower()
+    adapter_cls = FRAMEWORK_ADAPTERS.get(kind)
+    if adapter_cls is None:
+        supported = ", ".join(sorted(FRAMEWORK_ADAPTERS))
+        raise typer.BadParameter(
+            f"unknown --framework {framework!r}. Supported kinds: {supported}."
+        )
+    if not framework_ref:
+        raise typer.BadParameter(
+            f"--framework {kind} requires --framework-ref MODULE:ATTR pointing at "
+            f"your framework-native object (e.g. compiled graph, Crew, group chat)."
+        )
+    native_obj = _resolve_framework_ref(framework_ref)
+    # Every registered subclass takes ``(native_obj, *, ref=...)``; the base
+    # class deliberately doesn't, so we route through Any to keep mypy --strict
+    # happy without weakening every subclass's signature.
+    factory: Any = adapter_cls
+    try:
+        return factory(native_obj, ref=framework_ref)  # type: ignore[no-any-return]
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter(
+            f"--framework {kind}: adapter rejected the object from {framework_ref!r}: {exc}"
+        ) from exc
+
+
+# Placeholder hosts we never preflight against (would fail by design).
+_PLACEHOLDER_HOST_SUFFIXES: tuple[str, ...] = (".example.com", ".example.org", ".example.net")
+_PLACEHOLDER_HOSTS: frozenset[str] = frozenset({"example.com", "example.org", "example.net"})
+
+
+def _is_placeholder_endpoint(url: str) -> bool:
+    """True iff ``url``'s host is a documentation/scaffold placeholder.
+
+    Used by the endpoint preflight and the ``init --yes`` flow so a freshly
+    scaffolded contract isn't pre-flighted against ``api.example.com``.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:  # pragma: no cover -- defensive
+        return False
+    if not host:
+        return False
+    if host in _PLACEHOLDER_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in _PLACEHOLDER_HOST_SUFFIXES)
+
+
+async def _endpoint_reachability_preflight(endpoint: str) -> bool:
+    """Probe ``endpoint`` twice with a short timeout. Return True iff reachable.
+
+    Used before an ``--endpoint`` scan so an unreachable target fails fast with
+    :data:`EXIT_TARGET_UNREACHABLE` instead of spending the LLM budget on
+    every-probe timeouts. Any response (even 404/500) counts as "reachable";
+    only connect/timeout failures across both attempts mark the target down.
+    """
+    import httpx
+
+    attempts = 0
+    timeout = httpx.Timeout(2.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for _ in range(2):
+            try:
+                await client.post(endpoint, content=b"")
+                return True
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+                _LOG.debug(
+                    "endpoint preflight: attempt %d for %s failed (%s)", attempts, endpoint, exc
+                )
+                attempts += 1
+            except httpx.HTTPError as exc:
+                # Any other transport error (PoolTimeout, RemoteProtocolError, etc.)
+                # is treated as "reachable" -- we got far enough to be the
+                # target's problem, not the network's.
+                _LOG.debug(
+                    "endpoint preflight: non-fatal HTTP error %s (%s) -- counted as reachable",
+                    endpoint,
+                    exc,
+                )
+                return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -587,9 +760,11 @@ def doctor(
     # M9 ships OAuth2 SA auth; we still surface it here so the operator can
     # see the env key landed, but we label it so they don't think a Vertex
     # scan is supported (it isn't yet -- ``build_llm`` raises a clear
-    # M9-pending error if they try).
+    # M9-pending error if they try). Bedrock is intentionally NOT in this loop
+    # -- it uses the AWS credential chain (env > ~/.aws/credentials > IAM role),
+    # not an API key. Its readiness is reported by `_probe_bedrock_readiness()`.
     found_keys: list[str] = []
-    for provider in ("openai", "anthropic", "gemini", "bedrock"):
+    for provider in ("openai", "anthropic", "gemini"):
         if env_api_key(provider):
             found_keys.append(provider)
     if env_api_key("vertex"):
@@ -607,6 +782,11 @@ def doctor(
     else:
         typer.echo("llm keys detected: none (use --model stub for offline scans)")
 
+    # Bedrock readiness (AWS credential chain + boto3 + extra). Reported even
+    # without --check-connectivity because operators want to know up front
+    # whether `bedrock:<id>` will work.
+    _probe_bedrock_readiness()
+
     # Optional connectivity probe. Each provider gets a tiny request that
     # validates auth + reaches the endpoint without burning meaningful tokens.
     if check_connectivity and found_keys:
@@ -621,6 +801,15 @@ def doctor(
     except Exception as exc:  # pragma: no cover -- defensive
         _LOG.warning("doctor: sandbox import failed: %s: %s", type(exc).__name__, exc)
         typer.echo(f"sandbox: import failed ({type(exc).__name__})")
+
+    # PDF engine readiness (WeasyPrint > reportlab > none). Operators planning
+    # to ship `--output pdf` reports need this to be loud at install time.
+    _probe_pdf_readiness()
+
+    # OTel / dashboard readiness. Surfaces the [otel] extra status, the GenAI
+    # semconv opt-in flag, the exporter endpoint, and whether the dashboard's
+    # default port is free.
+    _probe_otel_and_dashboard_readiness()
 
     # State + config locations.
     typer.echo(f"state dir: {_state_dir()}")
@@ -697,6 +886,139 @@ def _connectivity_label(status_code: int) -> str:
     return f"http-{status_code}"
 
 
+def _probe_pdf_readiness() -> None:
+    """Report which PDF engine (if any) is available for `--output pdf`.
+
+    The PDF writer probes WeasyPrint first (best fidelity) then reportlab as a
+    fallback. WeasyPrint needs native libs (cairo / pango / gdk-pixbuf) so an
+    importable ``weasyprint`` is not enough -- a tiny write-pdf smoke test would
+    be too heavy here; we instead check that the module imports without OSError
+    (the native-lib failure mode raises OSError on import).
+    """
+    import importlib.util
+
+    weasy_version: str | None = None
+    reportlab_version: str | None = None
+    weasy_native_fail: str | None = None
+
+    if importlib.util.find_spec("weasyprint") is not None:
+        try:
+            weasy_mod = importlib.import_module("weasyprint")
+            weasy_version = getattr(weasy_mod, "__version__", "installed")
+        except OSError as exc:
+            # libpango/libcairo etc. missing -- common in slim CI containers.
+            weasy_native_fail = str(exc).splitlines()[0][:160]
+            _LOG.debug("doctor: weasyprint native libs missing (%s)", exc)
+        except Exception as exc:  # pragma: no cover -- defensive
+            _LOG.debug("doctor: weasyprint import failed (%s: %s)", type(exc).__name__, exc)
+
+    if importlib.util.find_spec("reportlab") is not None:
+        try:
+            reportlab_mod = importlib.import_module("reportlab")
+            reportlab_version = getattr(reportlab_mod, "Version", None) or getattr(
+                reportlab_mod, "__version__", "installed"
+            )
+        except Exception as exc:  # pragma: no cover -- defensive
+            _LOG.debug("doctor: reportlab import failed (%s: %s)", type(exc).__name__, exc)
+
+    weasy_part = (
+        f"weasyprint {weasy_version}"
+        if weasy_version
+        else (
+            f"weasyprint installed but native libs missing ({weasy_native_fail})"
+            if weasy_native_fail
+            else "none"
+        )
+    )
+    reportlab_part = f"reportlab {reportlab_version}" if reportlab_version else "none"
+    if weasy_version or reportlab_version:
+        typer.echo(f"pdf engine: {weasy_part} | {reportlab_part}")
+    else:
+        typer.echo(
+            f"pdf engine: {weasy_part} | {reportlab_part} -- "
+            "pip install 'agent-guardian[full]' or 'agent-guardian[pdf-fallback]' "
+            "to enable --output pdf."
+        )
+
+
+def _probe_bedrock_readiness() -> None:
+    """Report whether the AWS extra is installed and AWS env is staged.
+
+    Bedrock uses the AWS credential chain (env > ~/.aws/credentials > IAM role),
+    not an API key. ``doctor`` reports the extra status, region resolution, and
+    which env-bound credential leg is present so operators can fix the missing
+    leg before a paid scan.
+    """
+    import importlib.util
+
+    have_botocore = importlib.util.find_spec("botocore") is not None
+    have_boto3 = importlib.util.find_spec("boto3") is not None
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    have_static_keys = bool(os.environ.get("AWS_ACCESS_KEY_ID")) and bool(
+        os.environ.get("AWS_SECRET_ACCESS_KEY")
+    )
+    have_session_token = bool(os.environ.get("AWS_SESSION_TOKEN"))
+    have_profile = bool(os.environ.get("AWS_PROFILE"))
+
+    if not (have_botocore and have_boto3):
+        typer.echo("bedrock: aws extra not installed (pip install 'agent-guardian[aws]').")
+        return
+
+    creds_bits: list[str] = []
+    if have_static_keys:
+        creds_bits.append("AWS_ACCESS_KEY_ID set")
+    if have_session_token:
+        creds_bits.append("AWS_SESSION_TOKEN set")
+    if have_profile:
+        creds_bits.append(f"AWS_PROFILE={os.environ['AWS_PROFILE']}")
+    creds_label = (
+        ", ".join(creds_bits)
+        if creds_bits
+        else "no static AWS env (relying on default chain / IAM role)"
+    )
+    region_label = region or "unset (set AWS_REGION or AWS_DEFAULT_REGION)"
+    typer.echo(f"bedrock: aws extra OK, region={region_label}, creds: {creds_label}")
+
+
+def _probe_otel_and_dashboard_readiness() -> None:
+    """Report OTel extra status, GenAI semconv opt-in, exporter endpoint, port 7474.
+
+    The dashboard's default bind port is 7474; surface a port-in-use up front
+    so the operator catches a collision at doctor time rather than at serve
+    time.
+    """
+    import importlib.util
+    import socket
+
+    have_otel = importlib.util.find_spec("opentelemetry") is not None
+    if have_otel:
+        semconv_opt_in = os.environ.get("OTEL_SEMCONV_STABILITY_OPT_IN", "")
+        exporter_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+        semconv_label = semconv_opt_in or "unset (defaults: stable HTTP/RPC, no GenAI)"
+        endpoint_label = exporter_endpoint or "unset (OTel will no-op)"
+        typer.echo(
+            f"otel: extra installed, OTEL_SEMCONV_STABILITY_OPT_IN={semconv_label}, "
+            f"OTEL_EXPORTER_OTLP_ENDPOINT={endpoint_label}"
+        )
+    else:
+        typer.echo(
+            "otel: extra not installed (pip install 'agent-guardian[otel]'). "
+            "Without it the OTel exporter is a no-op."
+        )
+
+    port_in_use = False
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            result = sock.connect_ex(("127.0.0.1", 7474))
+            port_in_use = result == 0
+    except OSError as exc:  # pragma: no cover -- defensive
+        _LOG.debug("doctor: dashboard port probe failed (%s)", exc)
+    typer.echo(
+        f"dashboard port 7474: {'IN USE (serve will fail or collide)' if port_in_use else 'free'}"
+    )
+
+
 @app.command("list-agents")
 def list_agents() -> None:
     """Print the eleven specialist agents with their ASI category."""
@@ -752,15 +1074,34 @@ def badge(
 
 
 @app.command("last-score")
-def last_score() -> None:
+def last_score(
+    score_only: bool = typer.Option(
+        False,
+        "--score-only",
+        help=(
+            "Emit only the integer score (no band, no prose) so it composes in a "
+            "shell one-liner: `agent-guardian badge $(agent-guardian last-score "
+            "--score-only) --svg`. Exits 1 when no scans are on record so the "
+            "outer pipeline fails loudly instead of feeding 'no scans on record' "
+            "into the next command."
+        ),
+    ),
+) -> None:
     """Print the AIVSS of the most recent scan."""
     state = _read_state()
     last = state.get("last_score")
     if last is None:
+        if score_only:
+            typer.echo("no scans on record", err=True)
+            raise typer.Exit(code=EXIT_FAIL_UNDER)
         typer.echo("no scans on record.")
         return
-    band = band_for_score(int(last))
-    typer.echo(f"AIVSS {int(last)} ({band.value})")
+    score = int(last)
+    if score_only:
+        typer.echo(str(score))
+        return
+    band = band_for_score(score)
+    typer.echo(f"AIVSS {score} ({band.value})")
 
 
 @app.command()
@@ -1371,12 +1712,62 @@ def init(
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     typer.echo(f"contract written to {written}")
+
+    # #4 -- `init --yes` is the canonical "scaffold a contract in CI" path. The
+    # default URL ('https://api.example.com/v1/chat') is a documentation
+    # placeholder and the scaffolded contract is not yet meant to be reachable;
+    # auto-pre-flighting would fail every CI scaffolding job. Detect the
+    # placeholder and skip pre-flight cleanly. The user still gets `validate`
+    # as the explicit pre-flight after they edit the URL.
+    if _contract_url_is_placeholder(written):
+        typer.echo(
+            f"pre-flight skipped: target url is a placeholder. Edit {written} "
+            "and run `agent-guardian validate` to pre-flight against the real "
+            "endpoint."
+        )
+        raise typer.Exit(code=EXIT_OK)
+
     typer.echo("running pre-flight against the new contract...")
     report = asyncio.run(run_preflight(written))
     _render_preflight(report)
     if not report.ok:
         raise typer.Exit(code=report.exit_code)
     raise typer.Exit(code=EXIT_OK)
+
+
+def _contract_url_is_placeholder(contract_path: Path) -> bool:
+    """True iff the contract's target URL is the wizard placeholder or *.example.*.
+
+    Used by ``init --yes`` so a CI scaffold doesn't auto-fail on a contract
+    whose URL is still the default ``https://api.example.com/v1/chat``.
+    """
+    import yaml
+
+    from agent_guardian.contract.wizard import WizardDefaults
+
+    try:
+        data = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as exc:  # pragma: no cover -- defensive
+        _LOG.debug(
+            "init: could not read contract %s (%s) -- assuming non-placeholder", contract_path, exc
+        )
+        return False
+    if not isinstance(data, dict):
+        return False
+    target = data.get("target")
+    if not isinstance(target, dict):
+        return False
+    transport = target.get("transport")
+    url: str | None = None
+    if isinstance(transport, dict):
+        raw = transport.get("url")
+        if isinstance(raw, str):
+            url = raw
+    if not url:
+        return False
+    if url == WizardDefaults.url:
+        return True
+    return _is_placeholder_endpoint(url)
 
 
 @contract_app.command("schema")
@@ -1438,6 +1829,161 @@ def contract_migrate(
 
 
 # ---------------------------------------------------------------------------
+# Stored-scan management (scans list / scans delete / scans purge)
+# ---------------------------------------------------------------------------
+
+
+def _scans_root() -> Path:
+    """Resolve the stored-scan root, honouring AGENT_GUARDIAN_HOME.
+
+    Operators running multiple targets out of the same shell can point
+    ``AGENT_GUARDIAN_HOME`` at a per-target directory so scan history /
+    leaderboards / signed reports don't intermix. Defaults to
+    ``~/.agentguardian`` so existing installs keep finding their state.
+    """
+    custom = os.environ.get("AGENT_GUARDIAN_HOME")
+    if custom:
+        return Path(custom).expanduser() / "scans"
+    return Path.home() / ".agentguardian" / "scans"
+
+
+def _parse_relative_age(spec: str) -> timedelta:
+    """Parse ``30d`` / ``2w`` / ``6m`` (calendar-rough) into a ``timedelta``.
+
+    Suffixes:
+    * ``d`` -- days
+    * ``w`` -- weeks
+    * ``m`` -- months (approximated as 30 days)
+    """
+    raw = spec.strip().lower()
+    if not raw or len(raw) < 2:
+        raise typer.BadParameter(
+            f"--older-than {spec!r} is not in NUMBER+UNIT form (e.g. 30d, 2w, 6m)."
+        )
+    unit = raw[-1]
+    num_part = raw[:-1]
+    try:
+        amount = int(num_part)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"--older-than {spec!r}: leading number must be an integer (got {num_part!r})."
+        ) from exc
+    if amount < 0:
+        raise typer.BadParameter(f"--older-than {spec!r}: amount must be non-negative.")
+    if unit == "d":
+        return timedelta(days=amount)
+    if unit == "w":
+        return timedelta(weeks=amount)
+    if unit == "m":
+        # Calendar-rough -- 30 days. Honest about it in the help string.
+        return timedelta(days=amount * 30)
+    raise typer.BadParameter(
+        f"--older-than {spec!r}: unit must be d / w / m (days / weeks / months)."
+    )
+
+
+def _rmtree_quiet(path: Path) -> None:
+    """Best-effort recursive delete. Used by ``scans delete`` and ``purge``."""
+    import shutil
+
+    shutil.rmtree(path, ignore_errors=True)
+
+
+@scan_app.command("list")
+def scans_list() -> None:
+    """List stored scans (id + mtime), most recent first."""
+    root = _scans_root()
+    if not root.is_dir():
+        typer.echo("no stored scans.")
+        return
+    entries: list[tuple[float, str]] = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError as exc:
+            _LOG.debug("scans list: stat(%s) failed (%s) -- skipped", child, exc)
+            continue
+        entries.append((mtime, child.name))
+    if not entries:
+        typer.echo("no stored scans.")
+        return
+    entries.sort(reverse=True)
+    typer.echo(f"stored scans (root: {root}):")
+    for mtime, name in entries:
+        iso = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
+        typer.echo(f"  {iso}  {name}")
+
+
+@scan_app.command("delete")
+def scans_delete(
+    scan_id: str = typer.Argument(
+        ..., help="Scan ID to delete (matches a sub-dir under the scans root)."
+    ),
+) -> None:
+    """Delete a single stored scan directory."""
+    root = _scans_root()
+    target = root / scan_id
+    if not target.is_dir():
+        typer.echo(f"scan not found: {target}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    _rmtree_quiet(target)
+    if target.exists():  # pragma: no cover -- defensive
+        typer.echo(f"could not delete {target}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    typer.echo(f"deleted: {target}")
+
+
+@scan_app.command("purge")
+def scans_purge(
+    older_than: str = typer.Option(
+        ...,
+        "--older-than",
+        help=(
+            "Delete stored scans whose mtime is older than this. NUMBER+UNIT, "
+            "e.g. '30d' (days), '2w' (weeks), '6m' (months, ~30 days each)."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show which scans would be purged without deleting them.",
+    ),
+) -> None:
+    """Purge stored scans older than --older-than."""
+    delta = _parse_relative_age(older_than)
+    root = _scans_root()
+    if not root.is_dir():
+        typer.echo("no stored scans.")
+        return
+    cutoff = datetime.now(tz=timezone.utc) - delta
+    cutoff_ts = cutoff.timestamp()
+    to_remove: list[Path] = []
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError as exc:
+            _LOG.debug("scans purge: stat(%s) failed (%s) -- skipped", child, exc)
+            continue
+        if mtime < cutoff_ts:
+            to_remove.append(child)
+    if not to_remove:
+        typer.echo(f"nothing older than {older_than} (cutoff: {cutoff.isoformat()}).")
+        return
+    typer.echo(
+        f"{'would purge' if dry_run else 'purging'} {len(to_remove)} scan(s) "
+        f"older than {older_than} (cutoff: {cutoff.isoformat()}):"
+    )
+    for child in sorted(to_remove):
+        typer.echo(f"  - {child.name}")
+        if not dry_run:
+            _rmtree_quiet(child)
+
+
+# ---------------------------------------------------------------------------
 # scan command -- the big one
 # ---------------------------------------------------------------------------
 
@@ -1449,13 +1995,37 @@ def scan(
         help="Dotted path or file:attr -- e.g. 'my_agent:run'. Mutually exclusive with --system-prompt / --endpoint / --framework.",
     ),
     system_prompt: Path | None = typer.Option(
-        None, "--system-prompt", help="Mode A -- path to a system prompt file."
+        None, "--system-prompt", help="Path to a system prompt file (prompt-only target)."
     ),
     endpoint: str | None = typer.Option(
-        None, "--endpoint", help="Mode C -- hosted HTTP endpoint URL."
+        None, "--endpoint", help="Hosted HTTP endpoint URL of the target agent."
     ),
     framework: str | None = typer.Option(
-        None, "--framework", help="Mode D -- framework kind (langgraph, crewai, …)."
+        None,
+        "--framework",
+        help=(
+            "Framework kind. One of: "
+            "adk, autogen, crewai, langgraph, openai_agents, strands. "
+            "Pair with --framework-ref MODULE:ATTR to point at your native object."
+        ),
+    ),
+    framework_ref: str | None = typer.Option(
+        None,
+        "--framework-ref",
+        help=(
+            "With --framework: a Python dotted reference (MODULE:ATTR) to the "
+            "framework-native object to wrap (e.g. 'my_app.graph:graph')."
+        ),
+    ),
+    no_preflight: bool = typer.Option(
+        False,
+        "--no-preflight",
+        help=(
+            "Skip the pre-scan reachability check for --endpoint mode. The "
+            "default preflight POSTs an empty body twice with a 2s timeout; "
+            "if both attempts fail with ConnectError/Timeout the scan exits "
+            "with EXIT_TARGET_UNREACHABLE instead of burning LLM budget."
+        ),
     ),
     model: str = typer.Option(
         "stub",
@@ -1560,19 +2130,21 @@ def scan(
             "direct user ask (indirect prompt injection)."
         ),
     ),
-    owasp_llm: bool = typer.Option(
+    no_owasp_llm: bool = typer.Option(
         False,
-        "--owasp-llm",
+        "--no-owasp-llm",
         help=(
-            "Additionally dispatch the OWASP-LLM specialist agents (fuzzing, "
-            "secret-extraction, denial-of-wallet, detection-evasion)."
+            "Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, "
+            "denial-of-wallet, detection-evasion). Default: those four specialists "
+            "DO run alongside the core ASI01-10 slate -- agentic security needs "
+            "transport-level secret-leak and DoW checks to be the default surface."
         ),
     ),
     contract: Path | None = typer.Option(
         None,
         "--contract",
         help=(
-            "Stage 1B -- drive the scan from a target contract (agentguardian.yaml). "
+            "Drive the scan from a target contract (agentguardian.yaml). "
             "The contract supplies the transport, auth, session, and Rules of "
             "Engagement; RoE budgets map onto the swarm config and a provenance "
             "audit is attached to the report. Mutually exclusive with the "
@@ -1601,6 +2173,8 @@ def scan(
                 system_prompt=system_prompt,
                 endpoint=endpoint,
                 framework=framework,
+                framework_ref=framework_ref,
+                no_preflight=no_preflight,
                 model=model,
                 commander_model=commander_model,
                 attacker_model=attacker_model,
@@ -1620,7 +2194,7 @@ def scan(
                 bundle=bundle,
                 pretext=pretext,
                 indirect=indirect,
-                owasp_llm=owasp_llm,
+                no_owasp_llm=no_owasp_llm,
                 contract=contract,
             )
         )
@@ -1636,6 +2210,8 @@ async def _run_scan(
     system_prompt: Path | None,
     endpoint: str | None,
     framework: str | None,
+    framework_ref: str | None = None,
+    no_preflight: bool = False,
     model: str,
     commander_model: str | None,
     attacker_model: str | None,
@@ -1655,7 +2231,7 @@ async def _run_scan(
     bundle: Path | None = None,
     pretext: bool = False,
     indirect: bool = False,
-    owasp_llm: bool = False,
+    no_owasp_llm: bool = False,
     contract: Path | None = None,
 ) -> int:
     # 1. Config layer -- file + defaults.
@@ -1710,10 +2286,10 @@ async def _run_scan(
     # path below is left byte-for-byte unchanged.
     contract_ctx: _ContractScanContext | None = None
     if contract is not None:
-        if any((target, system_prompt, endpoint, framework)):
+        if any((target, system_prompt, endpoint, framework, framework_ref)):
             typer.echo(
                 "--contract is mutually exclusive with target / --system-prompt / "
-                "--endpoint / --framework.",
+                "--endpoint / --framework / --framework-ref.",
                 err=True,
             )
             return EXIT_CONFIG
@@ -1730,12 +2306,23 @@ async def _run_scan(
             return EXIT_CONFIG
         adapter: TargetAdapter = contract_ctx.adapter
     else:
+        # Pre-scan reachability preflight for --endpoint mode (#3). A hosted
+        # target that is unreachable would otherwise burn the full LLM budget
+        # on per-probe timeouts; we'd rather exit fast with a clear message.
+        # --no-preflight is the explicit escape hatch. Placeholder hosts (e.g.
+        # api.example.com from a scaffolded contract) are skipped automatically.
+        if endpoint and not no_preflight and not _is_placeholder_endpoint(endpoint):
+            reachable = await _endpoint_reachability_preflight(endpoint)
+            if not reachable:
+                typer.echo(f"target unreachable: {endpoint}", err=True)
+                return EXIT_TARGET_UNREACHABLE
         try:
             adapter = build_target_adapter(
                 target=target,
                 system_prompt_path=system_prompt,
                 endpoint=endpoint,
                 framework=framework,
+                framework_ref=framework_ref,
                 target_llm=target_llm,
                 target_model=_normalise_model_name(eff_attacker),
             )
@@ -1768,9 +2355,10 @@ async def _run_scan(
         evaluator_model=_normalise_model_name(eff_evaluator),
         overall_wall_seconds=float(cfg.swarm.budget.wall_seconds),
         total_tokens=cfg.swarm.budget.max_total_tokens,
-        # Allow the extra OWASP-LLM specialists past the parallel cap when asked
-        # (core slate is 10; +4 M2 specialists = 14).
-        max_parallel_agents=(14 if owasp_llm else min(10, cfg.swarm.max_parallel_agents)),
+        # OWASP-LLM specialists default ON post-launch hardening: transport-level
+        # secret-leak and DoW are required default surface for agentic security.
+        # --no-owasp-llm suppresses them and reverts to the 10-agent slate cap.
+        max_parallel_agents=(min(10, cfg.swarm.max_parallel_agents) if no_owasp_llm else 14),
         tier_override=tier_override,
         target_goal=goal,
         mode=resolved_mode,
@@ -1780,7 +2368,7 @@ async def _run_scan(
         bundle_dir=bundle,
         enable_pretext=pretext,
         enable_indirect=indirect,
-        include_m2_agents=owasp_llm,
+        include_m2_agents=not no_owasp_llm,
         # Runtime USD cap (opt-in). None = uncapped. Enforced live by the
         # swarm's budget watchdog -- see SwarmConfig.usd_cap.
         usd_cap=budget_usd,
@@ -1835,7 +2423,21 @@ async def _run_scan(
         typer.echo(f"llm provider error: {type(exc).__name__}: {exc}", err=True)
         return EXIT_LLM_PROVIDER
     finally:
-        await adapter.aclose()
+        # Close every LLM client + adapter we opened. Deduplicate when two
+        # role slots point at the same object (a stub run, or any case where
+        # the same model spec is reused) so we don't double-close. Returning
+        # exceptions instead of raising keeps a noisy aclose from masking the
+        # original scan error.
+        seen: set[int] = set()
+        closeables: list[Any] = [adapter]
+        for client in (attacker_llm, evaluator_llm, commander_llm, target_llm):
+            if id(client) not in seen:
+                seen.add(id(client))
+                closeables.append(client)
+        await asyncio.gather(
+            *(c.aclose() for c in closeables),
+            return_exceptions=True,
+        )
 
     # First-scan telemetry notice -- non-blocking, prints to stderr.
     # Fires at most once per install; subsequent scans are silent.
@@ -1922,11 +2524,31 @@ async def _run_scan(
 
     band: SeverityBand = scan_result.band
     aivss_label = str(scan_result.aivss) if authoritative else "n/a"
+    coverage_label = ""
+    coverage_pct: float | None = None
+    if scan_result.completeness is not None:
+        coverage_pct = float(scan_result.completeness.pct)
+        if coverage_pct < 100.0:
+            coverage_label = f" coverage={coverage_pct:.0f}%"
     typer.echo(
         f"scan {scan_id} done: AIVSS={aivss_label} band={band.value} "
-        f"tier={scan_result.tier.value} findings={len(scan_result.findings)} "
+        f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )
+
+    # Coverage warning: when a scan launched less than the authoritative-mode
+    # floor, surface it on stderr so a CI gate downstream knows the scan was
+    # thinly tested (and we never silently pass a slim run as full coverage).
+    if coverage_pct is not None and coverage_pct < 100.0:
+        mode_floor = {"fast": 60.0, "smart": 80.0, "full": 95.0}.get(scan_result.mode, 95.0)
+        if coverage_pct < mode_floor:
+            typer.echo(
+                f"WARNING: coverage {coverage_pct:.0f}% is below the "
+                f"--mode {scan_result.mode} authoritative threshold ({mode_floor:.0f}%). "
+                "The absence of findings here is not evidence of safety -- re-run with a "
+                "larger budget or --mode full for an authoritative assessment.",
+                err=True,
+            )
 
     # --fail-under: a non-authoritative scan is ALWAYS a failure (it tested
     # nothing); otherwise compare the numeric AIVSS against the floor. A

@@ -9,7 +9,7 @@ recon agent consumes.
 |  A   | [System prompt](prompt.md)               | You only have the agent's system prompt          |
 |  B   | [Code](code.md)                          | You have the Python source of the agent          |
 |  C   | [HTTP](http.md)                          | The agent is reachable as an HTTP endpoint       |
-|  D   | [Framework](framework.md)                | LangGraph / CrewAI / AutoGen / LlamaIndex / etc. |
+|  D   | [Framework](framework.md)                | LangGraph / CrewAI / AutoGen / OpenAI Agents / Strands / ADK |
 
 Pick the highest-fidelity adapter your situation allows. **Framework** is
 the highest, because the framework adapter introspects the agent's

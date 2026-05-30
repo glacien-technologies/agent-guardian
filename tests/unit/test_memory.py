@@ -177,8 +177,10 @@ async def test_write_reflection_with_embed_grows_vector_index(tmp_path: Path) ->
     await mem.write_reflection("recon", "agent has memory and PII tools", embed=True)
     stats = mem.stats()
     assert stats.vector_index_size == 1
-    # No sentence-transformers in CI → hash fallback kicks in.
-    assert stats.embedder_kind == "hash-fallback"
+    # Either path is correct: hash-fallback on a minimal CI install,
+    # sentence-transformers when the [full] extra is present locally.
+    # ``none`` would mean embedding silently no-op'd — that is a regression.
+    assert stats.embedder_kind in {"hash-fallback", "sentence-transformers"}
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@ alignment matrix.
 |  M5       | LLM backends — OpenAI, Anthropic, Bedrock, Vertex, stub.    | Shipped  |
 |  M6       | Four jailbreak strategies — PAIR, TAP, Crescendo, MAD-MAX.  | Shipped  |
 |  M7       | Shared vector memory + concurrency tests.                   | Shipped  |
-|  M8       | Four adapters — prompt, code, HTTP, framework.              | Shipped  |
+|  M8       | Four adapters — prompt, code, HTTP, framework.              | Partial — framework adapter *classes* shipped; CLI dispatch lands in v1.1. |
 |  M9       | Swarm Commander + convergence detection.                    | Shipped  |
 |  M10      | CLI surface — `scan`, `serve`, `verify`, `report`, `badge`. | Shipped  |
 |  M11      | Seed-probe corpus — all ten ASI categories.                 | Shipped  |

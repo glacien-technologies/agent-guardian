@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 
 import pytest
@@ -12,7 +13,12 @@ from agent_guardian.llm.errors import (
     LLMTimeoutError,
     LLMTransientError,
 )
-from agent_guardian.llm.retry import compute_delay, with_backoff
+from agent_guardian.llm.retry import (
+    AGENT_LOOP_MAX_RETRIES,
+    AGENT_LOOP_MAX_SECONDS,
+    compute_delay,
+    with_backoff,
+)
 
 
 def test_compute_delay_base_case() -> None:
@@ -214,3 +220,103 @@ async def test_with_backoff_negative_retry_after_falls_back_to_computed() -> Non
     )
     # Negative retry_after is treated as "no header" — falls back to computed.
     assert sleeps == [pytest.approx(1.0)]
+
+
+# ----------------------------------------------------------------- cancellation
+
+
+def test_agent_loop_defaults_are_tighter_than_public_defaults() -> None:
+    """Agent-loop ceiling MUST stay below the public 60s/6-retry default.
+
+    A regression here would mean an EARLY_STOP could once again soak the
+    wall-clock budget while an attacker LLM is locked in a 503 cycle.
+    """
+    assert AGENT_LOOP_MAX_RETRIES <= 3
+    assert AGENT_LOOP_MAX_SECONDS <= 15.0
+
+
+async def test_with_backoff_cancel_event_interrupts_mid_backoff() -> None:
+    """Setting the cancel event mid-sleep re-raises the retryable error promptly."""
+    cancel = asyncio.Event()
+    calls = 0
+
+    async def coro() -> str:
+        nonlocal calls
+        calls += 1
+        raise LLMTransientError("blip")
+
+    async def fake_sleep(_s: float) -> None:
+        # Simulate a long backoff that gets cancelled mid-wait. Yield once so
+        # the cancel_event.wait() task gets a chance to register, then await
+        # an event that never fires -- the wrapper's asyncio.wait will return
+        # via the cancel path.
+        cancel.set()
+        await asyncio.sleep(0)
+
+    with pytest.raises(LLMTransientError):
+        await with_backoff(
+            coro,
+            max_retries=5,
+            sleep=fake_sleep,
+            rng=random.Random(0),
+            cancel_event=cancel,
+        )
+    # We made the first attempt, hit retry, slept, the cancel fired during
+    # sleep -> we re-raised the most recent exception. No second attempt.
+    assert calls == 1
+
+
+async def test_with_backoff_cancel_event_already_set_before_first_call() -> None:
+    """Cancellation set before any attempt raises CancelledError immediately."""
+    cancel = asyncio.Event()
+    cancel.set()
+    calls = 0
+
+    async def coro() -> str:
+        nonlocal calls
+        calls += 1
+        return "never"
+
+    async def fake_sleep(_s: float) -> None:
+        return None
+
+    with pytest.raises(asyncio.CancelledError):
+        await with_backoff(
+            coro,
+            max_retries=3,
+            sleep=fake_sleep,
+            rng=random.Random(0),
+            cancel_event=cancel,
+        )
+    assert calls == 0
+
+
+async def test_with_backoff_cancel_event_unset_runs_normally() -> None:
+    """A cancel_event that never fires must not affect the success path."""
+    cancel = asyncio.Event()
+    calls = 0
+
+    async def coro() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 2:
+            raise LLMTransientError("blip")
+        return "ok"
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+
+    result = await with_backoff(
+        coro,
+        base_seconds=1.0,
+        factor=2.0,
+        jitter_pct=0.0,
+        sleep=fake_sleep,
+        rng=random.Random(0),
+        cancel_event=cancel,
+    )
+    assert result == "ok"
+    assert calls == 2
+    assert len(sleeps) == 1

@@ -35,7 +35,7 @@ for compliance-sensitive environments and signs every evidence pack
 with both HMAC-SHA256 and Ed25519 so downstream consumers can verify
 that a scan was produced by the documented pipeline. This paper
 describes the architecture, the AIVSS formula, the seed-probe corpus
-(50 probes across ASI01–ASI10), and the experimental setup we will use
+(92 probes across ASI01–ASI10), and the experimental setup we will use
 to publish the first public scorecards once the soft-beta cohort
 concludes.
 
@@ -209,12 +209,13 @@ The mapping from score to band is:
 
 ## 5. Experimental Setup
 
-The seed-probe corpus ships 50 YAML probes — 5 per ASI category —
-hand-curated against published attack patterns and informed by the
-related work surveyed in §2. Each probe carries a payload (or family
-of payloads via the `seeds:` list), an `expected_evidence` predicate
-the judge consults, a `tier_floor` (T1–T4), and full taxonomy mapping
-to ASI / MITRE ATLAS / CSA.
+The seed-probe corpus ships 92 YAML probes (corpus version
+`2026.05`) — roughly nine per ASI category — hand-curated against
+published attack patterns and informed by the related work surveyed in
+§2. Each probe carries a payload (or family of payloads via the
+`seeds:` list), an `expected_evidence` predicate the judge consults, a
+`tier_floor` (T1–T4), and full taxonomy mapping to ASI / MITRE ATLAS /
+CSA.
 
 The four scan tiers are PRD-defined slices of effort:
 

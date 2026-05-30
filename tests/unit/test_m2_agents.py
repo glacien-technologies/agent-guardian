@@ -1,4 +1,4 @@
-"""Tests for the four M2 OWASP-LLM specialist agents."""
+"""Tests for the M2 OWASP-LLM specialist agents."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from agent_guardian.agents import (
     DenialOfWalletAgent,
     DetectionEvasionAgent,
     FuzzingAgent,
+    OutputHandlingAgent,
     SecretExtractionAgent,
 )
 from agent_guardian.agents.base import AsiAgent
@@ -23,14 +24,17 @@ def _agent(cls: type[AsiAgent]) -> AsiAgent:
     return cls(attacker_llm=StubLLM(default="ok"), evaluator_llm=StubLLM(default="{}"))
 
 
-def test_registry_has_four_specialists() -> None:
-    assert len(M2_SPECIALIST_AGENTS) == 4
+def test_registry_has_five_specialists() -> None:
+    # OutputHandlingAgent (LLM02) was added alongside the original four to
+    # close the LLM02 coverage gap in the M2 specialist slate.
+    assert len(M2_SPECIALIST_AGENTS) == 5
     names = {c.name for c in M2_SPECIALIST_AGENTS}
     assert names == {
         "fuzzing-agent",
         "secret-extraction-agent",
         "denial-of-wallet-agent",
         "detection-evasion-agent",
+        "output-handling-agent",
     }
 
 
@@ -78,6 +82,13 @@ def test_detection_evasion_always_applicable() -> None:
     agent = _agent(DetectionEvasionAgent)
     fp = TargetFingerprint(mode="code", ref="x")
     assert agent.is_applicable(fp) is True
+
+
+def test_output_handling_maps_to_asi09() -> None:
+    # LLM02 has no dedicated ASI slot; we map it onto ASI09 (the broader
+    # unsafe-output rubric) the same way SecretExtractionAgent maps LLM07
+    # onto ASI01.
+    assert OutputHandlingAgent.asi_category is AsiCategory.ASI09
 
 
 def test_allowed_tools_resolve_against_real_registry() -> None:

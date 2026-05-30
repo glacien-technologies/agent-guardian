@@ -1,0 +1,78 @@
+name: Publish container to GHCR
+
+# Standard §4.4 / §4.5 — every ``v*.*.*`` tag publishes a multi-arch
+# (linux/amd64, linux/arm64) container image to GitHub Container
+# Registry. The image is tagged with both the exact release tag (e.g.
+# ``v1.0.0``) and ``latest``.
+#
+# Pull pattern after publish:
+#   docker run --rm ghcr.io/glacien-technologies/agent-guardian:latest doctor
+#
+# Auth uses the workflow-scoped GITHUB_TOKEN. No long-lived PAT secret
+# is involved, which keeps the credential blast radius small if the
+# repo is ever compromised.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build and push multi-arch image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        # Required to cross-build the arm64 layer on the amd64 runner.
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image reference (lowercase repo)
+        id: ref
+        # GHCR requires the image path to be lowercase. ``github.repository``
+        # preserves case; downcase it explicitly so tags like
+        # ``Glacien-Technologies/agent-guardian`` still publish cleanly.
+        run: |
+          repo="${{ github.repository }}"
+          echo "image=ghcr.io/${repo,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ref.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.ref.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the published image
+        # Pull the freshly-pushed amd64 variant and run ``doctor`` to
+        # confirm the entrypoint resolves and the CLI imports cleanly.
+        # Non-zero exit fails the workflow.
+        run: |
+          docker pull --platform linux/amd64 \
+            "${{ steps.ref.outputs.image }}:${{ github.ref_name }}"
+          docker run --rm --platform linux/amd64 \
+            "${{ steps.ref.outputs.image }}:${{ github.ref_name }}" doctor

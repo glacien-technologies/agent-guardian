@@ -67,8 +67,27 @@ reachable elsewhere.
 ## 5. Get a signed report and a badge
 
 After the scan completes, AgentGuardian has emitted a JSON evidence pack
-to `~/.agentguardian/scans/<scan-id>/`. The pack is signed with Ed25519,
-verifiable by anyone with the public key.
+to `~/.agentguardian/scans/<scan-id>/`. The pack is signed with Ed25519
+and HMAC-SHA256. The Ed25519 keypair is auto-generated on first use
+under `~/.agentguardian/keys/` — back that directory up if you need to
+re-sign or hand the public key to a remote verifier.
+
+Verify the signature with the public key embedded in the report (this
+is the "I produced this scan myself" path — see
+[CLI — verify](cli.md#verify) for full trust-anchor semantics):
+
+```bash
+SCAN_ID=$(jq -r .last_scan_id ~/.agentguardian/state.json)
+REPORT=~/.agentguardian/scans/"$SCAN_ID"/report.json
+PUBKEY=$(jq -r .signatures.ed25519.public_key_b32 "$REPORT")
+agent-guardian verify "$REPORT" --pubkey "$PUBKEY"
+```
+
+Running `verify` without `--pubkey` / `--pubkey-file` / `--secret`
+yields a non-zero exit and prints `trust anchor: UNANCHORED` — a
+signed report only proves the bytes were not tampered with, not who
+produced it. Pin the publisher's pubkey out-of-band when you receive
+reports from someone else.
 
 Generate the marketing badge:
 
@@ -76,17 +95,21 @@ Generate the marketing badge:
 agent-guardian badge $(agent-guardian last-score) --svg > badge.svg
 ```
 
-Or regenerate the report in a different format from the stored scan:
+Or regenerate the report in a different format from the stored scan —
+no need to re-run the swarm:
 
 ```bash
-agent-guardian report $(jq -r .last_scan_id ~/.agentguardian/state.json) --output md
+agent-guardian report "$SCAN_ID" --output md
 ```
 
-Need a PDF? Install the PDF extra and pass `--output pdf` on the next scan:
+Need a PDF? Install the PDF extra (`[full]` for WeasyPrint, or
+`[pdf-fallback]` for the lighter ReportLab engine on systems where
+WeasyPrint's native deps are awkward) and regenerate from the stored
+scan:
 
 ```bash
 pip install 'agent-guardian[full]'
-agent-guardian scan --system-prompt prompt.txt --output pdf --output-path report.pdf
+agent-guardian report "$SCAN_ID" --output pdf --output-path report.pdf
 ```
 
 That's it — under five minutes, and you have a deterministic, signed,

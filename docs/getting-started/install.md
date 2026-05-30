@@ -1,6 +1,6 @@
 # Install
 
-AgentGuardian is published on PyPI as [`agent-guardian`](https://pypi.org/project/agent-guardian/) and supports Python 3.10, 3.11, 3.12, and 3.13 on Linux, macOS, and Windows.
+AgentGuardian is published on PyPI as [`agent-guardian`](https://pypi.org/project/agent-guardian/) and supports Python 3.10, 3.11, 3.12, and 3.13 on **Linux** and **macOS**. **Windows is community-supported** — the wheel installs, but it is not on our CI matrix and the PDF extra (`[full]`) requires the WeasyPrint GTK runtime. On Windows we recommend `pip install 'agent-guardian[pdf-fallback]'` (ReportLab) instead of `[full]`.
 
 ## Standard install
 
@@ -43,15 +43,23 @@ This is the usual developer setup — see [Contributing](../contributing.md) for
 
 ## Docker
 
-A small image is published under `ghcr.io/glacien-technologies/agent-guardian`. The image ships the base install plus the `[full]` extra so PDF reports work out of the box.
+Until the `docker-publish` workflow ships, build the image locally from
+the bundled `Dockerfile`. The image bundles the base install plus the
+`[full]` extra so PDF reports work out of the box:
 
 ```bash
+git clone https://github.com/glacien-technologies/agent-guardian.git
+cd agent-guardian
+docker build -t agent-guardian:dev .
+
 docker run --rm -it \
   -e OPENAI_API_KEY \
   -v "$PWD":/work -w /work \
-  ghcr.io/glacien-technologies/agent-guardian:latest \
+  agent-guardian:dev \
   scan --system-prompt prompt.txt --model openai:gpt-4o
 ```
+
+Once `1.0.0` lands on PyPI we will publish a `ghcr.io/glacien-technologies/agent-guardian:latest` image alongside the wheel; the PyPI-install Dockerfile variant in the repo will become the recommended path.
 
 ## What next
 

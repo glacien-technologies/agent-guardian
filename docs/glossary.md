@@ -10,7 +10,7 @@
 - **MITRE ATLAS** — Adversarial Threat Landscape for Artificial-Intelligence Systems. MITRE's threat-modelling framework for AI/ML systems; AgentGuardian tags every finding with at least one ATLAS technique ID.
 - **PAdES-LTA** — PDF Advanced Electronic Signatures, Long-Term Archival. The regulator-grade evidence-pack signing tier; **Enterprise-only**, not part of the OSS package.
 - **PAIR** — Prompt Automatic Iterative Refinement (Chao et al. 2023). Attacker-LLM iterative critique-and-rewrite strategy.
-- **Probe** — A single seed test case, declared as YAML and validated against `agent_guardian.models.Probe`. The OSS package ships 50 in `src/agent_guardian/probes/`.
+- **Probe** — A single seed test case, declared as YAML and validated against `agent_guardian.models.Probe`. The OSS package ships **92** probes in `src/agent_guardian/probes/` (corpus version `2026.05`, exposed as `agent_guardian.PROBE_CORPUS_VERSION`).
 - **Recon agent** — The Layer-1 specialist that maps a target's attack surface before the 10 ASI attackers start.
 - **Seed** — The static prompt payload at the heart of a probe. The swarm dynamically extends seeds using TAP, Crescendo, MAD-MAX, and PAIR strategies.
 - **SSE** — Server-Sent Events. The unidirectional HTTP streaming protocol the dashboard uses to push live scan events to the browser.

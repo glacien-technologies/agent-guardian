@@ -1,0 +1,47 @@
+name: README lint
+
+# Guard rail against shipping the README with placeholder badges.
+#
+# Two placeholder IDs live in README.md today:
+#   * OpenSSF Best Practices ``/projects/0000`` — must be replaced once
+#     the project registers at https://www.bestpractices.dev (Standard
+#     §4.2).
+#   * Discord shields.io URL with an all-zero server ID
+#     (``/discord/0000000000000000``) — must be replaced once the
+#     Discord server is provisioned (Standard §6.7).
+#
+# If either placeholder is still in the file at PR or push time the
+# workflow fails. The matching tests live in
+# ``tests/unit/test_readme_badges.py``; this workflow is the CI gate
+# that keeps the placeholders from sneaking back in.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  readme-placeholders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject OpenSSF Best Practices placeholder
+        # ``grep -E`` exits 0 when a match is found. We invert with ``!``
+        # so the step fails the build when the placeholder is present.
+        run: |
+          if grep -nE '/projects/0000([^0-9]|$)' README.md; then
+            echo "::error file=README.md::OpenSSF Best Practices badge still points at the /projects/0000 placeholder."
+            exit 1
+          fi
+
+      - name: Reject Discord all-zero server-ID placeholder
+        run: |
+          if grep -nE '/discord/0+\b' README.md; then
+            echo "::error file=README.md::Discord badge still uses the all-zero placeholder server ID."
+            exit 1
+          fi

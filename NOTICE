@@ -26,4 +26,44 @@ Bundled fonts (PDF report template):
 - Inter (SIL OFL 1.1)            Copyright Rasmus Andersson
 - JetBrains Mono (SIL OFL 1.1)   Copyright JetBrains s.r.o.
 
-Full license texts for every package are available via `pip-licenses` after installation.
+------------------------------------------------------------------------------
+Transitive dependencies introduced by optional extras
+------------------------------------------------------------------------------
+
+The base install of ``agent-guardian`` deliberately ships only permissively
+licensed dependencies (Apache-2.0 / MIT / BSD). The opt-in extras may pull in
+additional transitive packages with copyleft or weak-copyleft licenses. We list
+them here so downstream auditors do not have to dig through the lockfile.
+
+[full] extra (PDF rendering + semantic dedupe + PII detection):
+
+- pyphen                         GPL-2.0-or-later OR LGPL-2.1-or-later OR
+                                 MPL-1.1 (tri-licensed)
+                                 Reached transitively via WeasyPrint for
+                                 syllable-aware line-breaking in the PDF
+                                 report template. Resolved under LGPL-2.1
+                                 dynamic-linking terms: pyphen is imported
+                                 unmodified at runtime; we do not ship a
+                                 derivative work. Pyphen also bundles the
+                                 LibreOffice hyphenation dictionaries
+                                 (MPL-1.1 / LGPL).
+                                 Only installed when users opt into the
+                                 ``[full]`` extra; the base install does NOT
+                                 pull this in and downstream redistributors
+                                 who avoid ``[full]`` carry no LGPL exposure.
+
+[full] / [otel] / [dev] transitives under MPL-2.0:
+
+- certifi (MPL-2.0)              Mozilla CA bundle. File-level copyleft only —
+                                 the MPL clause attaches to certifi's own
+                                 source, not to projects that merely depend
+                                 on it. Transitive via httpx.
+- hypothesis (MPL-2.0)           Property-based testing. ``[dev]`` only.
+- pathspec (MPL-2.0)             Gitignore-style path matching. Transitive
+                                 via pip-licenses (``[dev]``).
+- tqdm (MPL-2.0 AND MIT)         Progress bars. Transitive via
+                                 sentence-transformers (``[full]``).
+
+Full license texts for every package are available via `pip-licenses` after
+installation. The CI ``license-audit`` job rejects new transitive GPL / LGPL /
+AGPL deps outside the explicitly enumerated exceptions above.

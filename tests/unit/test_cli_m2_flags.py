@@ -40,7 +40,16 @@ def test_m2_flags_in_scan_help() -> None:
     assert isinstance(cmd, Group)
     scan = cmd.commands["scan"]
     registered = {opt for param in scan.params for opt in param.opts}
-    for flag in ("--pov-gate", "--critic", "--bundle", "--pretext", "--indirect", "--owasp-llm"):
+    for flag in (
+        "--pov-gate",
+        "--critic",
+        "--bundle",
+        "--pretext",
+        "--indirect",
+        # Post-launch hardening: the OWASP-LLM specialists now run by default;
+        # the operator opts OUT with --no-owasp-llm rather than opting in.
+        "--no-owasp-llm",
+    ):
         assert flag in registered
 
 
@@ -49,10 +58,11 @@ def test_include_m2_agents_extends_the_slate() -> None:
     cfg_off = SwarmConfig(scan_id="off")
     assert cfg_off.include_m2_agents is False
 
-    # When set, the swarm appends the 4 OWASP-LLM specialists.
+    # When set, the swarm appends the 5 OWASP-LLM specialists
+    # (LLM05 / LLM07 / LLM10 / detection-evasion / LLM02).
     from agent_guardian.agents import M2_SPECIALIST_AGENTS
 
-    assert len(M2_SPECIALIST_AGENTS) == 4
+    assert len(M2_SPECIALIST_AGENTS) == 5
     # Sanity: the M2 specialists are not already in the core slate.
     assert all(c not in _ASI_AGENT_CLASSES for c in M2_SPECIALIST_AGENTS)
 

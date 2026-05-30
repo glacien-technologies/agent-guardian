@@ -99,10 +99,11 @@ def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     # M11 shipped 50 bundled probes; Phase B added 29 OWASP-2026-aligned
     # probes; the production-hardening pass added 11 more (ASI04/06/09
     # coverage for poisoned checkpoints, sign-off spoofing, validator
-    # bypass, denial-of-wallet, recursion / fan-out abuse, etc.) for a
-    # total of 90. The corpus-version stamp is also printed.
+    # bypass, denial-of-wallet, recursion / fan-out abuse, etc.); the
+    # M2 LLM02 specialist pass added 2 output-handling canary probes for
+    # a total of 92. The corpus-version stamp is also printed.
     assert "Probe corpus version" in result.stdout
-    assert "Found 90 probes" in result.stdout
+    assert "Found 92 probes" in result.stdout
     # At least one ID from each category should appear.
     for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
         assert asi in result.stdout

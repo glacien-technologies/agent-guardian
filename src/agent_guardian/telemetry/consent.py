@@ -1,7 +1,7 @@
 """Telemetry consent state machine.
 
 State is persisted at ``~/.agentguardian/consent.json`` as a small
-JSON document:
+JSON document::
 
     {
       "state": "opted_in" | "opted_out" | "deferred" | "not_prompted",
@@ -10,8 +10,16 @@ JSON document:
     }
 
 The default state when the file does not exist is ``NOT_PROMPTED``.
-The first-run prompt (see :mod:`agent_guardian.telemetry.prompt`) is
-what transitions ``NOT_PROMPTED`` → one of the three decided states.
+
+Policy (v1.0+, post launch-readiness audit):
+    Telemetry is **OFF by default**. ``NOT_PROMPTED`` means no decision
+    has been recorded yet, and the read paths treat that as off --
+    :func:`is_opted_in` returns ``False`` and :func:`consent_level`
+    returns ``"off"``. The first interactive scan asks the user via
+    :func:`agent_guardian.telemetry.prompt.maybe_prompt_consent`, which
+    persists either ``ESSENTIAL`` (on a positive yes) or ``OPTED_OUT``
+    (on no / non-interactive run / env-var opt-out). Telemetry only
+    fires once a user has positively consented.
 
 Once decided, the state is sticky -- the prompt never re-fires unless
 the user explicitly runs ``agent-guardian telemetry reset``.
@@ -46,36 +54,41 @@ _SCHEMA_VERSION = 1
 class ConsentState(str, Enum):
     """Five states covering the essential/extended/off tiering.
 
-    Default policy (v1.0+): we ship with **essential operational
-    telemetry on by default** -- only aggregate counts (number of
-    agents, attempts, findings, AIVSS) that cannot identify the
-    user, their machine, or their code. The first scan emits a
-    one-line notice; from then on the user can downgrade
-    (``telemetry disable``) or upgrade (``telemetry extended``).
+    Default policy (v1.0+ post launch-audit): we ship with telemetry
+    **off**. The first interactive scan asks the user, and only after
+    a positive yes does any event leave the machine. The aggregate
+    counts collected on the essential tier (number of agents,
+    attempts, findings, AIVSS) cannot identify the user, their
+    machine, or their code -- but we still require positive consent
+    before sending anything.
 
     States:
 
-    * ``NOT_PROMPTED`` -- fresh install, no notice shown yet. Treated
-      as ESSENTIAL by all read paths (telemetry fires) but the
-      first-scan notice will print and transition to ESSENTIAL.
-    * ``ESSENTIAL`` -- basic counts only. The default after first scan.
+    * ``NOT_PROMPTED`` -- fresh install, no consent decision recorded.
+      Read paths treat this as off -- :func:`is_opted_in` returns
+      ``False`` and :func:`consent_level` returns ``"off"``. The
+      consent prompt will run on the first interactive scan.
+    * ``ESSENTIAL`` -- basic counts only. Set after a positive yes
+      in the consent prompt (or ``agent-guardian telemetry essential``).
     * ``EXTENDED`` -- counts + environment fingerprint (adapter,
       Python version, OS, arch). Explicit upgrade.
-    * ``OPTED_OUT`` -- nothing sent ever. Explicit opt-out.
+    * ``OPTED_OUT`` -- nothing sent ever. Explicit opt-out, or the
+      default after a non-interactive (CI / non-TTY) install where no
+      one could answer the prompt.
     * ``DEFERRED`` -- legacy state from the v1.0rc1 opt-in flow;
       kept for backwards-compat reading of old consent.json files.
-      Treated as ESSENTIAL by read paths.
+      Treated as off by read paths (no decision == no telemetry).
 
     The semantic check for "should we send any telemetry?" is
     :func:`is_opted_in`. For the fine-grained "may we include
     environment fields?" check use :func:`is_extended`.
     """
 
-    NOT_PROMPTED = "not_prompted"  # initial state
-    ESSENTIAL = "essential"  # default-on operational metrics
+    NOT_PROMPTED = "not_prompted"  # initial state -- treated as off
+    ESSENTIAL = "essential"  # operational metrics, positive consent
     EXTENDED = "extended"  # essential + environment fingerprint
     OPTED_OUT = "opted_out"  # nothing collected
-    DEFERRED = "deferred"  # legacy -- treat as ESSENTIAL
+    DEFERRED = "deferred"  # legacy -- treat as off
 
     # Backwards-compat: the v1.0rc1 OPTED_IN state maps to EXTENDED
     # under the new policy (rc1 users explicitly accepted environment
@@ -149,15 +162,17 @@ def set_consent(state: ConsentState, *, consent_dir: Path | None = None) -> None
 
 
 def is_opted_in(consent_dir: Path | None = None) -> bool:
-    """True iff ANY telemetry tier is active (ESSENTIAL or EXTENDED).
+    """True iff the user has positively consented to ANY telemetry tier.
 
-    Note the v1.0+ default: a fresh install with NO consent decision
-    yet (``NOT_PROMPTED``) is treated as ESSENTIAL -- telemetry fires.
-    The user opts OUT, not in. ``OPTED_OUT`` is the only state that
-    returns False.
+    Per the v1.0+ launch-audit policy: a fresh install (``NOT_PROMPTED``)
+    is OFF -- the user must explicitly opt in via the consent prompt or
+    one of the ``agent-guardian telemetry`` subcommands. Only the three
+    positive-consent states (``ESSENTIAL``, ``EXTENDED``, legacy
+    ``OPTED_IN``) return ``True``; ``NOT_PROMPTED``, ``OPTED_OUT`` and
+    legacy ``DEFERRED`` all return ``False``.
     """
     state = get_consent(consent_dir)
-    return state is not ConsentState.OPTED_OUT
+    return state in (ConsentState.ESSENTIAL, ConsentState.EXTENDED, ConsentState.OPTED_IN)
 
 
 def is_extended(consent_dir: Path | None = None) -> bool:
@@ -168,24 +183,29 @@ def is_extended(consent_dir: Path | None = None) -> bool:
 
 
 def consent_level(consent_dir: Path | None = None) -> str:
-    """Return ``"off"`` / ``"essential"`` / ``"extended"`` -- the
-    three semantic tiers the telemetry client cares about."""
+    """Return ``"off"`` / ``"essential"`` / ``"extended"`` -- the three
+    semantic tiers the telemetry client cares about.
+
+    Per the v1.0+ launch-audit policy ``NOT_PROMPTED`` maps to ``"off"``:
+    a user with no recorded decision has not consented and so no
+    telemetry should fire. Legacy ``DEFERRED`` likewise maps to off.
+    """
     state = get_consent(consent_dir)
-    if state is ConsentState.OPTED_OUT:
-        return "off"
     if state in (ConsentState.EXTENDED, ConsentState.OPTED_IN):
         return "extended"
-    # NOT_PROMPTED / ESSENTIAL / DEFERRED all map to essential.
-    return "essential"
+    if state is ConsentState.ESSENTIAL:
+        return "essential"
+    # NOT_PROMPTED / OPTED_OUT / DEFERRED -- no positive consent on file.
+    return "off"
 
 
 def has_been_notified(consent_dir: Path | None = None) -> bool:
-    """True iff the user has seen the first-scan notice.
+    """True iff the user has made an explicit consent decision.
 
-    Replaces the old ``has_been_prompted``. The notice runs once per
-    NOT_PROMPTED state; after it shows, state transitions to
-    ESSENTIAL (or the user's existing choice) and the notice never
-    re-fires.
+    Replaces the old ``has_been_prompted``. ``NOT_PROMPTED`` is the
+    only state where no decision is on file; every other state means
+    the consent prompt has run (or the user has run one of the
+    ``agent-guardian telemetry`` subcommands).
     """
     state = get_consent(consent_dir)
     return state is not ConsentState.NOT_PROMPTED

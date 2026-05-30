@@ -37,13 +37,13 @@ target:
   mode:      prompt                     # one of: prompt | code | http | framework
   path:      null                       # for code mode
   endpoint:  null                       # for http mode
-  framework: null                       # for framework mode (M11)
+  framework: null                       # for framework mode (CLI dispatch lands in v1.1)
   tier:      null                       # null = auto-detect; or T1 | T2 | T3 | T4
 
 output:
   formats:       [json]                 # any of: json | sarif | junit | md | pdf
   redact_pii:    true                   # strip PII from transcripts before emit
-  sign_evidence: true                   # HMAC-SHA256 + Ed25519 signatures (M13)
+  sign_evidence: true                   # HMAC-SHA256 + Ed25519 signatures
   output_dir:    null                   # null = ~/.agentguardian/scans/<scan-id>/
 
 server:
@@ -51,7 +51,7 @@ server:
   port: 7474                            # dashboard bind port
 
 telemetry:
-  enabled: false                        # opt-in, off by default (M15)
+  enabled: false                        # see Telemetry transparency for the data contract
 ```
 
 ## Section reference
@@ -76,7 +76,7 @@ Model strings here are **bare names** — no `openai:` / `anthropic:` prefix. Th
 | `mode`       | `prompt` \| `code` \| `http` \| `framework` | Default `prompt`.                              |
 | `path`       | string \| null                       | Only used for `code` mode.                          |
 | `endpoint`   | string \| null                       | Only used for `http` mode.                          |
-| `framework`  | string \| null                       | Only used for `framework` mode (M11).               |
+| `framework`  | string \| null                       | Only used for `framework` mode (CLI dispatch lands in v1.1). |
 | `tier`       | `T1`–`T4` \| null                    | `null` lets the swarm auto-detect from the fingerprint. |
 
 ### `output`
@@ -85,7 +85,7 @@ Model strings here are **bare names** — no `openai:` / `anthropic:` prefix. Th
 |-----------------|----------------|---------|------------------------------------------------------------------|
 | `formats`       | list of string | `[json]`| Any combination of `json`, `sarif`, `junit`, `md`, `pdf`.        |
 | `redact_pii`    | bool           | `true`  | Per-finding `summary` runs through `PiiRedactor` before emit.    |
-| `sign_evidence` | bool           | `true`  | Apply HMAC-SHA256 + Ed25519 signatures (M13). Required for `publish`. |
+| `sign_evidence` | bool           | `true`  | Apply HMAC-SHA256 + Ed25519 signatures. Required for `publish`. |
 | `output_dir`    | string \| null | `null`  | `null` = `~/.agentguardian/scans/<scan-id>/`.                    |
 
 ### `server`

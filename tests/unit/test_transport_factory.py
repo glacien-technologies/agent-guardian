@@ -480,6 +480,7 @@ def test_fingerprint_declared_tools_via_full_build() -> None:
 
 
 def test_auth_aws_sigv4_explicit_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("botocore")
     monkeypatch.setenv("AWS_AK", "AKIAEXAMPLE")
     monkeypatch.setenv("AWS_SK", "secret-key-material")
     contract = _contract(
@@ -502,6 +503,7 @@ def test_auth_aws_sigv4_no_explicit_credentials_uses_chain(
     # With no explicit credentials the provider falls back to the botocore
     # default chain at construction; we monkeypatch a session so the test does
     # not depend on the host's AWS configuration.
+    pytest.importorskip("botocore")
     import botocore.session
 
     class _FakeCreds:
@@ -553,6 +555,7 @@ def test_auth_azure_entra_without_client_raises(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_auth_gcp_adc(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("google.auth")
     import google.auth
 
     class _FakeCreds:
@@ -569,6 +572,7 @@ def test_auth_gcp_adc(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_auth_gcp_sa_json_resolves_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("google.oauth2")
     monkeypatch.setenv("GCP_SA", '{"type": "service_account", "project_id": "p"}')
 
     from google.oauth2 import service_account
@@ -600,6 +604,7 @@ def test_auth_gcp_sa_json_resolves_json(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_auth_gcp_sa_json_default_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("google.oauth2")
     monkeypatch.setenv("GCP_SA", '{"type": "service_account"}')
 
     from google.oauth2 import service_account
@@ -660,6 +665,7 @@ async def test_build_transport_anthropic_messages(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_build_transport_bedrock_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("botocore")
     import botocore.session
 
     class _FakeCreds:
@@ -684,6 +690,7 @@ async def test_build_transport_bedrock_agent(monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def test_build_transport_vertex_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("google.auth")
     import google.auth
 
     class _FakeCreds:

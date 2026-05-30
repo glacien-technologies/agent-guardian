@@ -27,10 +27,18 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run mypy src/agent_guardian
   test:
-    runs-on: ubuntu-latest
+    # Cross-platform matrix so we catch path / encoding / signal
+    # regressions on macOS and Windows before they hit real users.
+    # WeasyPrint depends on native libpango / libcairo which are
+    # painful to provision on the Windows runner — the Windows leg
+    # installs the pure-Python ``pdf-fallback`` extra (ReportLab) and
+    # the PDF emitter test skips the WeasyPrint path cleanly via
+    # ``importlib.util.find_spec`` (see tests/unit/test_report_pdf.py).
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -40,11 +48,21 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       # ``--extra aws`` pulls in botocore so the Bedrock provider tests
       # (SigV4 signing, error mapping) can construct ``BedrockClient``.
-      # Without it the test module errors at import time.
-      - run: uv sync --extra dev --extra aws
+      # Without it the test module errors at import time. On Windows we
+      # additionally install ``pdf-fallback`` (ReportLab) in place of
+      # the default ``full`` WeasyPrint path.
+      - name: Install deps (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: uv sync --extra dev --extra aws
+      - name: Install deps (Windows, pdf-fallback)
+        if: runner.os == 'Windows'
+        run: uv sync --extra dev --extra aws --extra pdf-fallback
       - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
       - uses: codecov/codecov-action@v5
-        if: matrix.python-version == '3.11'
+        # Standard §11.1 — single canonical Codecov upload. Gate on the
+        # ubuntu / 3.11 leg so the cross-platform matrix doesn't
+        # double-count coverage or race the Codecov upload token.
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
           fail_ci_if_error: false

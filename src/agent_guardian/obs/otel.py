@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 
 __all__ = [
+    "TransportSpanMixin",
     "agent_span",
     "compose_observers",
     "configure_otel",
@@ -53,6 +54,18 @@ __all__ = [
     "tool_span",
     "transport_span",
 ]
+
+# OTLP exporter env vars (per OTel spec). Trace-specific takes precedence over
+# the generic endpoint so an operator can route traces somewhere other than the
+# generic OTLP collector if they like. ``OTEL_EXPORTER_OTLP_HEADERS`` is a
+# comma-separated ``k=v`` list (also per spec) used to authenticate to a hosted
+# collector (Honeycomb, Grafana, etc.). ``OTEL_SERVICE_NAME`` overrides the
+# default ``service.name`` resource attribute.
+_ENV_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+_ENV_OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
+_ENV_OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
+_ENV_SERVICE_NAME = "OTEL_SERVICE_NAME"
+_DEFAULT_SERVICE_NAME = "agent-guardian"
 
 # --- GenAI semantic-convention constants ------------------------------------
 # Centralised so the attribute keys are spelled exactly once. These mirror the
@@ -381,11 +394,80 @@ def compose_observers(*observers: SwarmObserver) -> SwarmObserver:
 
 
 # --- Exporter wiring (Stage 1B: own spans only) -----------------------------
-def configure_otel(endpoint: str | None) -> None:
+def _parse_otlp_headers(raw: str) -> dict[str, str]:
+    """Parse an ``OTEL_EXPORTER_OTLP_HEADERS`` string into a ``{k: v}`` dict.
+
+    Format (per OTel spec, mirroring W3C Baggage): ``key1=value1,key2=value2``.
+    Whitespace around keys/values is stripped; empty entries are skipped;
+    duplicate keys take the last-seen value. Malformed entries (no ``=``) are
+    silently dropped — we never want a fat-fingered env var to crash a scan.
+    """
+    headers: dict[str, str] = {}
+    for raw_entry in raw.split(","):
+        entry = raw_entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        key, _, value = entry.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        headers[key] = value.strip()
+    return headers
+
+
+def _resolve_otlp_endpoint(explicit: str | None) -> str | None:
+    """Resolve the OTLP traces endpoint with the OTel-spec precedence chain.
+
+    Precedence (highest first):
+
+    #. ``explicit`` argument (e.g. a ``--otel-endpoint`` CLI flag).
+    #. ``OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`` env var.
+    #. ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var (the generic OTLP endpoint).
+
+    Returns ``None`` when none of the three are set — the caller treats that as
+    "no-op, do not configure an exporter".
+    """
+    if explicit:
+        return explicit
+    traces_endpoint = os.environ.get(_ENV_OTLP_TRACES_ENDPOINT, "").strip()
+    if traces_endpoint:
+        return traces_endpoint
+    generic_endpoint = os.environ.get(_ENV_OTLP_ENDPOINT, "").strip()
+    if generic_endpoint:
+        return generic_endpoint
+    return None
+
+
+def _resolve_service_name(explicit: str | None) -> str:
+    """Resolve the ``service.name`` resource attribute.
+
+    Precedence: explicit arg > ``OTEL_SERVICE_NAME`` env var > built-in default
+    (``"agent-guardian"``). Empty strings are ignored.
+    """
+    if explicit:
+        return explicit
+    env_name = os.environ.get(_ENV_SERVICE_NAME, "").strip()
+    if env_name:
+        return env_name
+    return _DEFAULT_SERVICE_NAME
+
+
+def configure_otel(endpoint: str | None, *, service_name: str | None = None) -> None:
     """Configure an OTLP-HTTP exporter + tracer provider for our own spans.
 
-    When ``endpoint`` is falsy, or the OTel SDK is not installed, this is a
+    The OTLP endpoint is resolved with the OTel-spec precedence chain:
+
+    #. ``endpoint`` argument (e.g. a ``--otel-endpoint`` CLI flag).
+    #. ``OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`` env var (trace-specific).
+    #. ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var (generic OTLP endpoint).
+
+    When none of the three are set, or the OTel SDK is not installed, this is a
     no-op (so the default install path never pays for tracing infrastructure).
+
+    ``OTEL_EXPORTER_OTLP_HEADERS`` is parsed as a ``k=v,k=v`` list and passed
+    through to the exporter so the operator can authenticate to a hosted
+    collector (Honeycomb, Grafana Cloud, etc.). ``OTEL_SERVICE_NAME`` overrides
+    the default ``service.name`` resource attribute (``"agent-guardian"``).
 
     .. note::
        Stage 1B only exports the spans *AgentGuardian itself* produces. Stage 3
@@ -395,7 +477,8 @@ def configure_otel(endpoint: str | None) -> None:
 
     NEVER raises if the SDK is absent — the import guard turns it into a no-op.
     """
-    if not endpoint:
+    resolved_endpoint = _resolve_otlp_endpoint(endpoint)
+    if not resolved_endpoint:
         return None
     try:
         from opentelemetry import trace
@@ -405,9 +488,51 @@ def configure_otel(endpoint: str | None) -> None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
     except ImportError:
         return None
-    resource = Resource.create({"service.name": "agent-guardian"})
+    resolved_service_name = _resolve_service_name(service_name)
+    resource = Resource.create({"service.name": resolved_service_name})
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=endpoint)
+    headers_raw = os.environ.get(_ENV_OTLP_HEADERS, "").strip()
+    headers = _parse_otlp_headers(headers_raw) if headers_raw else {}
+    if headers:
+        exporter = OTLPSpanExporter(endpoint=resolved_endpoint, headers=headers)
+    else:
+        exporter = OTLPSpanExporter(endpoint=resolved_endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
     return None
+
+
+# --- TransportSpanMixin -----------------------------------------------------
+class TransportSpanMixin:
+    """Reusable transport-span hook for adapters that aren't contract-backed.
+
+    The contract-backed :class:`ContractTargetAdapter` already wraps each
+    per-turn send in a :func:`transport_span` (see
+    ``transports/contract_adapter.py``). The non-contract adapters
+    (``PromptAdapter`` / ``HttpAdapter`` / framework adapters) live outside the
+    contract path and previously emitted no transport spans at all, so an
+    operator running ``agent-guardian scan target:run`` saw a hole in the trace
+    graph between the agent span and any target-side spans.
+
+    Adapters mix this in and call :meth:`_transport_span` from their per-turn
+    send. The mixin imports nothing eagerly and the span context manager is
+    no-op safe — adapters can adopt it unconditionally without paying for OTel
+    when the gate is closed.
+
+    Example::
+
+        class HttpAdapter(TransportSpanMixin, TargetAdapter):
+            async def send(self, prompt: str) -> str:
+                with self._transport_span(self._endpoint):
+                    return await self._do_send(prompt)
+    """
+
+    @staticmethod
+    def _transport_span(endpoint: str) -> Any:
+        """Return the :func:`transport_span` context manager for ``endpoint``.
+
+        Thin indirection so the mixin presents a single canonical method name
+        for adapters; the underlying ``transport_span`` is the same module-level
+        context manager (no-op when the gate is closed).
+        """
+        return transport_span(endpoint)

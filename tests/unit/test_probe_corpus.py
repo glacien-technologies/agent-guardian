@@ -66,17 +66,25 @@ def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
     assert not missing, f"probes missing owasp_scenario: {sorted(missing)}"
 
 
-def test_corpus_size_is_ninety() -> None:
-    """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap probes = 90.
+def test_corpus_size_is_ninety_two() -> None:
+    """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap +
+    2 LLM02 output-handling probes = 92.
 
-    The 11 coverage-gap additions close the CSA category gaps for
+    The 11 coverage-gap additions closed the CSA category gaps for
     ``checker-out-of-the-loop`` (4 probes under asi06) and
-    ``resource-service-exhaustion`` (4 probes under asi09), add 2 T4-floor
-    seeds under asi09 so the corpus exercises the lowest target tier, and
-    add a poisoned-checkpoint vector under asi04 to keep the per-ASI count
-    even at >=8.
+    ``resource-service-exhaustion`` (4 probes under asi09), added 2
+    T4-floor seeds under asi09 so the corpus exercises the lowest
+    target tier, and added a poisoned-checkpoint vector under asi04 to
+    keep the per-ASI count even at >=8.
+
+    The two LLM02 probes (``output-reflection-xss``,
+    ``output-context-payloads``) close the Improper Output Handling
+    coverage gap for the M2 specialist slate; their seeds embed
+    deterministic ``AG_*_CANARY`` tokens that the
+    :class:`OutputHandlingAgent` post-judge oracle treats as HIGH ASI09
+    evidence.
     """
-    assert len(load_all_probes()) == 90
+    assert len(load_all_probes()) == 92
 
 
 def test_corpus_version_stamp() -> None:

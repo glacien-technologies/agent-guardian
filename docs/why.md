@@ -57,7 +57,9 @@ on the scoring side. The 0–100 number ends up gated behind a paywall, the
 methodology is proprietary, and reproducibility dies. We do not want that
 to be the future of the agentic-security category.
 
-AgentGuardian is Apache-2.0, with no telemetry, no API-key
+AgentGuardian is Apache-2.0, with anonymous opt-out telemetry (no
+prompts, no findings, no environment fingerprint at the default tier —
+see [Telemetry transparency](telemetry/index.md)), no API-key
 requirement, and a published formula. Every probe, every adapter, every
 weight is in the repo. If you do not trust us, you can read the code.
 That is the point.

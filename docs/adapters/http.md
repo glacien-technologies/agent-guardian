@@ -3,80 +3,97 @@
 Use this adapter when the agent is reachable as a running HTTP endpoint —
 the most common production case.
 
-## Usage
+## CLI
 
 ```bash
-agent-guardian scan --http https://api.example.com/agent
+agent-guardian scan --endpoint https://api.example.com/agent
 ```
 
-The adapter auto-detects the request/response shape. To force a specific
-shape:
+For richer wiring (auth headers, custom request/response shape, TLS
+options) drive the scan from a target contract:
 
 ```bash
-agent-guardian scan --http https://api.example.com/agent --http-shape openai-chat
+agent-guardian init --out agentguardian.yaml   # interactive wizard
+agent-guardian scan --contract agentguardian.yaml
 ```
 
 ## Supported shapes
 
-The HTTP adapter recognises six common request/response shapes
-out-of-the-box:
+The HTTP adapter ships pluggable shape modules. Pick one with the
+`shape` keyword argument on the constructor (or via the contract):
 
 | Shape          | Description                                                     |
 |----------------|-----------------------------------------------------------------|
-| `openai-chat`  | OpenAI Chat Completions (`/v1/chat/completions`).               |
+| `openai`       | OpenAI Chat Completions (`/v1/chat/completions`).               |
 | `anthropic`    | Anthropic Messages API (`/v1/messages`).                        |
-| `text-prompt`  | Plain JSON `{"prompt": "..."}` → `{"completion": "..."}`.       |
-| `langserve`    | LangChain LangServe `/invoke` endpoints.                        |
-| `mcp`          | Model Context Protocol JSON-RPC servers.                        |
-| `custom`       | User-provided request/response template (see below).            |
+| `bedrock`      | AWS Bedrock InvokeModel request/response shaping.               |
+| `vertex`       | Google Vertex AI `generateContent` request/response shaping.    |
+| `agentcore`    | Bedrock AgentCore runtime shape.                                |
+| `generic`      | Operator-supplied request template + JSONPath response extractor.|
 
-## Custom shape
-
-For non-standard endpoints, supply a YAML template:
-
-```yaml
-# custom-shape.yaml
-request:
-  method: POST
-  headers:
-    Authorization: "Bearer ${API_TOKEN}"
-    Content-Type: application/json
-  body:
-    user_input: "{{ probe }}"
-response:
-  jsonpath: "$.response.text"
-```
-
-```bash
-agent-guardian scan --http https://api.example.com/agent \
-                    --http-shape custom \
-                    --http-template custom-shape.yaml
-```
+`call()` is fully wired for `openai`, `anthropic`, and `generic`.
+`bedrock`, `vertex`, and `agentcore` ship request/response shaping for
+unit tests but `call()` raises `NotImplementedError` until SigV4 /
+OAuth2 transports land.
 
 ## Programmatic
 
-```python
-from agent_guardian import scan_http
+Instantiate `HttpAdapter` directly and hand it to `SwarmCommander`:
 
-result = scan_http(
-    url="https://api.example.com/agent",
-    shape="openai-chat",
-    headers={"Authorization": f"Bearer {api_token}"},
-    model="anthropic:claude-opus-4-7",
+```python
+import asyncio
+
+from agent_guardian import (
+    HttpAdapter,
+    StubLLM,
+    SwarmCommander,
+    SwarmConfig,
+)
+
+
+async def main() -> None:
+    adapter = HttpAdapter(
+        endpoint="https://api.example.com/v1/chat/completions",
+        shape="openai",
+        auth_headers={"Authorization": "Bearer sk-..."},
+        model="gpt-4o-mini",
+    )
+    try:
+        swarm = SwarmCommander(
+            SwarmConfig(scan_id="demo"),
+            adapter,
+            attacker_llm=StubLLM(),
+            evaluator_llm=StubLLM(),
+        )
+        scan = await swarm.run()
+        print(scan.aivss, scan.band)
+    finally:
+        await adapter.aclose()
+
+
+asyncio.run(main())
+```
+
+For non-standard endpoints use the `generic` shape with an operator-
+supplied request template and response JSONPath:
+
+```python
+adapter = HttpAdapter(
+    endpoint="https://api.example.com/agent",
+    shape="generic",
+    request_template='{"user_input": "{prompt}"}',
+    response_jsonpath="$.response.text",
+    auth_headers={"Authorization": "Bearer ${API_TOKEN}"},
 )
 ```
 
 ## Rate limits and safety
 
-The HTTP adapter respects:
-
-- A configurable global QPS cap (`--max-qps`, default 5).
-- The endpoint's own `Retry-After` headers on 429 responses.
-- A configurable per-scan budget cap (`--max-requests`, default 500).
-
-The adapter will **never** scan a URL outside an explicit allowlist.
-Setting `--allow-any-url` is logged and produces a warning in the
-report.
+`HttpAdapter` honours per-instance concurrency (`max_concurrency`,
+default 5), per-request `timeout_seconds` (default 60s), and bounded
+`max_retries` (default 3) with exponential backoff on transient errors.
+The CLI exposes the swarm-level token / wall-clock budgets that bound
+total request volume; see the [Configuration guide](../guide/configuration.md).
 
 ## When to use
 

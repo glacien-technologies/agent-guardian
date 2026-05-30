@@ -41,13 +41,15 @@ _FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "OPENAI_API_KEY",
         # OpenAI / Anthropic-style keys: sk-…, sk-proj-…, sk-ant-api03-….
         # We deliberately match the *whole* ``sk-`` token — including short,
-        # dash-bearing placeholders like ``sk-LEAKED-9999`` — so the ``sk-``
-        # prefix is never left behind for a numeric tail to be mislabelled a
-        # phone number (the #2 leak). A real key is a long alnum run; a
-        # placeholder is a dash-joined word group. Either is masked whole.
+        # dash-bearing placeholders like ``sk-LEAKED-9999`` and dash-tailed
+        # Anthropic-style keys — so the ``sk-`` prefix is never left behind
+        # for a numeric tail to be mislabelled a phone number (the #2 leak).
+        # The body alt accepts ``[A-Za-z0-9_-]{16,}`` (dashes included) so an
+        # anthropic dash-tail is absorbed in a single span; a placeholder is
+        # a dash-joined word group. Either is masked whole.
         re.compile(
             r"\bsk-(?:proj-|ant-api03-)?"
-            r"(?:[A-Za-z0-9_]{16,}|[A-Za-z0-9_]{2,}(?:-[A-Za-z0-9_]+)+)"
+            r"(?:[A-Za-z0-9_-]{16,}|[A-Za-z0-9_]{2,}(?:-[A-Za-z0-9_]+)+)"
         ),
     ),
     (
@@ -61,8 +63,58 @@ _FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(r"\bgh[posru]_[A-Za-z0-9]{20,}\b"),
     ),
     (
+        "GITLAB_PAT",
+        # GitLab personal-access tokens: ``glpat-`` + 20+ alphanumerics/_/-.
+        re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    ),
+    (
         "GOOGLE_API_KEY",
         re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
+    ),
+    (
+        "SLACK_TOKEN",
+        # Slack bot/user/app tokens: ``xoxb-``/``xoxa-``/``xoxp-``/``xoxr-``/``xoxs-``.
+        re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b"),
+    ),
+    (
+        "SLACK_WEBHOOK",
+        # Slack incoming-webhook URLs leak the same secret value the token
+        # carries; treat the whole URL as a secret.
+        re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"),
+    ),
+    (
+        "STRIPE_KEY",
+        # Stripe live/test secret + publishable + restricted keys.
+        re.compile(r"\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
+    ),
+    (
+        "TWILIO_SK",
+        # Twilio API keys: ``SK`` + 32 hex digits.
+        re.compile(r"\bSK[a-f0-9]{32}\b"),
+    ),
+    (
+        "DISCORD_BOT_TOKEN",
+        # Discord bot tokens: three dot-separated base64url parts with the
+        # first being the snowflake-encoded bot id (24+ chars).
+        re.compile(r"\b[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{27,}\b"),
+    ),
+    (
+        "AZURE_STORAGE_KEY",
+        # Azure storage account-key connection-string fragment. AccountKey is
+        # the high-value credential in any Azure connection-string leak; mask
+        # the value through to the next delimiter.
+        re.compile(r"(?i)AccountKey=[A-Za-z0-9+/=]{16,}"),
+    ),
+    (
+        "PEM_PRIVATE_KEY",
+        # PEM-wrapped private-key blocks: RSA / OPENSSH / EC / DSA /
+        # ENCRYPTED / PGP / plain PRIVATE KEY. The whole armoured block —
+        # header, body and footer — is one secret span.
+        re.compile(
+            r"-----BEGIN (?:RSA |OPENSSH |EC |DSA |ENCRYPTED |PGP )?"
+            r"PRIVATE KEY-----[\s\S]+?-----END (?:RSA |OPENSSH |EC |DSA |"
+            r"ENCRYPTED |PGP )?PRIVATE KEY-----"
+        ),
     ),
     (
         "JWT",
@@ -74,8 +126,22 @@ _FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "GENERIC_SECRET",
-        # password=…, api_key: …, secret = …, token=… — capture the value.
-        re.compile(r"(?i)\b(?:password|api[_-]?key|secret|token)\s*[:=]\s*\S+"),
+        # password=…, api_key: …, secret = …, token=…, aws_secret_access_key=…
+        # — capture the keyword-and-value span. We drop the leading word-
+        # boundary anchor so a prefixed identifier (``aws_secret_access_key``,
+        # ``MY_API_KEY``) still matches: the keyword can appear after ``_``
+        # which is not a word boundary in Python's regex engine. The fixed-
+        # width lookbehind requires the match to start at a real delimiter
+        # (or the line start) and an optional ``[A-Za-z0-9_-]*?`` prefix
+        # absorbs identifier-prefix runs like ``aws_secret_access_key`` or
+        # ``MY_OPENAI_TOKEN`` without leaving the leading prefix unredacted.
+        re.compile(
+            r"(?im)(?:^|(?<=[\s,;\"'`(\[{=]))"
+            r"[A-Za-z0-9_-]*?"
+            r"(?:password|passwd|pwd|api[_-]?key|secret(?:[_-]?key)?|token|"
+            r"access[_-]?key|client[_-]?secret|auth[_-]?token)"
+            r"\s*[:=]\s*\S+"
+        ),
     ),
     (
         "CREDIT_CARD",
@@ -145,7 +211,15 @@ class PiiRedactor:
         "OPENAI_API_KEY",
         "AWS_ACCESS_KEY",
         "GITHUB_TOKEN",
+        "GITLAB_PAT",
         "GOOGLE_API_KEY",
+        "SLACK_TOKEN",
+        "SLACK_WEBHOOK",
+        "STRIPE_KEY",
+        "TWILIO_SK",
+        "DISCORD_BOT_TOKEN",
+        "AZURE_STORAGE_KEY",
+        "PEM_PRIVATE_KEY",
         "JWT",
         "BEARER_TOKEN",
         "GENERIC_SECRET",
@@ -159,10 +233,35 @@ class PiiRedactor:
             "OPENAI_API_KEY",
             "AWS_ACCESS_KEY",
             "GITHUB_TOKEN",
+            "GITLAB_PAT",
             "GOOGLE_API_KEY",
+            "SLACK_TOKEN",
+            "SLACK_WEBHOOK",
+            "STRIPE_KEY",
+            "TWILIO_SK",
+            "DISCORD_BOT_TOKEN",
+            "AZURE_STORAGE_KEY",
+            "PEM_PRIVATE_KEY",
             "JWT",
             "BEARER_TOKEN",
             "GENERIC_SECRET",
+        }
+    )
+
+    # Structured-PII entities where presidio's recogniser reliably misses
+    # matches at default thresholds without the heavy spaCy NLP model
+    # (e.g. ``US_SSN`` returns 0 results unless the en_core_web_lg model is
+    # downloaded). We always run the regex fallback for these so a launch-
+    # critical PII span never slips through the presidio path. The regex bank
+    # is idempotent: already-masked ``[REDACTED:...]`` tokens do not match.
+    _STRUCTURED_PII_BACKSTOP: frozenset[str] = frozenset(
+        {
+            "US_SSN",
+            "CREDIT_CARD",
+            "IBAN_CODE",
+            "IP_ADDRESS",
+            "EMAIL_ADDRESS",
+            "PHONE_NUMBER",
         }
     )
 
@@ -222,6 +321,15 @@ class PiiRedactor:
             if span in self.allow_list:
                 continue
             out = out[: r.start] + self._mask(r.entity_type) + out[r.end :]
+        # Defence-in-depth: presidio's recognisers for structured PII
+        # (US_SSN / CREDIT_CARD / IBAN / IP_ADDRESS / EMAIL_ADDRESS /
+        # PHONE_NUMBER) silently miss matches when the spaCy NLP model isn't
+        # downloaded or the surrounding context lacks the keywords presidio
+        # expects. A security-scanner redactor that ships SSNs through the
+        # dashboard is a launch-blocker, so always run the regex backstop for
+        # those entities after presidio. The fallback regex is idempotent
+        # against ``[REDACTED:...]`` masks already in ``out``.
+        out = self._redact_structured_pii_backstop(out)
         return out
 
     def _redact_secret_entities(self, text: str) -> str:
@@ -229,6 +337,21 @@ class PiiRedactor:
         out = text
         for entity, pattern in _FALLBACK_PATTERNS:
             if entity not in self._SECRET_ENTITIES or entity not in self.entities:
+                continue
+
+            def _replace(match: re.Match[str], _entity: str = entity) -> str:
+                if match.group(0) in self.allow_list:
+                    return match.group(0)
+                return self._mask(_entity)
+
+            out = pattern.sub(_replace, out)
+        return out
+
+    def _redact_structured_pii_backstop(self, text: str) -> str:
+        """Regex backstop for structured PII presidio's recognisers can miss."""
+        out = text
+        for entity, pattern in _FALLBACK_PATTERNS:
+            if entity not in self._STRUCTURED_PII_BACKSTOP or entity not in self.entities:
                 continue
 
             def _replace(match: re.Match[str], _entity: str = entity) -> str:

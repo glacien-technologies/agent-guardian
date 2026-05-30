@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import ssl
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -33,6 +34,7 @@ from agent_guardian.adapters.http_shapes.base import HttpShape, get_shape
 from agent_guardian.adapters.http_shapes.generic_shape import (
     extract_response_text as generic_extract_response_text,
 )
+from agent_guardian.adapters.http_shapes.generic_shape import walk_jsonpath
 from agent_guardian.llm.errors import (
     LLMAuthError,
     LLMPermanentError,
@@ -43,7 +45,7 @@ from agent_guardian.llm.errors import (
 )
 from agent_guardian.llm.retry import with_backoff
 
-__all__ = ["HttpAdapter"]
+__all__ = ["HttpAdapter", "HttpAdapterLastResponse", "HttpAdapterToolCall"]
 
 _LOG = logging.getLogger(__name__)
 
@@ -51,6 +53,144 @@ _LOG = logging.getLogger(__name__)
 # implement in M9. The build_request / extract_response_text pure functions
 # remain usable for unit tests, but ``HttpAdapter.call()`` refuses to send.
 _AUTH_DEFERRED_SHAPES: frozenset[str] = frozenset({"bedrock", "vertex", "agentcore"})
+
+
+# Per-shape (response_path, name_path, args_path) triples used by the
+# adapter-level tool-call extractor. Mirrors the higher-level
+# :class:`agent_guardian.transports.http.HttpTransport` extractor so a recon
+# pass that talks to the adapter directly (no transport wrap) still surfaces
+# tool invocations the target performed. The transport layer overrides these
+# defaults via its own configurable jsonpaths; the adapter exposes the same
+# shape-keyed defaults so recon's ``has_tools_observed`` flag flips on the
+# first turn a real provider returns a structured tool_call.
+# ``response_path`` resolves to either a list of tool blocks OR (for shapes
+# whose tool blocks share a container with text blocks, e.g. Anthropic
+# ``content``) a list of mixed items the extractor walks itself. When a
+# nested key is required to lift the tool block out of a container entry
+# (e.g. Bedrock ``content[*].toolUse``), ``container_child`` names it; the
+# extractor pulls ``item[container_child]`` for each container entry and
+# skips entries missing that key. ``container_child=None`` means the
+# container entries are the tool blocks themselves.
+_SHAPE_TOOL_PATHS: dict[str, tuple[str, str, str, str | None]] = {
+    "openai": (
+        "$.choices[0].message.tool_calls",
+        "$.function.name",
+        "$.function.arguments",
+        None,
+    ),
+    "anthropic": ("$.content", "$.name", "$.input", None),
+    "generic": ("$.tool_calls", "$.name", "$.arguments", None),
+    "bedrock": ("$.output.message.content", "$.name", "$.input", "toolUse"),
+    "vertex": (
+        "$.candidates[0].content.parts",
+        "$.name",
+        "$.args",
+        "functionCall",
+    ),
+    "agentcore": ("$.tool_calls", "$.name", "$.arguments", None),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class HttpAdapterToolCall:
+    """Structured tool invocation surfaced by the adapter from a response body.
+
+    Mirrors :class:`agent_guardian.transports.base.ToolCall` but kept local to
+    the adapter package so importers (e.g. recon) don't have to depend on the
+    transports layer. ``name`` is the function/tool handle; ``arguments`` is
+    the kwargs dict the target passed; ``raw`` keeps the original block for
+    forensic replay.
+    """
+
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    raw: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class HttpAdapterLastResponse:
+    """Snapshot of the most recent successful response.
+
+    Stashed on :attr:`HttpAdapter._last_response` after every successful
+    :meth:`HttpAdapter.call` so callers (recon, capability audit) can read
+    structured ``tool_calls`` alongside the assistant text. ``raw`` is the
+    parsed JSON body and is kept only for the duration of the next call —
+    the adapter overwrites the snapshot per turn rather than accumulating
+    history (the swarm memory owns longer-lived turn records).
+    """
+
+    text: str
+    tool_calls: tuple[HttpAdapterToolCall, ...] = ()
+    raw: dict[str, Any] | None = None
+
+
+def _extract_tool_calls(
+    response_json: dict[str, Any],
+    *,
+    shape_name: str,
+) -> tuple[HttpAdapterToolCall, ...]:
+    """Extract structured tool calls from a parsed response body.
+
+    Mirrors :meth:`agent_guardian.transports.http.HttpTransport._extract_tool_calls`
+    (transports/http.py:223-243) so the adapter-level call path surfaces the
+    same evidence the transport layer does. Returns an empty tuple when the
+    shape has no tool path defined, when the path resolves to nothing, or when
+    the extracted entries do not have the expected dict shape — never raises.
+    """
+    paths = _SHAPE_TOOL_PATHS.get(shape_name)
+    if paths is None:
+        return ()
+    response_path, name_path, args_path, container_child = paths
+    try:
+        raw = walk_jsonpath(response_json, response_path)
+    except ValueError:
+        # Malformed shape path -- treat as "no tool block" rather than raise.
+        return ()
+    if raw is None:
+        return ()
+    items = raw if isinstance(raw, list) else [raw]
+    calls: list[HttpAdapterToolCall] = []
+    for outer in items:
+        if not isinstance(outer, dict):
+            continue
+        # For container shapes (Bedrock / Vertex) the tool block is nested
+        # under a key; the container entry itself may not have the tool
+        # fields, so we lift it out before applying the name/args paths.
+        if container_child is not None:
+            item = outer.get(container_child)
+            if not isinstance(item, dict):
+                continue
+        else:
+            item = outer
+        try:
+            name = walk_jsonpath(item, name_path)
+            args = walk_jsonpath(item, args_path)
+        except ValueError:
+            continue
+        if name is None:
+            # Skip non-tool blocks (e.g. an Anthropic ``content`` text item).
+            continue
+        # ``arguments`` over the wire is sometimes a JSON-encoded string
+        # (notably OpenAI's tool_calls). Decode best-effort; ignore failures.
+        if isinstance(args, str):
+            try:
+                decoded = json.loads(args)
+                if isinstance(decoded, dict):
+                    args = decoded
+            except (json.JSONDecodeError, ValueError) as exc:
+                _LOG.debug(
+                    "http: tool_call arguments not JSON-decodable (%s) -- "
+                    "preserving the raw string",
+                    exc,
+                )
+        calls.append(
+            HttpAdapterToolCall(
+                name=str(name),
+                arguments=args if isinstance(args, dict) else {},
+                raw=outer,
+            )
+        )
+    return tuple(calls)
 
 
 class HttpAdapter(TargetAdapter):
@@ -120,6 +260,12 @@ class HttpAdapter(TargetAdapter):
         )
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._closed = False
+        # Snapshot of the most recent successful response (text + structured
+        # tool_calls). Read by recon / capability audit to flip
+        # ``has_tools_observed`` when the target returns real tool blocks the
+        # plain ``call() -> str`` interface would otherwise hide. Always
+        # overwritten per turn — see :class:`HttpAdapterLastResponse`.
+        self._last_response: HttpAdapterLastResponse | None = None
 
         self._fingerprint = TargetFingerprint(
             mode="http",
@@ -174,7 +320,14 @@ class HttpAdapter(TargetAdapter):
             raise LLMResponseFormatError(msg) from exc
 
     async def _send_once(self, prompt: str, *, session: str | None) -> str:
-        """One attempt: build, POST, parse, extract. Raises mapped LLM errors."""
+        """One attempt: build, POST, parse, extract. Raises mapped LLM errors.
+
+        On success the parsed body is also fed through the shape-specific
+        tool-call extractor and stashed on :attr:`_last_response`. Recon
+        reads that snapshot per-turn to flip ``has_tools_observed`` based on
+        the real structured invocations the target performed, not a
+        substring-matched guess against the assistant text.
+        """
         body = self._build_body(prompt, session=session)
         headers = self._build_headers()
         try:
@@ -192,7 +345,16 @@ class HttpAdapter(TargetAdapter):
             raise LLMResponseFormatError(
                 f"http: expected JSON object at top level, got {type(data).__name__}"
             )
-        return self._extract_text(data)
+        text = self._extract_text(data)
+        # Capture structured tool_calls into the per-turn snapshot so callers
+        # that walk ``adapter._last_response.tool_calls`` see real evidence.
+        # Extraction never raises (returns ``()`` on malformed paths).
+        self._last_response = HttpAdapterLastResponse(
+            text=text,
+            tool_calls=_extract_tool_calls(data, shape_name=self._shape_name),
+            raw=data,
+        )
+        return text
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         """Send a prompt and return the assistant text.

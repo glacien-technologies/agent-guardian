@@ -30,7 +30,14 @@ from agent_guardian.obs import (
     tool_span,
     transport_span,
 )
-from agent_guardian.obs.otel import _genai_opt_in_enabled, _NoOpTracer
+from agent_guardian.obs.otel import (
+    TransportSpanMixin,
+    _genai_opt_in_enabled,
+    _NoOpTracer,
+    _parse_otlp_headers,
+    _resolve_otlp_endpoint,
+    _resolve_service_name,
+)
 
 if TYPE_CHECKING:
     from agent_guardian.core.swarm import EventKind
@@ -448,3 +455,230 @@ class TestConfigureOtelActive:
         # Falsy endpoint short-circuits before any import — always a no-op.
         assert configure_otel(None) is None
         assert configure_otel("") is None
+
+
+# ---------------------------------------------------------------------------
+# OTLP env-var precedence + headers + service name (cluster-fix items)
+#
+# These tests lock in the OTel-spec env-var contract — an enterprise operator
+# wiring AgentGuardian into an existing observability stack should be able to
+# point the exporter at their collector via standard ``OTEL_EXPORTER_OTLP_*``
+# env vars instead of editing code or contract YAML.
+# ---------------------------------------------------------------------------
+class TestEndpointResolution:
+    """``_resolve_otlp_endpoint`` precedence: explicit > trace-specific > generic."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+
+    def test_explicit_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://env-traces:4318")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://env-generic:4318")
+        assert _resolve_otlp_endpoint("http://explicit:4318") == "http://explicit:4318"
+
+    def test_traces_specific_wins_over_generic(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://env-traces:4318")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://env-generic:4318")
+        assert _resolve_otlp_endpoint(None) == "http://env-traces:4318"
+
+    def test_generic_when_only_generic_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://env-generic:4318")
+        assert _resolve_otlp_endpoint(None) == "http://env-generic:4318"
+
+    def test_none_when_nothing_set(self) -> None:
+        # No explicit, no env vars → None means "no-op, do not configure".
+        assert _resolve_otlp_endpoint(None) is None
+        assert _resolve_otlp_endpoint("") is None
+
+    def test_whitespace_only_env_is_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "   ")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+        assert _resolve_otlp_endpoint(None) is None
+
+
+class TestServiceNameResolution:
+    @pytest.fixture(autouse=True)
+    def _clear_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OTEL_SERVICE_NAME", raising=False)
+
+    def test_explicit_arg_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "env-svc")
+        assert _resolve_service_name("explicit-svc") == "explicit-svc"
+
+    def test_env_when_no_explicit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "env-svc")
+        assert _resolve_service_name(None) == "env-svc"
+
+    def test_default_when_neither_set(self) -> None:
+        assert _resolve_service_name(None) == "agent-guardian"
+
+    def test_whitespace_env_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "   ")
+        assert _resolve_service_name(None) == "agent-guardian"
+
+
+class TestHeaderParsing:
+    def test_parses_single_pair(self) -> None:
+        assert _parse_otlp_headers("authorization=Bearer abc") == {"authorization": "Bearer abc"}
+
+    def test_parses_multiple_pairs(self) -> None:
+        out = _parse_otlp_headers("k1=v1,k2=v2,k3=v3")
+        assert out == {"k1": "v1", "k2": "v2", "k3": "v3"}
+
+    def test_strips_whitespace(self) -> None:
+        assert _parse_otlp_headers(" k1 = v1 , k2= v2 ") == {"k1": "v1", "k2": "v2"}
+
+    def test_skips_malformed_entries(self) -> None:
+        # A bare token with no ``=`` should NOT crash; we silently drop it.
+        assert _parse_otlp_headers("k1=v1,not-a-pair,k2=v2") == {"k1": "v1", "k2": "v2"}
+
+    def test_empty_string_yields_empty_dict(self) -> None:
+        assert _parse_otlp_headers("") == {}
+
+    def test_last_value_wins_on_duplicate_keys(self) -> None:
+        assert _parse_otlp_headers("k=v1,k=v2") == {"k": "v2"}
+
+
+class TestConfigureOtelEnvIntegration:
+    """End-to-end: configure_otel honours env vars even when arg is None."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_SERVICE_NAME",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_env_traces_endpoint_drives_wiring(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Even though the caller passes None, an env-set traces endpoint must
+        # still wire the exporter — that's the OTel-spec contract operators
+        # expect when they bring AgentGuardian into an existing stack.
+        pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://traces.example:4318")
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        import agent_guardian.obs.otel as otel_mod
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            trace, "set_tracer_provider", lambda p: captured.setdefault("provider", p)
+        )
+        assert otel_mod.configure_otel(None) is None
+        assert isinstance(captured["provider"], TracerProvider)
+
+    def test_env_service_name_lands_on_resource(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "my-collector")
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        import agent_guardian.obs.otel as otel_mod
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            trace, "set_tracer_provider", lambda p: captured.setdefault("provider", p)
+        )
+        otel_mod.configure_otel("http://collector:4318")
+        provider = captured["provider"]
+        assert isinstance(provider, TracerProvider)
+        # The Resource carries service.name — read it through the public API.
+        assert provider.resource.attributes["service.name"] == "my-collector"
+
+    def test_default_service_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+
+        import agent_guardian.obs.otel as otel_mod
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            trace, "set_tracer_provider", lambda p: captured.setdefault("provider", p)
+        )
+        otel_mod.configure_otel("http://collector:4318")
+        provider = captured["provider"]
+        assert isinstance(provider, TracerProvider)
+        assert provider.resource.attributes["service.name"] == "agent-guardian"
+
+    def test_otlp_headers_forwarded_to_exporter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "x-honeycomb-team=secret-key")
+
+        from opentelemetry import trace
+
+        import agent_guardian.obs.otel as otel_mod
+
+        captured: dict[str, object] = {}
+
+        # Capture the kwargs handed to the exporter so we can prove the
+        # OTEL_EXPORTER_OTLP_HEADERS env var was parsed and forwarded.
+        class _FakeExporter:
+            def __init__(self, **kwargs: object) -> None:
+                captured["kwargs"] = kwargs
+
+            def shutdown(self) -> None:
+                return None
+
+            def export(self, spans: object) -> int:
+                # ``SpanExportResult.SUCCESS`` is 0 in the SDK enum; returning a
+                # literal keeps us off the real enum (this is a stub).
+                return 0
+
+            def force_flush(self, timeout_millis: int = 0) -> bool:
+                return True
+
+        monkeypatch.setattr(otel_mod, "_resolve_otlp_endpoint", lambda _: "http://x")
+        monkeypatch.setattr(
+            "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
+            _FakeExporter,
+        )
+        monkeypatch.setattr(
+            trace, "set_tracer_provider", lambda _p: captured.setdefault("provider_set", True)
+        )
+        otel_mod.configure_otel(None)
+        kwargs = captured["kwargs"]
+        assert isinstance(kwargs, dict)
+        assert kwargs.get("headers") == {"x-honeycomb-team": "secret-key"}
+        assert kwargs.get("endpoint") == "http://x"
+
+
+# ---------------------------------------------------------------------------
+# TransportSpanMixin — the adapter-reusable hook for transport.send spans
+# ---------------------------------------------------------------------------
+class TestTransportSpanMixin:
+    """The mixin returns the same context manager as the module-level helper."""
+
+    def test_transport_span_is_inert_when_gate_closed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(_OPT_IN_ENV, raising=False)
+
+        class _A(TransportSpanMixin):
+            pass
+
+        # Inert context manager: produces a span object that swallows attribute
+        # writes and never raises.
+        with _A._transport_span("https://x.example/v1/chat") as span:
+            span.set_attribute("k", "v")
+
+    def test_transport_span_emits_when_gate_open(self, in_memory_tracer) -> None:  # type: ignore[no-untyped-def]
+        class _A(TransportSpanMixin):
+            pass
+
+        with _A._transport_span("https://target.example/chat"):
+            pass
+        spans = in_memory_tracer.get_finished_spans()
+        assert len(spans) == 1
+        # The mixin must produce the SAME span shape as transport_span —
+        # otherwise adapters that mix in would emit spans the OTel backend
+        # can't group with the contract-adapter's transport spans.
+        span = spans[0]
+        assert span.name == "transport.send https://target.example/chat"
+        assert span.attributes["server.address"] == "target.example"
+        assert span.attributes["server.port"] == 443
