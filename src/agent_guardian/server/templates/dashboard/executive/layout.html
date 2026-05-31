@@ -23,16 +23,19 @@
   <meta name="referrer" content="no-referrer" />
   <meta name="color-scheme" content="dark light" />
   <title>{{ page_title }} · Executive Dashboard · AgentGuardian</title>
-  <link rel="stylesheet" href="/static/colors_and_type.css" />
-  <link rel="stylesheet" href="/static/executive.css" />
+  {# Cache-bust by package version so a release ships fresh CSS without
+     forcing an end-user hard refresh — a recurring 2026-05-31 footgun
+     where browser-cached executive.css masked a layout change. #}
+  <link rel="stylesheet" href="/static/colors_and_type.css?v={{ package_version }}" />
+  <link rel="stylesheet" href="/static/executive.css?v={{ package_version }}" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2213%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%221.6%22%2F%3E%3C%2Fsvg%3E" />
-  <script src="/static/executive_tabs.js" defer></script>
+  <script src="/static/executive_tabs.js?v={{ package_version }}" defer></script>
   {# Chart.js v4 — drives the AIVSS / severity bar and ASI radar charts.
      Same CDN + version as the Narrative theme. executive_charts.js reads
      window.Chart on DOMContentLoaded; both are defer-loaded so the DOM is
      parsed before the chart initialisers run. #}
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/static/executive_charts.js" defer></script>
+  <script src="/static/executive_charts.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
