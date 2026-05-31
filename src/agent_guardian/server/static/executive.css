@@ -932,6 +932,96 @@ body.exec-body {
 }
 .exec-finding__none { color: var(--exec-ink-subtle); }
 
+/* --- Findings evidence expansion ------------------------------
+ * Per-finding ``<details>`` block that surfaces the verbatim probe
+ * attempts (prompt / response / judge reasoning) correlated to the
+ * finding. Mirrors the Probes-tab idiom and reuses
+ * ``.exec-probe__label`` / ``.exec-probe__prompt`` /
+ * ``.exec-probe__response`` / ``.exec-probe__reason`` inside each
+ * row so the two tabs feel like siblings. The outer wrapper sits
+ * BELOW ``.exec-finding__meta`` and is visually anchored with a
+ * border-top.
+ * ------------------------------------------------------------- */
+.exec-finding__evidence {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--exec-border-subtle);
+}
+.exec-finding__evidence > summary {
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-brand);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+}
+.exec-finding__evidence > summary::-webkit-details-marker { display: none; }
+.exec-finding__evidence > summary::marker { content: ""; }
+.exec-finding__evidence > summary:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-finding__evidence-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.exec-finding__evidence-row {
+  padding: 16px 0;
+  border-top: 1px solid var(--exec-border-subtle);
+}
+.exec-finding__evidence-row:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+.exec-finding__evidence-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.exec-finding__evidence-id {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-finding__evidence-agent,
+.exec-finding__evidence-turn {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  letter-spacing: 0.04em;
+}
+.exec-finding__evidence-time {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  margin-left: auto;
+}
+.exec-finding__evidence-body > summary {
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-brand);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+}
+.exec-finding__evidence-body > summary::-webkit-details-marker { display: none; }
+.exec-finding__evidence-body > summary::marker { content: ""; }
+.exec-finding__evidence-body > summary:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+  border-radius: var(--exec-radius-sm);
+}
+
 .exec-pager {
   margin-top: 24px;
   display: flex;

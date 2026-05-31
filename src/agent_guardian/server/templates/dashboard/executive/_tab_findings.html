@@ -76,6 +76,77 @@
                     {% endif %}
                   </dd>
                 </dl>
+                {# Evidence expansion — verbatim probe attempts that
+                   correlate to this finding (matched by probe_id, with an
+                   agent+ASI fallback). Suppressed entirely when there are
+                   no matching turns: not every finding has captured probe
+                   evidence (e.g. static-analysis or recon-derived). All
+                   prompt / response / reasoning text is operator-untrusted
+                   and goes through Jinja autoescape — never use ``|safe``
+                   on these fields. #}
+                {% if f.evidence and f.evidence | length > 0 %}
+                  <details class="exec-finding__evidence">
+                    <summary>
+                      {{ f.evidence | length }} evidence event{% if f.evidence | length != 1 %}s{% endif %}
+                      {% if f.evidence_truncated %}
+                        &middot; showing {{ f.evidence | length }} of {{ f.evidence_total }}
+                      {% endif %}
+                    </summary>
+                    <ol class="exec-finding__evidence-list" role="list">
+                      {% for ev in f.evidence %}
+                        <li class="exec-finding__evidence-row"
+                            data-verdict="{{ ev.verdict }}"
+                            data-agent="{{ ev.agent }}">
+                          <div class="exec-finding__evidence-strip">
+                            <code class="exec-finding__evidence-id">{{ ev.probe_id or '—' }}</code>
+                            <span class="exec-finding__evidence-agent">{{ ev.agent or '—' }}</span>
+                            <span class="exec-finding__evidence-turn">turn {{ ev.turn }}</span>
+                            <time class="exec-finding__evidence-time">{{ ev.timestamp_label }}</time>
+                          </div>
+                          {% if f.evidence | length > 1 %}
+                            <details class="exec-finding__evidence-body">
+                              <summary>Prompt &middot; response &middot; reasoning</summary>
+                              <p class="exec-probe__label">Prompt</p>
+                              <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
+                              <p class="exec-probe__label">Target response</p>
+                              <pre class="exec-probe__response">{{ ev.target_response }}</pre>
+                              {% if ev.confidence and ev.confidence > 0.0 %}
+                                <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(ev.confidence) }})</p>
+                              {% else %}
+                                <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
+                              {% endif %}
+                              {% if ev.reasoning %}
+                                <blockquote class="exec-probe__reason">{{ ev.reasoning }}</blockquote>
+                              {% else %}
+                                <p class="exec-probe__reason exec-probe__reason--empty">
+                                  Not graded per-turn — see the Probes tab for the verbatim judge trail.
+                                </p>
+                              {% endif %}
+                            </details>
+                          {% else %}
+                            {# Single event: skip the second collapse, show inline. #}
+                            <p class="exec-probe__label">Prompt</p>
+                            <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
+                            <p class="exec-probe__label">Target response</p>
+                            <pre class="exec-probe__response">{{ ev.target_response }}</pre>
+                            {% if ev.confidence and ev.confidence > 0.0 %}
+                              <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(ev.confidence) }})</p>
+                            {% else %}
+                              <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
+                            {% endif %}
+                            {% if ev.reasoning %}
+                              <blockquote class="exec-probe__reason">{{ ev.reasoning }}</blockquote>
+                            {% else %}
+                              <p class="exec-probe__reason exec-probe__reason--empty">
+                                Not graded per-turn — see the Probes tab for the verbatim judge trail.
+                              </p>
+                            {% endif %}
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </details>
+                {% endif %}
               </li>
             {% endfor %}
           </ol>

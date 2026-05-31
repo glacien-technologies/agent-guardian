@@ -413,6 +413,78 @@ def _findings_page(
     return items, pagination
 
 
+# Per-finding evidence cap. Noisy attacks (10+ turns on a single probe_id) would
+# otherwise blow the Findings card vertical rhythm — the operator can still
+# drill into every turn from the Probes tab. We cap at 10 evidence rows per
+# finding and surface ``evidence_truncated`` so the template can say
+# "10 of N evidence event(s) shown".
+_FINDING_EVIDENCE_CAP: Final[int] = 10
+
+
+def _attach_evidence_to_findings(
+    findings_items: list[dict[str, Any]],
+    probes_list: list[dict[str, Any]],
+) -> None:
+    """Mutate ``findings_items`` in place to add an ``evidence`` field per row.
+
+    Correlation rule:
+
+    1. Primary — match on ``probe_id``. A reflection record's ``probe_id``
+       (derived from ``turn.seed_id``) equals the Finding's ``probe_id`` when
+       both came from the same attack thread. This is the strongest signal
+       and covers the common case where a finding rolls up its attempt_count
+       turns.
+    2. Fallback — when the finding has NO ``probe_id`` (e.g. static-analysis
+       or recon-derived) or when no probe-attempt record matches by id, fall
+       back to ``agent + asi_category`` (broader). This keeps the panel
+       useful for findings that pre-date the seed_id wiring without
+       polluting probe-id-matched findings with unrelated attempts.
+
+    Each evidence row mirrors the probes_list record shape verbatim (the
+    template can reuse the same Jinja access pattern as the Probes tab).
+    Capped at :data:`_FINDING_EVIDENCE_CAP`; ``evidence_truncated`` /
+    ``evidence_total`` are added when the unfiltered match-set was larger.
+    """
+    if not findings_items or not probes_list:
+        for item in findings_items:
+            item.setdefault("evidence", [])
+            item.setdefault("evidence_truncated", False)
+            item.setdefault("evidence_total", 0)
+        return
+    # Pre-index probes_list by probe_id and by (agent, asi_category) so each
+    # finding is O(1) lookup instead of an O(P) scan. probes_list is already
+    # capped at _PROBES_LIST_CAP (500), so the index is small.
+    by_probe_id: dict[str, list[dict[str, Any]]] = {}
+    by_agent_asi: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for p in probes_list:
+        pid = str(p.get("probe_id") or "")
+        if pid:
+            by_probe_id.setdefault(pid, []).append(p)
+        key = (str(p.get("agent") or ""), str(p.get("asi_category") or ""))
+        if key != ("", ""):
+            by_agent_asi.setdefault(key, []).append(p)
+    for item in findings_items:
+        fid_probe = str(item.get("probe_id") or "")
+        matched: list[dict[str, Any]] = []
+        if fid_probe and fid_probe in by_probe_id:
+            matched = by_probe_id[fid_probe]
+        if not matched:
+            # Fallback: agent + asi_category. The finding row doesn't carry
+            # an ``agent`` field today, so this is keyed off asi_code alone
+            # for now (we accept the broader match — the worst case is the
+            # operator sees turn evidence from the right ASI bucket).
+            asi = str(item.get("asi_code") or "")
+            if asi:
+                for key, records in by_agent_asi.items():
+                    if key[1] == asi:
+                        matched.extend(records)
+        total = len(matched)
+        capped = matched[:_FINDING_EVIDENCE_CAP]
+        item["evidence"] = capped
+        item["evidence_total"] = total
+        item["evidence_truncated"] = total > _FINDING_EVIDENCE_CAP
+
+
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:
     """Return 10 dot states ('done' / 'active' / 'queued') for the at-a-glance pill row."""
     states: list[str] = []
@@ -552,6 +624,12 @@ def build_dashboard_context(
 
     asi_rows = _asi_rows(scan, findings_by_asi)
     findings_page, pagination = _findings_page(scan, page=page, per_page=per_page)
+    # Evidence wiring: attach the verbatim probe attempts (prompt / response /
+    # reasoning) that correlate to each finding row. Done post-_findings_page
+    # so the function signature stays stable and other callers (SSE diff,
+    # report exporter) don't have to re-derive the join.
+    _probes_list_for_evidence = _assemble_probes_list(scan_dir)
+    _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
     asi_dot_states = _asi_dot_states(scan, findings_by_asi)
     asi_covered = sum(1 for b in findings_by_asi.values() if sum(b.values()) > 0)
 
@@ -680,7 +758,10 @@ def build_dashboard_context(
         # Executive theme — Probes + Logs tabs (additive; other themes ignore).
         # Both lists are always present (empty when scan_dir is None or files
         # are missing) so template authors can iterate without guarding.
-        "probes_list": _assemble_probes_list(scan_dir),
+        # ``_probes_list_for_evidence`` is reused here (already assembled
+        # above for the Findings tab evidence join) so we don't read
+        # memory.jsonl twice per render.
+        "probes_list": _probes_list_for_evidence,
         "logs_tail": _assemble_logs_tail(scan_dir),
     }
     return DashboardContext(payload=payload)

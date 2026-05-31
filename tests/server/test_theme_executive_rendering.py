@@ -899,3 +899,123 @@ def test_executive_probes_tab_keeps_judge_reasoning_when_present(
     assert "no judge confidence" not in probes_pane
     # And the standard confidence eyebrow renders.
     assert "confidence 0.85" in probes_pane
+
+
+# ---------------------------------------------------------------------------
+# 10. Findings tab — per-finding evidence expansion
+# ---------------------------------------------------------------------------
+
+
+def _seed_memory_jsonl_for_finding(
+    scan_dir: Path,
+    *,
+    seed_id: str,
+    agent: str = "asi01-goal",
+    asi_category: str = "ASI01",
+    count: int = 2,
+) -> list[dict[str, object]]:
+    """Write ``count`` reflection records all carrying the same ``seed_id`` so
+    they correlate to a finding whose ``probe_id`` equals that ``seed_id``."""
+    turns: list[dict[str, object]] = []
+    lines: list[str] = []
+    for i in range(count):
+        turn = {
+            "agent": agent,
+            "asi_category": asi_category,
+            "csa_category": "GOAL_INSTRUCTION_MANIPULATION",
+            "turn": i + 1,
+            "strategy": "direct_injection",
+            "prompt": f"finding-evidence prompt {i}",
+            "target_response": f"finding-evidence target response {i}",
+            "verdict": "vulnerable",
+            "confidence": 0.91,
+            "reasoning": f"finding-evidence judge reasoning {i}",
+            "seed_id": seed_id,
+            "attacker_refused": False,
+        }
+        record = {
+            "timestamp": f"2026-05-27T13:{30 + i:02d}:00+00:00",
+            "record_type": "reflection",
+            "payload": {
+                "agent": turn["agent"],
+                "content": json.dumps(turn),
+            },
+        }
+        turns.append(turn)
+        lines.append(json.dumps(record))
+    (scan_dir / "memory.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return turns
+
+
+def test_executive_findings_tab_evidence_expandable_per_finding(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A finding with 2 matching probe attempts renders a
+    ``<details class="exec-finding__evidence">`` containing 2 evidence rows,
+    each surfacing the verbatim prompt + target response + judge reasoning."""
+    # Build a scan with exactly one CRITICAL finding whose probe_id we control.
+    finding = _make_finding("f-crit-1", Severity.CRITICAL, AsiCategory.ASI01)
+    # _make_finding sets probe_id="probe-<fid>" → "probe-f-crit-1".
+    seed_id = finding.probe_id
+    scan = Scan(
+        id="cli-evidence-001",
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=84,
+        band=SeverityBand.GOOD,
+        sub_scores={
+            "prompt_injection_resistance": 72.0,
+            "tool_scope_safety": 88.0,
+            "pii_containment": 95.0,
+            "memory_poisoning_resistance": 68.0,
+            "excessive_agency_containment": 84.0,
+            "hallucination_resistance": 79.0,
+        },
+        findings=[finding],
+        asi_scores={cat: 80.0 for cat in AsiCategory},
+        duration_seconds=252.0,
+        cost_usd=0.84,
+        tokens_total=820_000,
+        mode="full",
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+    )
+    scan_dir = _persist(store, scan)
+    turns = _seed_memory_jsonl_for_finding(scan_dir, seed_id=seed_id, count=2)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    # Scope to the findings tab to avoid catching Probes-tab markup.
+    idx = body.find('id="tabpanel-findings"')
+    next_panel_idx = body.find('id="tabpanel-probes"', idx)
+    findings_pane = body[idx:next_panel_idx]
+    # The per-finding evidence <details> wrapper is present.
+    assert 'class="exec-finding__evidence"' in findings_pane
+    # Exactly 2 evidence rows (one <li> per turn).
+    assert findings_pane.count('class="exec-finding__evidence-row"') == 2
+    # Each row carries the verbatim prompt + target response + reasoning.
+    for turn in turns:
+        assert str(turn["prompt"]) in findings_pane
+        assert str(turn["target_response"]) in findings_pane
+        assert str(turn["reasoning"]) in findings_pane
+
+
+def test_executive_findings_tab_omits_evidence_when_none(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A finding with no matching probe-attempt records (no memory.jsonl) must
+    NOT render a ``<details class="exec-finding__evidence">``."""
+    scan = _make_scan(scan_id="cli-evidence-empty-001")  # 3 findings, no memory.jsonl
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-findings"')
+    next_panel_idx = body.find('id="tabpanel-probes"', idx)
+    findings_pane = body[idx:next_panel_idx]
+    assert 'class="exec-finding__evidence"' not in findings_pane
+    assert 'class="exec-finding__evidence-row"' not in findings_pane
