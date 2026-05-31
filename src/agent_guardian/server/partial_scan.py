@@ -487,8 +487,16 @@ class JsonlLogHandler(Handler):
         try:
             scan_dir.mkdir(parents=True, exist_ok=True)
             self._events_path.touch(exist_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            # Disk-level failure; the handler itself logs each per-record
+            # failure separately, so a noisy WARN here would just duplicate.
+            # A debug-level breadcrumb names the cause for forensic replay.
+            _LOG.debug(
+                "JsonlLogHandler: best-effort touch of %s failed (%s: %s)",
+                self._events_path,
+                type(exc).__name__,
+                exc,
+            )
 
     @property
     def scan_dir(self) -> Path:
