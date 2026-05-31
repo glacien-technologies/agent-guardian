@@ -1,0 +1,69 @@
+{# Executive — ASI radar chart (Narrative port).
+
+   10-axis Chart.js radar of Adversarial Surface Index per category.
+   Falls back to all-zeros so an empty/pre-run scan still renders an
+   empty shape rather than disappearing. Mounted by
+   executive_charts.js; offscreen <table> mirrors values for screen
+   readers.
+
+   Payload fields consumed:
+     - asi_rows[*].name        — axis label
+     - asi_rows[*].score_pct   — radial value
+     - asi_rows[*].code        — ASI code
+     - asi_rows[*].is_pending  — drop pending rows from the live shape
+#}
+{% set _radar_rows = [] %}
+{% for r in asi_rows %}
+  {% if not r.is_pending %}
+    {% set _ = _radar_rows.append({'label': r.name, 'value': r.score_pct, 'code': r.code}) %}
+  {% endif %}
+{% endfor %}
+{% if not _radar_rows %}
+  {% for r in asi_rows %}
+    {% set _ = _radar_rows.append({'label': r.name, 'value': 0, 'code': r.code}) %}
+  {% endfor %}
+{% endif %}
+{% set _radar_payload = {
+  'labels': _radar_rows | map(attribute='label') | list,
+  'values': _radar_rows | map(attribute='value') | list,
+  'codes': _radar_rows | map(attribute='code') | list,
+} %}
+<figure class="exec-chart exec-chart--radar"
+        data-component="asi-radar"
+        aria-labelledby="exec-chart-radar-caption">
+  <figcaption id="exec-chart-radar-caption">
+    <span class="exec-chart__eyebrow">FIG. 1</span>
+    <h3 class="exec-chart__title">Adversarial Surface Index — per category</h3>
+    <p class="exec-chart__lede">
+      Higher is stronger. Scores below 70 indicate the agent handled
+      fewer than 70&thinsp;% of probes in that category safely. 100 =
+      no successful exploit; 0 = every probe in this category landed.
+    </p>
+  </figcaption>
+  <div class="exec-chart__canvas-wrap">
+    <canvas id="exec-asi-radar"
+            class="exec-chart__canvas"
+            role="img"
+            aria-label="ASI sub-scores by category, radar chart"
+            data-chart='{{ _radar_payload | tojson }}'></canvas>
+  </div>
+  <details class="exec-chart__data-toggle">
+    <summary>Show data table</summary>
+    <table class="exec-chart__data-table">
+      <thead>
+        <tr>
+          <th scope="col">Category</th>
+          <th scope="col">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in _radar_rows %}
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            <td>{{ row.value }} / 100</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</figure>

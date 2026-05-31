@@ -1,0 +1,72 @@
+{# Executive — per-ASI breakdown rows (Narrative port).
+
+   10 rows ASI01..ASI10 — each surfaces the ASI code (mono), the
+   category name (serif), the score number (mono right-aligned), an
+   inline horizontal bar (violet by default, amber when the row is
+   attention-flagged, red when score < 40), and a "N findings" count.
+   Each row is collapsible (<details>/<summary>) so an analyst can
+   drill into the per-row sub-finding split.
+
+   Payload fields consumed:
+     - asi_rows[*]
+       .code, .name, .score_label, .score_pct, .is_pending,
+       .is_attention, .findings.{critical,high,medium,low}
+#}
+<ol class="exec-asi-list"
+    data-component="asi-rows"
+    role="list"
+    aria-label="Adversarial Surface Index per category">
+  {% for row in asi_rows %}
+    {% set _row_findings = (row.findings.critical | default(0))
+        + (row.findings.high | default(0))
+        + (row.findings.medium | default(0))
+        + (row.findings.low | default(0)) %}
+    {% set _score_pct = row.score_pct | default(0) %}
+    {% set _row_critical = (not row.is_pending) and (_score_pct | float < 40.0) %}
+    <li class="exec-asi-list__item
+               {% if row.is_attention %}exec-asi-list__item--attention{% endif %}
+               {% if _row_critical %}exec-asi-list__item--critical{% endif %}">
+      <details class="exec-asi-list__details">
+        <summary class="exec-asi-list__summary">
+          <span class="exec-asi-list__chevron" aria-hidden="true">▸</span>
+          <span class="exec-asi-list__code">{{ row.code }}</span>
+          <span class="exec-asi-list__name">{{ row.name }}</span>
+          <span class="exec-asi-list__score"
+                data-live="asi-{{ row.code }}-score">
+            {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
+          </span>
+          <span class="exec-asi-list__bar" aria-hidden="true">
+            <span class="exec-asi-list__fill"
+                  style="width: {{ _score_pct }}%;"></span>
+          </span>
+          <span class="exec-asi-list__count">
+            {{ _row_findings }} finding{% if _row_findings != 1 %}s{% endif %}
+          </span>
+        </summary>
+        <div class="exec-asi-list__body">
+          {% if row.subtitle %}
+            <p class="exec-asi-list__subtitle">{{ row.subtitle }}</p>
+          {% endif %}
+          <dl class="exec-asi-list__split">
+            <div class="exec-asi-list__split-row">
+              <dt>Critical</dt>
+              <dd>{{ row.findings.critical | default(0) }}</dd>
+            </div>
+            <div class="exec-asi-list__split-row">
+              <dt>High</dt>
+              <dd>{{ row.findings.high | default(0) }}</dd>
+            </div>
+            <div class="exec-asi-list__split-row">
+              <dt>Medium</dt>
+              <dd>{{ row.findings.medium | default(0) }}</dd>
+            </div>
+            <div class="exec-asi-list__split-row">
+              <dt>Low</dt>
+              <dd>{{ row.findings.low | default(0) }}</dd>
+            </div>
+          </dl>
+        </div>
+      </details>
+    </li>
+  {% endfor %}
+</ol>

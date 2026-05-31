@@ -23,7 +23,7 @@
   "use strict";
 
   var STORAGE_KEY = "ag.dashboard.theme";
-  var VALID_THEMES = ["editorial", "mission", "narrative", "ide"];
+  var VALID_THEMES = ["editorial", "mission", "narrative", "executive"];
 
   function safeRead() {
     try {

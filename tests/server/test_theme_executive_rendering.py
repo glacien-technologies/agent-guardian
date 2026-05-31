@@ -546,7 +546,7 @@ def test_executive_keyboard_nav_aria_attributes_correct(
 
 @pytest.mark.parametrize(
     "theme",
-    ["editorial", "mission", "narrative", "ide", "executive"],
+    ["editorial", "mission", "narrative", "executive"],
 )
 def test_every_theme_renders_locked_findings_literal(
     client: TestClient, store: ScanStore, theme: str
@@ -557,3 +557,218 @@ def test_every_theme_renders_locked_findings_literal(
     resp = client.get(f"/scan/{scan.id}?theme={theme}")
     assert resp.status_code == 200, resp.text[:500]
     assert "All findings so far." in resp.text
+
+
+# ---------------------------------------------------------------------------
+# 13. QA-024 — Narrative-styled partials wired into the 5 tabs
+# ---------------------------------------------------------------------------
+
+
+def test_executive_overview_renders_aivss_hero_partial(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The AIVSS hero card (big serif numeric + band axis) renders in the
+    Overview tab. Markers: ``data-component="aivss-hero"`` + the
+    ``exec-hero__number`` class + the 5-segment band axis."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    # Anchor inside the Overview pane.
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    assert 'data-component="aivss-hero"' in overview_pane
+    assert "exec-hero__number" in overview_pane
+    # Eyebrow + sub-line carry mono labels.
+    assert "AIVSS" in overview_pane
+    # Band axis: 5 segments with their labels.
+    for label in ("Critical", "Poor", "Warning", "Good", "Excellent"):
+        assert f">{label}<" in overview_pane, f"band axis missing {label}"
+
+
+def test_executive_overview_renders_severity_bars_partial(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The severity bar chart renders in the Overview tab with all 4 labels."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    assert 'data-component="severity-bars"' in overview_pane
+    assert 'id="exec-severity-bar"' in overview_pane
+    # The mono FIG. 2 eyebrow + serif headline.
+    assert "FIG. 2" in overview_pane
+    assert "Findings by severity" in overview_pane
+
+
+def test_executive_findings_tab_includes_severity_bars_and_jump_anchors(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The Findings tab renders the severity bar chart AND the per-severity
+    jump anchors (#exec-sev-{key}) that the chart's onClick handler targets."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-findings"')
+    next_idx = body.find('id="tabpanel-probes"', idx)
+    findings_pane = body[idx:next_idx]
+    assert 'data-component="severity-bars"' in findings_pane
+    # The fixture seeds critical / high / medium → at least these anchors must
+    # be present (low has no findings → no bucket → no anchor).
+    assert 'id="exec-sev-critical"' in findings_pane
+    assert 'id="exec-sev-high"' in findings_pane
+    assert 'id="exec-sev-medium"' in findings_pane
+
+
+def test_executive_overview_renders_asi_radar_partial(client: TestClient, store: ScanStore) -> None:
+    """The ASI radar chart renders in the Overview tab with the FIG. 1
+    eyebrow and the locked headline."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    assert 'data-component="asi-radar"' in overview_pane
+    assert 'id="exec-asi-radar"' in overview_pane
+    assert "FIG. 1" in overview_pane
+    assert "Adversarial Surface Index" in overview_pane
+
+
+def test_executive_agents_tab_renders_asi_rows_partial(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The Agents tab renders the per-ASI breakdown rows (ASI01..ASI10 in
+    order). The 10 mono codes + the per-row .exec-asi-list__item class must
+    all be present."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-agents"')
+    next_idx = body.find('id="tabpanel-logs"', idx)
+    agents_pane = body[idx:next_idx]
+    assert 'data-component="asi-rows"' in agents_pane
+    # All 10 ASI codes appear in order.
+    for code in (
+        "ASI01",
+        "ASI02",
+        "ASI03",
+        "ASI04",
+        "ASI05",
+        "ASI06",
+        "ASI07",
+        "ASI08",
+        "ASI09",
+        "ASI10",
+    ):
+        assert code in agents_pane, f"agents pane missing ASI code {code}"
+    # Exactly 10 list items rendered (one per ASI).
+    assert agents_pane.count('class="exec-asi-list__item') == 10
+
+
+def test_executive_reproducibility_renders_in_layout_footer(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The reproducibility receipt renders exactly once per page, positioned
+    AFTER all role=tabpanel sections (i.e. as a footer to the main
+    container)."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    assert body.count('data-component="reproducibility"') == 1
+    # The 7 mono row labels are all present.
+    for label in (
+        "SCAN_ID",
+        "SEED",
+        "GUARDIAN",
+        "AIVSS",
+        "PROBES",
+        "TARGET",
+        "EVIDENCE",
+    ):
+        assert label in body, f"reproducibility missing label {label}"
+    # The REPRODUCIBILITY mono eyebrow.
+    assert "REPRODUCIBILITY" in body
+    # The Copy button with the correct data-copy-target hook.
+    assert 'data-copy-target="#exec-repro-command"' in body
+    # The reproducibility section must appear AFTER all 5 tabpanels.
+    repro_idx = body.find('data-component="reproducibility"')
+    last_panel_idx = body.rfind('role="tabpanel"')
+    assert repro_idx > last_panel_idx, (
+        "reproducibility receipt must sit below all tabpanels in DOM order"
+    )
+
+
+def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> None:
+    """The Executive chart bootstrapper is reachable + reads the --exec-*
+    palette tokens (so the chart colours pick up the Narrative palette)."""
+    resp = client.get("/static/executive_charts.js")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "exec-asi-radar" in body
+    assert "exec-severity-bar" in body
+    assert "--exec-brand" in body
+    assert "--exec-sev-" in body
+    assert "mountCopyButtons" in body
+
+
+def test_executive_css_carries_narrative_palette_tokens(client: TestClient) -> None:
+    """The Executive stylesheet declares the Narrative palette tokens with
+    the --exec- prefix (Source Serif Pro headlines, JetBrains Mono eyebrows,
+    cream parchment background, violet brand, amber high, red critical)."""
+    resp = client.get("/static/executive.css")
+    assert resp.status_code == 200
+    body = resp.text
+    # Token declarations.
+    assert "--exec-font-serif" in body
+    assert "Source Serif Pro" in body
+    assert "--exec-font-mono" in body
+    assert "JetBrains Mono" in body
+    # Palette literals — Narrative palette migrated verbatim into Executive.
+    assert "#8b5cf6" in body  # brand violet
+    assert "#7c3aed" in body  # brand-strong
+    assert "#fafaf7" in body  # cream parchment background
+    assert "#d97706" in body  # high amber
+    assert "#b91c1c" in body  # critical red
+    # The hero number ports the Narrative big-numeric serif treatment.
+    assert ".exec-hero__number" in body
+    assert "var(--exec-font-serif)" in body
+    # Severity tokens are key for executive_charts.js readToken().
+    assert "--exec-sev-critical" in body
+    assert "--exec-sev-high" in body
+    assert "--exec-sev-medium" in body
+    assert "--exec-sev-low" in body
+
+
+def test_executive_clean_control_renders_all_5_new_partials(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The clean_control sentry survives the Narrative partial migration —
+    every new partial renders with the 0-findings fixture without error."""
+    scan = _make_scan(with_findings=False)
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    # All 5 new partials present even when the scan flagged nothing.
+    assert 'data-component="aivss-hero"' in body
+    assert 'data-component="severity-bars"' in body
+    assert 'data-component="asi-radar"' in body
+    assert 'data-component="asi-rows"' in body
+    assert 'data-component="reproducibility"' in body
+    # The findings empty-state copy is still wired through.
+    assert "Nothing flagged yet." in body

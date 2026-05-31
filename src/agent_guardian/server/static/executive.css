@@ -1,52 +1,107 @@
-/* Executive theme — sticky 3-layer stack + WAI-ARIA tab styling.
+/* AgentGuardian — Executive Dashboard theme (Theme E / QA-024 redesign).
  *
- * Dark-default; respects ``prefers-color-scheme: light``.
- * All measurements use rem / px (px on borders only).
- * Viewport >= 1024px is the supported width (locked in QA-020 parent spec).
+ * Executive layout (sticky topbar + sticky KPI strip + WAI-ARIA tab bar with
+ * five tabs) is PRESERVED byte-for-byte. The QA-024 redesign migrates the
+ * Narrative palette and typography (Source Serif Pro headlines, Inter sans
+ * body, JetBrains Mono eyebrows / codes / receipt labels, cream parchment
+ * background, violet brand) into this stylesheet, so Executive reads
+ * visually consistent with Narrative while keeping its tabbed brief layout.
+ *
+ * Token naming: every variable is prefixed ``--exec-`` (no collision with
+ * Narrative's ``--nr-`` block). Component class names stay ``.exec-*`` so
+ * the existing executive_tabs.js + template structure keep working unchanged.
+ *
+ * Severity naming convention (load-bearing — executive_charts.js reads the
+ * key at runtime via readToken("--exec-sev-" + row.severity)):
+ *   --exec-sev-critical / --exec-sev-high / --exec-sev-medium / --exec-sev-low
+ *
+ * Layout: viewport >= 1024px is the supported width (locked in the parent
+ * Executive spec). The sticky 3-layer chrome is preserved; the tab pane
+ * content adopts the Narrative editorial column rhythm.
  */
 
+/* ------------------------------------------------------------------ */
+/* 1. Design tokens — Narrative palette, --exec-* prefix              */
+/* ------------------------------------------------------------------ */
+
 :root {
-  --topbar-h: 3.5rem;
-  --kpi-h: 6rem;
-  --tabbar-h: 3rem;
-  --bg-base: #0b0d10;
-  --bg-elevated: #14171c;
-  --bg-deeper: #07090c;
-  --text-strong: #e8ecf2;
-  --text-muted: #9aa3af;
-  --text-faint: #6b7280;
-  --border-subtle: #232830;
-  --accent: #6d9eeb;
-  --accent-soft: rgba(109, 158, 235, 0.16);
-  --sev-critical: #f87171;
-  --sev-high: #fb923c;
-  --sev-medium: #fbbf24;
-  --sev-low: #34d399;
-  --verdict-vuln-bg: #7f1d1d;
-  --verdict-vuln-fg: #fee2e2;
-  --verdict-robust-bg: #064e3b;
-  --verdict-robust-fg: #d1fae5;
-  --verdict-other-bg: #1f2937;
-  --verdict-other-fg: #d1d5db;
+  /* Typography — Source Serif Pro headlines, Inter sans body, JetBrains
+   * Mono eyebrows / receipt labels. Fonts are loaded by colors_and_type.css
+   * at the top of every theme; these custom properties just wire up the
+   * fallback stack. */
+  --exec-font-serif: "Source Serif Pro", "Source Serif 4",
+    ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --exec-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --exec-font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace,
+    SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Light mode palette — Stripe Press paper feel (cream parchment). */
+  --exec-bg: #fafaf7;
+  --exec-bg-elev: #ffffff;
+  --exec-bg-sunken: #f4f1ea;
+  --exec-ink: #1a1a1a;
+  --exec-ink-muted: #525252;
+  --exec-ink-subtle: #8a8a8a;
+  --exec-border-subtle: #e8e6e0;
+  --exec-border: #d8d5cc;
+  --exec-brand: #8b5cf6;
+  --exec-brand-strong: #7c3aed;
+  --exec-brand-tint: #f3eeff;
+  --exec-code-bg: #f4f1ea;
+
+  /* Severity tokens — pills, bars, and the Chart.js severity chart all
+   * read these via getComputedStyle. */
+  --exec-sev-critical: #b91c1c;
+  --exec-sev-critical-bg: #fef2f2;
+  --exec-sev-high: #d97706;
+  --exec-sev-high-bg: #fff7ed;
+  --exec-sev-medium: #ca8a04;
+  --exec-sev-medium-bg: #fefce8;
+  --exec-sev-low: #65a30d;
+  --exec-sev-low-bg: #f7fee7;
+  --exec-sev-info: #0ea5e9;
+
+  /* Layout primitives */
+  --exec-shell-max: 1200px;
+  --exec-gutter: 32px;
+  --exec-pad-x: 32px;
+  --exec-pad-y: 32px;
+  --exec-radius-sm: 4px;
+  --exec-radius: 8px;
+  --exec-radius-lg: 12px;
+  --exec-shadow: none;
+
+  /* Sticky-layer heights — preserved from the pre-QA-024 layout so the
+   * sticky math in executive_tabs.js still works. */
+  --exec-topbar-h: 3.5rem;
+  --exec-kpi-h: 6rem;
+  --exec-tabbar-h: 3rem;
 }
 
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg-base: #fafafa;
-    --bg-elevated: #ffffff;
-    --bg-deeper: #f3f4f6;
-    --text-strong: #14171c;
-    --text-muted: #5b6470;
-    --text-faint: #8b94a0;
-    --border-subtle: #e3e6ea;
-    --accent: #1d4ed8;
-    --accent-soft: rgba(29, 78, 216, 0.12);
-    --verdict-vuln-bg: #fee2e2;
-    --verdict-vuln-fg: #7f1d1d;
-    --verdict-robust-bg: #d1fae5;
-    --verdict-robust-fg: #065f46;
-    --verdict-other-bg: #e5e7eb;
-    --verdict-other-fg: #374151;
+    --exec-bg: #0e0e10;
+    --exec-bg-elev: #17171a;
+    --exec-bg-sunken: #1f1f23;
+    --exec-ink: #f5f5f2;
+    --exec-ink-muted: #a8a8a4;
+    --exec-ink-subtle: #6e6e6a;
+    --exec-border-subtle: #2a2a2e;
+    --exec-border: #3a3a3e;
+    --exec-brand: #a78bfa;
+    --exec-brand-strong: #c4b5fd;
+    --exec-brand-tint: #1e1a2e;
+    --exec-code-bg: #1f1f23;
+    --exec-sev-critical: #f87171;
+    --exec-sev-critical-bg: #2c1414;
+    --exec-sev-high: #fb923c;
+    --exec-sev-high-bg: #2a1a0d;
+    --exec-sev-medium: #facc15;
+    --exec-sev-medium-bg: #281f0a;
+    --exec-sev-low: #a3e635;
+    --exec-sev-low-bg: #182209;
+    --exec-sev-info: #38bdf8;
   }
 }
 
@@ -54,9 +109,14 @@
 
 body.exec-body {
   margin: 0;
-  background: var(--bg-base);
-  color: var(--text-strong);
-  font: 0.875rem/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 0;
+  font-family: var(--exec-font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--exec-ink);
+  background: var(--exec-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .exec-sr-only {
@@ -70,61 +130,79 @@ body.exec-body {
 }
 
 /* ============================================================
- * Topbar (sticky layer 1)
+ * 2. Topbar (sticky layer 1) — Narrative tokens, structure preserved
  * ============================================================ */
 .exec-topbar {
   position: sticky;
   top: 0;
   z-index: 100;
-  height: var(--topbar-h);
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-subtle);
+  height: var(--exec-topbar-h);
+  background: color-mix(in srgb, var(--exec-bg) 92%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--exec-border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem;
+  padding: 0 var(--exec-pad-x);
 }
 .exec-topbar__brand { display: flex; align-items: center; gap: 0.75rem; }
 .exec-topbar__mark {
-  font-weight: 700;
+  font-family: var(--exec-font-mono);
+  font-weight: 600;
   letter-spacing: 0.04em;
   padding: 0.25rem 0.5rem;
-  background: var(--accent);
-  color: var(--bg-base);
-  border-radius: 0.25rem;
+  background: var(--exec-brand);
+  color: var(--exec-bg-elev);
+  border-radius: var(--exec-radius-sm);
   font-size: 0.75rem;
 }
-.exec-topbar__title { font-weight: 600; }
-.exec-topbar__crumb { color: var(--text-muted); font-size: 0.8125rem; }
-.exec-topbar__crumb code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.exec-topbar__title {
+  font-family: var(--exec-font-sans);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  color: var(--exec-ink);
+}
+.exec-topbar__crumb {
+  color: var(--exec-ink-muted);
+  font-size: 0.8125rem;
+}
+.exec-topbar__crumb code {
+  font-family: var(--exec-font-mono);
+  color: var(--exec-ink);
+}
 .exec-topbar__right { display: flex; align-items: center; gap: 1rem; }
 .exec-topbar__locality {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   font-size: 0.75rem;
-  color: var(--text-muted);
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.25rem;
+  color: var(--exec-ink-muted);
+  padding: 0.25rem 0.625rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: 999px;
+  background: var(--exec-bg-elev);
 }
 .exec-topbar__locality-dot {
   width: 0.5rem; height: 0.5rem; border-radius: 50%;
-  background: var(--sev-low);
+  background: var(--exec-sev-low);
 }
-.exec-topbar__locality--hosted .exec-topbar__locality-dot { background: var(--accent); }
+.exec-topbar__locality--hosted .exec-topbar__locality-dot {
+  background: var(--exec-brand);
+}
 
 /* ============================================================
- * KPI strip (sticky layer 2)
+ * 3. KPI strip (sticky layer 2) — cream surface, mono labels,
+ *    serif numbers
  * ============================================================ */
 .exec-kpi-strip {
   position: sticky;
-  top: var(--topbar-h);
+  top: var(--exec-topbar-h);
   z-index: 99;
-  min-height: var(--kpi-h);
-  background: var(--bg-base);
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 1rem 1.5rem;
+  min-height: var(--exec-kpi-h);
+  background: var(--exec-bg);
+  border-bottom: 1px solid var(--exec-border-subtle);
+  padding: 1rem var(--exec-pad-x);
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
   gap: 0.75rem;
@@ -133,46 +211,49 @@ body.exec-body {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.375rem;
+  padding: 0.625rem 0.875rem;
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
 }
 .exec-kpi__label {
+  font-family: var(--exec-font-mono);
   font-size: 0.6875rem;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--exec-ink-subtle);
 }
 .exec-kpi__value {
+  font-family: var(--exec-font-serif);
   font-size: 1.75rem;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  color: var(--text-strong);
+  color: var(--exec-ink);
 }
-.exec-kpi__value--critical { color: var(--sev-critical); }
-.exec-kpi__value--high { color: var(--sev-high); }
-.exec-kpi__value--medium { color: var(--sev-medium); }
-.exec-kpi__value--low { color: var(--sev-low); }
+.exec-kpi__value--critical { color: var(--exec-sev-critical); }
+.exec-kpi__value--high { color: var(--exec-sev-high); }
+.exec-kpi__value--medium { color: var(--exec-sev-medium); }
+.exec-kpi__value--low { color: var(--exec-sev-low); }
 .exec-kpi__value--excellent,
-.exec-kpi__value--good { color: var(--sev-low); }
-.exec-kpi__value--warning { color: var(--sev-medium); }
-.exec-kpi__value--poor,
-.exec-kpi__value--critical { color: var(--sev-critical); }
+.exec-kpi__value--good { color: var(--exec-sev-low); }
+.exec-kpi__value--warning { color: var(--exec-sev-medium); }
+.exec-kpi__value--poor { color: var(--exec-sev-critical); }
 
 /* ============================================================
- * Tab bar (sticky layer 3)
+ * 4. Tab bar (sticky layer 3) — violet underline on active tab,
+ *    muted grey inactive
  * ============================================================ */
 .exec-tabbar {
   position: sticky;
-  top: calc(var(--topbar-h) + var(--kpi-h));
+  top: calc(var(--exec-topbar-h) + var(--exec-kpi-h));
   z-index: 98;
-  height: var(--tabbar-h);
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-subtle);
+  height: var(--exec-tabbar-h);
+  background: var(--exec-bg-elev);
+  border-bottom: 1px solid var(--exec-border-subtle);
   display: flex;
   gap: 0.25rem;
-  padding: 0 1.5rem;
+  padding: 0 var(--exec-pad-x);
   align-items: stretch;
 }
 .exec-tabbar [role="tab"] {
@@ -180,16 +261,18 @@ body.exec-body {
   background: transparent;
   border: 0;
   padding: 0 1rem;
-  font: inherit;
-  color: var(--text-muted);
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--exec-ink-muted);
   cursor: pointer;
   position: relative;
   display: flex;
   align-items: center;
-  font-weight: 500;
+  transition: color 120ms ease;
 }
-.exec-tabbar [role="tab"]:hover { color: var(--text-strong); }
-.exec-tabbar [role="tab"][aria-selected="true"] { color: var(--text-strong); }
+.exec-tabbar [role="tab"]:hover { color: var(--exec-ink); }
+.exec-tabbar [role="tab"][aria-selected="true"] { color: var(--exec-ink); }
 .exec-tabbar [role="tab"][aria-selected="true"]::after {
   content: "";
   position: absolute;
@@ -197,198 +280,471 @@ body.exec-body {
   right: 0.75rem;
   bottom: 0;
   height: 2px;
-  background: var(--accent);
+  background: var(--exec-brand);
   border-radius: 1px;
 }
 .exec-tabbar [role="tab"]:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--exec-brand);
   outline-offset: -2px;
-  border-radius: 0.25rem;
+  border-radius: var(--exec-radius-sm);
 }
 
-/* Shadow-on-scroll for sticky layers. ``executive_tabs.js`` toggles
- * .is-scrolled on the three sticky containers when window.scrollY > 0. */
+/* Sticky-on-scroll shadow — executive_tabs.js toggles .is-scrolled. */
 .exec-topbar.is-scrolled,
 .exec-kpi-strip.is-scrolled,
 .exec-tabbar.is-scrolled {
-  box-shadow:
-    0 1px 0 var(--border-subtle),
-    0 4px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 0 var(--exec-border-subtle);
   transition: box-shadow 160ms ease-out;
 }
 
 /* ============================================================
- * Tab panels
+ * 5. Tab panels — Narrative editorial column rhythm
  * ============================================================ */
 [role="tabpanel"][hidden] { display: none; }
-[role="tabpanel"] { padding: 1.5rem; }
-
-.exec-section-title {
-  font-size: 1.25rem;
-  margin: 0 0 0.25rem 0;
-  font-weight: 600;
+[role="tabpanel"] {
+  padding: var(--exec-pad-y) var(--exec-pad-x);
+  max-width: var(--exec-shell-max);
+  margin: 0 auto;
 }
-.exec-section-lede {
-  color: var(--text-muted);
-  margin: 0 0 1rem 0;
+
+.exec-section-title,
+.exec-section__title {
+  font-family: var(--exec-font-serif);
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 500;
+  color: var(--exec-ink);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.005em;
+}
+.exec-section-lede,
+.exec-section__lede {
+  font-family: var(--exec-font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--exec-ink-muted);
+  margin: 0 0 24px 0;
+  max-width: 68ch;
 }
 .exec-empty {
-  color: var(--text-muted);
+  font-family: var(--exec-font-sans);
+  color: var(--exec-ink-muted);
   font-style: italic;
-  padding: 1.5rem;
-  border: 1px dashed var(--border-subtle);
-  border-radius: 0.375rem;
+  padding: 24px;
+  background: var(--exec-bg-sunken);
+  border-radius: var(--exec-radius);
   text-align: center;
 }
 
 /* ============================================================
- * Severity + verdict pills (shared across Findings / Probes /
- * Overview teaser cards)
+ * 6. AIVSS hero card — big serif numeric + band axis
  * ============================================================ */
-.exec-sev,
-.exec-probe__verdict {
+.exec-hero {
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-lg);
+  background: var(--exec-bg-elev);
+  padding: 32px 36px;
+  margin: 0 0 32px 0;
+}
+.exec-hero__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 18px 0;
+}
+.exec-hero__eyebrow {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+.exec-hero__eyebrow--right {
+  margin-left: auto;
+  color: var(--exec-ink-muted);
+}
+.exec-hero__row {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin: 0 0 14px 0;
+}
+.exec-hero__number {
+  font-family: var(--exec-font-serif);
+  font-size: 96px;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  color: var(--exec-ink);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.exec-hero__band {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  font-weight: 600;
+}
+.exec-hero__band--critical { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
+.exec-hero__band--poor { background: var(--exec-sev-high-bg); color: var(--exec-sev-high); }
+.exec-hero__band--warning { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
+.exec-hero__band--good,
+.exec-hero__band--excellent { background: var(--exec-sev-low-bg); color: var(--exec-sev-low); }
+.exec-hero__band--not-evaluated,
+.exec-hero__band--unknown,
+.exec-hero__band--pending { background: var(--exec-bg-sunken); color: var(--exec-ink-muted); }
+.exec-hero__sub {
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+  color: var(--exec-ink-muted);
+  margin: 0 0 24px 0;
+}
+.exec-hero__sub strong { font-weight: 600; color: var(--exec-ink); }
+
+.exec-bandaxis {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.exec-bandaxis__seg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--exec-radius-sm);
+  background: var(--exec-bg-sunken);
+  border-left: 3px solid var(--exec-border);
+}
+.exec-bandaxis__seg--critical { border-left-color: var(--exec-sev-critical); }
+.exec-bandaxis__seg--poor { border-left-color: var(--exec-sev-high); }
+.exec-bandaxis__seg--warning { border-left-color: var(--exec-sev-medium); }
+.exec-bandaxis__seg--good { border-left-color: var(--exec-sev-low); }
+.exec-bandaxis__seg--excellent { border-left-color: var(--exec-brand); }
+.exec-bandaxis__label {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+}
+.exec-bandaxis__tick {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  margin-top: 2px;
+}
+
+/* ============================================================
+ * 7. Chart figure (radar + severity bar) — Narrative editorial chrome
+ * ============================================================ */
+.exec-chart {
+  margin: 0 0 32px 0;
+  padding: 0;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  background: var(--exec-bg-elev);
+  overflow: hidden;
+}
+.exec-chart figcaption {
+  padding: 20px 24px 12px;
+}
+.exec-chart__eyebrow {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  display: block;
+  margin-bottom: 6px;
+}
+.exec-chart__title {
+  font-family: var(--exec-font-serif);
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 500;
+  color: var(--exec-ink);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.005em;
+}
+.exec-chart__lede {
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+  color: var(--exec-ink-muted);
+  margin: 0;
+}
+.exec-chart__canvas-wrap {
+  padding: 16px 24px 24px;
+  position: relative;
+}
+.exec-chart__canvas-wrap--bar {
+  min-height: 200px;
+}
+.exec-chart__canvas {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 480px;
+}
+.exec-chart__data-toggle {
+  border-top: 1px solid var(--exec-border-subtle);
+  padding: 12px 24px;
+  font-size: 13px;
+}
+.exec-chart__data-toggle summary {
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+}
+.exec-chart__data-table {
+  margin-top: 12px;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+}
+.exec-chart__data-table th,
+.exec-chart__data-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  text-align: left;
+}
+.exec-chart__data-table th {
+  color: var(--exec-ink-muted);
+  font-weight: 500;
+}
+.exec-chart__data-table a {
+  color: var(--exec-brand);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--exec-brand) 40%, transparent);
+}
+.exec-chart__data-table a:hover { color: var(--exec-brand-strong); }
+
+/* ============================================================
+ * 8. ASI list — 10 rows ASI01..ASI10
+ * ============================================================ */
+.exec-asi-list {
+  list-style: none;
+  margin: 32px 0 0 0;
+  padding: 0;
+  border-top: 1px solid var(--exec-border-subtle);
+}
+.exec-asi-list__item {
+  display: grid;
+  grid-template-columns: 16px 60px 1fr 60px 120px 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+}
+.exec-asi-list__item--attention {
+  background: linear-gradient(to right, var(--exec-sev-medium-bg), transparent 30%);
+}
+.exec-asi-list__chevron {
+  color: var(--exec-ink-subtle);
+  font-family: var(--exec-font-mono);
+}
+.exec-asi-list__code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+}
+.exec-asi-list__name {
+  font-family: var(--exec-font-sans);
+  color: var(--exec-ink);
+  font-weight: 500;
+}
+.exec-asi-list__score {
+  font-family: var(--exec-font-mono);
+  font-size: 13px;
+  color: var(--exec-ink);
+  text-align: right;
+}
+.exec-asi-list__bar {
+  position: relative;
+  height: 6px;
+  background: var(--exec-bg-sunken);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exec-asi-list__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--exec-brand);
+  border-radius: 3px;
+}
+.exec-asi-list__item--attention .exec-asi-list__fill {
+  background: var(--exec-sev-high);
+}
+.exec-asi-list__count {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  text-align: right;
+}
+
+.exec-asi-list__item--critical .exec-asi-list__fill {
+  background: var(--exec-sev-critical);
+}
+
+.exec-asi-list__details {
+  display: contents;
+}
+.exec-asi-list__summary {
+  display: grid;
+  grid-template-columns: 16px 60px 1fr 60px 120px 100px;
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  width: 100%;
+}
+.exec-asi-list__summary::-webkit-details-marker { display: none; }
+.exec-asi-list__summary::marker { content: ""; }
+.exec-asi-list__details[open] > .exec-asi-list__summary .exec-asi-list__chevron {
+  transform: rotate(90deg);
+}
+.exec-asi-list__chevron {
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+.exec-asi-list__body {
+  grid-column: 1 / -1;
+  padding: 12px 0 12px 72px;
+  border-top: 1px solid var(--exec-border-subtle);
+  margin-top: 8px;
+}
+.exec-asi-list__subtitle {
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink-muted);
+  margin: 0 0 8px 0;
+}
+.exec-asi-list__split {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.exec-asi-list__split-row {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  background: var(--exec-bg-sunken);
+  border-radius: var(--exec-radius-sm);
+}
+.exec-asi-list__split-row dt {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  margin: 0;
+}
+.exec-asi-list__split-row dd {
+  font-family: var(--exec-font-serif);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--exec-ink);
+  margin: 0;
+}
+
+@media (max-width: 1023px) {
+  .exec-asi-list__item,
+  .exec-asi-list__summary {
+    grid-template-columns: 16px 60px 1fr 60px;
+  }
+  .exec-asi-list__bar,
+  .exec-asi-list__count {
+    display: none;
+  }
+}
+
+/* ============================================================
+ * 9. Severity pills + buckets (Findings tab)
+ * ============================================================ */
+.exec-sev-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink);
+}
+.exec-sev-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.exec-sev-pill--critical { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
+.exec-sev-pill--high { background: var(--exec-sev-high-bg); color: var(--exec-sev-high); }
+.exec-sev-pill--medium { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
+.exec-sev-pill--low { background: var(--exec-sev-low-bg); color: var(--exec-sev-low); }
+
+.exec-sev-bucket {
+  margin: 24px 0;
+}
+.exec-sev-bucket__title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px 0;
+  font-family: var(--exec-font-sans);
+  font-size: 16px;
+  font-weight: 600;
+}
+.exec-sev-bucket__count {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  font-weight: 400;
+}
+
+/* ============================================================
+ * 10. Severity pills (legacy) — kept for back-compat
+ *     (the OVERVIEW teaser stub references .exec-sev--{key})
+ * ============================================================ */
+.exec-sev {
   display: inline-block;
   padding: 0.125rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--exec-radius-sm);
+  font-family: var(--exec-font-mono);
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   line-height: 1.4;
 }
-.exec-sev--critical { background: var(--verdict-vuln-bg); color: var(--verdict-vuln-fg); }
-.exec-sev--high { background: #7c2d12; color: #ffedd5; }
-.exec-sev--medium { background: #78350f; color: #fef3c7; }
-.exec-sev--low { background: var(--verdict-robust-bg); color: var(--verdict-robust-fg); }
-.exec-probe__verdict--vulnerable,
-.exec-probe__verdict--flagged { background: var(--verdict-vuln-bg); color: var(--verdict-vuln-fg); }
-.exec-probe__verdict--robust,
-.exec-probe__verdict--safe { background: var(--verdict-robust-bg); color: var(--verdict-robust-fg); }
-.exec-probe__verdict--unknown,
-.exec-probe__verdict--inconclusive { background: var(--verdict-other-bg); color: var(--verdict-other-fg); }
-@media (prefers-color-scheme: light) {
-  .exec-sev--high { background: #ffedd5; color: #7c2d12; }
-  .exec-sev--medium { background: #fef3c7; color: #78350f; }
-}
+.exec-sev--critical { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
+.exec-sev--high { background: var(--exec-sev-high-bg); color: var(--exec-sev-high); }
+.exec-sev--medium { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
+.exec-sev--low { background: var(--exec-sev-low-bg); color: var(--exec-sev-low); }
 
 /* ============================================================
- * Overview tab content
- * ============================================================ */
-.exec-overview {
-  display: grid;
-  gap: 1.5rem;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-}
-.exec-overview__asi { grid-column: span 2; }
-.exec-overview__eyebrow {
-  font-size: 0.6875rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin: 0 0 0.5rem 0;
-}
-.exec-overview__score,
-.exec-overview__teaser,
-.exec-overview__asi {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.5rem;
-  padding: 1.25rem;
-}
-.exec-overview__score-num {
-  font-size: 3rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  margin: 0;
-  line-height: 1;
-}
-.exec-overview__band {
-  display: inline-block;
-  margin-top: 0.5rem;
-  padding: 0.25rem 0.625rem;
-  border-radius: 0.25rem;
-  font-weight: 600;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.exec-overview__band--critical { background: var(--verdict-vuln-bg); color: var(--verdict-vuln-fg); }
-.exec-overview__band--poor { background: #78350f; color: #fef3c7; }
-.exec-overview__band--warning { background: #78350f; color: #fef3c7; }
-.exec-overview__band--good,
-.exec-overview__band--excellent { background: var(--verdict-robust-bg); color: var(--verdict-robust-fg); }
-.exec-overview__lede {
-  color: var(--text-muted);
-  margin: 1rem 0;
-  line-height: 1.55;
-}
-.exec-overview__lede em { color: var(--text-strong); font-style: italic; }
-.exec-overview__lede strong { color: var(--text-strong); }
-.exec-overview__kv {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-  margin: 0;
-  font-size: 0.8125rem;
-}
-.exec-overview__kv dt { color: var(--text-muted); }
-.exec-overview__kv dd { margin: 0; color: var(--text-strong); }
-.exec-overview__kv code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.exec-overview__list,
-.exec-overview__asi-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.exec-overview__list li {
-  display: grid;
-  grid-template-columns: max-content max-content 1fr;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  background: var(--bg-deeper);
-  border-radius: 0.375rem;
-}
-.exec-overview__list-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); font-size: 0.75rem; }
-.exec-overview__list-summary { color: var(--text-strong); }
-.exec-overview__list-meta { grid-column: 1 / -1; color: var(--text-faint); font-size: 0.75rem; }
-.exec-overview__asi-row {
-  display: grid;
-  grid-template-columns: 4rem minmax(0, 1fr) 8rem 3rem;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.375rem 0;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.exec-overview__asi-row:last-child { border-bottom: 0; }
-.exec-overview__asi-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); font-size: 0.75rem; }
-.exec-overview__asi-name { color: var(--text-strong); font-size: 0.8125rem; }
-.exec-overview__asi-bar {
-  height: 0.375rem;
-  background: var(--bg-deeper);
-  border-radius: 0.1875rem;
-  overflow: hidden;
-  position: relative;
-}
-.exec-overview__asi-bar-fill {
-  position: absolute; inset: 0;
-  background: var(--accent);
-  border-radius: 0.1875rem;
-}
-.exec-overview__asi-score {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  color: var(--text-muted);
-  font-size: 0.8125rem;
-}
-
-/* ============================================================
- * Findings tab content
+ * 11. Findings tab — serif headlines, mono ids, evidence cards
  * ============================================================ */
 .exec-findings-list,
 .exec-probes-list,
@@ -398,177 +754,403 @@ body.exec-body {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 12px;
 }
-.exec-finding,
-.exec-probe {
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.375rem;
-  padding: 0.75rem 1rem;
-  background: var(--bg-elevated);
+.exec-finding {
+  padding: 20px 24px;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  background: var(--exec-bg-elev);
 }
 .exec-finding__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .exec-finding__id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--accent);
-  font-size: 0.8125rem;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
 }
-.exec-finding__title { color: var(--text-strong); flex: 1 1 50%; }
+.exec-finding__title {
+  font-family: var(--exec-font-serif);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--exec-ink);
+  flex: 1 1 60%;
+  margin: 0;
+}
 .exec-finding__time {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  letter-spacing: 0.04em;
 }
 .exec-finding__meta {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 0.125rem 1rem;
+  gap: 4px 16px;
   margin: 0;
-  font-size: 0.8125rem;
+  padding-top: 12px;
+  border-top: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
 }
-.exec-finding__meta dt { color: var(--text-muted); }
-.exec-finding__meta dd { margin: 0; color: var(--text-strong); }
-.exec-finding__meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
-.exec-finding__none { color: var(--text-faint); }
+.exec-finding__meta dt {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--exec-ink-subtle);
+}
+.exec-finding__meta dd {
+  margin: 0;
+  color: var(--exec-ink);
+}
+.exec-finding__meta code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-finding__none { color: var(--exec-ink-subtle); }
 
 .exec-pager {
-  margin-top: 1rem;
+  margin-top: 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 16px;
+  border-top: 1px solid var(--exec-border-subtle);
+  padding-top: 16px;
 }
-.exec-pager__range { color: var(--text-muted); font-size: 0.8125rem; }
-.exec-pager__buttons { display: flex; gap: 0.25rem; }
+.exec-pager__range {
+  font-family: var(--exec-font-mono);
+  color: var(--exec-ink-muted);
+  font-size: 12px;
+}
+.exec-pager__buttons { display: flex; gap: 4px; }
 .exec-pager__btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 2rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.25rem;
+  min-width: 28px;
+  padding: 0 8px;
+  height: 28px;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
   text-decoration: none;
-  color: var(--text-strong);
-  font-size: 0.8125rem;
+  color: var(--exec-ink-muted);
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
 }
-.exec-pager__btn--active { background: var(--accent); color: var(--bg-base); border-color: var(--accent); }
+.exec-pager__btn:hover { color: var(--exec-ink); }
+.exec-pager__btn--active {
+  background: var(--exec-brand);
+  color: var(--exec-bg-elev);
+  border-color: var(--exec-brand);
+}
 
 /* ============================================================
- * Probes tab content
+ * 12. Probes tab — restyled with Narrative tokens
  * ============================================================ */
+.exec-probe {
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  padding: 16px 20px;
+  background: var(--exec-bg-elev);
+}
 .exec-probe__head {
   display: flex;
-  gap: 0.75rem;
+  gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 0.5rem;
+  margin-bottom: 8px;
 }
 .exec-probe__id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--accent);
-  font-size: 0.75rem;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
 }
-.exec-probe__agent { color: var(--text-strong); font-weight: 500; }
+.exec-probe__agent {
+  font-family: var(--exec-font-sans);
+  color: var(--exec-ink);
+  font-weight: 500;
+  font-size: 14px;
+}
 .exec-probe__asi {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-ink-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
 }
+.exec-probe__verdict {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.exec-probe__verdict--vulnerable,
+.exec-probe__verdict--flagged { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
+.exec-probe__verdict--robust,
+.exec-probe__verdict--safe { background: var(--exec-sev-low-bg); color: var(--exec-sev-low); }
+.exec-probe__verdict--unknown,
+.exec-probe__verdict--inconclusive { background: var(--exec-bg-sunken); color: var(--exec-ink-muted); }
 .exec-probe__time {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-ink-subtle);
+  font-size: 11px;
   margin-left: auto;
 }
 .exec-probe__body summary {
   cursor: pointer;
-  color: var(--accent);
-  font-size: 0.8125rem;
-  padding: 0.25rem 0;
-}
-.exec-probe__body summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 0.25rem; }
-.exec-probe__label {
-  font-size: 0.6875rem;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-brand);
+  font-size: 12px;
+  padding: 4px 0;
   letter-spacing: 0.04em;
+}
+.exec-probe__body summary:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-probe__label {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  margin: 0.75rem 0 0.25rem 0;
+  color: var(--exec-ink-subtle);
+  margin: 12px 0 4px 0;
 }
 .exec-probe__prompt,
 .exec-probe__response {
-  background: var(--bg-deeper);
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.25rem;
-  padding: 0.5rem;
+  background: var(--exec-code-bg);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  padding: 12px 14px;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 15rem;
   overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--exec-ink);
   margin: 0;
 }
 .exec-probe__reason {
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-left: 3px solid var(--accent);
-  color: var(--text-muted);
+  margin: 8px 0 0 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--exec-brand);
+  background: var(--exec-brand-tint);
+  color: var(--exec-ink);
+  font-family: var(--exec-font-serif);
+  font-size: 14px;
+  line-height: 1.6;
   font-style: italic;
+  border-radius: 0 var(--exec-radius-sm) var(--exec-radius-sm) 0;
 }
 
 /* ============================================================
- * Agents tab content
+ * 13. Agents tab — serif headers, mono agent IDs
  * ============================================================ */
 .exec-agents-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+  margin-bottom: 32px;
 }
 .exec-agents-table th,
 .exec-agents-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--exec-border-subtle);
   text-align: left;
 }
 .exec-agents-table th {
-  color: var(--text-muted);
-  font-size: 0.6875rem;
-  letter-spacing: 0.05em;
+  font-family: var(--exec-font-mono);
+  color: var(--exec-ink-subtle);
+  font-size: 11px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  font-weight: 600;
+  font-weight: 500;
 }
-.exec-agents-table code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.exec-agents-table td {
+  color: var(--exec-ink);
+}
+.exec-agents-table code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+  color: var(--exec-ink);
+}
 .exec-agents-table__num {
+  font-family: var(--exec-font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right !important;
 }
 
 /* ============================================================
- * Logs tab content
+ * 14. Logs tab — mono everywhere, severity-tinted level pills
  * ============================================================ */
 .exec-log {
   display: grid;
   grid-template-columns: 5rem 4rem 8rem 1fr;
-  gap: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  border-bottom: 1px solid var(--border-subtle);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
   align-items: center;
+  background: var(--exec-bg-elev);
 }
-.exec-log__time { color: var(--text-muted); }
-.exec-log__level { font-weight: 600; }
-.exec-log--info .exec-log__level { color: var(--text-muted); }
-.exec-log--warn .exec-log__level { color: var(--sev-medium); }
-.exec-log--error .exec-log__level { color: var(--sev-critical); }
-.exec-log__kind { color: var(--accent); }
-.exec-log__agent { color: var(--text-strong); }
-.exec-log__asi { color: var(--text-muted); }
-.exec-log__msg { color: var(--text-strong); }
+.exec-log:first-child { border-top: 1px solid var(--exec-border-subtle); }
+.exec-log__time { color: var(--exec-ink-muted); }
+.exec-log__level {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: var(--exec-radius-sm);
+  text-align: center;
+}
+.exec-log--info .exec-log__level { background: var(--exec-bg-sunken); color: var(--exec-ink-muted); }
+.exec-log--warn .exec-log__level { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
+.exec-log--error .exec-log__level { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
+.exec-log__kind { color: var(--exec-brand); }
+.exec-log__agent { color: var(--exec-ink); }
+.exec-log__asi { color: var(--exec-ink-muted); }
+.exec-log__msg { color: var(--exec-ink); }
+
+/* ============================================================
+ * 15. Reproducibility receipt — appears at the bottom of every tab
+ *     via layout.html (outside the tabpanels container)
+ * ============================================================ */
+.exec-callout {
+  max-width: var(--exec-shell-max);
+  margin: 32px auto 48px;
+  padding: 20px 24px;
+  font-family: var(--exec-font-mono);
+  border: 1px solid var(--exec-border-subtle);
+  border-left: 3px solid var(--exec-brand);
+  border-radius: var(--exec-radius);
+  background: var(--exec-brand-tint);
+}
+.exec-callout__label {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+  margin: 0 0 12px 0;
+}
+.exec-callout__grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.exec-callout__row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: baseline;
+  margin: 0;
+}
+.exec-callout__row dt {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.exec-callout__row dd {
+  font-family: var(--exec-font-mono);
+  font-size: 13px;
+  color: var(--exec-ink);
+  margin: 0;
+}
+.exec-callout__command {
+  margin-top: 16px;
+  position: relative;
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+}
+.exec-callout__pre {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--exec-ink);
+  overflow-x: auto;
+  white-space: pre;
+}
+.exec-callout__copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-bg-sunken);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  cursor: pointer;
+}
+.exec-callout__copy:hover {
+  color: var(--exec-ink);
+  background: var(--exec-bg);
+}
+.exec-callout__copy:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+ * 16. Inline mono code (utility)
+ * ============================================================ */
+.exec-mono-inline {
+  font-family: var(--exec-font-mono);
+  font-size: 0.9em;
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+  color: var(--exec-ink);
+}
+
+/* ============================================================
+ * 17. Accessibility — focus + reduced motion
+ * ============================================================ */
+.exec-finding details summary:focus-visible,
+.exec-probe details summary:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+  border-radius: var(--exec-radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exec-tabbar [role="tab"],
+  .exec-callout__copy {
+    transition: none !important;
+  }
+  html { scroll-behavior: auto; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}

@@ -1,0 +1,62 @@
+{# Executive — Findings by severity (horizontal bar chart, Narrative port).
+
+   Mirrors the Narrative _bar_probes_per_agent.html partial: a single
+   Chart.js horizontal bar with rows CRITICAL / HIGH / MEDIUM / LOW and
+   monospace labels. Click any bar to jump to the matching #exec-sev-{key}
+   anchor inside the Findings tab (Overview rendering no-ops when no
+   anchor target is present in the active panel — executive_charts.js
+   bails on querySelector null).
+
+   Payload fields consumed:
+     - counts.critical, counts.high, counts.medium, counts.low
+#}
+{% set _severities = ['critical', 'high', 'medium', 'low'] %}
+{% set _severity_rows = [] %}
+{% for sev in _severities %}
+  {% set _ = _severity_rows.append({
+    'severity': sev,
+    'label': sev | upper,
+    'count': counts[sev] | default(0),
+    'anchor': '#exec-sev-' ~ sev,
+  }) %}
+{% endfor %}
+{% set _bar_payload = {'rows': _severity_rows} %}
+<figure class="exec-chart exec-chart--bar"
+        data-component="severity-bars"
+        aria-labelledby="exec-chart-bar-caption">
+  <figcaption id="exec-chart-bar-caption">
+    <span class="exec-chart__eyebrow">FIG. 2</span>
+    <h3 class="exec-chart__title">Findings by severity</h3>
+    <p class="exec-chart__lede">
+      Click any bar to jump to that severity grouping below.
+    </p>
+  </figcaption>
+  <div class="exec-chart__canvas-wrap exec-chart__canvas-wrap--bar">
+    <canvas id="exec-severity-bar"
+            class="exec-chart__canvas"
+            role="img"
+            aria-label="Findings count grouped by severity, horizontal bar chart"
+            data-chart='{{ _bar_payload | tojson }}'></canvas>
+  </div>
+  <details class="exec-chart__data-toggle">
+    <summary>Show data table</summary>
+    <table class="exec-chart__data-table">
+      <thead>
+        <tr>
+          <th scope="col">Severity</th>
+          <th scope="col">Count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in _severity_rows %}
+          <tr>
+            <th scope="row">
+              <a class="exec-chart__data-link" href="{{ row.anchor }}">{{ row.label }}</a>
+            </th>
+            <td>{{ row.count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</figure>

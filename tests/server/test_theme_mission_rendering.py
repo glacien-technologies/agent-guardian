@@ -187,7 +187,7 @@ def test_mission_includes_theme_switcher_partial(client: TestClient, store: Scan
     # The select element id used by theme_switcher.js
     assert 'id="ag-theme-switcher-select"' in body
     # Every theme slug listed in the dropdown
-    for slug in ("editorial", "mission", "narrative", "ide"):
+    for slug in ("editorial", "mission", "narrative", "executive"):
         assert f'value="{slug}"' in body
 
 

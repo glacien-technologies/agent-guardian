@@ -26,13 +26,18 @@ between the four locked template paths:
 * ``editorial`` → ``dashboard/scan_detail.html`` (UNCHANGED current design)
 * ``mission``   → ``dashboard/mission/layout.html``
 * ``narrative`` → ``dashboard/narrative/layout.html``
-* ``ide``       → ``dashboard/ide/layout.html``
+* ``executive`` → ``dashboard/executive/layout.html``
 
 Precedence is: query param ``?theme=`` > ``$AGENT_GUARDIAN_DASHBOARD_THEME``
 env var > ``editorial`` default. Invalid theme names (including empty strings,
 typos, or names not in the locked set) fall through silently to the next
 priority — never raise. This guarantees a request without ``?theme=`` is
 byte-for-byte equivalent to the pre-QA-020 behaviour.
+
+Back-compat note (QA-024): the legacy ``ide`` slug was deleted alongside the
+IDE / Terminal theme. Any operator-bookmarked ``?theme=ide`` URL is
+silently rewritten to ``editorial`` inside :func:`resolve_theme` so the
+dashboard never 404s on a stale link.
 """
 
 from __future__ import annotations
@@ -82,15 +87,27 @@ DASHBOARD_THEMES: Final[tuple[str, ...]] = (
     "editorial",
     "mission",
     "narrative",
-    "ide",
     "executive",
 )
 DASHBOARD_THEME_TEMPLATES: Final[Mapping[str, str]] = {
     "editorial": "dashboard/scan_detail.html",
     "mission": "dashboard/mission/layout.html",
     "narrative": "dashboard/narrative/layout.html",
-    "ide": "dashboard/ide/layout.html",
     "executive": "dashboard/executive/layout.html",
+}
+
+# Legacy theme slugs that were deleted from :data:`DASHBOARD_THEMES` but are
+# still rewritten silently inside :func:`resolve_theme` so old operator
+# bookmarks keep rendering. Each entry maps the dead slug to the surviving
+# slug the request should be served as.
+#
+# - ``ide`` (QA-024): the IDE / Terminal theme was deleted; ``?theme=ide``
+#   bookmarks are routed to the Editorial briefing layout so the dashboard
+#   keeps a useful first paint instead of falling through to the default
+#   silently (which would still work, but this explicit rewrite means the
+#   intent is documented and the test suite can lock it in).
+_DASHBOARD_LEGACY_THEME_REDIRECTS: Final[Mapping[str, str]] = {
+    "ide": "editorial",
 }
 
 
@@ -113,6 +130,15 @@ def resolve_theme(
     priority — never raise. The caller can rely on the return value always
     being one of :data:`DASHBOARD_THEMES`.
 
+    Legacy redirect (QA-024 — IDE theme deletion): any candidate that
+    normalises to a key in :data:`_DASHBOARD_LEGACY_THEME_REDIRECTS` is
+    rewritten to its replacement slug *in place*, preserving the precedence
+    ladder. In particular, a query string carrying ``?theme=ide`` resolves
+    to ``editorial`` (the briefing layout) so operator bookmarks created
+    before the IDE theme was deleted keep working. The explicit rewrite is
+    documented here so the behaviour is greppable and lockable in tests
+    (``test_route_query_param_ide_silently_falls_back_to_editorial``).
+
     The function is pure (no ``os.environ`` reads, no I/O) so the route can
     test it in isolation and the env-var resolution is the route's
     responsibility. A small convenience wrapper, :func:`resolve_theme_from_env`,
@@ -123,6 +149,10 @@ def resolve_theme(
         if raw is None:
             continue
         normalised = raw.strip().lower()
+        # Legacy redirect (QA-024): rewrite deleted slugs to their surviving
+        # replacement before the membership check so bookmarks keep working.
+        if normalised in _DASHBOARD_LEGACY_THEME_REDIRECTS:
+            return _DASHBOARD_LEGACY_THEME_REDIRECTS[normalised]
         if normalised in DASHBOARD_THEMES:
             return normalised
     return DASHBOARD_THEME_DEFAULT

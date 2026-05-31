@@ -1,10 +1,21 @@
 {# Executive — Findings tab panel.
 
    The literal greppable heading ``All findings so far.`` lives here so the
-   Executive theme's findings region matches the other four. Each finding card
-   carries severity / id / summary / agent / ASI / probe metadata. Empty-state
-   copy preserves the ``clean_control`` sentry.
+   Executive theme's findings region matches the other four. The severity
+   bar chart sits directly under the heading; its click handler scrolls to
+   one of the four severity bucket anchors (#exec-sev-{critical|high|medium
+   |low}). Each finding card carries severity / id / summary / agent / ASI
+   / probe metadata, restyled with Narrative serif headlines and mono
+   eyebrow tags. Empty-state copy preserves the ``clean_control`` sentry.
 #}
+{% set _by_sev = {'critical': [], 'high': [], 'medium': [], 'low': []} %}
+{% for f in findings_page %}
+  {% set _bucket = _by_sev.get(f.severity_class) %}
+  {% if _bucket is not none %}
+    {% set _ = _bucket.append(f) %}
+  {% endif %}
+{% endfor %}
+
 <section id="tabpanel-findings"
          role="tabpanel"
          aria-labelledby="tab-findings"
@@ -12,38 +23,64 @@
          hidden>
   <h2 class="exec-section-title">All findings so far.</h2>
   <p class="exec-section-lede">
-    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality.
+    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality. Click any
+    bar to jump to that severity grouping below.
   </p>
+
+  {% include "dashboard/executive/_severity_bars.html" %}
+
   {% if findings_total == 0 %}
     <p class="exec-empty">Nothing flagged yet.</p>
   {% else %}
-    <ol class="exec-findings-list" data-live="findings-list">
-      {% for f in findings_page %}
-        <li class="exec-finding"
-            id="finding-{{ f.id }}"
-            data-severity="{{ f.severity_class }}">
-          <header class="exec-finding__head">
-            <span class="exec-sev exec-sev--{{ f.severity_class }}">{{ f.severity_label }}</span>
-            <code class="exec-finding__id">{{ f.id }}</code>
-            <span class="exec-finding__title">{{ f.summary }}</span>
-            <time class="exec-finding__time">{{ f.created_label }}</time>
-          </header>
-          <dl class="exec-finding__meta">
-            <dt>ASI</dt><dd><code>{{ f.asi_code }}</code></dd>
-            <dt>CSA</dt><dd><code>{{ f.csa_code }}</code></dd>
-            <dt>Probe</dt><dd><code>{{ f.probe_id }}</code></dd>
-            <dt>ATLAS</dt>
-            <dd>
-              {% if f.atlas %}
-                {% for technique in f.atlas %}<code>{{ technique }}</code>{% if not loop.last %} &middot; {% endif %}{% endfor %}
-              {% else %}
-                <span class="exec-finding__none">&mdash;</span>
-              {% endif %}
-            </dd>
-          </dl>
-        </li>
-      {% endfor %}
-    </ol>
+    {% for _sev_key, _sev_items in [('critical', _by_sev.critical),
+                                     ('high', _by_sev.high),
+                                     ('medium', _by_sev.medium),
+                                     ('low', _by_sev.low)] %}
+      {% if _sev_items %}
+        <section class="exec-sev-bucket" id="exec-sev-{{ _sev_key }}">
+          <h3 class="exec-sev-bucket__title">
+            <span class="exec-sev-pill exec-sev-pill--{{ _sev_key }}">
+              <span class="exec-sev-pill__dot" aria-hidden="true"></span>
+              {{ _sev_key | upper }}
+            </span>
+            <span class="exec-sev-bucket__count">
+              {{ _sev_items | length }} finding{% if _sev_items | length != 1 %}s{% endif %}
+            </span>
+          </h3>
+          <ol class="exec-findings-list" role="list">
+            {% for f in _sev_items %}
+              <li class="exec-finding"
+                  id="finding-{{ f.id }}"
+                  data-severity="{{ f.severity_class }}">
+                <header class="exec-finding__head">
+                  <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
+                        aria-label="{{ f.severity_label }} severity">
+                    <span class="exec-sev-pill__dot" aria-hidden="true"></span>
+                    {{ f.severity_label }}
+                  </span>
+                  <code class="exec-finding__id">{{ f.id }}</code>
+                  <h4 class="exec-finding__title">{{ f.summary }}</h4>
+                  <time class="exec-finding__time">{{ f.created_label }}</time>
+                </header>
+                <dl class="exec-finding__meta">
+                  <dt>ASI</dt><dd><code>{{ f.asi_code }}</code></dd>
+                  <dt>CSA</dt><dd><code>{{ f.csa_code }}</code></dd>
+                  <dt>Probe</dt><dd><code>{{ f.probe_id }}</code></dd>
+                  <dt>ATLAS</dt>
+                  <dd>
+                    {% if f.atlas %}
+                      {% for technique in f.atlas %}<code>{{ technique }}</code>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+                    {% else %}
+                      <span class="exec-finding__none">&mdash;</span>
+                    {% endif %}
+                  </dd>
+                </dl>
+              </li>
+            {% endfor %}
+          </ol>
+        </section>
+      {% endif %}
+    {% endfor %}
     {% if pagination.total_pages > 1 %}
       <nav class="exec-pager" aria-label="Findings pagination">
         <span class="exec-pager__range">

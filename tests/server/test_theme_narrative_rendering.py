@@ -250,8 +250,8 @@ def test_narrative_findings_render_each_as_a_card(client: TestClient, store: Sca
     assert "Evidence trail" in body
 
     # Cross-theme deep-links (the unique drill-down differentiator)
-    assert "?theme=ide" in body
     assert "?theme=mission" in body
+    assert "?theme=executive" in body
 
 
 def test_narrative_data_live_keys_mirrored(client: TestClient, store: ScanStore) -> None:
@@ -393,7 +393,7 @@ def test_narrative_theme_switcher_includes_all_four_themes(
     assert 'data-current="narrative"' in body
 
     # All four theme slugs appear as <option value="..."> entries.
-    for slug in ("editorial", "mission", "narrative", "ide"):
+    for slug in ("editorial", "mission", "narrative", "executive"):
         assert f'value="{slug}"' in body, f"theme option missing: {slug}"
 
     # Narrative is the one marked selected.

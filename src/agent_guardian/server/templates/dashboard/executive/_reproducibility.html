@@ -1,0 +1,70 @@
+{# Executive — Reproducibility receipt (Narrative port; rendered as a
+   footer in layout.html, OUTSIDE the tabpanels — appears at the bottom
+   of every tab).
+
+   Notion-style callout with the exact scan fingerprint so a stakeholder
+   can paste the command into a terminal and rerun the scan locally.
+   The mono REPRODUCIBILITY eyebrow leads, the 7 mono-label rows follow
+   (SCAN_ID / SEED / GUARDIAN / AIVSS / PROBES / TARGET / EVIDENCE),
+   and the repro shell command sits below them with a Copy button wired
+   to executive_charts.js's mountCopyButtons().
+
+   Payload fields consumed:
+     - scan_id
+     - rng_seed
+     - package_version          (GUARDIAN)
+     - aivss_formula_version    (AIVSS)
+     - probe_library_version    (PROBES)
+     - target_ref               (TARGET)
+     - evidence_fingerprint     (EVIDENCE)
+     - tier_label               (repro shell command --tier flag)
+#}
+<section class="exec-callout"
+         id="exec-repro"
+         data-component="reproducibility"
+         role="group"
+         aria-labelledby="exec-repro-label">
+  <p class="exec-callout__label" id="exec-repro-label">REPRODUCIBILITY</p>
+  <dl class="exec-callout__grid">
+    <div class="exec-callout__row">
+      <dt>SCAN_ID</dt>
+      <dd><span class="exec-mono-inline">{{ scan_id }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>SEED</dt>
+      <dd><span class="exec-mono-inline">{{ rng_seed }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>GUARDIAN</dt>
+      <dd><span class="exec-mono-inline">{{ package_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>AIVSS</dt>
+      <dd><span class="exec-mono-inline">{{ aivss_formula_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>PROBES</dt>
+      <dd><span class="exec-mono-inline">{{ probe_library_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>TARGET</dt>
+      <dd><span class="exec-mono-inline">{{ target_ref }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>EVIDENCE</dt>
+      <dd><span class="exec-mono-inline">{{ evidence_fingerprint }}</span></dd>
+    </div>
+  </dl>
+  <div class="exec-callout__command">
+    <pre class="exec-callout__pre" id="exec-repro-command"><code>uv run agent-guardian scan \
+  --target {{ target_ref }} \
+  --tier {{ tier_label }} \
+  --seed {{ rng_seed }}</code></pre>
+    <button class="exec-callout__copy"
+            type="button"
+            data-copy-target="#exec-repro-command"
+            aria-label="Copy reproducibility command">
+      Copy
+    </button>
+  </div>
+</section>

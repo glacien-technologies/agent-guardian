@@ -1,9 +1,15 @@
 """QA-020 — dashboard theme switcher infrastructure tests.
 
 Covers the route-level theme resolution + template selection introduced for
-the Mission Control / Narrative Report / IDE themes, plus the byte-for-byte
-preservation of the existing Editorial theme behaviour when ``?theme=`` is
-absent.
+the Mission Control / Narrative Report / Executive Dashboard themes, plus
+the byte-for-byte preservation of the existing Editorial theme behaviour
+when ``?theme=`` is absent.
+
+QA-024: the IDE / Terminal theme was deleted; the legacy ``?theme=ide``
+bookmark is now silently rewritten to ``editorial`` inside
+:func:`resolve_theme`. The regression test
+:func:`test_route_query_param_ide_silently_falls_back_to_editorial`
+locks that behaviour in.
 
 The tests are deliberately layered:
 
@@ -148,7 +154,7 @@ def test_resolve_theme_query_param_wins(slug: str) -> None:
 
 def test_resolve_theme_falls_back_to_env_when_no_query() -> None:
     assert resolve_theme(None, "narrative") == "narrative"
-    assert resolve_theme(None, "ide") == "ide"
+    assert resolve_theme(None, "executive") == "executive"
 
 
 def test_resolve_theme_default_when_nothing_set() -> None:
@@ -168,7 +174,7 @@ def test_resolve_theme_invalid_falls_through(bad: str) -> None:
     # Bad query + good env: env wins.
     assert resolve_theme(bad, "mission") == "mission"
     # Good query + bad env: query still wins.
-    assert resolve_theme("ide", bad) == "ide"
+    assert resolve_theme("executive", bad) == "executive"
 
 
 @pytest.mark.parametrize(
@@ -177,7 +183,7 @@ def test_resolve_theme_invalid_falls_through(bad: str) -> None:
         ("EDITORIAL", "editorial"),
         ("Mission", "mission"),
         ("  narrative  ", "narrative"),
-        ("IDE", "ide"),
+        ("EXECUTIVE", "executive"),
     ],
 )
 def test_resolve_theme_normalises_case_and_whitespace(raw: str, expected: str) -> None:
@@ -197,7 +203,7 @@ def test_resolve_theme_from_env_with_no_env_var(monkeypatch: pytest.MonkeyPatch)
     """When the env var is unset, only the query param + default are consulted."""
     monkeypatch.delenv(AGENT_GUARDIAN_DASHBOARD_THEME_ENV, raising=False)
     assert resolve_theme_from_env(None) == DASHBOARD_THEME_DEFAULT
-    assert resolve_theme_from_env("ide") == "ide"
+    assert resolve_theme_from_env("executive") == "executive"
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +234,28 @@ def test_route_query_param_narrative_picks_narrative_template(
     assert 'data-theme="narrative"' in resp.text
 
 
-def test_route_query_param_ide_picks_ide_template(client: TestClient, store: ScanStore) -> None:
-    """``?theme=ide`` renders the IDE / Terminal layout."""
+def test_theme_ide_silently_falls_back_to_editorial(client: TestClient, store: ScanStore) -> None:
+    """Regression for QA-024 — bookmarked ``?theme=ide`` URLs keep working.
+
+    The IDE / Terminal theme was deleted, but operators may still hold
+    bookmarks pointing at ``?theme=ide``. Those requests MUST render the
+    Editorial briefing layout (status 200, no exception, no 404, no
+    ``data-theme="ide"`` marker leaking through).
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=ide")
-    assert resp.status_code == 200
-    assert 'data-theme="ide"' in resp.text
+
+    assert resp.status_code == 200, resp.text[:500]
+    body = resp.text
+    # Editorial template marker — the briefing layout puts class="dash-body"
+    # on <body>. This is the same anchor the invalid-theme fall-through
+    # tests below use, so the assertion stays canonical.
+    assert 'class="dash-body"' in body
+    # The deleted IDE template marker MUST NOT be present.
+    assert 'data-theme="ide"' not in body
+    # And there must be no stale reference to the deleted template path.
+    assert "dashboard/ide/" not in body
 
 
 def test_route_query_param_executive_picks_executive_template(
