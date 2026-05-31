@@ -24,9 +24,14 @@
         <li class="exec-log exec-log--{{ ev.level }}{% if ev.kind == 'log' %} exec-log--cli{% endif %}" data-level="{{ ev.level }}" data-agent="{{ ev.agent }}" data-kind="{{ ev.kind }}">
           <time class="exec-log__time">{{ ev.timestamp_label }}</time>
           <span class="exec-log__level">{{ ev.level | upper }}</span>
-          {% if ev.kind != 'log' %}<span class="exec-log__kind">{{ ev.kind }}</span>{% endif %}
-          {% if ev.agent and ev.kind != 'log' %}<span class="exec-log__agent">{{ ev.agent }}</span>{% endif %}
-          {% if ev.asi %}<span class="exec-log__asi">{{ ev.asi }}</span>{% endif %}
+          {# Metadata tags share one auto-width grid cell — when there are
+             no tags (kind=log + no asi), the cell collapses to zero and the
+             message column claims the full remaining width. #}
+          <span class="exec-log__meta">
+            {% if ev.kind != 'log' %}<span class="exec-log__kind">{{ ev.kind }}</span>{% endif %}
+            {% if ev.agent and ev.kind != 'log' %}<span class="exec-log__agent">{{ ev.agent }}</span>{% endif %}
+            {% if ev.asi %}<span class="exec-log__asi">{{ ev.asi }}</span>{% endif %}
+          </span>
           <span class="exec-log__msg{% if ev.kind == 'log' %} exec-log__msg--mono{% endif %}">{{ ev.summary }}</span>
         </li>
       {% endfor %}

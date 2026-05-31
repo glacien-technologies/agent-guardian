@@ -1455,14 +1455,38 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
  * ============================================================ */
 .exec-log {
   display: grid;
-  grid-template-columns: 5rem 4rem 8rem 1fr;
+  /* time (fixed) | level pill (fixed) | metadata tags (auto — collapses
+   * to zero when empty) | message (1fr — claims all remaining width).
+   * Was ``5rem 4rem 8rem 1fr``, but the fixed 8rem column wasted ~128 px
+   * on every kind=log row (httpx + agent_guardian.* messages) AND pushed
+   * the message into the wrong column on those rows — the message was
+   * landing in the 8rem cell, not the 1fr cell, because Jinja-skipped
+   * children shift their siblings up the grid. Auto + dedicated wrapper
+   * fixes both. */
+  grid-template-columns: 5rem 4rem auto 1fr;
   gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--exec-border-subtle);
   font-family: var(--exec-font-mono);
   font-size: 12px;
-  align-items: center;
+  align-items: start;
   background: var(--exec-bg-elev);
+}
+.exec-log__meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.exec-log__meta:empty { display: none; }
+.exec-log__msg {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.exec-log__msg--mono {
+  font-family: var(--exec-font-mono);
 }
 .exec-log:first-child { border-top: 1px solid var(--exec-border-subtle); }
 .exec-log__time { color: var(--exec-ink-muted); }
@@ -1479,6 +1503,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-log__kind { color: var(--exec-brand); }
 .exec-log__agent { color: var(--exec-ink); }
 .exec-log__asi { color: var(--exec-ink-muted); }
+/* ``.exec-log__msg`` colour: layout properties (min-width / overflow-wrap)
+ * live on the rule above (next to the new ``__meta`` rule); colour is
+ * kept separate so palette overrides in dark mode can stay localised. */
 .exec-log__msg { color: var(--exec-ink); }
 
 /* ============================================================
