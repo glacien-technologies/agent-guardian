@@ -2917,6 +2917,20 @@ async def _run_scan_inner(
         observer=observer,
     )
 
+    # Cross-process dashboard bridge -- snapshot a partial Scan to disk on
+    # every ``agent_done`` / ``checkpoint`` event. The CLI scan process and
+    # the dashboard ``uvicorn`` subprocess (spawned by ``AutoServeManager``)
+    # don't share memory, so without this disk-backed bridge the dashboard's
+    # in-memory ``ScanStore`` registry stays empty and every widget renders
+    # the always-zero / always-"running" placeholders. Wired *before* the
+    # CLI feed renderer / TUI so those wrap our observer (and the partial
+    # writer always runs, regardless of which optional UI was attached).
+    from agent_guardian.server.partial_scan import make_partial_writer
+
+    partial_scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    partial_scan_dir.mkdir(parents=True, exist_ok=True)
+    make_partial_writer(swarm, partial_scan_dir)
+
     # QA-005 — attach the reflection sink BEFORE the TUI so the renderer
     # wraps whatever observer is already wired (otel, store, etc.) and
     # the TUI's attach_to() wraps the renderer in turn. The wrap chain
@@ -3064,6 +3078,17 @@ async def _run_scan_inner(
         typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
     (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
+    # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
+    # has landed -- the dashboard subprocess's ``load_completed`` reads the
+    # terminal file first, but unlinking the partial avoids a stale snapshot
+    # surviving a crash on the next scan with the same id (defensive).
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    _partial = partial_scan_path(scan_dir)
+    if _partial.is_file():
+        # pragma: no cover -- best-effort
+        with contextlib.suppress(OSError):
+            _partial.unlink()
 
     # 10. Final state + summary.
     state = _read_state()

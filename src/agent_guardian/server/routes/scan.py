@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from agent_guardian._version import __version__
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.dashboard_view import build_dashboard_context, live_snapshot
+from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
 __all__ = ["router"]
@@ -93,7 +94,15 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         page = 1
 
     base_url = _resolve_base_url(request)
-    elapsed = max(0.0, time.time() - mtime) if (is_running and mtime is not None) else None
+    # Elapsed clock: prefer wall-clock from the scan-dir mtime whenever the
+    # scan is still in flight -- that covers both the in-process path
+    # (``is_running=True`` from a library caller that used ``store.register``)
+    # and the cross-process path (the dashboard subprocess sees only the
+    # partial scan on disk and never gets ``register()``-d). The Scan's own
+    # ``duration_seconds`` is the right source once the terminal file lands.
+    terminal_on_disk = is_terminal_scan_on_disk(scan_dir)
+    in_flight = is_running or (scan is not None and not terminal_on_disk)
+    elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
     ctx = build_dashboard_context(
         scan_id=scan_id,
         scan=scan,
@@ -103,6 +112,7 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         elapsed_seconds=elapsed,
         started_at_label=started_label,
         page=page,
+        is_terminal=terminal_on_disk and not is_running,
     )
     return templates.TemplateResponse(
         request,
@@ -184,7 +194,9 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
                 mtime = scan_dir.stat().st_mtime if scan_dir.is_dir() else None
             except OSError:
                 mtime = None
-            elapsed = max(0.0, time.time() - mtime) if (is_running and mtime is not None) else None
+            terminal_on_disk = is_terminal_scan_on_disk(scan_dir)
+            in_flight = is_running or (scan is not None and not terminal_on_disk)
+            elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
             ctx = build_dashboard_context(
                 scan_id=scan_id,
                 scan=scan,
@@ -193,12 +205,19 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
                 version_label=__version__,
                 elapsed_seconds=elapsed,
                 started_at_label=_started_at_label(mtime),
+                is_terminal=terminal_on_disk and not is_running,
             )
             snapshot = live_snapshot(ctx)
             if snapshot != last_snapshot:
                 yield f"event: snapshot\ndata: {json.dumps(snapshot, separators=(',', ':'))}\n\n"
                 last_snapshot = snapshot
-            if not is_running and scan is not None:
+            # Stop the SSE stream once the terminal scan file has landed on
+            # disk -- a partial mid-flight snapshot (scan.partial.json) keeps
+            # the live updates flowing. Using the on-disk presence as the
+            # terminal signal (rather than ``scoring_valid``) preserves the
+            # SSE-end behaviour for legitimately-completed stub / non-
+            # authoritative scans whose ``scoring_valid`` is False by design.
+            if not is_running and scan is not None and terminal_on_disk:
                 yield "event: scan_done\ndata: {}\n\n"
                 break
             try:

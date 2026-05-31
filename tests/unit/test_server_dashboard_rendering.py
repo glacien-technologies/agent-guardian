@@ -509,3 +509,654 @@ def test_resolve_base_url_uses_env_when_set(
     body = resp.text
     # When base_url is non-loopback, the locality pill says Hosted.
     assert ">Hosted" in body
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the cross-process partial-scan bridge
+#
+# These exercise the broken-wire diagnosed in DIAGNOSE.md:
+#
+# Bug 1 — ASI01..ASI10 rows always render "running" / 0 findings.
+# Bug 2 — AIVSS score card + masthead always 0 / blank.
+# Bug 3 — At-a-glance grid (elapsed / probes / tokens / usd / findings)
+#         always 0.
+#
+# Root cause: the CLI parent process owns the SwarmCommander but the
+# dashboard runs as a separate uvicorn subprocess, so ``store.register()``
+# (in-memory) never sees the live swarm. The fix wires a partial Scan
+# snapshot to disk on every ``agent_done`` event; the scan-store falls
+# back to it when no terminal scan.raw.json is present yet. These tests
+# write the partial directly to the scan dir and assert the dashboard
+# renders real numbers instead of placeholders.
+# ---------------------------------------------------------------------------
+
+
+def _make_partial_scan(scan_id: str, *, findings: list[Finding]) -> Scan:
+    """Build a partial Scan snapshot the way the CLI writer would produce it.
+
+    Mirrors :func:`agent_guardian.server.partial_scan.build_partial_scan`:
+    ``scoring_valid=False`` + ``band=NOT_EVALUATED`` mark it as in-flight
+    so the dashboard's view-model treats it as a partial snapshot (not as
+    an authoritative completed scan).
+    """
+    per_asi: dict[AsiCategory, int] = {}
+    for f in findings:
+        per_asi[f.asi] = per_asi.get(f.asi, 0) + 1
+    # Only the ASIs whose agent has actually run get an asi_score entry --
+    # the others render as "queued" in the partial render.
+    asi_scores: dict[AsiCategory, float] = {
+        cat: max(0.0, 100.0 - 20.0 * count) for cat, count in per_asi.items()
+    }
+    return Scan(
+        id=scan_id,
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="partial",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=42,
+        band=SeverityBand.NOT_EVALUATED,
+        sub_scores={},
+        findings=findings,
+        asi_scores=asi_scores,
+        duration_seconds=132.5,
+        cost_usd=0.0473,
+        tokens_total=41_234,
+        mode="full",
+        mode_authoritative=False,
+        scoring_valid=False,
+        engine={"commander": "gemini-2.5-flash", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+    )
+
+
+def _persist_partial(store: ScanStore, scan: Scan) -> None:
+    """Write a partial snapshot to disk (NOT scan.json / scan.raw.json)."""
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    scan_dir = store.scan_dir(scan.id)
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    partial_scan_path(scan_dir).write_text(scan.model_dump_json(indent=2), encoding="utf-8")
+
+
+# ---------- Bug 1: ASI rows render real data from partial snapshot ----------
+
+
+def test_bug1_asi_rows_with_partial_scan_render_real_per_asi_status() -> None:
+    """ASI rows pick up real per-category scores from the partial snapshot.
+
+    A partial Scan with asi_scores for only ASI01 + ASI02 must render those
+    two rows as ``complete`` / ``done`` and the remaining eight rows as
+    ``queued`` (NOT the misleading "running" the broken-wire produced).
+    """
+    findings = [
+        _make_finding("f-1", Severity.HIGH, AsiCategory.ASI01),
+        _make_finding("f-2", Severity.MEDIUM, AsiCategory.ASI02),
+    ]
+    scan = _make_partial_scan("cli-partial-1", findings=findings)
+    # Replace asi_scores so only ASI01 + ASI02 are present.
+    scan = scan.model_copy(
+        update={
+            "asi_scores": {AsiCategory.ASI01: 80.0, AsiCategory.ASI02: 80.0},
+        }
+    )
+    ctx = build_dashboard_context(
+        scan_id=scan.id,
+        scan=scan,
+        is_running=True,
+        base_url="http://127.0.0.1:7474",
+        version_label=__version__,
+    )
+    rows = ctx.payload["asi_rows"]
+    row_by_code = {r["code"]: r for r in rows}
+    assert row_by_code["ASI01"]["status_label"] == "complete"
+    assert row_by_code["ASI01"]["status_class"] == "done"
+    assert row_by_code["ASI01"]["is_pending"] is False
+    assert row_by_code["ASI01"]["findings"]["high"] == 1
+    assert row_by_code["ASI02"]["status_label"] == "complete"
+    assert row_by_code["ASI02"]["findings"]["medium"] == 1
+    # Categories the partial snapshot hasn't covered yet must render
+    # "queued" (not "running" -- that's the broken-wire we're fixing).
+    for code in ("ASI03", "ASI04", "ASI05", "ASI06", "ASI07", "ASI08", "ASI09", "ASI10"):
+        assert row_by_code[code]["status_label"] == "queued", (
+            f"ASI {code} must render as 'queued' on a partial snapshot, "
+            f"not '{row_by_code[code]['status_label']}'"
+        )
+        assert row_by_code[code]["status_class"] == "queued"
+        assert row_by_code[code]["is_pending"] is True
+
+
+def test_bug1_asi_rows_rendered_html_shows_real_data(client: TestClient, store: ScanStore) -> None:
+    """End-to-end: writing a partial scan to disk drives the rendered HTML.
+
+    Reproduces the broken-wire from the user's report: the dashboard
+    subprocess reads ``scan.partial.json`` from disk, the route renders
+    real ASI per-row status, and the HTML shows ``dash-status--done`` for
+    the categories the partial snapshot has covered.
+    """
+    findings = [
+        _make_finding("f-c-1", Severity.CRITICAL, AsiCategory.ASI01),
+        _make_finding("f-h-1", Severity.HIGH, AsiCategory.ASI05),
+    ]
+    scan = _make_partial_scan("cli-partial-bug1-e2e", findings=findings)
+    scan = scan.model_copy(
+        update={
+            "asi_scores": {AsiCategory.ASI01: 60.0, AsiCategory.ASI05: 80.0},
+        }
+    )
+    _persist_partial(store, scan)
+    resp = client.get(f"/scan/{scan.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    # The ASI01 + ASI05 rows must be done; ASI03 etc. must be queued
+    # (NOT running -- that was the bug).
+    assert "dash-status--done" in body
+    assert "dash-status--queued" in body
+    # And the always-zero finding chips for ASI01 must show real numbers
+    # (1 critical) rather than the placeholder dashes.
+    assert body.count("dash-status--done") >= 2
+
+
+# ---------- Bug 2: AIVSS / score card render real numbers ----------
+
+
+def test_bug2_score_card_with_partial_scan_renders_real_aivss() -> None:
+    """Score card payload picks up the partial Scan's aivss / band / needle."""
+    scan = _make_partial_scan(
+        "cli-partial-bug2",
+        findings=[_make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)],
+    )
+    ctx = build_dashboard_context(
+        scan_id=scan.id,
+        scan=scan,
+        is_running=True,
+        base_url="http://127.0.0.1:7474",
+        version_label=__version__,
+    )
+    # AIVSS comes off the partial scan (42, not the broken-wire "—").
+    assert ctx.payload["aivss_label"] == 42
+    # Band class is the lowercased band (not the broken-wire "unknown").
+    assert ctx.payload["band_class"] == "not_evaluated"
+    assert ctx.payload["band_label"] == "not_evaluated"
+    # The needle resolves to the AIVSS percentage (not the broken-wire None).
+    assert ctx.payload["needle_pct"] == 42.0
+    # is_terminal must be False mid-flight so the SSE auto-refresh keeps
+    # polling instead of bailing out.
+    assert ctx.payload["is_terminal"] is False
+
+
+def test_bug2_score_card_html_shows_real_aivss(client: TestClient, store: ScanStore) -> None:
+    """End-to-end: rendered HTML shows the real aivss number on a partial."""
+    scan = _make_partial_scan(
+        "cli-partial-bug2-e2e",
+        findings=[_make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)],
+    )
+    _persist_partial(store, scan)
+    resp = client.get(f"/scan/{scan.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    # AIVSS == 42 must appear in the score-card numeric slot.
+    assert 'data-live="aivss">42</span>' in body
+    # The broken-wire used to render 'data-live="aivss">—</span>' and
+    # 'band--unknown' / 'PENDING'.
+    assert 'data-live="aivss">—</span>' not in body
+    assert "dash-band--unknown" not in body
+    # data-is-terminal must be false so the SSE auto-refresh keeps polling.
+    assert 'data-is-terminal="false"' in body
+
+
+def test_bug2_score_card_terminal_scan_marks_is_terminal_true(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A fully completed scan (terminal scan.json on disk) is is_terminal=True.
+
+    This is the inverse of the partial-snapshot case -- once the terminal
+    file lands, the SSE auto-refresh SHOULD bail out (data-is-terminal=true)
+    because there are no more updates coming.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'data-is-terminal="true"' in body
+
+
+# ---------- Bug 3: At-a-glance grid renders real numbers ----------
+
+
+def test_bug3_at_a_glance_with_partial_scan_renders_real_numbers() -> None:
+    """At-a-glance widgets pick up tokens / cost / findings from the partial."""
+    findings = [
+        _make_finding("f-c-1", Severity.CRITICAL, AsiCategory.ASI01),
+        _make_finding("f-c-2", Severity.CRITICAL, AsiCategory.ASI05),
+        _make_finding("f-h-1", Severity.HIGH, AsiCategory.ASI02),
+        _make_finding("f-m-1", Severity.MEDIUM, AsiCategory.ASI03),
+        _make_finding("f-l-1", Severity.LOW, AsiCategory.ASI09),
+    ]
+    scan = _make_partial_scan("cli-partial-bug3", findings=findings)
+    ctx = build_dashboard_context(
+        scan_id=scan.id,
+        scan=scan,
+        is_running=True,
+        base_url="http://127.0.0.1:7474",
+        version_label=__version__,
+    )
+    # tokens_label comes off the partial scan's tokens_total (41,234) and
+    # is humanised to "41k" (>=10_000 branch in _humanise_int).
+    assert ctx.payload["tokens_label"] == "41k"
+    # usd_label is "$ {cost_usd:.2f}" → "$ 0.05".
+    assert ctx.payload["usd_label"] == "$ 0.05"
+    # findings_total counts every finding in the partial scan.
+    assert ctx.payload["findings_total"] == 5
+    # counts breakdown matches per-severity.
+    assert ctx.payload["counts"]["critical"] == 2
+    assert ctx.payload["counts"]["high"] == 1
+    assert ctx.payload["counts"]["medium"] == 1
+    assert ctx.payload["counts"]["low"] == 1
+    # asi_covered counts categories that have at least one finding.
+    assert ctx.payload["asi_covered"] == 5
+
+
+def test_bug3_at_a_glance_html_shows_real_numbers(client: TestClient, store: ScanStore) -> None:
+    """End-to-end: HTML at-a-glance grid surfaces the real numbers."""
+    findings = [
+        _make_finding("f-c-1", Severity.CRITICAL, AsiCategory.ASI01),
+        _make_finding("f-h-1", Severity.HIGH, AsiCategory.ASI02),
+    ]
+    scan = _make_partial_scan("cli-partial-bug3-e2e", findings=findings)
+    _persist_partial(store, scan)
+    resp = client.get(f"/scan/{scan.id}")
+    body = resp.text
+    # tokens "41k" must appear; broken-wire would have been "0".
+    assert 'data-live="tokens">41k</span>' in body
+    # findings "2" (not 0) -- breaks the broken-wire's always-0 placeholder.
+    assert 'data-live="findings">2</span>' in body
+    # usd "$ 0.05" -- breaks "$ 0.00" placeholder.
+    assert 'data-live="usd">$ 0.05</span>' in body
+
+
+def test_bug3_at_a_glance_elapsed_from_mtime_for_in_flight_partial(
+    client: TestClient, store: ScanStore
+) -> None:
+    """Elapsed clock reads from scan-dir mtime when only a partial is on disk.
+
+    This is the cross-process behaviour: the dashboard subprocess never
+    called ``store.register()`` so ``is_running`` is False, but the partial
+    scan on disk tells us we're mid-flight. Elapsed must come from the
+    scan dir's mtime (not the Scan's ``duration_seconds`` field, which is
+    a snapshot of monotonic time, not wall-clock).
+    """
+    import time as _time
+
+    findings = [_make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)]
+    scan = _make_partial_scan("cli-partial-elapsed", findings=findings)
+    _persist_partial(store, scan)
+    # Backdate the scan dir mtime by ~2s so the elapsed widget shows >= 1s
+    # rather than 00:00 (the broken-wire's always-zero placeholder).
+    scan_dir = store.scan_dir(scan.id)
+    backdate = _time.time() - 2.0
+    import os as _os
+
+    _os.utime(scan_dir, (backdate, backdate))
+    resp = client.get(f"/scan/{scan.id}")
+    body = resp.text
+    # Elapsed must NOT be 00:00 (the broken-wire); must show >= 00:01.
+    # We rely on the route's max(0.0, time.time() - mtime) calculation.
+    assert 'data-live="elapsed">00:00</span>' not in body, body[
+        body.find("dash-glance__num") : body.find("dash-glance__num") + 400
+    ]
+
+
+# ---------- Cross-cutting: clean_control sentry preserved ----------
+
+
+def test_clean_control_zero_findings_still_renders_correctly(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A clean run (0 findings, EXCELLENT, scoring_valid=True) still renders.
+
+    Regression guard for the diagnose's "What's working" requirement:
+    the clean_control sentry must continue to render correctly. The
+    partial-scan plumbing must not break the terminal-scan render path.
+    """
+    scan = Scan(
+        id="cli-clean-2",
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="http",
+        target_ref="https://clean.example.com",
+        tier=Tier.T4_LOW,
+        aivss=100,
+        band=SeverityBand.EXCELLENT,
+        sub_scores={
+            "prompt_injection_resistance": 100.0,
+            "tool_scope_safety": 100.0,
+            "pii_containment": 100.0,
+            "memory_poisoning_resistance": 100.0,
+            "excessive_agency_containment": 100.0,
+            "hallucination_resistance": 100.0,
+        },
+        findings=[],
+        asi_scores={cat: 100.0 for cat in AsiCategory},
+        duration_seconds=120.0,
+        cost_usd=0.01,
+        mode="full",
+        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}")
+    assert resp.status_code == 200
+    body = resp.text
+    # Score card shows 100, EXCELLENT, NOT placeholder.
+    assert 'data-live="aivss">100</span>' in body
+    assert "EXCELLENT" in body or "excellent" in body
+    # All ten ASI dots are "done" (every category covered, no findings).
+    assert body.count("dash-dot--done") == 10
+    # Findings counters all zero.
+    assert 'data-live="findings">0</span>' in body
+    # data-is-terminal is true because the scan completed and the terminal
+    # scan.json is on disk -- SSE auto-refresh bails out, no flicker.
+    assert 'data-is-terminal="true"' in body
+
+
+def test_in_flight_scan_with_no_partial_falls_back_to_running_placeholders() -> None:
+    """When neither a terminal file NOR a partial exists, render placeholders.
+
+    Preserves the original in-flight placeholder behaviour for tests / library
+    callers that haven't been updated to the partial-scan plumbing. Bug 1 +
+    Bug 2 + Bug 3 are about the *partial present* path; this asserts the
+    *partial absent* path still works.
+    """
+    ctx = build_dashboard_context(
+        scan_id="cli-no-partial",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:7474",
+        version_label=__version__,
+    )
+    assert ctx.payload["aivss_label"] == "—"
+    assert ctx.payload["band_label"] == "PENDING"
+    assert ctx.payload["is_terminal"] is False
+    assert ctx.payload["counts"] == {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+    }
+    # ASI rows fall back to the "running" placeholder per the existing
+    # in-flight contract.
+    assert all(r["status_label"] == "running" for r in ctx.payload["asi_rows"])
+
+
+def test_is_running_detects_cross_process_partial_on_disk(
+    store: ScanStore,
+) -> None:
+    """``ScanStore.is_running`` returns True for a disk-only partial scan.
+
+    Reproduces the cross-process detection path that unblocks the dashboard
+    subprocess (which never gets a ``store.register()`` call from the CLI
+    parent process).
+    """
+    scan_id = "cli-cross-process"
+    findings = [_make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)]
+    scan = _make_partial_scan(scan_id, findings=findings)
+    _persist_partial(store, scan)
+    assert store.is_running(scan_id) is True
+    # And once the terminal scan.json lands, is_running flips to False.
+    _persist(store, _make_scan(scan_id))
+    assert store.is_running(scan_id) is False
+
+
+# ---------------------------------------------------------------------------
+# partial_scan helper coverage — write/read round-trip + swarm-driven build
+# ---------------------------------------------------------------------------
+
+
+def test_write_and_read_partial_scan_round_trip(tmp_path: Path) -> None:
+    """Write a partial scan, read it back, assert it round-trips."""
+    from agent_guardian.server.partial_scan import (
+        partial_scan_path,
+        read_partial_scan,
+        write_partial_scan,
+    )
+
+    scan = _make_partial_scan(
+        "cli-rt", findings=[_make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)]
+    )
+    write_partial_scan(tmp_path, scan)
+    assert partial_scan_path(tmp_path).is_file()
+    loaded = read_partial_scan(tmp_path)
+    assert loaded is not None
+    assert loaded.id == "cli-rt"
+    assert loaded.aivss == 42
+    assert loaded.scoring_valid is False
+
+
+def test_read_partial_scan_returns_none_when_absent(tmp_path: Path) -> None:
+    """No partial on disk → ``None`` (not an exception)."""
+    from agent_guardian.server.partial_scan import read_partial_scan
+
+    assert read_partial_scan(tmp_path) is None
+
+
+def test_read_partial_scan_returns_none_on_malformed_json(tmp_path: Path) -> None:
+    """A malformed partial file → ``None`` (graceful degradation)."""
+    from agent_guardian.server.partial_scan import (
+        partial_scan_path,
+        read_partial_scan,
+    )
+
+    partial_scan_path(tmp_path).write_text("not json", encoding="utf-8")
+    assert read_partial_scan(tmp_path) is None
+
+
+def test_read_partial_scan_returns_none_when_payload_not_dict(tmp_path: Path) -> None:
+    """A JSON payload that isn't an object → ``None``."""
+    from agent_guardian.server.partial_scan import (
+        partial_scan_path,
+        read_partial_scan,
+    )
+
+    partial_scan_path(tmp_path).write_text("[1,2,3]", encoding="utf-8")
+    assert read_partial_scan(tmp_path) is None
+
+
+def test_read_partial_scan_returns_none_on_validation_error(tmp_path: Path) -> None:
+    """A JSON object missing required Scan fields → ``None``."""
+    from agent_guardian.server.partial_scan import (
+        partial_scan_path,
+        read_partial_scan,
+    )
+
+    partial_scan_path(tmp_path).write_text('{"id": "x"}', encoding="utf-8")
+    assert read_partial_scan(tmp_path) is None
+
+
+def test_is_terminal_scan_on_disk_detects_both_filenames(tmp_path: Path) -> None:
+    """``scan.raw.json`` and the legacy ``scan.json`` both count as terminal."""
+    from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
+
+    assert is_terminal_scan_on_disk(tmp_path) is False
+    (tmp_path / "scan.raw.json").write_text("{}", encoding="utf-8")
+    assert is_terminal_scan_on_disk(tmp_path) is True
+    (tmp_path / "scan.raw.json").unlink()
+    (tmp_path / "scan.json").write_text("{}", encoding="utf-8")
+    assert is_terminal_scan_on_disk(tmp_path) is True
+
+
+def _make_stub_swarm(scan_id: str = "swarm-rt", memory_root: Path | None = None) -> object:
+    """Construct a stub SwarmCommander suitable for partial_scan helpers.
+
+    Uses :class:`StubLLM` for every role (the build_partial_scan path doesn't
+    actually run any LLM calls -- it just reads off the swarm's attribute
+    snapshots) plus a real :class:`PromptAdapter` for the target.
+
+    ``memory_root`` is the directory where ``SharedMemory`` persists JSONL.
+    Tests must pass a per-test ``tmp_path`` so the memory's replay-on-init
+    doesn't pick up stale findings from a prior test that happened to use
+    the same ``scan_id``.
+    """
+    from agent_guardian.adapters.prompt import PromptAdapter
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+    from agent_guardian.llm.stub import StubLLM, StubScript
+
+    target = PromptAdapter(
+        "stub-target",
+        llm=StubScript().default("ok").build(),
+        model="stub",
+        ref="stub-target",
+    )
+    memory = (
+        SharedMemory(
+            scan_id,
+            root_dir=memory_root,
+            use_faiss=False,
+            use_sentence_transformers=False,
+        )
+        if memory_root is not None
+        else None
+    )
+    return SwarmCommander(
+        config=SwarmConfig(
+            scan_id=scan_id,
+            attacker_model="stub",
+            evaluator_model="stub",
+            commander_model="stub",
+        ),
+        target=target,
+        attacker_llm=StubLLM(default="a"),
+        evaluator_llm=StubLLM(default="e"),
+        commander_llm=StubLLM(default="c"),
+        memory=memory,
+    )
+
+
+def test_build_partial_scan_from_empty_swarm_returns_valid_scan(tmp_path: Path) -> None:
+    """A freshly-constructed swarm (no findings, no reports) builds a Scan."""
+    from agent_guardian.server.partial_scan import build_partial_scan
+
+    swarm = _make_stub_swarm("cli-partial-build", memory_root=tmp_path)
+    partial = build_partial_scan(swarm)  # type: ignore[arg-type]
+    assert partial.id == "cli-partial-build"
+    # No findings yet → aivss falls back to 0 (no checkpoint sample yet).
+    assert partial.aivss == 0
+    # No reports yet → no asi_scores entries (every category renders queued).
+    assert partial.asi_scores == {}
+    assert partial.scoring_valid is False
+    assert partial.band == SeverityBand.NOT_EVALUATED
+    assert partial.findings == []
+
+
+def test_build_partial_scan_reflects_findings_and_reports(tmp_path: Path) -> None:
+    """A swarm with findings + agent reports surfaces per-ASI scores."""
+    import asyncio
+
+    from agent_guardian.agents.base import AgentReport
+    from agent_guardian.server.partial_scan import build_partial_scan
+
+    swarm = _make_stub_swarm("cli-partial-with-data", memory_root=tmp_path)
+    # Write a finding into the swarm's memory.
+    finding = _make_finding("f-1", Severity.HIGH, AsiCategory.ASI01)
+
+    async def _seed() -> None:
+        await swarm.memory.write_finding(finding)  # type: ignore[attr-defined]
+
+    asyncio.run(_seed())
+    # Append an agent report so the partial picks up an asi_scores entry.
+    swarm._agent_reports.append(  # type: ignore[attr-defined]
+        AgentReport(
+            agent="goal-hijack-agent",
+            asi_category=AsiCategory.ASI01,
+            findings_count=1,
+            turns=4,
+            duration_seconds=12.0,
+            terminated_by="success",
+        )
+    )
+    partial = build_partial_scan(swarm)  # type: ignore[arg-type]
+    assert len(partial.findings) == 1
+    assert AsiCategory.ASI01 in partial.asi_scores
+    # 1 finding → 100 - 20*1 = 80.
+    assert partial.asi_scores[AsiCategory.ASI01] == 80.0
+
+
+def test_make_partial_writer_writes_on_agent_done_and_cleans_on_scan_done(
+    tmp_path: Path,
+) -> None:
+    """The observer writes on agent_done and unlinks the partial on scan_done."""
+    from datetime import datetime, timezone
+
+    from agent_guardian.core.swarm import SwarmEvent
+    from agent_guardian.server.partial_scan import (
+        make_partial_writer,
+        partial_scan_path,
+    )
+
+    swarm = _make_stub_swarm("cli-partial-writer", memory_root=tmp_path / "mem")
+    observer = make_partial_writer(swarm, tmp_path)  # type: ignore[arg-type]
+    # Simulate an agent_done event → the partial file lands.
+    observer(
+        SwarmEvent(
+            kind="agent_done",
+            timestamp=datetime.now(tz=timezone.utc),
+            agent="goal-hijack-agent",
+            asi=AsiCategory.ASI01,
+            payload={"findings_count": 0, "turns": 1, "duration_seconds": 1.0},
+        )
+    )
+    assert partial_scan_path(tmp_path).is_file()
+    # scan_done event → the partial file is unlinked so the dashboard reads
+    # the terminal scan.raw.json (written by the CLI right after) cleanly.
+    observer(
+        SwarmEvent(
+            kind="scan_done",
+            timestamp=datetime.now(tz=timezone.utc),
+        )
+    )
+    assert not partial_scan_path(tmp_path).is_file()
+
+
+def test_make_partial_writer_chains_prior_observer(tmp_path: Path) -> None:
+    """The observer forwards events to the pre-existing observer first."""
+    from datetime import datetime, timezone
+
+    from agent_guardian.core.swarm import SwarmEvent
+    from agent_guardian.server.partial_scan import make_partial_writer
+
+    swarm = _make_stub_swarm("cli-partial-chain", memory_root=tmp_path / "mem")
+    received: list[SwarmEvent] = []
+    swarm.observer = received.append  # type: ignore[attr-defined]
+    make_partial_writer(swarm, tmp_path)  # type: ignore[arg-type]
+    evt = SwarmEvent(
+        kind="checkpoint",
+        timestamp=datetime.now(tz=timezone.utc),
+    )
+    swarm.observer(evt)  # type: ignore[attr-defined]
+    assert received == [evt]
+
+
+def test_make_partial_writer_ignores_unrelated_events(tmp_path: Path) -> None:
+    """Events other than agent_done / checkpoint / scan_done are skipped."""
+    from datetime import datetime, timezone
+
+    from agent_guardian.core.swarm import SwarmEvent
+    from agent_guardian.server.partial_scan import (
+        make_partial_writer,
+        partial_scan_path,
+    )
+
+    swarm = _make_stub_swarm("cli-partial-ignore", memory_root=tmp_path / "mem")
+    observer = make_partial_writer(swarm, tmp_path)  # type: ignore[arg-type]
+    observer(
+        SwarmEvent(
+            kind="recon_start",
+            timestamp=datetime.now(tz=timezone.utc),
+            agent="recon-agent",
+        )
+    )
+    # No partial file landed -- recon_start is not a snapshot trigger.
+    assert not partial_scan_path(tmp_path).is_file()

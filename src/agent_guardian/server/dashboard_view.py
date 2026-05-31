@@ -173,10 +173,14 @@ def _status_for_row(scan: Scan | None, is_pending: bool, score: float) -> tuple[
     """Return ``(label, class)`` for an ASI row's status pill."""
     if scan is not None and not is_pending:
         return ("complete", "done")
+    # Partial snapshot: a category we haven't seen an asi_scores entry for is
+    # queued, not "running" -- the dashboard subprocess sees only what the
+    # last partial scan persisted. "queued" reads as "the swarm hasn't gotten
+    # to this one yet" rather than the misleading "this one is in flight".
+    if is_pending and scan is not None:
+        return ("queued", "queued")
     if is_pending and scan is None:
         return ("running", "running")
-    if is_pending:
-        return ("12% · warming", "queued")
     return ("running", "running")
 
 
@@ -346,6 +350,7 @@ def build_dashboard_context(
     started_at_label: str = "",
     page: int = 1,
     per_page: int = 15,
+    is_terminal: bool | None = None,
 ) -> DashboardContext:
     """Build the Jinja context for the live dashboard render.
 
@@ -407,10 +412,24 @@ def build_dashboard_context(
         if isinstance(fp, str) and fp:
             evidence_fingerprint = fp
 
+    # ``is_terminal`` is True iff a fully-completed (terminal) Scan has been
+    # loaded from disk AND no one is still actively producing more events.
+    # The dashboard template uses this -- not ``is_running`` -- to decide
+    # whether to short-circuit the SSE auto-refresh: a mid-flight scan with
+    # only a partial snapshot on disk (cross-process) MUST keep polling so
+    # the AIVSS / ASI / at-a-glance widgets pick up the live numbers as the
+    # swarm writes new partial snapshots. The route handler passes the
+    # disk-backed signal (terminal file present); when not threaded through
+    # we fall back to ``scan is not None and not is_running`` for back-compat
+    # with library callers that haven't been updated.
+    resolved_is_terminal = (
+        is_terminal if is_terminal is not None else (scan is not None and not is_running)
+    )
     payload: dict[str, Any] = {
         "page_title": f"Scan {scan_id}",
         "scan_id": scan_id,
         "is_running": is_running,
+        "is_terminal": resolved_is_terminal,
         "version": version_label,
         # Topbar
         "base_url": base_url,

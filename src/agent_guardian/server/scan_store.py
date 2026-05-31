@@ -55,6 +55,10 @@ from typing import IO, Any
 
 from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
 from agent_guardian.models.scan import Scan
+from agent_guardian.server.partial_scan import (
+    is_terminal_scan_on_disk,
+    read_partial_scan,
+)
 
 __all__ = [
     "INDEX_FILENAME",
@@ -695,7 +699,27 @@ class ScanStore:
         return self._running.get(scan_id)
 
     def is_running(self, scan_id: str) -> bool:
-        return scan_id in self._running
+        """Return True when the scan is mid-flight.
+
+        First consults the in-memory ``self._running`` registry (the in-process
+        path used by library callers + tests that call :meth:`register`). For
+        cross-process callers (the dashboard ``uvicorn`` subprocess does NOT
+        share state with the CLI parent process that owns the
+        :class:`SwarmCommander`), we additionally treat a scan as running when
+        its on-disk ``scan.partial.json`` is present and no terminal
+        ``scan.raw.json`` / ``scan.json`` has been written yet. This is what
+        unblocks the dashboard's at-a-glance / ASI / AIVSS widgets mid-flight.
+        """
+        if scan_id in self._running:
+            return True
+        scan_dir = self.scan_dir(scan_id)
+        if not scan_dir.is_dir():
+            return False
+        if is_terminal_scan_on_disk(scan_dir):
+            return False
+        from agent_guardian.server.partial_scan import partial_scan_path
+
+        return partial_scan_path(scan_dir).is_file()
 
     # ------------------------------------------------------------------
     # SSE plumbing
@@ -770,6 +794,14 @@ class ScanStore:
         ``scan.raw.json``. We load the raw dump first and fall back to the
         legacy single-file layout (where ``scan.json`` *was* the raw model
         dump) so pre-existing on-disk scans still deserialise.
+
+        For mid-flight scans (no terminal file yet), we additionally fall
+        through to ``scan.partial.json`` -- the snapshot the CLI's swarm
+        observer writes on each ``agent_done`` event. The dashboard's
+        view-model treats a partial Scan exactly like a completed one (it
+        just renders the in-flight numbers), and the partial Scan is marked
+        ``scoring_valid=False`` + ``band=NOT_EVALUATED`` so it can never be
+        mistaken for an authoritative completed scan.
         """
         scan_dir = self.scan_dir(scan_id)
         for name in ("scan.raw.json", "scan.json"):
@@ -798,7 +830,10 @@ class ScanStore:
                     exc,
                 )
                 continue
-        return None
+        # Mid-flight fallback -- the swarm observer in the CLI writes a
+        # partial scan snapshot after every ``agent_done`` event so the
+        # dashboard can render real numbers before the terminal file lands.
+        return read_partial_scan(scan_dir)
 
     def get_scan(self, scan_id: str) -> Scan | None:
         """Resolve a scan by id — running or completed."""
