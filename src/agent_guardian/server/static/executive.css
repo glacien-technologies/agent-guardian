@@ -954,6 +954,10 @@ body.exec-body {
   font-size: 12px;
   letter-spacing: 0.04em;
   padding: 4px 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 .exec-finding__evidence > summary::-webkit-details-marker { display: none; }
 .exec-finding__evidence > summary::marker { content: ""; }
@@ -961,6 +965,51 @@ body.exec-body {
   outline: 2px solid var(--exec-brand);
   outline-offset: 2px;
   border-radius: var(--exec-radius-sm);
+}
+.exec-finding__evidence-count {
+  font-family: var(--exec-font-mono);
+  color: var(--exec-brand);
+}
+/* Inline mini-pills for the verdict breakdown ("4 defended", "2
+ * exploited", ...). Same colour vocabulary as the per-row badges
+ * but smaller + softer so they read as a summary, not a row. */
+.exec-finding__evidence-breakdown {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+.exec-finding__evidence-breakdown-pill {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+  border: 1px solid transparent;
+}
+.exec-finding__evidence-breakdown-pill--fail {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 20%, transparent);
+}
+.exec-finding__evidence-breakdown-pill--pass {
+  background: var(--exec-sev-low-bg);
+  color: var(--exec-sev-low);
+  border-color: color-mix(in srgb, var(--exec-sev-low) 25%, transparent);
+}
+.exec-finding__evidence-breakdown-pill--inconclusive {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 25%, transparent);
+}
+.exec-finding__evidence-breakdown-pill--unknown {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
 }
 .exec-finding__evidence-list {
   list-style: none;

@@ -87,9 +87,40 @@
                 {% if f.evidence and f.evidence | length > 0 %}
                   <details class="exec-finding__evidence">
                     <summary>
-                      {{ f.evidence | length }} evidence event{% if f.evidence | length != 1 %}s{% endif %}
-                      {% if f.evidence_truncated %}
-                        &middot; showing {{ f.evidence | length }} of {{ f.evidence_total }}
+                      <span class="exec-finding__evidence-count">
+                        {{ f.evidence | length }} evidence event{% if f.evidence | length != 1 %}s{% endif %}
+                        {% if f.evidence_truncated %}
+                          &middot; showing {{ f.evidence | length }} of {{ f.evidence_total }}
+                        {% endif %}
+                      </span>
+                      {# Verdict breakdown — same enum keys + colour vocab as
+                         the per-row badges, so the operator can see at a glance
+                         how many turns went which way without expanding the
+                         drawer. Hidden when the count is zero so a 7/0/0 finding
+                         doesn't render three trailing pills. #}
+                      {% if f.evidence_stats %}
+                        <span class="exec-finding__evidence-breakdown">
+                          {% if f.evidence_stats.fail %}
+                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--fail">
+                              {{ f.evidence_stats.fail }} exploited
+                            </span>
+                          {% endif %}
+                          {% if f.evidence_stats.pass %}
+                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--pass">
+                              {{ f.evidence_stats.pass }} defended
+                            </span>
+                          {% endif %}
+                          {% if f.evidence_stats.inconclusive %}
+                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--inconclusive">
+                              {{ f.evidence_stats.inconclusive }} inconclusive
+                            </span>
+                          {% endif %}
+                          {% if f.evidence_stats.unknown %}
+                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--unknown">
+                              {{ f.evidence_stats.unknown }} pending
+                            </span>
+                          {% endif %}
+                        </span>
                       {% endif %}
                     </summary>
                     <ol class="exec-finding__evidence-list" role="list">

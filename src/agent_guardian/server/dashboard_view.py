@@ -444,12 +444,20 @@ def _attach_evidence_to_findings(
     template can reuse the same Jinja access pattern as the Probes tab).
     Capped at :data:`_FINDING_EVIDENCE_CAP`; ``evidence_truncated`` /
     ``evidence_total`` are added when the unfiltered match-set was larger.
+    Also attaches ``evidence_stats``: a dict counting verdicts in the
+    capped slice (``fail`` / ``pass`` / ``inconclusive`` / ``unknown``)
+    so the outer drawer summary can render "N events · X exploited ·
+    Y defended · Z inconclusive" without re-iterating in Jinja.
     """
     if not findings_items or not probes_list:
         for item in findings_items:
             item.setdefault("evidence", [])
             item.setdefault("evidence_truncated", False)
             item.setdefault("evidence_total", 0)
+            item.setdefault(
+                "evidence_stats",
+                {"fail": 0, "pass": 0, "inconclusive": 0, "unknown": 0},
+            )
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -480,9 +488,20 @@ def _attach_evidence_to_findings(
                         matched.extend(records)
         total = len(matched)
         capped = matched[:_FINDING_EVIDENCE_CAP]
+        # Count verdicts in the capped slice. The badge text the template
+        # renders reads the SAME enum keys ("fail" / "pass" / "inconclusive"),
+        # so the counts and the colours can never disagree.
+        stats = {"fail": 0, "pass": 0, "inconclusive": 0, "unknown": 0}
+        for p in capped:
+            v = str(p.get("verdict") or "")
+            if v in ("fail", "pass", "inconclusive"):
+                stats[v] += 1
+            else:
+                stats["unknown"] += 1
         item["evidence"] = capped
         item["evidence_total"] = total
         item["evidence_truncated"] = total > _FINDING_EVIDENCE_CAP
+        item["evidence_stats"] = stats
 
 
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:
