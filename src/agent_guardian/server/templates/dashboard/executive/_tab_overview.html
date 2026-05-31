@@ -13,6 +13,11 @@
          role="tabpanel"
          aria-labelledby="tab-overview"
          tabindex="0">
+  {# KPI strip — formerly a sticky layer in layout.html. Moved here on
+     2026-05-31 so it is only visible on Overview. It scrolls with the
+     tab content (NOT sticky) and is centred + capped at 1600px to match
+     the rest of the Overview panel. #}
+  {% include "dashboard/executive/_kpi_strip.html" %}
   {% include "dashboard/executive/_aivss_hero.html" %}
   {% set tab_key = 'overview' %}
   <div class="exec-overview-twocol">

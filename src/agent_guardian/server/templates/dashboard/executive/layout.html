@@ -7,9 +7,11 @@
 
    Sticky stack (from top to bottom, ordered for sticky-offset math):
      1. Topbar       — brand + theme switcher dropdown (sticky layer 1)
-     2. KPI strip    — 8 tiles (sticky layer 2)
-     3. Tab bar      — WAI-ARIA tablist, 5 buttons (sticky layer 3)
-     4. Main content — 5 ``<section role="tabpanel">`` panes
+     2. Tab bar      — WAI-ARIA tablist, 5 buttons (sticky layer 2)
+     3. Main content — 5 ``<section role="tabpanel">`` panes. The KPI
+        strip now lives INSIDE the Overview tabpanel (not the layout shell),
+        so it scrolls with the tab content and is not visible on the
+        Findings / Probes / Agents / Logs tabs.
 
    Same shared view-model contract as every other theme; the only Executive-
    specific payload fields are ``probes_list`` and ``logs_tail`` (additive in
@@ -43,7 +45,6 @@
       data-is-terminal="{{ 'true' if is_terminal else 'false' }}">
 
   {% include "dashboard/executive/_topbar.html" %}
-  {% include "dashboard/executive/_kpi_strip.html" %}
   {% include "dashboard/executive/_tab_bar.html" %}
 
   <main class="exec-main" role="main">

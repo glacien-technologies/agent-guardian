@@ -510,18 +510,30 @@ def test_executive_agents_tab_aggregates_probes_per_agent(
 
 
 def test_executive_sticky_layer_order_is_locked(client: TestClient, store: ScanStore) -> None:
-    """Topbar appears before KPI strip; KPI strip appears before tab bar."""
+    """Sticky shell order: topbar precedes tabbar. KPI strip is inside the
+    Overview tabpanel (not the shell), so it must appear AFTER the tabbar
+    and within the tabpanel-overview section."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     topbar_idx = body.find('class="exec-topbar"')
-    kpi_idx = body.find('class="exec-kpi-strip"')
     tabbar_idx = body.find('class="exec-tabbar"')
+    overview_start = body.find('id="tabpanel-overview"')
+    # The end of the overview pane = start of the next tabpanel.
+    overview_end = body.find('id="tabpanel-findings"')
+    kpi_idx = body.find('class="exec-kpi-strip"')
     assert topbar_idx >= 0
-    assert kpi_idx >= 0
     assert tabbar_idx >= 0
-    assert topbar_idx < kpi_idx < tabbar_idx
+    assert overview_start >= 0
+    assert overview_end > overview_start
+    assert kpi_idx >= 0
+    # Shell order: topbar before tabbar, no KPI strip between them.
+    assert topbar_idx < tabbar_idx
+    # KPI strip lives inside the Overview tabpanel.
+    assert overview_start < kpi_idx < overview_end
+    # And only once in the document (it is not duplicated to other panes).
+    assert body.count('class="exec-kpi-strip"') == 1
 
 
 # ---------------------------------------------------------------------------
