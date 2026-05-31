@@ -285,18 +285,21 @@ body.exec-body {
   background: var(--exec-bg-elev);
   border-bottom: 1px solid var(--exec-border-subtle);
   display: flex;
-  gap: 0.25rem;
+  gap: 0.5rem;
   padding: 0 var(--exec-pad-x);
   align-items: stretch;
+  /* Centre the 5-button tablist horizontally (was left-aligned). */
+  justify-content: center;
 }
 .exec-tabbar [role="tab"] {
   appearance: none;
   background: transparent;
   border: 0;
-  padding: 0 1rem;
+  padding: 0 1.5rem;
   font-family: var(--exec-font-sans);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--exec-ink-muted);
   cursor: pointer;
   position: relative;
