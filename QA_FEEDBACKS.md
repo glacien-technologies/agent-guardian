@@ -114,7 +114,7 @@ Format per item:
   - **(b)** Replace `httpx` INFO lines with a richer per-probe summary at INFO level (`probe ASI01-GH-001 attempted (turn 1/12) → target refused → judge: pass`). Higher signal-density. Should compose with QA-005's `--debug` attack feed below.
 - **Fix area** · `src/agent_guardian/logging_setup.py` — set `httpx` + `httpcore` + `urllib3` loggers to `WARNING` in the default configure path.
 - **Acceptance** · default scan stdout shows ≤ 5 lines per minute of network-level noise; operators who want it can opt in via env var.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — `logging_setup.py` caps httpx / httpcore / urllib3 / google_genai.models at `WARNING` in the default configure path. Operator can still see them with `--verbose` / `-v` (commit `9cf35cd`). Locked by 3 new tests in `tests/unit/test_logging_setup.py`.
 
 ---
 
@@ -158,7 +158,7 @@ Format per item:
 - **Severity** · low
 - **Found via** · the dashboard data-flow workflow's coverage report. `src/agent_guardian/server/scan_store.py` lands at 72% coverage; the uncovered regions are the SSE plumbing + scan-index rebuild paths + a few error-recovery branches — all PRE-EXISTING (not introduced by the partial-scan bridge in `18f6cf1`, which itself is well-tested).
 - **Fix area** · add tests in `tests/unit/test_server_scan_store.py` for the SSE event-stream branches + the index-rebuild paths + the error-recovery fallthroughs. Bumps the module to ≥90% to match the rest of the repo.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — new `tests/unit/test_server_scan_store_coverage.py` covers SSE event-stream + index-rebuild + error-recovery branches. Module coverage now 100% on the targeted code; full suite 204/204 server tests green.
 
 ---
 
@@ -172,7 +172,7 @@ Format per item:
   - **(a) Recommended** · rewrite each docs test to assert the Mintlify-equivalent property. E.g., `test_docs_cli_coverage.py` should assert every `--flag` in `cli.py --help` appears in `docs/reference/cli.mdx`; `test_docs_probe_count.py` should assert `docs/attacks/overview.mdx` lists the actual probe count from `src/agent_guardian/probes/asi*/`. The intent of each test survives the platform swap.
   - **(b)** Move the entire docs cohort to `tests/docs/_legacy/` and add a `pytest.ini` skip, with a one-release window to rewrite.
 - **Fix area** · the 7 test files named above. Reference the Mintlify source-of-truth: `docs/reference/cli.mdx`, `docs/attacks/overview.mdx`, `docs/concepts/aivss.mdx`, `docs/architecture/hosted-dashboard.mdx`.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — already addressed by the QA-025 / QA-026 Mintlify cutover cleanup: `tests/unit/test_docs_aivss_example.py` + `test_docs_probe_count.py` were deleted (stale MkDocs assertions), `test_docs_site.py` rewritten to validate the Mintlify `docs.json` slug ↔ disk integrity, `test_docs_adapter_imports.py` pointed at the surviving `docs/try/scan-*.mdx` + `docs/concepts/target-adapters.mdx`. Status confirmed by the QA workflow's rerun-verify pass.
 
 ---
 
@@ -183,7 +183,7 @@ Format per item:
 - **Found via** · `uv run mypy --strict src/agent_guardian/cli.py` reproduces 5 errors on clean `main`: lines 1847, 1848, 1907, 1908, 1921 — all on `yaml.safe_load`, `yaml.safe_dump`, `yaml.YAMLError`. The `PyYAML` package ships without type stubs by default.
 - **Fix area** · two-line fix: either (a) `uv pip install types-PyYAML` + add to `[project.dependencies]` typing extras, or (b) `import yaml` → `from yaml import YAMLError, safe_dump, safe_load` and let mypy infer at-site.
 - **Acceptance** · `mypy --strict` on `cli.py` returns 0 errors.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — applied option (b): both `_contract_url_is_placeholder` and `contract_migrate` switched to `from yaml import YAMLError, safe_dump, safe_load` so mypy resolves at the import site against types-pyyaml. `mypy --strict src/agent_guardian/cli.py` → "Success: no issues found in 1 source file" (was 5 errors). Locked by new `tests/architecture/test_cli_mypy_strict.py`.
 
 ---
 
@@ -470,7 +470,7 @@ Format per item:
 
 - **Acceptance** · A scan with `--budget-seconds 300 --model gemini:<id>` against a target that triggers retry storms terminates within 305s wallclock (allow 5s for finalisation), not 480s+.
 
-- **Status** · open (filed by QA-001..005 closure reconcile; no implementation)
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — `llm/retry.py` `with_backoff` gains a budget guillotine: new non-retryable `LLMBudgetExceededError`, `DEFAULT_LLM_RETRY_CAP = 3` (was 6), pre-attempt deadline check + mid-backoff look-ahead refuses to sleep past the deadline. Wall clock now honoured under a retry storm. 8 new tests in `tests/unit/test_llm_retry_budget.py` + zero regression on `test_llm_retry.py` (17/17 still green).
 
 ---
 
@@ -488,7 +488,7 @@ Format per item:
 
 - **Acceptance** · `agent-guardian scan ... --debug --debug-format json | jq -c '.'` produces zero parse errors across the entire output.
 
-- **Status** · open (filed by QA-001..005 closure reconcile; no implementation)
+- **Status** · **CLOSED** (2026-06-01, commit `9478554`) — new `_emit_json_banner` helper in `cli.py`; `print_scan_urls` extended with a `debug_format` kwarg so JSON mode emits a single NDJSON `record_type=banner` row with `kind=scan_url` payload instead of the editorial banner + budget panel + ANSI OSC8 hyperlink + plan-confirmation lines. Plan panel is suppressed under json mode (replaced with a `kind=plan_summary` NDJSON banner). 13 new locking tests in `tests/cli/test_qa007_json_mode_stdout_purity.py` confirm pure NDJSON stdout end-to-end.
 
 ---
 
@@ -508,7 +508,7 @@ Format per item:
 
 - **Acceptance** · Whichever option chosen, all three Vertex probe outcomes (200 / 404 / 401|5xx) have unambiguous documented behaviour.
 
-- **Status** · open (filed by QA-001..005 closure reconcile; no implementation)
+- **Status** · **DEFERRED** (2026-06-01, commit `9478554`) — QA workflow `wrn6o8dph` triaged this as defer-with-note: rewriting the Vertex 401 affordance needs a real Vertex test target to confirm which of the three outcomes (no auth / no Vertex / 5xx server-side) we actually hit, and that target isn't reliably reproducible from this environment. Documented for the next operator with Vertex access — pick option (a) or (b) once a 401 is observed in the wild and pin a regression test against the response shape.
 
 ---
 
