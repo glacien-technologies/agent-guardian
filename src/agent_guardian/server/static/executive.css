@@ -1508,6 +1508,102 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
  * kept separate so palette overrides in dark mode can stay localised. */
 .exec-log__msg { color: var(--exec-ink); }
 
+/* Hidden state for filtered-out rows. ``!important`` because the
+ * native ``[hidden]`` UA rule can lose to ``.exec-log { display: grid }``
+ * specificity on some browsers (Safari < 17 in particular). */
+.exec-log[hidden] { display: none !important; }
+
+/* ============================================================
+ * 14.5 — Logs filter toolbar (level chips + free-form search +
+ *        showing-X-of-Y counter)
+ * ============================================================ */
+.exec-logs-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  margin: 0 0 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  background: var(--exec-bg-elev);
+}
+.exec-logs-filter__chips {
+  display: inline-flex;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+.exec-logs-filter__chip {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--exec-ink-subtle);
+  border: 1px solid var(--exec-border-subtle);
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.exec-logs-filter__chip:hover {
+  background: var(--exec-brand-tint);
+  border-color: var(--exec-brand);
+  color: var(--exec-brand-strong);
+}
+.exec-logs-filter__chip:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+.exec-logs-filter__chip[aria-pressed="true"].exec-logs-filter__chip--info {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink);
+  border-color: var(--exec-ink-muted);
+}
+.exec-logs-filter__chip[aria-pressed="true"].exec-logs-filter__chip--warn {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 30%, transparent);
+}
+.exec-logs-filter__chip[aria-pressed="true"].exec-logs-filter__chip--error {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 30%, transparent);
+}
+.exec-logs-filter__chip[aria-pressed="false"] {
+  opacity: 0.55;
+}
+.exec-logs-filter__input {
+  flex: 1 1 14rem;
+  min-width: 14rem;
+  padding: 6px 10px;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  background: var(--exec-bg);
+  color: var(--exec-ink);
+}
+.exec-logs-filter__input:focus {
+  outline: none;
+  border-color: var(--exec-brand);
+  box-shadow: 0 0 0 2px var(--exec-brand-tint);
+}
+.exec-logs-filter__count {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.exec-logs-filter__no-match {
+  margin: 0.5rem 0 1rem;
+  color: var(--exec-ink-muted);
+}
+
 /* ============================================================
  * 15. Reproducibility receipt — appears at the bottom of every tab
  *     via layout.html (outside the tabpanels container)

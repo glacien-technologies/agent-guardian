@@ -16,6 +16,37 @@
   <p class="exec-section-lede">
     {{ logs_tail | length }} events &middot; press <kbd>F5</kbd> to refresh.
   </p>
+  {% if logs_tail | length > 0 %}
+    {# Filter toolbar — level chips (multi-select, default all on) + free-form
+       search (substring, case-insensitive, 100ms debounce) + showing-X-of-Y
+       counter. State is persisted in the URL hash as ``#logs?level=info,warn
+       &q=httpx`` so a browser refresh preserves filter state and tab switches
+       restore on the next visit. All filter logic is client-side. #}
+    <div class="exec-logs-filter" role="toolbar" aria-label="Filter scan log events">
+      <div class="exec-logs-filter__chips">
+        <button type="button"
+                class="exec-logs-filter__chip exec-logs-filter__chip--info"
+                data-filter-level="info"
+                aria-pressed="true">INFO</button>
+        <button type="button"
+                class="exec-logs-filter__chip exec-logs-filter__chip--warn"
+                data-filter-level="warn"
+                aria-pressed="true">WARNING</button>
+        <button type="button"
+                class="exec-logs-filter__chip exec-logs-filter__chip--error"
+                data-filter-level="error"
+                aria-pressed="true">ERROR</button>
+      </div>
+      <input type="search"
+             class="exec-logs-filter__input"
+             placeholder="Search logs… (substring, case-insensitive)"
+             aria-label="Search scan log events" />
+      <span class="exec-logs-filter__count" data-logs-filter-count></span>
+    </div>
+    <p class="exec-empty exec-logs-filter__no-match" hidden>
+      No log events match the current filter — clear chips or the search box to see all events.
+    </p>
+  {% endif %}
   {% if logs_tail | length == 0 %}
     <p class="exec-empty">No log events recorded yet.</p>
   {% else %}
@@ -38,4 +69,109 @@
     </ol>
   {% endif %}
   {% include "dashboard/executive/_reproducibility.html" %}
+  {% if logs_tail | length > 0 %}
+    <script>
+    /* Logs filter — client-side level chips + free-form search.
+       State persisted in the URL hash as #logs?level=info,warn,error&q=<query>.
+       100 ms debounce on input. Filter logic iterates DOM rows by data-level
+       and the row's textContent; both are already escaped by Jinja autoescape. */
+    (function () {
+      var root = document.getElementById("tabpanel-logs");
+      if (!root) { return; }
+      var toolbar = root.querySelector(".exec-logs-filter");
+      if (!toolbar) { return; }
+      var chips = Array.prototype.slice.call(toolbar.querySelectorAll("[data-filter-level]"));
+      var input = toolbar.querySelector(".exec-logs-filter__input");
+      var countEl = toolbar.querySelector("[data-logs-filter-count]");
+      var noMatchEl = root.querySelector(".exec-logs-filter__no-match");
+      var rows = Array.prototype.slice.call(root.querySelectorAll(".exec-log"));
+
+      function readHash() {
+        var hash = window.location.hash || "";
+        var match = hash.match(/^#logs\?(.*)$/);
+        if (!match) { return null; }
+        try {
+          var params = new URLSearchParams(match[1]);
+          var levelsRaw = params.get("level") || "";
+          var levels = levelsRaw.split(",").filter(Boolean);
+          var q = params.get("q") || "";
+          return { levels: levels, q: q };
+        } catch (e) { return null; }
+      }
+
+      function writeHash() {
+        var enabled = chips
+          .filter(function (c) { return c.getAttribute("aria-pressed") === "true"; })
+          .map(function (c) { return c.getAttribute("data-filter-level"); });
+        var q = (input.value || "").trim();
+        var parts = ["level=" + enabled.join(",")];
+        if (q) { parts.push("q=" + encodeURIComponent(q)); }
+        var newHash = "#logs?" + parts.join("&");
+        try {
+          history.replaceState(null, "", window.location.pathname + window.location.search + newHash);
+        } catch (e) {
+          window.location.hash = newHash;
+        }
+      }
+
+      function applyFilter() {
+        var enabledSet = {};
+        chips.forEach(function (c) {
+          if (c.getAttribute("aria-pressed") === "true") {
+            enabledSet[c.getAttribute("data-filter-level")] = true;
+          }
+        });
+        var q = (input.value || "").trim().toLowerCase();
+        var visible = 0;
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          var lvl = row.getAttribute("data-level") || "info";
+          var levelOk = !!enabledSet[lvl];
+          var queryOk = !q || (row.textContent || "").toLowerCase().indexOf(q) !== -1;
+          var ok = levelOk && queryOk;
+          row.hidden = !ok;
+          if (ok) { visible++; }
+        }
+        if (countEl) {
+          countEl.textContent = "Showing " + visible + " of " + rows.length + " events";
+        }
+        if (noMatchEl) {
+          noMatchEl.hidden = visible !== 0;
+        }
+      }
+
+      // Restore from hash, if any.
+      var state = readHash();
+      if (state) {
+        var enabledLevels = state.levels.length ? state.levels : ["info", "warn", "error"];
+        var enabledLookup = {};
+        enabledLevels.forEach(function (l) { enabledLookup[l] = true; });
+        chips.forEach(function (c) {
+          c.setAttribute("aria-pressed", enabledLookup[c.getAttribute("data-filter-level")] ? "true" : "false");
+        });
+        if (state.q) { input.value = state.q; }
+      }
+
+      chips.forEach(function (c) {
+        c.addEventListener("click", function () {
+          var was = c.getAttribute("aria-pressed") === "true";
+          c.setAttribute("aria-pressed", was ? "false" : "true");
+          applyFilter();
+          writeHash();
+        });
+      });
+
+      var debounceT = null;
+      input.addEventListener("input", function () {
+        if (debounceT) { clearTimeout(debounceT); }
+        debounceT = setTimeout(function () {
+          applyFilter();
+          writeHash();
+        }, 100);
+      });
+
+      applyFilter();
+    })();
+    </script>
+  {% endif %}
 </section>

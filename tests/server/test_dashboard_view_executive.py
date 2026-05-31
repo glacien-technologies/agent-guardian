@@ -212,7 +212,11 @@ def test_assemble_logs_tail_reads_locked_shape(tmp_path: Path) -> None:
     assert rows[0]["timestamp_label"] == "12:01:00"
 
 
-def test_assemble_logs_tail_caps_at_1000_entries_keeping_newest(tmp_path: Path) -> None:
+def test_assemble_logs_tail_returns_every_line_after_cap_removal(tmp_path: Path) -> None:
+    """Cap removed 2026-06-01 per operator request — ``_assemble_logs_tail``
+    now returns every event from ``events.jsonl``. A 1200-line file produces
+    a 1200-row list; the Logs tab's client-side filter is the operator's
+    primary tool for navigating long runs."""
     events = [
         {
             "kind": "tick",
@@ -227,10 +231,10 @@ def test_assemble_logs_tail_caps_at_1000_entries_keeping_newest(tmp_path: Path) 
         "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
     )
     rows = _assemble_logs_tail(tmp_path)
-    assert len(rows) == 1000
-    # FIFO tail — the kept rows are the newest 1000 (seq starts at 200).
-    seq_values = [int(r["payload_keys"][0] == "seq") for r in rows]  # just checking shape
-    assert all(s == 1 for s in seq_values)
+    assert len(rows) == 1200
+    # All rows kept, in original chronological order.
+    assert rows[0]["payload_keys"] == ["seq"]
+    assert rows[-1]["payload_keys"] == ["seq"]
 
 
 def test_assemble_logs_tail_skips_malformed_lines(tmp_path: Path) -> None:
@@ -415,9 +419,12 @@ def test_build_dashboard_context_with_scan_dir_reads_memory_jsonl(tmp_path: Path
 
 
 def test_dashboard_view_module_caps_are_locked() -> None:
-    """Locked constants — the design lock says 500 / 1000, never change without QA."""
+    """Locked constants — ``_PROBES_LIST_CAP`` stays at 500. ``_LOGS_TAIL_CAP``
+    was lifted to ``None`` on 2026-06-01 per operator request; the Logs tab
+    now renders every event from ``events.jsonl`` and the client-side filter
+    toolbar is the primary navigation tool for large logs."""
     assert dv._PROBES_LIST_CAP == 500
-    assert dv._LOGS_TAIL_CAP == 1000
+    assert dv._LOGS_TAIL_CAP is None
 
 
 # ---------------------------------------------------------------------------

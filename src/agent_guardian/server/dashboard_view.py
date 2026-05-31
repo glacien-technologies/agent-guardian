@@ -99,7 +99,12 @@ def _humanise_band(band: SeverityBand | None) -> str:
 # the operator always sees the most recent events. Both values are locked in
 # the design doc (DESIGN_LOCK §3.3).
 _PROBES_LIST_CAP: Final[int] = 500
-_LOGS_TAIL_CAP: Final[int] = 1000
+# ``_LOGS_TAIL_CAP`` was 1000 until 2026-06-01 when the operator asked the
+# Logs tab to surface every event regardless of count. Cap removed — the
+# Executive Logs tab now renders every line from ``events.jsonl``. Browser
+# memory is the only limit; the client-side filter toolbar (level chips +
+# search) is the operator's primary tool for navigating large logs.
+_LOGS_TAIL_CAP: Final[int | None] = None
 
 __all__ = [
     "AGENT_GUARDIAN_DASHBOARD_THEME_ENV",
@@ -881,8 +886,10 @@ def _assemble_logs_tail(scan_dir: Path | None) -> list[dict[str, Any]]:
     ``summary`` from the event kind + payload so the Executive Logs tab can
     render a colour-coded feed without re-implementing the heuristics in Jinja.
 
-    FIFO-capped at :data:`_LOGS_TAIL_CAP` entries — keeps the most recent
-    ``N``. Returns an empty list when ``scan_dir`` is ``None`` or the file is
+    Uncapped as of 2026-06-01 — :data:`_LOGS_TAIL_CAP` is ``None`` so every
+    event from ``events.jsonl`` reaches the renderer. The Logs tab's
+    client-side filter toolbar is the operator's tool for navigating long
+    runs. Returns an empty list when ``scan_dir`` is ``None`` or the file is
     missing. Never raises.
     """
     if scan_dir is None:
@@ -903,10 +910,10 @@ def _assemble_logs_tail(scan_dir: Path | None) -> list[dict[str, Any]]:
     except OSError as exc:  # pragma: no cover — disk-level failure
         _LOG.debug("dashboard_view: events.jsonl read failed (%s)", exc)
         return []
-    # FIFO tail — drop oldest beyond the cap so the operator always sees the
-    # freshest events. The list is already chronological (append-only writer).
-    if len(out) > _LOGS_TAIL_CAP:
-        out = out[-_LOGS_TAIL_CAP:]
+    # No FIFO trim — cap removed 2026-06-01 (operator request). The list
+    # stays chronological (append-only writer); the renderer iterates it in
+    # full and the client-side filter is what the operator uses to find
+    # specific events in a large log.
     return out
 
 
