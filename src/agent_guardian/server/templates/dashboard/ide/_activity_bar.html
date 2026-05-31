@@ -1,0 +1,83 @@
+{#
+  Activity bar — 48px left rail with inline-SVG icons in the VS Code Codicons
+  style. Buttons activate sidebar views (explorer / search / findings / trace)
+  and the bottom slot opens the shared theme switcher.
+
+  Each button toggles `data-active` on itself and dispatches a custom event so
+  `ide_interactive.js` can update the file tree's render mode without a
+  reload. Default-active is "explorer" — the file tree view.
+#}
+<aside class="ide-activity-bar"
+       role="toolbar"
+       aria-label="IDE activity bar"
+       aria-orientation="vertical">
+
+  <button type="button"
+          class="ide-act-btn"
+          data-act="explorer"
+          data-active="true"
+          aria-label="Explorer"
+          title="Explorer (Cmd/Ctrl+Shift+E)">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 5h6l2 2h8v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5z"
+            fill="none" stroke="currentColor" stroke-width="1.6"
+            stroke-linejoin="round"/>
+    </svg>
+  </button>
+
+  <button type="button"
+          class="ide-act-btn"
+          data-act="search"
+          aria-label="Search"
+          title="Search (Cmd/Ctrl+Shift+F)">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M16 16l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+  </button>
+
+  <button type="button"
+          class="ide-act-btn"
+          data-act="findings"
+          aria-label="Findings"
+          title="Findings ({{ findings_total }})">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.6"
+            stroke-linejoin="round"/>
+      <path d="M12 10v4M12 16.5v.5" stroke="currentColor" stroke-width="1.6"
+            stroke-linecap="round"/>
+    </svg>
+    {% if counts.critical > 0 %}
+    <span class="ide-act-btn__badge ide-act-btn__badge--crit"
+          data-live="critical"
+          aria-label="{{ counts.critical }} critical findings">{{ counts.critical }}</span>
+    {% endif %}
+  </button>
+
+  <button type="button"
+          class="ide-act-btn"
+          data-act="trace"
+          aria-label="Trace"
+          title="Trace timeline">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 6h16M4 12h10M4 18h16"
+            stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="18" cy="12" r="2.4" fill="currentColor"/>
+    </svg>
+  </button>
+
+  <div class="ide-activity-bar__spacer" aria-hidden="true"></div>
+
+  <button type="button"
+          class="ide-act-btn ide-act-btn--theme"
+          data-act="settings"
+          data-ide-theme-toggle
+          aria-label="Theme settings"
+          title="Switch theme">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"
+            stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+  </button>
+</aside>

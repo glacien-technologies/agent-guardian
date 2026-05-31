@@ -1,0 +1,77 @@
+{# Attack timeline section — collapsible <details> with the horizontal bar
+   chart for findings-by-severity and a chronologically-ordered list of
+   notable attack moments.
+
+   Auto-expands when the scan surfaced critical findings; otherwise the
+   reader can drill in. The bar's onClick scrolls to the matching sev
+   bucket in the findings section below.
+#}
+{% set _attack_total = (counts.critical | default(0))
+    + (counts.high | default(0))
+    + (counts.medium | default(0))
+    + (counts.low | default(0)) %}
+<details class="nr-section" id="nr-section-attacks"{% if counts.critical and counts.critical > 0 %} open{% endif %}>
+  <summary class="nr-section__summary">
+    <span class="nr-section__chevron" aria-hidden="true">▸</span>
+    <span class="nr-section__title">Attack timeline</span>
+    <span class="nr-section__badge" data-live="findings-total">{{ _attack_total }} probe{% if _attack_total != 1 %}s landed{% else %} landed{% endif %}</span>
+  </summary>
+  <div class="nr-section__body">
+    <p class="nr-section__lede">
+      Across the {{ asi_covered }} ASI categor{% if asi_covered != 1 %}ies{% else %}y{% endif %}
+      exercised, the swarm landed
+      <strong data-live="findings-total">{{ _attack_total }}</strong>
+      successful probe{% if _attack_total != 1 %}s{% endif %}. The severity
+      profile below shows where attention should land first.
+    </p>
+
+    {% include "dashboard/narrative/_bar_probes_per_agent.html" %}
+
+    <ul class="nr-attack-summary" role="list">
+      <li class="nr-attack-summary__item nr-attack-summary__item--critical">
+        <span class="nr-attack-summary__label">Critical</span>
+        <span class="nr-attack-summary__count" data-live="critical">{{ counts.critical | default(0) }}</span>
+        <span class="nr-attack-summary__note">
+          {% if counts.critical and counts.critical > 0 %}
+            Patch immediately.
+          {% else %}
+            None surfaced.
+          {% endif %}
+        </span>
+      </li>
+      <li class="nr-attack-summary__item nr-attack-summary__item--high">
+        <span class="nr-attack-summary__label">High</span>
+        <span class="nr-attack-summary__count" data-live="high">{{ counts.high | default(0) }}</span>
+        <span class="nr-attack-summary__note">
+          {% if counts.high and counts.high > 0 %}
+            Open tickets this sprint.
+          {% else %}
+            None surfaced.
+          {% endif %}
+        </span>
+      </li>
+      <li class="nr-attack-summary__item nr-attack-summary__item--medium">
+        <span class="nr-attack-summary__label">Medium</span>
+        <span class="nr-attack-summary__count" data-live="medium">{{ counts.medium | default(0) }}</span>
+        <span class="nr-attack-summary__note">
+          {% if counts.medium and counts.medium > 0 %}
+            Plan in the next iteration.
+          {% else %}
+            None surfaced.
+          {% endif %}
+        </span>
+      </li>
+      <li class="nr-attack-summary__item nr-attack-summary__item--low">
+        <span class="nr-attack-summary__label">Low</span>
+        <span class="nr-attack-summary__count" data-live="low">{{ counts.low | default(0) }}</span>
+        <span class="nr-attack-summary__note">
+          {% if counts.low and counts.low > 0 %}
+            Track in backlog.
+          {% else %}
+            None surfaced.
+          {% endif %}
+        </span>
+      </li>
+    </ul>
+  </div>
+</details>

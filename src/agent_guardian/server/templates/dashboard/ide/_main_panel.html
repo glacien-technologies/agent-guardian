@@ -1,0 +1,255 @@
+{#
+  Main panel — tab strip + cell host.
+
+  We pre-render every cell so a click in the file tree only needs to swap
+  `data-active` rather than fetch anything. This keeps the IDE theme fully
+  no-build, no-fetch — the entire scan is on the page once it's loaded.
+
+  Visible cell at first paint is README.md. `ide_interactive.js` swaps the
+  active cell when a tree row is clicked. Tabs in the strip mirror the
+  open files (opened on click); the README tab is always present.
+#}
+<div class="ide-tabs" role="tablist" aria-label="Open files" data-ide-tabs>
+  <button type="button"
+          class="ide-tab ide-tab--active"
+          role="tab"
+          aria-selected="true"
+          data-tree-path="README.md"
+          data-tree-kind="readme">
+    <span class="ide-tab__icon ide-tab__icon--md" aria-hidden="true"></span>
+    <span class="ide-tab__label">README.md</span>
+    <span class="ide-tab__close" aria-hidden="true">×</span>
+  </button>
+  {% if findings_page %}
+    {% set f = findings_page[0] %}
+    <button type="button"
+            class="ide-tab"
+            role="tab"
+            aria-selected="false"
+            data-tree-path="findings/{{ f.id }}.diff"
+            data-tree-kind="diff">
+      <span class="ide-tab__sev-dot ide-tab__sev-dot--{{ f.severity_class }}"
+            aria-hidden="true"></span>
+      <span class="ide-tab__label">{{ f.id }}.diff</span>
+      <span class="ide-tab__close" aria-hidden="true">×</span>
+    </button>
+  {% endif %}
+  <button type="button"
+          class="ide-tab ide-tab--plus"
+          aria-label="Open command palette"
+          title="Cmd/Ctrl+K"
+          data-ide-palette-open>+</button>
+</div>
+
+<section class="ide-panel" role="region" aria-label="File contents">
+
+  {# ============ README.md cell — the scan summary ============ #}
+  <article class="ide-cell ide-cell--active"
+           data-tree-kind="readme"
+           data-tree-path="README.md"
+           aria-labelledby="ide-cell-readme-title">
+    <header class="ide-cell__head">
+      <span class="ide-cell__gutter">In&nbsp;[1]:</span>
+      <h2 class="ide-cell__title" id="ide-cell-readme-title">README.md</h2>
+    </header>
+    <div class="ide-cell__body ide-cell__body--md">
+      <h1 class="ide-md-h1"># Scan <span data-live="scan-id-display">{{ scan_id }}</span></h1>
+      <pre class="ide-md-meta"><span class="ide-key">Target  </span>: <span class="ide-val">{{ target_ref }}</span>
+<span class="ide-key">Adapter </span>: <span class="ide-val">{{ adapter_label }}</span>
+<span class="ide-key">Tier    </span>: <span class="ide-val">{{ tier_label }}</span>
+<span class="ide-key">Started </span>: <span class="ide-val">{{ started_at_label }}</span>
+<span class="ide-key">Elapsed </span>: <span class="ide-val" data-live="elapsed">{{ elapsed_label }}</span>
+<span class="ide-key">Verdict </span>: <span class="ide-val"><span data-live="critical">{{ counts.critical }}</span> critical &middot; <span data-live="high">{{ counts.high }}</span> high &middot; <span data-live="medium">{{ counts.medium }}</span> medium &middot; <span data-live="low">{{ counts.low }}</span> low</span></pre>
+
+      <h2 class="ide-md-h2">## Score</h2>
+      <div class="ide-md-output">
+        <span class="ide-md-output__gutter">Out&nbsp;[1]:</span>
+        <div class="ide-md-output__body">
+          <div class="ide-scorecard">
+            <span class="ide-scorecard__num"
+                  data-live="aivss">{{ aivss_label }}</span>
+            <span class="ide-scorecard__band ide-scorecard__band--{{ band_class }}"
+                  data-live="band">{{ band_label }}</span>
+            <span class="ide-scorecard__sub">{{ score_sublabel }}</span>
+          </div>
+          <div class="ide-scorebar">
+            <span class="ide-scorebar__fill"
+                  style="width: {{ needle_pct or 0 }}%;"></span>
+          </div>
+          <div class="ide-scorecard__kv">
+            <span class="ide-key">resilience</span><span class="ide-val">{{ band_label | lower }}</span>
+            <span class="ide-key">attacks</span><span class="ide-val">
+              <span data-live="findings-total">{{ findings_total }}</span>
+              findings / <span data-live="probes">{{ probes_label }}</span> probes</span>
+            <span class="ide-key">coverage</span><span class="ide-val"
+                  data-live="asi-covered">{{ asi_covered }} / 10</span>
+            <span class="ide-key">tokens</span><span class="ide-val"
+                  data-live="tokens">{{ tokens_label }}</span>
+            <span class="ide-key">cost</span><span class="ide-val"
+                  data-live="usd">{{ usd_label }}</span>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="ide-md-h2">## Breakdown</h2>
+      <div class="ide-md-output">
+        <span class="ide-md-output__gutter">Out&nbsp;[2]:</span>
+        <div class="ide-md-output__body ide-asi-grid">
+          {% for row in asi_rows %}
+          <a class="ide-asi-cell ide-asi-cell--{{ row.status_class }}"
+             href="?theme=ide&file=agents/{{ row.code }}.log"
+             data-tree-path="agents/{{ row.code }}.log"
+             data-tree-kind="log">
+            <span class="ide-asi-cell__code">{{ row.code }}</span>
+            <span class="ide-asi-cell__name">{{ row.name }}</span>
+            <span class="ide-asi-cell__score">{{ row.score_label }}</span>
+            <span class="ide-asi-cell__bar">
+              <span class="ide-asi-cell__bar-fill"
+                    style="width: {{ row.score_pct }}%;"></span>
+            </span>
+            <span class="ide-asi-cell__counts">
+              {% if row.findings.critical %}<em class="ide-asi-cell__crit">{{ row.findings.critical }}c</em>{% endif %}
+              {% if row.findings.high %}<em class="ide-asi-cell__high">{{ row.findings.high }}h</em>{% endif %}
+              {% if row.findings.medium %}<em class="ide-asi-cell__med">{{ row.findings.medium }}m</em>{% endif %}
+              {% if row.findings.low %}<em class="ide-asi-cell__low">{{ row.findings.low }}l</em>{% endif %}
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <h2 class="ide-md-h2">## Next</h2>
+      <p class="ide-md-p">Click any <code>F-…</code> in the file tree to open its diff. Or press <kbd>Cmd</kbd>+<kbd>K</kbd> for the command palette.</p>
+    </div>
+  </article>
+
+  {# ============ Per-finding diff cells ============ #}
+  {% for f in findings_page %}
+  <article class="ide-cell"
+           data-tree-kind="diff"
+           data-tree-path="findings/{{ f.id }}.diff"
+           data-finding-id="{{ f.id }}"
+           aria-labelledby="ide-cell-{{ f.id }}-title"
+           hidden>
+    <header class="ide-cell__head">
+      <span class="ide-cell__gutter">In&nbsp;[{{ loop.index + 1 }}]:</span>
+      <h2 class="ide-cell__title" id="ide-cell-{{ f.id }}-title">findings/{{ f.id }}.diff</h2>
+    </header>
+    <div class="ide-cell__body">
+      {% with finding=f %}
+      {% include "dashboard/ide/_attack_transcript_view.html" %}
+      {% endwith %}
+    </div>
+  </article>
+  {% endfor %}
+
+  {# ============ Agent log cells (one per ASI row) ============ #}
+  {% for row in asi_rows %}
+  <article class="ide-cell"
+           data-tree-kind="log"
+           data-tree-path="agents/{{ row.code }}.log"
+           aria-labelledby="ide-cell-log-{{ row.code }}-title"
+           hidden>
+    <header class="ide-cell__head">
+      <span class="ide-cell__gutter">In&nbsp;[{{ loop.index + findings_page | length + 1 }}]:</span>
+      <h2 class="ide-cell__title" id="ide-cell-log-{{ row.code }}-title">agents/{{ row.code }}.log</h2>
+    </header>
+    <div class="ide-cell__body">
+      <div class="ide-log" role="log" aria-live="off">
+        <details class="ide-log__group" open>
+          <summary class="ide-log__group-head">
+            <span class="ide-log__ts">::</span>
+            <span class="ide-log__ln">1</span>
+            <span class="ide-log__msg ide-log__msg--group">::group:: {{ row.code }} — {{ row.name }}</span>
+          </summary>
+          <div class="ide-log__line">
+            <span class="ide-log__ts">--:--:--</span>
+            <span class="ide-log__ln">2</span>
+            <span class="ide-log__msg">weight: {{ row.weight_label }}{% if row.weight_high %} (priority){% endif %}</span>
+          </div>
+          <div class="ide-log__line">
+            <span class="ide-log__ts">--:--:--</span>
+            <span class="ide-log__ln">3</span>
+            <span class="ide-log__msg">score: {{ row.score_label }} / 100</span>
+          </div>
+          <div class="ide-log__line">
+            <span class="ide-log__ts">--:--:--</span>
+            <span class="ide-log__ln">4</span>
+            <span class="ide-log__msg">status: {{ row.status_label }}</span>
+          </div>
+          <div class="ide-log__line {% if row.findings.critical %}ide-log__line--err{% endif %}">
+            <span class="ide-log__ts">--:--:--</span>
+            <span class="ide-log__ln">5</span>
+            <span class="ide-log__msg">findings: {{ row.findings.critical }} critical / {{ row.findings.high }} high / {{ row.findings.medium }} medium / {{ row.findings.low }} low</span>
+          </div>
+        </details>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+
+  {# ============ JSON cells — recon / trace / reproducibility ============ #}
+  {% set json_specs = [
+    ('recon/system-card.json', {
+      'target_ref': target_ref,
+      'adapter': adapter_label,
+      'tier': tier_label,
+      'commander_model': commander_model,
+      'attacker_model': attacker_model,
+      'evaluator_model': evaluator_model,
+    }),
+    ('recon/tooling.json', {
+      'probe_library_version': probe_library_version,
+      'mode': 'full',
+      'tokens_cap': tokens_cap_label,
+      'usd_cap': usd_cap_label,
+    }),
+    ('recon/policy.json', {
+      'tier': tier_label,
+      'aivss_formula_version': aivss_formula_version,
+      'package_version': package_version,
+    }),
+    ('trace/timeline.json', {
+      'scan_id': scan_id,
+      'elapsed': elapsed_label,
+      'started_at': started_at_label,
+      'findings_total': findings_total,
+      'asi_covered': asi_covered,
+    }),
+    ('trace/reflections.ndjson', {
+      'scan_id': scan_id,
+      'reflections': 'streamed at /scans/' ~ scan_id ~ '/reflections.sse',
+    }),
+    ('reproducibility/manifest.json', {
+      'scan_id': scan_id,
+      'evidence_fingerprint': evidence_fingerprint,
+      'aivss_formula_version': aivss_formula_version,
+      'package_version': package_version,
+      'probe_library_version': probe_library_version,
+      'rng_seed': rng_seed,
+    }),
+    ('reproducibility/env.lock', {
+      'package_version': package_version,
+      'aivss_formula_version': aivss_formula_version,
+    }),
+  ] %}
+  {% for path, doc in json_specs %}
+  <article class="ide-cell"
+           data-tree-kind="json"
+           data-tree-path="{{ path }}"
+           hidden
+           aria-labelledby="ide-cell-{{ loop.index0 }}-json-title">
+    <header class="ide-cell__head">
+      <span class="ide-cell__gutter">In&nbsp;[{{ loop.index + findings_page | length + asi_rows | length + 1 }}]:</span>
+      <h2 class="ide-cell__title"
+          id="ide-cell-{{ loop.index0 }}-json-title">{{ path }}</h2>
+    </header>
+    <div class="ide-cell__body">
+      {% with json_path=path, json_doc=doc %}
+      {% include "dashboard/ide/_json_view.html" %}
+      {% endwith %}
+    </div>
+  </article>
+  {% endfor %}
+
+</section>

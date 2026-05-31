@@ -1,0 +1,50 @@
+{# Mission Control — drill-down slide-over.
+
+   Right-edge panel that animates in when a findings-table row or agent-panel
+   row is clicked. Hidden by default (translate-x 100% via .mission-slideover);
+   gets .is-open from mission_charts.js. Modal-ish (role="dialog",
+   aria-modal="true") but does NOT block the underlying page — operators
+   should be able to keep scrolling while the panel is open.
+
+   The content is populated client-side from the findings JSON island; this
+   template renders the chrome + an empty body.
+#}
+<aside class="mission-slideover"
+       id="mission-slideover"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="mission-slideover-title"
+       aria-hidden="true"
+       tabindex="-1">
+  <header class="mission-slideover__head">
+    <span class="mission-slideover__eyebrow">Finding detail</span>
+    <h3 class="mission-slideover__title" id="mission-slideover-title">Select a finding</h3>
+    <button type="button"
+            class="mission-slideover__close"
+            data-mission-slideover-close
+            aria-label="Close detail panel">
+      &times;
+    </button>
+  </header>
+
+  <div class="mission-slideover__body" data-mission-slideover-body>
+    <p class="mission-slideover__placeholder">
+      Click any row in the findings table to inspect its prompt, response,
+      judge verdict, and reproduction transcript.
+    </p>
+  </div>
+
+  <footer class="mission-slideover__footer">
+    <button type="button"
+            class="mission-slideover__esc-hint"
+            data-mission-slideover-close>
+      <kbd>esc</kbd> to close
+    </button>
+  </footer>
+</aside>
+
+{# Backdrop — clicking it closes the slide-over. The slide-over itself sits
+   above this; pointer-events are toggled together. #}
+<div class="mission-slideover__backdrop"
+     data-mission-slideover-backdrop
+     aria-hidden="true"></div>

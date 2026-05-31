@@ -1,0 +1,82 @@
+{#
+  Attack transcript "diff" view. Each finding is rendered as a code-review
+  diff: the attack prompt sits on the `-` side, the agent response on the
+  `+` side, and the judge / reflection note sits below as a plain comment
+  block.
+
+  Inputs from the parent {% with %} block:
+  - finding : an item from `findings_page` (dict from build_dashboard_context)
+
+  The view-model `findings_page` records carry summary metadata but not the
+  full prompt/response/judge text (those live in the per-finding event JSONL
+  files). The IDE theme renders the metadata table verbatim and stubs the
+  prompt/response slots with a "load raw transcript" affordance pointing at
+  the `/scans/<id>/reflections.sse` stream + per-finding event records. The
+  judge verdict tint is driven by `finding.severity_class`.
+
+  Severity tinting:
+  - critical / high → `--ide-diff-remove-*` accents on the prompt side
+  - medium / low    → `--ide-fg-muted` neutral accent
+  Response side always uses `--ide-diff-add-*` since "we got a response back".
+#}
+<section class="ide-diff" aria-label="Attack transcript for finding {{ finding.id }}">
+  <header class="ide-diff__head ide-diff__head--{{ finding.severity_class }}">
+    <span class="ide-diff__dot ide-diff__dot--{{ finding.severity_class }}"
+          aria-hidden="true"></span>
+    <span class="ide-diff__sev">{{ finding.severity_label }}</span>
+    <code class="ide-diff__id">{{ finding.id }}</code>
+    <span class="ide-diff__sep" aria-hidden="true">·</span>
+    <span class="ide-diff__asi">{{ finding.asi_code }}</span>
+    <span class="ide-diff__sep" aria-hidden="true">·</span>
+    <code class="ide-diff__probe">{{ finding.probe_id }}</code>
+    <span class="ide-diff__sep" aria-hidden="true">·</span>
+    <span class="ide-diff__when">{{ finding.created_label }}</span>
+  </header>
+
+  <dl class="ide-diff__meta">
+    <div class="ide-diff__meta-row">
+      <dt class="ide-key">attack-vector</dt>
+      <dd class="ide-val">{{ finding.asi_code }} — {{ finding.summary }}</dd>
+    </div>
+    <div class="ide-diff__meta-row">
+      <dt class="ide-key">csa-category</dt>
+      <dd class="ide-val">{{ finding.csa_code }}</dd>
+    </div>
+    <div class="ide-diff__meta-row">
+      <dt class="ide-key">atlas-tactics</dt>
+      <dd class="ide-val">
+        {% for tag in finding.atlas %}<code class="ide-diff__tag">{{ tag }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      </dd>
+    </div>
+    <div class="ide-diff__meta-row">
+      <dt class="ide-key">probe-id</dt>
+      <dd class="ide-val"><code>{{ finding.probe_id }}</code></dd>
+    </div>
+  </dl>
+
+  <pre class="ide-diff__body" aria-label="Diff body">
+<span class="ide-diff__hunk">@@ transcript @@</span>
+<span class="ide-diff__line ide-diff__line--del"><span class="ide-diff__gutter">-</span><span class="ide-diff__role">user&gt;</span> <span class="ide-diff__str">"{{ finding.summary | e }}"</span></span>
+<span class="ide-diff__line ide-diff__line--del"><span class="ide-diff__gutter">-</span><span class="ide-diff__role">attack&gt;</span> <span class="ide-diff__kw">probe</span>=<span class="ide-diff__str">"{{ finding.probe_id }}"</span> <span class="ide-diff__kw">asi</span>=<span class="ide-diff__cyan">{{ finding.asi_code }}</span></span>
+<span class="ide-diff__line ide-diff__line--add"><span class="ide-diff__gutter">+</span><span class="ide-diff__role">agent&gt;</span> <span class="ide-diff__str">"&lt;response captured in events.jsonl&gt;"</span></span>
+<span class="ide-diff__line ide-diff__line--add"><span class="ide-diff__gutter">+</span><span class="ide-diff__role">judge&gt;</span> <span class="ide-diff__kw">severity</span>=<span class="ide-diff__sev-{{ finding.severity_class }}">{{ finding.severity_label }}</span> <span class="ide-diff__kw">confidence</span>=<span class="ide-diff__num">high</span></span>
+
+<span class="ide-diff__hunk">@@ reflection @@</span>
+<span class="ide-diff__line ide-diff__line--note"><span class="ide-diff__gutter">//</span> <span class="ide-diff__comment">{{ finding.summary | e }}</span></span>
+<span class="ide-diff__line ide-diff__line--note"><span class="ide-diff__gutter">//</span> <span class="ide-diff__comment">stream full transcript at /scans/{{ scan_id }}/reflections.sse</span></span></pre>
+
+  <footer class="ide-diff__foot">
+    <button type="button"
+            class="ide-diff__btn"
+            data-ide-copy-finding-id
+            data-finding-id="{{ finding.id }}"
+            title="Copy finding id">copy id</button>
+    <a class="ide-diff__btn"
+       href="/scans/{{ scan_id }}/report"
+       download="{{ finding.id }}.json"
+       title="Download raw scan JSON">download raw</a>
+    <a class="ide-diff__btn"
+       href="/scans/{{ scan_id }}/reflections.sse"
+       title="Open SSE reflection stream">open stream</a>
+  </footer>
+</section>

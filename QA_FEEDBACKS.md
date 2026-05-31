@@ -17,6 +17,35 @@ Format per item:
 
 ---
 
+## QA-022 — `server/routes/scan.py` coverage at 88% (pre-existing SSE / redirect-on-unknown-scan branches)
+
+- **Date filed** · 2026-05-31 (surfaced by `whw6i19rw` 4-theme dashboard reconcile)
+- **Severity** · low
+- **Found via** · the theme workflow's QualityGate phase reported `scan.py` at 88% coverage — below the ≥90% bar. The uncovered regions are the **SSE event-stream branches** + the **redirect-on-unknown-scan** path. **PRE-EXISTING** baseline (the theme work itself added covered code at 100%; the 88% reflects untouched older paths).
+- **Fix area** · add `tests/server/test_scan_route_sse.py` covering the SSE handler's keepalive + abort branches; add `tests/server/test_scan_route_unknown_id.py` covering the redirect path. Touches no production code.
+- **Acceptance** · `scan.py` coverage ≥ 90%.
+- **Status** · open
+
+---
+
+## QA-020 — Four-theme dashboard with live switcher (Editorial preserved + Mission Control + Narrative Report + IDE Terminal)
+
+- **Date filed** · 2026-05-31 (filed AND closed in same commit, per process rule)
+- **Severity** · medium / strategic (UX feature shipping, not a bug fix)
+- **What shipped** · Three new dashboard themes live alongside the existing Editorial saved-design implementation, switchable via URL query param (`?theme=mission|narrative|ide|editorial`), dropdown in the topbar (included by every theme), and `$AGENT_GUARDIAN_DASHBOARD_THEME` env override. Single shared view-model `build_dashboard_context()` drives all 4 themes — theme-specific data forking is forbidden.
+  - **Theme A · Editorial** (default; preserved byte-for-byte when `?theme=` absent): existing saved-design implementation. Only delta: +1 line in `_topbar.html` for the dropdown include.
+  - **Theme B · Mission Control** (Datadog/Grafana vibe): 6 KPI tiles + AIVSS time-series + agent sparkline list + filterable findings table + slide-over drill-down on click. Chart.js 4.4.7 CDN + `mission_charts.js` (20KB). Dark theme default.
+  - **Theme C · Narrative Report** (Linear changelog / Notion-blocks vibe): editorial italic headline + sticky TOC + 4 collapsible `<details>` sections + radar (sub-scores) + horizontal bar (probes per agent). `narrative_charts.js` (12KB). Light theme default.
+  - **Theme D · IDE / Terminal** (VS Code / Tokyo Night palette): activity bar + file tree + main panel + status bar; findings rendered as code-review-style attack transcripts in monospace; JSON-view drill-down for raw payload. `ide_interactive.js` (17KB). Dark theme default.
+- **Architecture locks** · `resolve_theme(request, env)` helper in `server/routes/scan.py`: query param > env var > `'editorial'` default; invalid name → silent fallback with `X-AgentGuardian-Theme-Warning` response header. `theme_switcher.js` (8KB) persists operator choice to `localStorage`. Shared view-model contract unchanged. Each theme CSS bundle <30 KB. All themes work at viewports ≥ 1024px; mobile deferred.
+- **Live evidence** · scan `cli-9c21b1fcb4ca` against testbench `/finbot/chat` (fast mode, $0.30 cap; early-stopped at variance=0.00 with 3 findings); all 4 themes rendered the same scan correctly via `/scans/<id>?theme=<name>`; theme-switcher dropdown present and functional in all 4 layouts; `clean_control` sentry preserved (0-findings state renders cleanly across all themes).
+- **Tests added** · 80 new theme-specific tests (`test_theme_mission_rendering.py` 26 · `test_theme_narrative_rendering.py` 27 · `test_theme_ide_rendering.py` 27 · `test_theme_switcher.py` for env/query/precedence/invalid-fallback). 185/185 server regression suite passes including the 38/38 pre-existing dashboard rendering tests.
+- **Quality** · ruff clean · ruff format clean · mypy --strict clean on touched modules (`scan.py` + `dashboard_view.py`) · pytest 185+80 green · bandit 0 HIGH-severity new findings · coverage on touched: `dashboard_view.py` 93%, `scan.py` 88% (88% pre-existing baseline filed as QA-022).
+- **Newly-discovered** · QA-022 (above) — `scan.py` SSE / redirect branch coverage gap.
+- **Status** · **CLOSED** (2026-05-31, commit `fd7a670`) — 4 themes live; switcher in topbar; URL + env + localStorage precedence wired; same view-model contract; live testbench validation passed across all 4; clean_control sentry preserved.
+
+---
+
 ## QA-019 — `httpx INFO HTTP Request: ... 200 OK` log noise drowns the swarm-board signal
 
 - **Date surfaced** · 2026-05-31 (manual scan against testbench with `--mode full`)

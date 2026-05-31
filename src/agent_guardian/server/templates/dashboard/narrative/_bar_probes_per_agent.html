@@ -1,0 +1,50 @@
+{# Inline Chart.js horizontal bar — findings by severity (probes per agent).
+
+   The bar is "click-to-scroll" — onClick handler in narrative_charts.js
+   scrolls smoothly to the matching sev-bucket inside the findings section.
+   Severity colors are read from CSS custom properties so light/dark mode
+   flips for free.
+#}
+{% set _severities = ['critical', 'high', 'medium', 'low'] %}
+{% set _severity_rows = [] %}
+{% for sev in _severities %}
+  {% set _ = _severity_rows.append({
+    'severity': sev,
+    'label': sev | upper,
+    'count': counts[sev] | default(0),
+    'anchor': '#nr-sev-' ~ sev,
+  }) %}
+{% endfor %}
+{% set _bar_payload = {'rows': _severity_rows} %}
+<figure class="nr-chart nr-chart--bar" aria-labelledby="nr-chart-bar-caption">
+  <figcaption id="nr-chart-bar-caption">
+    <span class="nr-chart__eyebrow">FIG. 2</span>
+    <h3 class="nr-chart__title">Findings by severity</h3>
+    <p class="nr-chart__lede">
+      Click any bar to jump to that severity grouping below.
+    </p>
+  </figcaption>
+  <div class="nr-chart__canvas-wrap nr-chart__canvas-wrap--bar">
+    <canvas id="nr-severity-bar"
+            class="nr-chart__canvas"
+            role="img"
+            aria-label="Findings count grouped by severity, horizontal bar chart"
+            data-chart='{{ _bar_payload | tojson }}'></canvas>
+  </div>
+  <details class="nr-chart__data-toggle">
+    <summary>Show data table</summary>
+    <table class="nr-chart__data-table">
+      <thead>
+        <tr><th scope="col">Severity</th><th scope="col">Count</th></tr>
+      </thead>
+      <tbody>
+        {% for row in _severity_rows %}
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            <td>{{ row.count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</figure>

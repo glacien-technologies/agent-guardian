@@ -32,7 +32,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 
 from agent_guardian._version import __version__
 from agent_guardian.server.auth import require_dashboard_auth
-from agent_guardian.server.dashboard_view import build_dashboard_context, live_snapshot
+from agent_guardian.server.dashboard_view import (
+    DASHBOARD_THEME_TEMPLATES,
+    DASHBOARD_THEMES,
+    build_dashboard_context,
+    live_snapshot,
+    resolve_theme_from_env,
+)
 from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
@@ -114,10 +120,21 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         page=page,
         is_terminal=terminal_on_disk and not is_running,
     )
+    # Theme resolution: query param > $AGENT_GUARDIAN_DASHBOARD_THEME > 'editorial'.
+    # Invalid theme names fall through silently to the next priority (see
+    # resolve_theme docstring) so a typo never breaks the dashboard.
+    raw_theme = request.query_params.get("theme")
+    active_theme = resolve_theme_from_env(raw_theme)
+    template_path = DASHBOARD_THEME_TEMPLATES[active_theme]
+    payload = ctx.to_dict()
+    # Theme partial inputs. The shared switcher partial reads `active_theme`
+    # and `theme_choices` from the context to render the dropdown.
+    payload["active_theme"] = active_theme
+    payload["theme_choices"] = list(DASHBOARD_THEMES)
     return templates.TemplateResponse(
         request,
-        "dashboard/scan_detail.html",
-        ctx.to_dict(),
+        template_path,
+        payload,
     )
 
 

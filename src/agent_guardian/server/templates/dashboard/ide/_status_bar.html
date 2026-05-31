@@ -1,0 +1,78 @@
+{#
+  Status bar — 24px pinned strip at the bottom. tmux-style segments separated
+  by 12px gaps. Left side shows global state, right side shows position state.
+
+  Mirrors the relevant data-live keys (elapsed, findings count, critical
+  count) so SSE updates still tick through. The theme segment is a button
+  that toggles the shared theme switcher dropdown — same control as the
+  activity bar's settings icon.
+
+  AC-7 in DESIGN_LOCK.md: every data-live key from the editorial template
+  is represented somewhere in the IDE shell. The README cell carries most;
+  the status bar adds elapsed + findings + critical so the live numbers
+  refresh even when the user is deep in a finding diff.
+#}
+<footer class="ide-status-bar" role="contentinfo" aria-label="Status bar">
+  <div class="ide-status-bar__left">
+    <span class="ide-status-bar__seg ide-status-bar__seg--locality {% if is_local %}ide-status-bar__seg--local{% else %}ide-status-bar__seg--hosted{% endif %}"
+          title="{{ locality_label }}">
+      <span class="ide-status-bar__dot" aria-hidden="true"></span>
+      <span class="ide-status-bar__text">{% if is_local %}local{% else %}hosted{% endif %}</span>
+    </span>
+    <button type="button"
+            class="ide-status-bar__seg ide-status-bar__seg--copy"
+            data-ide-copy-scan-id
+            title="Copy scan id">
+      <span class="ide-status-bar__icon" aria-hidden="true">⌗</span>
+      <span class="ide-status-bar__text">scan_{{ scan_id }}</span>
+    </button>
+    <span class="ide-status-bar__seg" title="Total findings">
+      <span class="ide-status-bar__icon" aria-hidden="true">↻</span>
+      <span class="ide-status-bar__text">
+        <span data-live="findings">{{ findings_total }}</span> findings
+      </span>
+    </span>
+    {% if counts.critical > 0 %}
+    <span class="ide-status-bar__seg ide-status-bar__seg--alert"
+          title="Critical findings">
+      <span class="ide-status-bar__icon" aria-hidden="true">!</span>
+      <span class="ide-status-bar__text">
+        <span data-live="critical">{{ counts.critical }}</span> critical
+      </span>
+    </span>
+    {% endif %}
+  </div>
+
+  <div class="ide-status-bar__right">
+    <span class="ide-status-bar__seg" title="AIVSS aggregate">
+      <span class="ide-status-bar__icon" aria-hidden="true">▦</span>
+      <span class="ide-status-bar__text">aivss <span data-live="aivss-total">{{ aivss_label }}</span></span>
+    </span>
+    <span class="ide-status-bar__seg" title="ASI coverage">
+      <span class="ide-status-bar__icon" aria-hidden="true">◇</span>
+      <span class="ide-status-bar__text">cov <span data-live="asi-covered">{{ asi_covered }} / 10</span></span>
+    </span>
+    <span class="ide-status-bar__seg" title="Spend so far">
+      <span class="ide-status-bar__icon" aria-hidden="true">$</span>
+      <span class="ide-status-bar__text" data-live="usd">{{ usd_label }}</span>
+    </span>
+    <span class="ide-status-bar__seg" title="Active file">
+      <span class="ide-status-bar__icon" aria-hidden="true">›</span>
+      <span class="ide-status-bar__text" data-ide-status-selection>README.md</span>
+    </span>
+    <span class="ide-status-bar__seg" title="Elapsed wall-clock">
+      <span class="ide-status-bar__icon" aria-hidden="true">⏱</span>
+      <span class="ide-status-bar__text" data-live="elapsed">{{ elapsed_label }}</span>
+    </span>
+    <button type="button"
+            class="ide-status-bar__seg ide-status-bar__seg--theme"
+            data-ide-theme-toggle
+            title="Switch theme">
+      <span class="ide-status-bar__icon" aria-hidden="true">◐</span>
+      <span class="ide-status-bar__text">theme: <strong>{{ active_theme if active_theme else 'ide' }}</strong></span>
+    </button>
+    <span class="ide-status-bar__seg ide-status-bar__seg--version" title="Package version">
+      v{{ package_version }}
+    </span>
+  </div>
+</footer>

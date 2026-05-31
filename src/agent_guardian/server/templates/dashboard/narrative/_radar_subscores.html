@@ -1,0 +1,58 @@
+{# Inline Chart.js radar — ASI sub-scores per category.
+
+   Reads payload data from a `data-chart` JSON attribute so this partial is
+   trivial to render in tests without a JS runtime. The actual chart is
+   mounted by narrative_charts.js on DOMContentLoaded; canvas mirrors the
+   data in an offscreen <table> for screen-reader access (AC: a11y).
+#}
+{% set _radar_rows = [] %}
+{% for r in asi_rows %}
+  {% if not r.is_pending %}
+    {% set _ = _radar_rows.append({'label': r.name, 'value': r.score_pct, 'code': r.code}) %}
+  {% endif %}
+{% endfor %}
+{# Fallback: if every row is pending (pre-run), seed all to 0 so the radar
+   still renders an empty shape instead of disappearing. #}
+{% if not _radar_rows %}
+  {% for r in asi_rows %}
+    {% set _ = _radar_rows.append({'label': r.name, 'value': 0, 'code': r.code}) %}
+  {% endfor %}
+{% endif %}
+{% set _radar_payload = {
+  'labels': _radar_rows | map(attribute='label') | list,
+  'values': _radar_rows | map(attribute='value') | list,
+  'codes': _radar_rows | map(attribute='code') | list,
+} %}
+<figure class="nr-chart nr-chart--radar" aria-labelledby="nr-chart-radar-caption">
+  <figcaption id="nr-chart-radar-caption">
+    <span class="nr-chart__eyebrow">FIG. 1</span>
+    <h3 class="nr-chart__title">Adversarial Surface Index — per category</h3>
+    <p class="nr-chart__lede">
+      Higher is stronger. 100 = no successful exploit in this category;
+      0 = every probe in this category landed.
+    </p>
+  </figcaption>
+  <div class="nr-chart__canvas-wrap">
+    <canvas id="nr-asi-radar"
+            class="nr-chart__canvas"
+            role="img"
+            aria-label="ASI sub-scores by category, radar chart"
+            data-chart='{{ _radar_payload | tojson }}'></canvas>
+  </div>
+  <details class="nr-chart__data-toggle">
+    <summary>Show data table</summary>
+    <table class="nr-chart__data-table">
+      <thead>
+        <tr><th scope="col">Category</th><th scope="col">Score</th></tr>
+      </thead>
+      <tbody>
+        {% for row in _radar_rows %}
+          <tr>
+            <th scope="row">{{ row.label }}</th>
+            <td>{{ row.value }} / 100</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</figure>

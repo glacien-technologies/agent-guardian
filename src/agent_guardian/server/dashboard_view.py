@@ -13,25 +13,114 @@ view-model assembly out of the route handler means:
 The builder works for both completed scans (``Scan`` instance) and in-flight
 scans (``Scan = None``, ``is_running=True``) — every field gracefully degrades
 to a placeholder when the data isn't ready yet.
+
+Theme switcher (QA-020)
+-----------------------
+
+The :func:`resolve_theme` helper decides which Jinja root template the route
+hands the shared view-model to. The view-model itself is theme-agnostic — all
+four themes consume the exact same payload dict produced by
+:func:`build_dashboard_context`. The route calls :func:`resolve_theme` to pick
+between the four locked template paths:
+
+* ``editorial`` → ``dashboard/scan_detail.html`` (UNCHANGED current design)
+* ``mission``   → ``dashboard/mission/layout.html``
+* ``narrative`` → ``dashboard/narrative/layout.html``
+* ``ide``       → ``dashboard/ide/layout.html``
+
+Precedence is: query param ``?theme=`` > ``$AGENT_GUARDIAN_DASHBOARD_THEME``
+env var > ``editorial`` default. Invalid theme names (including empty strings,
+typos, or names not in the locked set) fall through silently to the next
+priority — never raise. This guarantees a request without ``?theme=`` is
+byte-for-byte equivalent to the pre-QA-020 behaviour.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import urllib.parse
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
 
 __all__ = [
+    "AGENT_GUARDIAN_DASHBOARD_THEME_ENV",
+    "DASHBOARD_THEMES",
+    "DASHBOARD_THEME_DEFAULT",
+    "DASHBOARD_THEME_TEMPLATES",
     "DashboardContext",
     "build_dashboard_context",
     "resolve_locality",
+    "resolve_theme",
+    "resolve_theme_from_env",
 ]
+
+
+# Theme registry — single source of truth for slugs, env-var name, default,
+# and template path. Routes import these constants; never hard-code a slug.
+AGENT_GUARDIAN_DASHBOARD_THEME_ENV: Final[str] = "AGENT_GUARDIAN_DASHBOARD_THEME"
+DASHBOARD_THEME_DEFAULT: Final[str] = "editorial"
+DASHBOARD_THEMES: Final[tuple[str, ...]] = (
+    "editorial",
+    "mission",
+    "narrative",
+    "ide",
+)
+DASHBOARD_THEME_TEMPLATES: Final[Mapping[str, str]] = {
+    "editorial": "dashboard/scan_detail.html",
+    "mission": "dashboard/mission/layout.html",
+    "narrative": "dashboard/narrative/layout.html",
+    "ide": "dashboard/ide/layout.html",
+}
+
+
+def resolve_theme(
+    query_theme: str | None,
+    env_value: str | None,
+) -> str:
+    """Resolve the active dashboard theme slug.
+
+    Precedence (LOCKED — do not reorder):
+
+    1. ``query_theme`` — the ``?theme=`` query-string parameter from the
+       incoming request. ``None`` means the query string was absent.
+    2. ``env_value`` — the value of ``$AGENT_GUARDIAN_DASHBOARD_THEME`` (or
+       any caller-supplied operator-default). ``None`` means unset.
+    3. :data:`DASHBOARD_THEME_DEFAULT` (``"editorial"``).
+
+    Invalid theme names (not in :data:`DASHBOARD_THEMES`, including the empty
+    string and any whitespace-only value) fall through *silently* to the next
+    priority — never raise. The caller can rely on the return value always
+    being one of :data:`DASHBOARD_THEMES`.
+
+    The function is pure (no ``os.environ`` reads, no I/O) so the route can
+    test it in isolation and the env-var resolution is the route's
+    responsibility. A small convenience wrapper, :func:`resolve_theme_from_env`,
+    handles the env lookup for production callers.
+    """
+    candidates: tuple[str | None, ...] = (query_theme, env_value)
+    for raw in candidates:
+        if raw is None:
+            continue
+        normalised = raw.strip().lower()
+        if normalised in DASHBOARD_THEMES:
+            return normalised
+    return DASHBOARD_THEME_DEFAULT
+
+
+def resolve_theme_from_env(query_theme: str | None) -> str:
+    """Production helper — reads the env var, then delegates to :func:`resolve_theme`.
+
+    Kept separate from :func:`resolve_theme` so unit tests can drive the pure
+    function without monkeypatching ``os.environ``.
+    """
+    env_raw = os.environ.get(AGENT_GUARDIAN_DASHBOARD_THEME_ENV)
+    return resolve_theme(query_theme, env_raw)
 
 
 # ASI row metadata — subtitle + weight (matches the saved design).

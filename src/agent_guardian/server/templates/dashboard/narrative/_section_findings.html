@@ -1,0 +1,162 @@
+{# Findings section — collapsible <details> with one card per finding.
+
+   Each card is the core narrative unit:
+     - Header strip: severity pill + finding id + ASI category tag
+     - Headline: one-line plain-English summary from finding.summary
+     - Evidence accordion (nested <details>):
+         · Probe metadata
+         · MITRE ATLAS techniques
+         · Open in other themes (deep links carry ?theme=)
+     - Footer: created-at timestamp + per-card permalink
+
+   Findings are grouped by severity. The sev anchor IDs match the bar-chart
+   onClick handler in narrative_charts.js (#nr-sev-critical, etc.).
+#}
+{% set _by_sev = {'critical': [], 'high': [], 'medium': [], 'low': []} %}
+{% for f in findings_page %}
+  {% set _bucket = _by_sev.get(f.severity_class) %}
+  {% if _bucket is not none %}
+    {% set _ = _bucket.append(f) %}
+  {% endif %}
+{% endfor %}
+
+<details class="nr-section" id="nr-section-findings"{% if findings_total > 0 %} open{% endif %}>
+  <summary class="nr-section__summary">
+    <span class="nr-section__chevron" aria-hidden="true">▸</span>
+    <span class="nr-section__title">Findings</span>
+    <span class="nr-section__badge" data-live="findings">{{ findings_total }}</span>
+  </summary>
+  <div class="nr-section__body">
+    {% if findings_total == 0 %}
+      <div class="nr-empty-state">
+        <p class="nr-empty-state__lede">
+          {% if is_running %}
+            <em>The swarm is still landing probes.</em> Findings will appear
+            here as soon as the evaluator agent issues a verdict.
+          {% else %}
+            <em>No findings surfaced.</em> The agent held clean across every
+            probe the swarm dispatched. The reproducibility receipt at the
+            bottom locks the exact configuration for re-running this scan.
+          {% endif %}
+        </p>
+      </div>
+    {% else %}
+      <p class="nr-section__lede">
+        Each card below shows the swarm's verdict, the probe that surfaced
+        it, and the ASI category it maps to. Open a card to drill into the
+        evidence; click <em>Open in IDE</em> to read the raw trace.
+      </p>
+
+      {% for _sev_key, _sev_items in [('critical', _by_sev.critical),
+                                       ('high', _by_sev.high),
+                                       ('medium', _by_sev.medium),
+                                       ('low', _by_sev.low)] %}
+        {% if _sev_items %}
+          <section class="nr-sev-bucket" id="nr-sev-{{ _sev_key }}">
+            <h3 class="nr-sev-bucket__title">
+              <span class="nr-sev-pill nr-sev-pill--{{ _sev_key }}">
+                <span class="nr-sev-pill__dot" aria-hidden="true"></span>
+                {{ _sev_key | upper }}
+              </span>
+              <span class="nr-sev-bucket__count">
+                {{ _sev_items | length }} finding{% if _sev_items | length != 1 %}s{% endif %}
+              </span>
+            </h3>
+            {% for f in _sev_items %}
+              <article class="nr-finding" id="nr-finding-{{ f.id }}">
+                <header class="nr-finding__header">
+                  <span class="nr-sev-pill nr-sev-pill--{{ f.severity_class }}"
+                        aria-label="{{ f.severity_label }} severity">
+                    <span class="nr-sev-pill__dot" aria-hidden="true"></span>
+                    {{ f.severity_label }}
+                  </span>
+                  <code class="nr-finding__id">{{ f.id }}</code>
+                  <span class="nr-finding__asi">
+                    <span class="nr-finding__asi-label">ASI</span>
+                    <span class="nr-mono-inline">{{ f.asi_code }}</span>
+                  </span>
+                </header>
+                <h4 class="nr-finding__headline">{{ f.summary }}</h4>
+                <dl class="nr-finding__meta">
+                  <div class="nr-finding__meta-cell">
+                    <dt>Probe</dt>
+                    <dd><span class="nr-mono-inline">{{ f.probe_id }}</span></dd>
+                  </div>
+                  <div class="nr-finding__meta-cell">
+                    <dt>CSA</dt>
+                    <dd><span class="nr-mono-inline">{{ f.csa_code }}</span></dd>
+                  </div>
+                  <div class="nr-finding__meta-cell">
+                    <dt>Created</dt>
+                    <dd><span class="nr-mono-inline">{{ f.created_label }}</span></dd>
+                  </div>
+                </dl>
+
+                <details class="nr-finding__evidence">
+                  <summary class="nr-finding__evidence-summary">
+                    Evidence trail
+                  </summary>
+                  <div class="nr-finding__evidence-body">
+                    {% if f.atlas %}
+                      <p class="nr-finding__evidence-label">MITRE ATLAS</p>
+                      <ul class="nr-finding__atlas" role="list">
+                        {% for technique in f.atlas %}
+                          <li><span class="nr-mono-inline">{{ technique }}</span></li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                    <p class="nr-finding__evidence-label">Probe identifier</p>
+                    <pre class="nr-finding__pre"><code>{{ f.probe_id }}</code></pre>
+                    <p class="nr-finding__evidence-label">Reference</p>
+                    <ul class="nr-finding__refs" role="list">
+                      <li>
+                        <a class="nr-link" href="/scans/{{ scan_id }}?theme=ide#finding-{{ f.id }}">
+                          Open in IDE / Terminal theme
+                        </a>
+                      </li>
+                      <li>
+                        <a class="nr-link" href="/scans/{{ scan_id }}?theme=mission#finding-{{ f.id }}">
+                          Open in Mission Control theme
+                        </a>
+                      </li>
+                    </ul>
+                  </div>
+                </details>
+
+                <footer class="nr-finding__footer">
+                  <span class="nr-finding__seed">
+                    seed <span class="nr-mono-inline">{{ rng_seed }}</span>
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span class="nr-finding__created">{{ f.created_label }}</span>
+                  <span aria-hidden="true">·</span>
+                  <a class="nr-link nr-finding__permalink" href="#nr-finding-{{ f.id }}">
+                    permalink
+                  </a>
+                </footer>
+              </article>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% endfor %}
+
+      {% if pagination and pagination.total_pages > 1 %}
+        <nav class="nr-pagination" aria-label="Findings pagination">
+          <span class="nr-pagination__status">
+            Showing {{ pagination.start }}–{{ pagination.end }} of {{ pagination.total }}
+          </span>
+          <ol class="nr-pagination__list" role="list">
+            {% for p in pagination.pages %}
+              <li>
+                <a class="nr-pagination__page {% if p == pagination.current %}is-active{% endif %}"
+                   href="?page={{ p }}&theme=narrative">
+                  {{ p }}
+                </a>
+              </li>
+            {% endfor %}
+          </ol>
+        </nav>
+      {% endif %}
+    {% endif %}
+  </div>
+</details>

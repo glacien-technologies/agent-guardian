@@ -1,0 +1,44 @@
+{# Mission Control — Agent sparkline list (left rail).
+
+   Derived from the 10 ASI breakdown rows — each ASI category in the swarm has
+   a "specialist agent" identity (Goal Hijack agent, Tool Misuse agent, …).
+   Rows show:
+     - Severity-tinted status dot
+     - Agent name (humanised ASI title)
+     - Score badge (mono, tabular-nums)
+     - Sparkline canvas (mounted by mission_charts.js)
+
+   Click an agent row to filter the findings table to that agent / ASI. The
+   row carries data-agent-asi="ASI01" so the table filter JS can pick it up.
+#}
+<aside class="mission__agent-panel" aria-label="Agent specialists">
+  <header class="mission__agent-panel-head">
+    <span class="mission__agent-panel-eyebrow">Agents</span>
+    <span class="mission__agent-panel-count">
+      {{ asi_rows | length }} active
+    </span>
+  </header>
+
+  <ol class="mission__agent-list" data-mission-agent-list>
+    {% for row in asi_rows %}
+    <li class="mission__agent-row{% if row.is_attention %} is-attention{% endif %}{% if row.is_pending %} is-pending{% endif %}"
+        data-agent-asi="{{ row.code }}"
+        data-agent-score="{{ row.score_label }}"
+        tabindex="0"
+        role="button"
+        aria-label="Filter findings to {{ row.name }} agent">
+      <span class="mission__agent-dot mission__agent-dot--{{ row.status_class }}"
+            aria-hidden="true"></span>
+      <span class="mission__agent-meta">
+        <span class="mission__agent-name">{{ row.name | lower | replace(' ', '_') }}</span>
+        <span class="mission__agent-sub">{{ row.code }} &middot; {{ row.subtitle }}</span>
+      </span>
+      <span class="mission__agent-score">{{ row.score_label }}</span>
+      <canvas class="mission__agent-spark"
+              data-agent-spark="{{ row.code }}"
+              data-agent-status="{{ row.status_class }}"
+              aria-hidden="true"></canvas>
+    </li>
+    {% endfor %}
+  </ol>
+</aside>

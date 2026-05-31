@@ -1,0 +1,26 @@
+{#
+  Breadcrumb — 32px row above the tab strip. Default selection is
+  README.md so the visible chain is `scan_<id> › README.md`. The trail
+  is rebuilt by `ide_interactive.js` whenever the active tab changes
+  (via the `data-ide-breadcrumb` ol).
+
+  Separator glyph is U+203A `›` styled in `--ide-fg-subtle`. Each
+  segment is a real <a> so right-click "copy link" still works.
+#}
+<nav class="ide-breadcrumb" aria-label="Breadcrumb">
+  <ol class="ide-breadcrumb__list" data-ide-breadcrumb>
+    <li class="ide-breadcrumb__item">
+      <a class="ide-breadcrumb__seg"
+         href="?theme=ide&file=README.md"
+         data-tree-path="README.md">scan_{{ scan_id }}</a>
+    </li>
+    <li class="ide-breadcrumb__item" aria-hidden="true">
+      <span class="ide-breadcrumb__sep">›</span>
+    </li>
+    <li class="ide-breadcrumb__item ide-breadcrumb__item--active"
+        aria-current="page">
+      <span class="ide-breadcrumb__seg ide-breadcrumb__seg--active"
+            data-ide-breadcrumb-last>README.md</span>
+    </li>
+  </ol>
+</nav>

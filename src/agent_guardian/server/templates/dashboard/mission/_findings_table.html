@@ -1,0 +1,126 @@
+{# Mission Control — findings table.
+
+   Sentry Issues / Vercel observability style:
+     - Filter chips above (all / crit / high / med / low) with counts
+     - Sortable columns (id / severity / agent / target / last seen / trend)
+     - Row click → slide-over with full finding detail
+     - Severity chip + ASI / probe code tags inline
+
+   Filter chip state is purely client-side (mission_charts.js) and round-trips
+   the URL ?sev= param so a shared link reproduces the filtered view.
+
+   The <ol data-live="findings-list"> wrapper mirrors the Editorial baseline
+   so the existing SSE patcher can replace the table contents on new findings.
+#}
+<section class="mission__findings" id="mission-findings" aria-label="Findings table">
+
+  <header class="mission__findings-head">
+    <div>
+      <span class="mission__findings-eyebrow">All findings</span>
+      <h2 class="mission__findings-title">
+        <span data-live="findings-total">{{ findings_total }}</span>
+        findings &middot; severity-sorted
+      </h2>
+    </div>
+    <div class="mission__chip-row" role="toolbar" aria-label="Severity filter">
+      <button type="button"
+              class="mission__chip mission__chip--all is-active"
+              data-mission-filter="all">
+        all <span class="mission__chip-count">{{ findings_total }}</span>
+      </button>
+      <button type="button"
+              class="mission__chip mission__chip--crit"
+              data-mission-filter="critical">
+        crit <span class="mission__chip-count" data-live="critical">{{ counts.critical }}</span>
+      </button>
+      <button type="button"
+              class="mission__chip mission__chip--high"
+              data-mission-filter="high">
+        high <span class="mission__chip-count" data-live="high">{{ counts.high }}</span>
+      </button>
+      <button type="button"
+              class="mission__chip mission__chip--med"
+              data-mission-filter="medium">
+        med <span class="mission__chip-count" data-live="medium">{{ counts.medium }}</span>
+      </button>
+      <button type="button"
+              class="mission__chip mission__chip--low"
+              data-mission-filter="low">
+        low <span class="mission__chip-count" data-live="low">{{ counts.low }}</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="mission__table-wrap">
+    <table class="mission__table" role="table">
+      <thead>
+        <tr>
+          <th scope="col" class="mission__th mission__th--id">ID</th>
+          <th scope="col" class="mission__th mission__th--sev">Severity</th>
+          <th scope="col" class="mission__th mission__th--agent">Agent / ASI</th>
+          <th scope="col" class="mission__th mission__th--probe">Probe</th>
+          <th scope="col" class="mission__th mission__th--summary">Summary</th>
+          <th scope="col" class="mission__th mission__th--time">Last seen</th>
+        </tr>
+      </thead>
+      <tbody class="mission__tbody" data-live="findings-list" data-mission-tbody>
+        {% if findings_page %}
+          {% for f in findings_page %}
+          <tr class="mission__row mission__row--{{ f.severity_class }}"
+              data-finding-id="{{ f.id }}"
+              data-severity="{{ f.severity_class }}"
+              data-asi="{{ f.asi_code }}"
+              tabindex="0">
+            <td class="mission__td mission__td--id">
+              <code class="mission__finding-id">{{ f.id }}</code>
+            </td>
+            <td class="mission__td mission__td--sev">
+              <span class="mission-pill mission-pill--{{ f.severity_class }}">
+                {{ f.severity_label }}
+              </span>
+            </td>
+            <td class="mission__td mission__td--agent">
+              <code class="mission__asi-tag">{{ f.asi_code }}</code>
+              <span class="mission__csa-tag">{{ f.csa_code }}</span>
+            </td>
+            <td class="mission__td mission__td--probe">
+              <code class="mission__probe-id">{{ f.probe_id }}</code>
+            </td>
+            <td class="mission__td mission__td--summary">{{ f.summary }}</td>
+            <td class="mission__td mission__td--time">
+              <code>{{ f.created_label }}</code>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="mission__row mission__row--empty">
+            <td class="mission__td mission__td--empty" colspan="6">
+              {% if is_running %}
+                <span class="mission__empty-spinner" aria-hidden="true"></span>
+                awaiting first finding &mdash; swarm probing target
+              {% else %}
+                no findings recorded &mdash; clean scan
+              {% endif %}
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.total_pages > 1 %}
+  <nav class="mission__pager" aria-label="Findings pagination">
+    <span class="mission__pager-range">
+      <code>{{ pagination.start }}&ndash;{{ pagination.end }}</code> of
+      <code>{{ pagination.total }}</code>
+    </span>
+    <div class="mission__pager-buttons">
+      {% for p in pagination.pages %}
+      <a class="mission__pager-btn{% if p == pagination.current %} is-active{% endif %}"
+         href="?theme=mission&amp;page={{ p }}">{{ p }}</a>
+      {% endfor %}
+    </div>
+  </nav>
+  {% endif %}
+
+</section>

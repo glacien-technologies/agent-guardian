@@ -1,0 +1,56 @@
+{# Mission Control — center chart pane.
+
+   Two stacked panels:
+     - TOP    Findings-per-second time-series (stacked area by severity)
+     - BOTTOM ASI horizontal-bar chart (10 axes, severity-tinted by score)
+
+   The canvases are mounted by mission_charts.js on DOMContentLoaded. Series
+   data is read from the #mission-chart-data JSON island in layout.html.
+#}
+<section class="mission__charts" aria-label="Findings + ASI charts">
+
+  {# ---- Time-series ---- #}
+  <article class="mission__chart-pane mission__chart-pane--ts">
+    <header class="mission__chart-head">
+      <div>
+        <span class="mission__chart-eyebrow">Findings over time</span>
+        <h2 class="mission__chart-title">findings/sec, stacked by severity</h2>
+      </div>
+      <div class="mission__chart-legend">
+        <span class="mission__legend-key mission__legend-key--crit">crit</span>
+        <span class="mission__legend-key mission__legend-key--high">high</span>
+        <span class="mission__legend-key mission__legend-key--med">med</span>
+        <span class="mission__legend-key mission__legend-key--low">low</span>
+      </div>
+    </header>
+    <div class="mission__chart-canvas-wrap">
+      <canvas id="mission-timeseries"
+              data-mission-chart="timeseries"
+              role="img"
+              aria-label="Findings per second time-series, stacked by severity"></canvas>
+    </div>
+  </article>
+
+  {# ---- ASI bar ---- #}
+  <article class="mission__chart-pane mission__chart-pane--asi">
+    <header class="mission__chart-head">
+      <div>
+        <span class="mission__chart-eyebrow">ASI breakdown</span>
+        <h2 class="mission__chart-title">10 axes &middot; severity-tinted by score</h2>
+      </div>
+      <div class="mission__chart-legend">
+        <span class="mission__legend-key mission__legend-key--crit">&le;30 crit</span>
+        <span class="mission__legend-key mission__legend-key--high">&le;50 high</span>
+        <span class="mission__legend-key mission__legend-key--med">&le;70 med</span>
+        <span class="mission__legend-key mission__legend-key--pass">&gt;70 pass</span>
+      </div>
+    </header>
+    <div class="mission__chart-canvas-wrap">
+      <canvas id="mission-asi-bar"
+              data-mission-chart="asi-bar"
+              role="img"
+              aria-label="ASI 10-axis breakdown horizontal bar chart"></canvas>
+    </div>
+  </article>
+
+</section>

@@ -1,0 +1,85 @@
+{# Reconnaissance section — collapsible <details> with the target metadata,
+   adapter info, and ASI radar chart inline. Notion-style toggle.
+#}
+<details class="nr-section" id="nr-section-recon"{% if findings_total == 0 %} open{% endif %}>
+  <summary class="nr-section__summary">
+    <span class="nr-section__chevron" aria-hidden="true">▸</span>
+    <span class="nr-section__title">Reconnaissance</span>
+    <span class="nr-section__badge">{{ asi_covered }}/10 ASI covered</span>
+  </summary>
+  <div class="nr-section__body">
+    <p class="nr-section__lede">
+      Before the swarm began probing, the recon agent fingerprinted the
+      target adapter, tier policy, and probe library. The numbers below
+      define the surface the scan exercised.
+    </p>
+
+    <dl class="nr-recon-grid">
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Target</dt>
+        <dd class="nr-recon-grid__def" data-live="target_ref">
+          <span class="nr-mono-inline">{{ target_ref }}</span>
+        </dd>
+      </div>
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Adapter</dt>
+        <dd class="nr-recon-grid__def">{{ adapter_label }}</dd>
+      </div>
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Tier</dt>
+        <dd class="nr-recon-grid__def">{{ tier_label }}</dd>
+      </div>
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Commander</dt>
+        <dd class="nr-recon-grid__def"><span class="nr-mono-inline">{{ commander_model }}</span></dd>
+      </div>
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Attacker</dt>
+        <dd class="nr-recon-grid__def"><span class="nr-mono-inline">{{ attacker_model }}</span></dd>
+      </div>
+      <div class="nr-recon-grid__cell">
+        <dt class="nr-recon-grid__term">Evaluator</dt>
+        <dd class="nr-recon-grid__def"><span class="nr-mono-inline">{{ evaluator_model }}</span></dd>
+      </div>
+    </dl>
+  </div>
+</details>
+
+<details class="nr-section" id="nr-section-asi" open>
+  <summary class="nr-section__summary">
+    <span class="nr-section__chevron" aria-hidden="true">▸</span>
+    <span class="nr-section__title">ASI breakdown</span>
+    <span class="nr-section__badge">{{ asi_rows | length }} categories</span>
+  </summary>
+  <div class="nr-section__body">
+    <p class="nr-section__lede">
+      Higher is stronger. Scores below 70 indicate the agent handled fewer
+      than 70&thinsp;% of probes in that category safely. The radar gives
+      a per-category shape; the list below drills into each one.
+    </p>
+    {% include "dashboard/narrative/_radar_subscores.html" %}
+
+    <ol class="nr-asi-list" role="list">
+      {% for row in asi_rows %}
+        <li class="nr-asi-list__item {% if row.is_attention %}nr-asi-list__item--attention{% endif %}">
+          <span class="nr-asi-list__chevron" aria-hidden="true">▸</span>
+          <span class="nr-asi-list__code">{{ row.code }}</span>
+          <span class="nr-asi-list__name">{{ row.name }}</span>
+          <span class="nr-asi-list__score" data-live="asi-{{ row.code }}-score">
+            {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
+          </span>
+          <span class="nr-asi-list__bar" aria-hidden="true">
+            <span class="nr-asi-list__fill" style="width: {{ row.score_pct }}%;"></span>
+          </span>
+          <span class="nr-asi-list__count">
+            {% set _row_findings = (row.findings.critical | default(0))
+                + (row.findings.high | default(0))
+                + (row.findings.medium | default(0))
+                + (row.findings.low | default(0)) %}
+            {{ _row_findings }} finding{% if _row_findings != 1 %}s{% endif %}
+          </span>
+        </li>
+      {% endfor %}
+    </ol>
+  </div>
+</details>
