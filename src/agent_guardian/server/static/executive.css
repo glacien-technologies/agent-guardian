@@ -63,7 +63,7 @@
   --exec-sev-info: #0ea5e9;
 
   /* Layout primitives */
-  --exec-shell-max: 1200px;
+  --exec-shell-max: 1600px;
   --exec-gutter: 32px;
   --exec-pad-x: 32px;
   --exec-pad-y: 32px;
@@ -326,22 +326,24 @@ body.exec-body {
   margin: 0 auto;
 }
 
-/* Per-tab max-width — Overview keeps a narrative editorial column
- * (960px) for the AIVSS hero + two-col rhythm, while data-dense tabs
- * (Findings / Probes / Agents / Logs) widen to 1440px so finding cards,
- * probe rows, and the agents table have room to breathe.
+/* Per-tab max-width — every tab widens to 1600px so the central content
+ * uses the available screen real-estate. Earlier revisions kept Overview
+ * narrow (960px Narrative editorial column) but the side-by-side
+ * Findings + Radar pair below the hero needs horizontal room to read,
+ * and the operator feedback on 2026-05-31 was unambiguous: "increase
+ * the width of the central component in all the pages". The 1600px cap
+ * is large enough to avoid huge left/right whitespace on standard
+ * laptop / desktop widths while still keeping line-length tolerable.
  *
  * IDs intentionally use higher specificity than the base [role="tabpanel"]
  * rule above, so no !important is required.
  */
-#tabpanel-overview {
-  max-width: 960px;
-}
+#tabpanel-overview,
 #tabpanel-findings,
 #tabpanel-probes,
 #tabpanel-agents,
 #tabpanel-logs {
-  max-width: 1440px;
+  max-width: 1600px;
 }
 
 /* Cards / rows inside the data-dense tabs span the full panel
@@ -543,20 +545,41 @@ body.exec-body {
 }
 /* ============================================================
  * Side-by-side Overview charts (FIG 1 Findings + FIG 2 ASI Radar)
+ *
+ * Both cards must render at the SAME height — the FIG 1 horizontal-bar
+ * card was visually short next to the FIG 2 radar (2026-05-31 operator
+ * feedback). Grid `align-items: stretch` (default) handles equal heights
+ * at the column level; the per-card flex column makes the canvas wrap
+ * grow to fill any leftover space below the figcaption + above the data
+ * toggle. The radar drops its aspectRatio:1 lock in executive_charts.js
+ * so it sizes to the container instead of forcing a square.
  * ============================================================ */
 .exec-overview-twocol {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1.5rem;
   margin: 0 0 2rem 0;
+  align-items: stretch;
 }
-.exec-overview-twocol .exec-chart { margin: 0; }
-/* Ensure Chart.js canvases respect their narrower two-col container.
-   Severity bar uses maintainAspectRatio:false → needs an explicit
-   wrapper height. Radar uses aspectRatio:1 → square via JS. */
+.exec-overview-twocol .exec-chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.exec-overview-twocol .exec-chart__canvas-wrap {
+  flex: 1 1 auto;
+  min-height: 360px;
+  display: flex;
+  align-items: stretch;
+}
 .exec-overview-twocol .exec-chart__canvas-wrap--bar {
-  min-height: 240px;
-  height: 240px;
+  min-height: 360px;
+  height: auto;
+}
+.exec-overview-twocol .exec-chart__canvas {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none;
 }
 @media (max-width: 1024px) {
   .exec-overview-twocol { grid-template-columns: 1fr; }

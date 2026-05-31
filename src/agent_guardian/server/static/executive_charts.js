@@ -113,8 +113,13 @@
       },
       options: {
         responsive: true,
-        maintainAspectRatio: true,
-        aspectRatio: 1,
+        // Drop aspectRatio:1 (was forcing a square) so the radar fills
+        // the height of its grid cell — the side-by-side Overview pair
+        // (FIG 1 bar + FIG 2 radar) must be visually balanced. The CSS
+        // .exec-overview-twocol stretches both cards equally; this lets
+        // the radar respect that stretch instead of locking itself to a
+        // square.
+        maintainAspectRatio: false,
         elements: { line: { borderWidth: 2 } },
         scales: {
           r: {
