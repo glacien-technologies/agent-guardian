@@ -1,0 +1,5 @@
+# Reference / design bundle — not part of the published doc tree.
+_design/
+
+# Phase-2/3 placeholder slots still in scaffold state.
+# (Remove these lines as each page lands in BuildP2/P3.)

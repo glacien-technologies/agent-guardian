@@ -1,0 +1,152 @@
+---
+title: "AgentGuardian"
+sidebarTitle: "Introduction"
+description: "Open-source adversarial-swarm framework for red-teaming LLM agents. Eleven specialist attackers, a deterministic AIVSS score, OWASP ASI 2026 / MITRE ATLAS v5.4.0 / CSA Agentic-RT aligned."
+icon: "shield-check"
+---
+
+# Red team your AI agents before attackers do.
+
+AgentGuardian is an open-source toolkit for testing prompt injection, tool abuse, RAG poisoning, memory attacks, and multi-agent vulnerabilities in AI systems. It deploys an adversarial swarm of eleven specialist attackers against your LLM agent and returns a deterministic 0–100 **AIVSS score** aligned with the OWASP Top 10 for Agentic Applications 2026, MITRE ATLAS v5.4.0, and the CSA Agentic AI Red Teaming Guide.
+
+<Info>
+  **AIVSS** is AgentGuardian's deterministic Agentic-AI Vulnerability Scoring System: a reproducible 0–100 score (higher is safer) derived from per-finding severity, target-tier weighting, and ASI sub-scores. Same seed, same target, same score — every time.
+</Info>
+
+## What AgentGuardian does
+
+Single-chain red-teaming tools send one prompt at a time. Production agents compose tools, hold memory, talk to other agents, and run real code — and that surface needs eleven attackers working in concert.
+
+AgentGuardian runs a **Swarm Commander LLM** that dispatches up to fourteen parallel attacker agents — one reconnaissance agent maps your target, then ten ASI-aligned specialists attack concurrently. Every finding is triple-tagged with OWASP ASI, MITRE ATLAS, and CSA Agentic-RT categories, then composed into a single signed report.
+
+## Who it's for
+
+- **Agent developers** shipping LangGraph, CrewAI, AutoGen, OpenAI Agents SDK, Strands, or Google ADK applications who need a pre-production red-team before the agent touches a real user.
+- **Security engineers** running PR-gate checks and continuous assurance on agent code, with SARIF findings landing inline in GitHub's Security tab.
+- **MCP server authors** and **tool-surface owners** who need to know which of their tools can be weaponised before publishing.
+- **Compliance and audit teams** who need a signed evidence pack (HMAC + Ed25519, optional Sigstore) tied to a reproducible scan.
+
+## What it tests
+
+96 probes across the 10 OWASP Top 10 for Agentic Applications 2026 categories. Every probe is a YAML file under `src/agent_guardian/probes/asi*/` — versioned, golden-tested, and triple-framework-tagged.
+
+<CardGroup cols={2}>
+  <Card title="ASI01 — Goal Hijack" icon="message-square-warning" href="/attacks/prompt-injection">
+    Direct and indirect prompt injection that overrides the agent's system goal. 9 probes covering role-swap, echoleak zero-click, tool-output IPI, and dialect roleplay.
+  </Card>
+  <Card title="ASI02 — Tool Misuse" icon="wrench" href="/attacks/tool-abuse">
+    Argument injection, chain exfiltration, parameter smuggling, recursion bombs. 8 probes — the eight ways an agent's tool surface gets weaponised.
+  </Card>
+  <Card title="ASI03 — Privilege Abuse" icon="key-round">
+    Escalation through inherited credentials, role confusion, and authority misattribution. 9 probes.
+  </Card>
+  <Card title="ASI04 — Supply Chain" icon="boxes">
+    Poisoned plugins, malicious adapters, dependency-confusion routes into the agent. 8 probes.
+  </Card>
+  <Card title="ASI05 — Code Execution" icon="terminal">
+    Unauthorised code execution through `exec`/`eval` tools, sandbox escapes, and code-as-input vectors. 8 probes.
+  </Card>
+  <Card title="ASI06 — Memory Poisoning" icon="database" href="/attacks/rag-poisoning">
+    RAG corpus inject, persistent triggers, embedding collisions, cross-tenant vector bleed. 13 probes covering both memory-poisoning (MP) and HITL failure modes.
+  </Card>
+  <Card title="ASI07 — Agent-to-Agent (A2A)" icon="users-round">
+    Compromise that crosses an A2A boundary — a delegated sub-agent that follows attacker-supplied instructions. 8 probes.
+  </Card>
+  <Card title="ASI08 — Cascading Failures" icon="git-fork">
+    Multi-step blast radius: one bad tool call that opens the next, that opens the next. 8 probes.
+  </Card>
+  <Card title="ASI09 — Trust Exploitation" icon="badge-alert">
+    Misuse of inherited trust — user impersonation, identity leak, output exfiltration via trusted channels. 17 probes (the largest family).
+  </Card>
+  <Card title="ASI10 — Rogue Agents (drift)" icon="compass">
+    Goal-drift over long sessions, persona breaks, behavioural divergence from the system prompt. 8 probes.
+  </Card>
+</CardGroup>
+
+## What it generates
+
+Every scan persists a canonical `scan.json` at `~/.agentguardian/scans/<scan_id>/scan.json` (HMAC- and Ed25519-signed), plus your chosen report format at `--output-path`.
+
+| Format | Flag | When to use |
+| --- | --- | --- |
+| JSON | `--output json` | Programmatic post-processing, dashboards, custom gates. |
+| SARIF | `--output sarif` | GitHub Code Scanning — auto-upload via `codeql-action/upload-sarif@v3`. |
+| JUnit | `--output junit` | Any CI runner that already parses test results. |
+| Markdown | `--output md` | PR comments, RFCs, internal write-ups. |
+| PDF | `--output pdf` | Auditor / stakeholder share-out (WeasyPrint, ReportLab fallback). |
+
+For evidence retention, `--bundle ./evidence/` produces a `bundle_<scan_id>/` tree with the SARIF, the PoV (proof-of-vulnerability) replay artefacts, raw evidence, and a `manifest.json`.
+
+## When to use this
+
+- **Pre-production agent red-team** before the first real user touches it.
+- **PR gate** on every change to system prompts, tool definitions, or adapter code.
+- **Before scaling tool surface** — adding a new tool, a new MCP server, a new sub-agent.
+- **Before publishing an MCP server** so the tool author knows what an adversarial caller can do.
+- **Regression testing after a hardening change** to prove the AIVSS number moved.
+
+<Danger>
+  AgentGuardian is for testing systems you own or are explicitly authorised to test. Use against third-party systems without authorisation is unlawful in most jurisdictions.
+</Danger>
+
+## Get a score in 60 seconds
+
+<CodeGroup>
+
+```bash uv
+uv add agent-guardian
+agent-guardian scan --system-prompt prompt.txt --model stub
+```
+
+```bash pip
+pip install agent-guardian
+agent-guardian scan --system-prompt prompt.txt --model stub
+```
+
+```bash pipx
+pipx install agent-guardian
+agent-guardian scan --system-prompt prompt.txt --model stub
+```
+
+</CodeGroup>
+
+The `--model stub` flag runs the swarm against a deterministic in-process model so you can verify the pipeline with zero API keys. Swap to `--model gemini:gemini-2.5-flash`, `--model openai:gpt-4o-mini`, or `--model anthropic:claude-sonnet-4-5` once you have a key exported.
+
+### Expected output
+
+```text expandable
+scan ag_2026_xxxxxxxx done: AIVSS=87 band=GOOD tier=T4 findings=2 report=scan.json
+→ live dashboard: http://127.0.0.1:7474/scans/ag_2026_xxxxxxxx
+```
+
+## How to read the score
+
+AIVSS is **inverse-risk**: 100 is perfect, 0 is critical. The numeric score is bucketed into a human-readable band by `agent_guardian.models.severity.band_for_score`:
+
+| Band | Range | Meaning |
+| --- | --- | --- |
+| `EXCELLENT` | 90–100 | No high/critical findings; ship with confidence. |
+| `GOOD` | 80–89 | Minor findings; review and ship. |
+| `WARNING` | 60–79 | Real findings present; remediate before production. |
+| `POOR` | 40–59 | Material risk; do not ship. |
+| `CRITICAL` | 0–39 | Severe agent vulnerabilities; halt. |
+| `not_evaluated` | n/a | Scan ran in `--model stub` or `--mode fast/smart`; no authoritative number can be claimed — see the warning on stderr. |
+
+`tier` is the auto-detected target tier (T4 = prompt-only … T1 = tools + memory + PII), which weights how much each finding moves the score.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Five minutes from `pip install` to your first AIVSS score on a real LangGraph chatbot.
+  </Card>
+  <Card title="How it works" icon="compass" href="/how-it-works">
+    The six-phase swarm: Recon → Decompose → Parallel launch → Checkpoint → Budget donate → Finalise.
+  </Card>
+  <Card title="Attack library" icon="shield-alert" href="/attacks/overview">
+    All 96 probes across the 10 OWASP ASI categories, with severity and tier breakdowns.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci/github-actions">
+    Gate every PR on an AIVSS floor with SARIF auto-upload to the Security tab.
+  </Card>
+</CardGroup>

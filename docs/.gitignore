@@ -1,0 +1,6 @@
+# Mintlify CLI artefacts
+.mintlify/
+mintlify.log
+
+# OS noise
+.DS_Store
