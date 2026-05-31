@@ -2442,6 +2442,28 @@ def scan(
             "jq-clean. Has no effect without --debug."
         ),
     ),
+    no_serve: bool = typer.Option(
+        False,
+        "--no-serve",
+        help=(
+            "Disable the auto-spawn dashboard server for this scan. "
+            "Equivalent to setting $AGENT_GUARDIAN_DISABLE_AUTO_SERVE=1. The "
+            "dashboard URL is still printed; you'll need to start "
+            "'agent-guardian serve' yourself in another terminal for the "
+            "URL to resolve."
+        ),
+    ),
+    serve_grace_seconds: int = typer.Option(
+        300,
+        "--serve-grace-seconds",
+        help=(
+            "Keep the auto-spawned dashboard alive for N seconds after the "
+            "scan completes so you can click the URL and review the report. "
+            "Defaults to 300 (5 minutes). Pass 0 to shut down immediately "
+            "on scan completion. Pass -1 to keep the dashboard alive until "
+            "you Ctrl-C the command (ngrok-style)."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -2474,6 +2496,14 @@ def scan(
     # JSON-mode reflection feed implicitly disables the Live region —
     # the operator wants a clean ``jq`` pipeline, not Rich frames.
     effective_no_tui = no_tui or (debug_level > 0 and debug_format_norm == "json")
+    # QA-009 — validate --serve-grace-seconds. Accept 0 (immediate
+    # shutdown), -1 (block until SIGINT), or any positive int.
+    if serve_grace_seconds < -1:
+        typer.echo(
+            "--serve-grace-seconds must be 0, -1, or a positive integer",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from None
 
     try:
         exit_code = asyncio.run(
@@ -2509,6 +2539,8 @@ def scan(
                 publish=publish,
                 debug_level=debug_level,
                 debug_format=debug_format_norm,
+                no_serve=no_serve,
+                serve_grace_seconds=serve_grace_seconds,
             )
         )
     except KeyboardInterrupt:
@@ -2550,6 +2582,8 @@ async def _run_scan(
     publish: bool = True,
     debug_level: int = 0,
     debug_format: str = "text",
+    no_serve: bool = False,
+    serve_grace_seconds: int = 300,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -2630,7 +2664,124 @@ async def _run_scan(
     # swallowed the URL on every preflight failure, leaving the operator
     # with only a cryptic "target unreachable" line.
     scan_id = f"cli-{uuid.uuid4().hex[:12]}"
-    print_scan_urls(scan_id, suppress=not publish)
+
+    # QA-009 — auto-serve. Decide whether to spawn a dashboard child
+    # BEFORE we emit the URL so the URL reflects the actually-bound port
+    # (which may be 7475..7499 if 7474 was occupied by a stranger). The
+    # manager is entered as a context manager; ``__exit__`` always runs
+    # (in the outer ``finally`` below) — even on KeyboardInterrupt — so
+    # the child can never outlive the scan command.
+    from agent_guardian.ui.auto_serve import AutoServeManager, should_auto_serve
+
+    auto_serve_suppression = should_auto_serve(
+        no_serve=no_serve,
+        no_tui=no_tui,
+        debug_format=debug_format,
+        publish=publish,
+    )
+    auto_serve_manager = AutoServeManager(
+        grace_seconds=serve_grace_seconds,
+        token=os.environ.get("AGENT_GUARDIAN_DASHBOARD_TOKEN"),
+        suppression_reason=auto_serve_suppression,
+    )
+    auto_serve_result = auto_serve_manager.__enter__()
+    auto_serve_base_url: str | None = (
+        auto_serve_result.base_url
+        if (auto_serve_result.spawned or auto_serve_result.reused)
+        else None
+    )
+    print_scan_urls(scan_id, suppress=not publish, base_url=auto_serve_base_url)
+
+    try:
+        exit_code = await _run_scan_inner(
+            cfg=cfg,
+            scan_id=scan_id,
+            target=target,
+            system_prompt=system_prompt,
+            endpoint=endpoint,
+            framework=framework,
+            framework_ref=framework_ref,
+            no_preflight=no_preflight,
+            eff_attacker=eff_attacker,
+            eff_evaluator=eff_evaluator,
+            eff_commander=eff_commander,
+            attacker_llm=attacker_llm,
+            evaluator_llm=evaluator_llm,
+            commander_llm=commander_llm,
+            target_llm=target_llm,
+            tier_override=tier_override,
+            fail_under=fail_under,
+            output=output,
+            output_path=output_path,
+            no_tui=no_tui,
+            seed=seed,
+            goal=goal,
+            mode=mode,
+            pov_gate=pov_gate,
+            critic=critic,
+            bundle=bundle,
+            pretext=pretext,
+            indirect=indirect,
+            no_owasp_llm=no_owasp_llm,
+            contract=contract,
+            otel_endpoint=otel_endpoint,
+            budget_usd=budget_usd,
+            debug_level=debug_level,
+            debug_format=debug_format,
+        )
+    finally:
+        # Grace period: keep the dashboard alive so the operator can click
+        # the URL we already printed. ``grace_wait`` is a no-op when we
+        # didn't spawn (reused / suppressed) or when ``serve_grace_seconds
+        # == 0``. It is interruptible via SIGINT/SIGTERM through the
+        # manager's signal handlers.
+        try:
+            auto_serve_manager.grace_wait()
+        finally:
+            auto_serve_manager.__exit__(None, None, None)
+    return exit_code
+
+
+async def _run_scan_inner(
+    *,
+    cfg: Config,
+    scan_id: str,
+    target: str | None,
+    system_prompt: Path | None,
+    endpoint: str | None,
+    framework: str | None,
+    framework_ref: str | None,
+    no_preflight: bool,
+    eff_attacker: str,
+    eff_evaluator: str,
+    eff_commander: str,
+    attacker_llm: Any,
+    evaluator_llm: Any,
+    commander_llm: Any,
+    target_llm: Any,
+    tier_override: Tier | None,
+    fail_under: int | None,
+    output: str,
+    output_path: Path | None,
+    no_tui: bool,
+    seed: int,
+    goal: str | None,
+    mode: str,
+    pov_gate: bool,
+    critic: bool,
+    bundle: Path | None,
+    pretext: bool,
+    indirect: bool,
+    no_owasp_llm: bool,
+    contract: Path | None,
+    otel_endpoint: str | None,
+    budget_usd: float | None,
+    debug_level: int,
+    debug_format: str,
+) -> int:
+    """Run the scan body. Extracted from ``_run_scan`` so the auto-serve
+    context manager (QA-009) cleanly wraps every ``return EXIT_X`` exit
+    path via a single ``try/finally`` in the caller."""
 
     # Stage 1B -- a --contract run replaces the four legacy target modes with a
     # contract-built adapter + RoE controller + OTel observer. The non-contract

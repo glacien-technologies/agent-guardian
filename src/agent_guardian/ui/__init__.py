@@ -16,11 +16,25 @@ from agent_guardian.ui.attack_feed import (
     build_curl_one_liner,
     render_reflection_block,
 )
+from agent_guardian.ui.auto_serve import (
+    AutoServeManager,
+    AutoServeResult,
+    find_free_port,
+    probe_is_our_serve,
+    should_auto_serve,
+    wait_until_ready,
+)
 
 __all__: list[str] = [
     "AttackFeedRenderer",
+    "AutoServeManager",
+    "AutoServeResult",
     "DebugFormat",
     "DebugLevel",
     "build_curl_one_liner",
+    "find_free_port",
+    "probe_is_our_serve",
     "render_reflection_block",
+    "should_auto_serve",
+    "wait_until_ready",
 ]

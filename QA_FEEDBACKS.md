@@ -15,6 +15,241 @@ Format per item:
 
 ---
 
+## QA-012 — CLI flow should be phase-based (Recon → Red Teaming → Findings), not a flat agent list
+
+- **Date surfaced** · 2026-05-31 (manual testing follow-up to QA-011)
+- **Severity** · medium (changes how operators read the swarm board; today it looks like 13 simultaneous unrelated workers, but underneath the engine actually flows through clean phases)
+- **Found via** · same manual scan as QA-011. User's verbatim ask: *"the cli we need to implement it better. we are putting it like agent when. but we need to first recon to understand goal and understand of the goal and then red teaming part that has to be put it as nice design how is it happen what happened and then findings list and so."*
+
+- **What's wrong** · The swarm board today is a flat 13-row agent table:
+
+  ```
+  ┃ Agent                  ┃   ASI   ┃ Status     ┃ Findings ┃
+  │ recon-agent            │   n/a   │ done       │        0 │
+  │ goal-hijack-agent      │  ASI01  │ done       │        3 │
+  │ tool-abuse-agent       │  ASI02  │ skipped    │        0 │
+  │ ... (10 more rows)
+  ```
+
+  But under the hood the engine actually moves through **four named phases** (already in the log output): `phase recon → phase decompose → phase parallel → phase finalise`. The CLI flattens all 13 agents into one big table even though `recon-agent` is conceptually phase 1 (understand the target), `decompose` is phase 2 (decide which probes apply), the 12 ASI agents are phase 3 (red team in parallel), and `finalise` is phase 4 (score + findings list). Operators can't see "what stage is the scan in right now" at a glance — they see 13 rows of status pills flickering.
+
+- **What the user wants — three distinct sections in the dashboard:**
+
+  ```
+  ┌─ PHASE 1 · Reconnaissance ────────────────────────────────────────┐
+  │  ▸ Goal:          Black-box capability audit                      │
+  │  ▸ Target:        https://...­.run.app/finbot/chat                 │
+  │  ▸ What we found: 13 probes apply · 3 skipped · multi-agent: no   │
+  │  ▸ Status:        ✓ done (90.0s)                                  │
+  └───────────────────────────────────────────────────────────────────┘
+
+  ┌─ PHASE 2 · Red Teaming ───────────────────────────────────────────┐
+  │  ┃ Agent            ┃   ASI  ┃ Status   ┃ Turns ┃ Findings ┃     │
+  │  │ goal-hijack-agent│ ASI01  │ ● done   │  9/12 │     3    │     │
+  │  │ privilege-agent  │ ASI03  │ ● done   │  6/12 │     2    │     │
+  │  │ supply-chain     │ ASI04  │ ◐ running│  3/12 │     1    │     │
+  │  │ ...                                                            │
+  │  budget: 47% (~$0.032 / $0.10)  ·  elapsed: 4m 12s / 15m          │
+  └───────────────────────────────────────────────────────────────────┘
+
+  ┌─ PHASE 3 · Findings ──────────────────────────────────────────────┐
+  │  18 total · 1 critical · 17 high · 0 medium · 0 low               │
+  │                                                                    │
+  │  CRITICAL                                                         │
+  │  ✗ ASI03-PR-007 · privilege-agent · privilege escalation          │
+  │  ✗ ASI03-PII-001 · privilege-agent · cross-tenant PII leak        │
+  │  HIGH                                                              │
+  │  ✗ ASI01-GH-004 · goal-hijack · prompt-injection succeeded        │
+  │  ✗ ASI01-GH-005 · secret-extraction · system-prompt leak          │
+  │  ... (15 more)                                                    │
+  └───────────────────────────────────────────────────────────────────┘
+  ```
+
+  Each phase has its OWN visual identity: phase 1 (Recon) is a fact-sheet, phase 2 (Red Teaming) is the existing live agent table (rebadged), phase 3 (Findings) is a severity-grouped list. The previous phases stay visible (collapsed but not gone) as later phases activate, so the operator can scroll back and see "what did recon find?" while red teaming is mid-flight.
+
+- **Why this matters** ·
+  - **Mental model match** · "First we look at it, then we attack it, then we report what we found" is how operators describe a red-team engagement. The current flat table inverts that into "13 robots simultaneously doing stuff."
+  - **Phase-locked output** · today, an operator who joins the terminal late doesn't know whether the swarm is still warming up (recon), actively attacking, or wrapping up (finalise). Three distinct phase panels tell them at a glance.
+  - **Findings-first** · phase 3 deserves its own panel — today findings are buried inside agent-row "Findings: 3" cells; an operator wanting to see WHAT was found has to wait until scan-complete and then read the JSON or open the dashboard. Surface them inline as they fire.
+
+- **Fix area** ·
+  - `src/agent_guardian/ui/dashboard.py` — replace the flat agent-table renderable with a `Group(recon_panel, red_team_panel, findings_panel)` composition. Each panel has its own state-pulling logic from the SwarmObserver.
+  - `src/agent_guardian/swarm.py` SwarmObserver — emit explicit `phase_start` / `phase_done` events for `recon` / `decompose` / `parallel` / `finalise` (the names are already in the log strings; just hoist them into the event channel).
+  - `src/agent_guardian/ui/recon_panel.py` (new) — render phase 1 (goal, target, what-we-found, duration).
+  - `src/agent_guardian/ui/red_team_panel.py` (new) — render phase 2 (the existing agent table, rebadged + with turns column + collapsed when phase done).
+  - `src/agent_guardian/ui/findings_panel.py` (new) — render phase 3 (severity-grouped list, streams in as findings fire).
+  - The QA-002 single-Live-region invariant holds: all three panels share one Live, re-rendered each tick.
+  - The QA-005 attack feed (--debug) flows BELOW the phase panels, not between them.
+
+- **Acceptance** ·
+  - During recon, only the recon panel is visible-active; phase 2/3 placeholders show "waiting on recon".
+  - During red teaming, recon panel is collapsed (showing summary only); phase 2 panel is active with live agent rows; phase 3 panel streams findings as they fire.
+  - At scan completion, all three panels show their final state side-by-side; the operator can read top-to-bottom and understand "what we looked at, what we tried, what we found".
+  - The flat-table behaviour is preserved as a `--legacy-board` opt-in flag for one release for users who prefer it.
+
+- **Cross-cuts** ·
+  - QA-002 (Live region) — must compose without re-rendering on every event; use rich.console.Group for the three panels in one Live.update().
+  - QA-005 (attack feed) — feed cards flow below phase 3 Findings panel in `--debug` mode.
+  - QA-003 (dashboard design) — the web dashboard already has this phase-separation in the saved design (the editorial-tech masthead-then-score-then-findings flow); CLI should match the same conceptual partition.
+
+- **Status** · open
+
+---
+
+## QA-011 — Add scan-execution preview: validate ALL inputs upfront + show a "this is what we're about to do" summary table before any LLM cost
+
+- **Date surfaced** · 2026-05-31 (manual testing — wasted 6 min + $0.03 on a scan whose PDF couldn't be written; user wants this caught at scan-start)
+- **Severity** · medium (every minute and dollar burned on a scan whose final artifact can't be produced is wasted; the validation already happens piecemeal — model in QA-001, target in `_endpoint_reachability_preflight` — but it's never *shown* to the operator as a single coherent "here is what is about to happen")
+- **Found via** · cumulative observation across this session — see QA-001 (unknown model), QA-010 (missing PDF engine), QA-008 (Gemini timeout cascade), QA-009 (serve not running). Each failure mode discovered too late wastes the operator's budget.
+
+- **User's verbatim intent** · *"when we execute the command, for that step is validation of all the input params, for the endpoint is accessible or not, what options we have when it works working, and give a summary table — this is what we are going to do — or put that in agent guardian swarm board itself."*
+
+- **What's wrong** · Today the scan command immediately starts working:
+  1. validates model (QA-001 fix; ~3s for Gemini)
+  2. constructs LLM clients
+  3. preflights endpoint (~250ms - 30s with cold-start budget)
+  4. prints scan URL
+  5. starts swarm
+  6. … 6 minutes later … writes report
+  7. — possibly fails at the very last step because the PDF engine isn't installed
+
+  At no point is the operator shown a SINGLE pre-flight summary saying "here is what is about to happen, here is what we verified works, here is what we can't write, here is what it'll cost." The information is all there in the engine; the CLI just doesn't surface it as a coherent pre-execution panel.
+
+- **What the user wants** · a "scan plan" panel at the very start of the scan command output, BEFORE the first LLM call, with:
+
+  ```
+  ┌─ Scan plan · cli-6a04e02a7b5e ──────────────────────────────────────────┐
+  │                                                                          │
+  │  TARGET                                                                  │
+  │    URL                  https://...­.run.app/finbot/chat                  │
+  │    Reachable            ✓ HTTP 200 in 247ms                              │
+  │    Multi-agent          no (single endpoint)                             │
+  │                                                                          │
+  │  MODELS (all validated)                                                  │
+  │    Attacker             gemini:gemini-2.5-flash       ✓ 200 OK           │
+  │    Evaluator            gemini:gemini-2.5-flash       ✓ 200 OK           │
+  │    Commander            gemini:gemini-2.5-flash       ✓ 200 OK           │
+  │                                                                          │
+  │  BUDGET                                                                  │
+  │    Mode                 full (95% coverage required for authoritative)   │
+  │    Wall-clock cap       15 min                                           │
+  │    USD cap              $0.10                                            │
+  │    Estimated cost       $0.04 - $0.08 (typical for this mode+target)     │
+  │                                                                          │
+  │  OUTPUTS                                                                 │
+  │    --output             pdf                                              │
+  │    PDF engine           ✗ NOT AVAILABLE — install agent-guardian[full]   │
+  │    --output-path        ~/Desktop/finbot_scan.pdf                        │
+  │    Other artifacts      ~/.agentguardian/scans/cli-.../report.json       │
+  │                                                                          │
+  │  DASHBOARD                                                               │
+  │    URL                  http://127.0.0.1:7474/scans/cli-6a04e02a7b5e     │
+  │    Server status        ✗ not running — start `agent-guardian serve`     │
+  │                                                                          │
+  │  SAFETY GUARDS                                                           │
+  │    RoE blocklist        none (--endpoint mode; no contract)              │
+  │    Authorization        n/a (--endpoint mode)                            │
+  │    Egress allowlist     unrestricted                                     │
+  │                                                                          │
+  │  WARNINGS                                                                │
+  │    ⚠  PDF engine missing — scan will succeed but PDF will NOT write      │
+  │    ⚠  Dashboard server not running — URL will be ERR_CONNECTION_REFUSED  │
+  │                                                                          │
+  │  Press Enter to proceed, Ctrl-C to abort.                                │
+  └──────────────────────────────────────────────────────────────────────────┘
+  ```
+
+  Two operating modes for this panel:
+  - **Default (interactive)** · print the panel, wait for Enter / 5-second timeout. Lets the operator catch the warnings (PDF missing, serve not running) BEFORE burning LLM cost.
+  - **`--yes` / `--no-plan-confirm`** · skip the wait; print the panel and immediately proceed. For CI / scripted use. Should be the implicit default when stdout is non-TTY.
+
+- **What each row resolves** ·
+  - **TARGET** · already done at preflight; surface the result instead of swallowing it.
+  - **MODELS** · already done by QA-001 model validation; surface the per-role result.
+  - **BUDGET** · pulled from `SwarmConfig`; estimated cost is a per-mode lookup table (`fast ~$0.005, smart ~$0.03, full ~$0.04-0.08`) seeded from historical scan stats.
+  - **OUTPUTS** · NEW — checks `--output` engine availability at scan-start (the QA-010 adjacent improvement). For each format requested, probe whether the engine is importable; flag the gap if not.
+  - **DASHBOARD** · NEW — probes 127.0.0.1:7474 for liveness (related to QA-009).
+  - **SAFETY GUARDS** · from contract if `--contract`; defaults summarised if `--endpoint`.
+  - **WARNINGS** · aggregated from the above rows that show a ✗.
+
+- **Why this matters** · A scan is a 5-30 minute operation that costs real money. The plan panel turns it into a single-screen review the operator can sign off on. The 5-second-default wait is short enough not to annoy interactive users, long enough to catch the panel and Ctrl-C if any warnings are unacceptable. CI / non-TTY skips the wait automatically.
+
+- **Where this lives in the CLI flow** ·
+  - AFTER model validation (so model results can be shown)
+  - AFTER preflight (so reachability + cold-start time can be shown)
+  - BEFORE swarm start (so the operator can abort without LLM cost)
+  - BEFORE scan_id-URL emission moves to *inside* the plan panel (it becomes one row of "DASHBOARD"); a separate one-line emission is no longer needed.
+
+- **Fix area** ·
+  - `src/agent_guardian/cli.py` — add `--yes` / `--no-plan-confirm` flags; insert plan-panel print + confirmation gate between preflight and swarm start.
+  - `src/agent_guardian/ui/scan_plan.py` (new) — pure-function `build_plan_panel(scan_ctx) -> Panel` that pulls from the validated state and renders the panel above.
+  - `src/agent_guardian/reports/output_engines.py` (new) — `validate_output_engine_available(format) -> EngineCheck` so the plan can show ✓/✗ for each `--output` value. Same primitive QA-010 wants for fail-fast at scan-start.
+  - `src/agent_guardian/server/client_probe.py` (new) — `probe_dashboard_server(base_url) -> ServerCheck` so the plan can show whether the dashboard URL will work.
+  - tests/cli/test_scan_plan.py covering: TTY vs non-TTY behavior, --yes skip, every row's ✓/✗ branch, the warning aggregation logic.
+
+- **Acceptance** ·
+  - Interactive scan: plan panel renders within 1 second of model validation completing; defaults to "press Enter to proceed (5s auto-proceed)".
+  - Any ✗ row produces a warning in the WARNINGS section.
+  - `--yes` flag skips the wait.
+  - Non-TTY auto-skips (CI / piped use unaffected).
+  - PDF-engine-missing case: plan shows ✗, warns, operator can Ctrl-C and `uv pip install agent-guardian[full]` BEFORE the scan starts (saves 6 min + LLM cost).
+
+- **Cross-cuts** ·
+  - QA-001 (model validation) — plan panel surfaces the model-check results.
+  - QA-009 (auto-serve) — plan panel surfaces dashboard server status; if auto-serve has landed, this row says "✓ auto-served (PID 12345)".
+  - QA-010 (PDF engine in base) — plan panel surfaces output-engine availability for every advertised format.
+  - QA-012 (phase-based CLI) — the plan panel is conceptually Phase 0 (Plan) preceding Phase 1 (Recon); the three should compose into a clean 4-phase narrative.
+
+- **Status** · open
+
+---
+
+## QA-010 — `--output pdf` advertised but doesn't work after default install; PDF engine should ship in base, not be a separate extra
+
+- **Date surfaced** · 2026-05-31 (manual testing — full `--mode full` scan against testbench produced 18 findings + AIVSS=41 in 6 minutes but the `--output pdf --output-path ~/Desktop/finbot_scan.pdf` step failed at write-time with `PdfFeatureUnavailable: No PDF engine available. Install 'agent-guardian[full]' for WeasyPrint or 'agent-guardian[pdf-fallback]' for ReportLab.`)
+- **Severity** · medium (kills first-impression UX: every flag in `--help` should work after a default install; the user wasted $0.03 + 6 min of LLM time to discover the PDF render couldn't write)
+
+- **What's wrong** · `agent-guardian scan --help` advertises `--output: json | sarif | junit | md | pdf`. After a default `pip install agent-guardian`, four of those work. PDF doesn't — it requires a SEPARATE install of either `agent-guardian[full]` (heavy: pulls faiss-cpu + sentence-transformers + a bunch of ML deps for WeasyPrint) or `agent-guardian[pdf-fallback]` (light: just `reportlab>=4.2`). Neither is installed by default, so a stock user running `--output pdf` discovers this only AFTER the scan has run, the LLM money has been spent, and the failure mode is at the very last step (the writer).
+
+- **Why this matters more than it sounds** · Every advertised CLI flag is an implicit promise. A flag that surfaces in `--help` but errors at runtime — unless the user remembers to install an optional extra — feels like a bug, not a feature. PDF reports are also the most-asked-for artifact format from security teams (it's what gets attached to a Jira ticket / emailed to compliance), so making it the LEAST out-of-the-box format inverts the priority.
+
+- **The user's exact intent (verbatim)** · "why pdf fallback needs to be installed separately. when we install agent guardian pdf should be installed so that when we give --output it should work as expected. similarly for other output types also."
+
+- **Recommended fix (locked design)** ·
+  - Pull `reportlab>=4.2` into the **base `[project.dependencies]`** in `pyproject.toml`. ReportLab is ~5MB, pure-Python (no native compilation), Apache-2.0 — entirely safe as a default dep. This makes `--output pdf` work after a stock `pip install agent-guardian` with zero opt-in.
+  - **Keep `[full]` as the WeasyPrint extra** for users who want the higher-fidelity HTML→PDF rendering (it pulls in cairo + pango system libs and is heavier; not appropriate as default).
+  - **Rename `[pdf-fallback]` to deprecate-and-no-op** — it'll be redundant once ReportLab is in base. Keep a transitional alias for one release that emits a deprecation warning ("ReportLab is now installed by default; this extra is a no-op and will be removed in v1.2.").
+  - PDF writer dispatcher (`src/agent_guardian/reports/pdf.py`) already tries WeasyPrint first and falls back to ReportLab — that's the right pattern; we just need to guarantee the fallback is always present.
+
+- **Audit other output formats for similar gating** (during the fix) ·
+  - `json` · pure-Python, no deps · OK
+  - `sarif` · uses `jsonschema` for validation (already in base) · OK
+  - `junit` · uses `junitparser` or hand-rolled XML · CHECK whether `junitparser` is in base or extra
+  - `md` · pure-Python · OK
+  - `pdf` · the gated one — this QA item
+  - The principle: anything advertised in `--output <format>` --help should work after `pip install agent-guardian` with no extras.
+
+- **Adjacent fail-fast improvement (worth bundling)** · Today the PDF dep check happens at write-time, at the END of the scan. After this QA closes (PDF in base), the failure mode is gone for PDF specifically. But the pattern — "check writer / engine availability AT scan startup, not at write-time" — is still right for any future format with optional engines (e.g., a future `--output xlsx` requiring openpyxl, or `--output docx` requiring python-docx). Implement a `validate_output_engine_available(format: str)` call at the same scan-preflight point QA-001 model validation lives, so the user can't burn LLM budget on a scan whose final artifact won't be writeable.
+
+- **Fix area** ·
+  - `pyproject.toml` — move `reportlab>=4.2` from `[pdf-fallback]` extra into base `[project.dependencies]`.
+  - `pyproject.toml` — keep `[full]` with `weasyprint>=63.0` for high-fidelity opt-in.
+  - `pyproject.toml` — leave `[pdf-fallback]` defined as an empty / deprecation extra for one release.
+  - `src/agent_guardian/reports/pdf.py` — confirm dispatcher logic stays: prefer WeasyPrint when present, else ReportLab; no behaviour change other than ReportLab now always being importable.
+  - `tests/test_packaging.py` — add an assertion that a fresh wheel install (zero extras) can import the PDF writer and emit a non-zero-byte PDF.
+  - `docs/reference/cli.md` — remove any "PDF requires an extra" caveat from the `--output` flag table; add a "WeasyPrint is the preferred renderer; install `agent-guardian[full]` for it" note for power users.
+  - `docs/architecture/` — document the engine-fallback pattern as the canonical approach for any future format with optional engines.
+
+- **Acceptance** ·
+  - `pip install agent-guardian && agent-guardian scan ... --output pdf --output-path /tmp/x.pdf` produces a valid PDF on the first try, no extras required.
+  - `--output {json,sarif,junit,md,pdf}` ALL work after a stock install (no extras).
+  - The WeasyPrint upgrade path (`agent-guardian[full]`) still gives users the higher-fidelity renderer when they want it.
+  - `tests/test_packaging.py` includes a no-extras PDF emission smoke test.
+
+- **Status** · open (filed by manual testing 2026-05-31; not in flight)
+
+---
+
 ## QA-009 — Scan URL is dead on arrival when `serve` isn't running; user gets `ERR_CONNECTION_REFUSED`
 
 - **Date surfaced** · 2026-05-31 (post-QA-001..005 closure manual testing)
@@ -43,7 +278,9 @@ Format per item:
 
 - **Acceptance** · clicking the URL in the first 30 seconds of seeing it always either (i) opens the dashboard if serve is running, or (ii) gives the user clear visible context that serve isn't running and they need to start it.
 
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31) — auto-spawn dashboard child on `scan`; URL works on first click; 5 min grace window after scan completes; suppression matrix (8 triggers: `--no-serve`, `--no-tui`, `--debug-format json`, non-TTY, `$CI=true`, `$AGENT_GUARDIAN_DISABLE_AUTO_SERVE=1`, `$AGENT_GUARDIAN_DASHBOARD_URL` set, `--no-publish`) preserves every existing automation path. Implementation chose option (b) auto-spawn over (a) instruction line. Coverage 92% on `ui/auto_serve.py`; 60 new unit/lifecycle tests + 5 live scenarios against the Cloud Run testbench. See `/tmp/ag_qa009/RECONCILE_QA009.md` for the full reconcile.
+
+  Note: the recommended fix text above mentions `GET /health` for the loopback probe; actual implementation uses `/healthz` (the canonical AG endpoint) — behaviour is correct, just the spec phrasing.
 
 ---
 
