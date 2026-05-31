@@ -61,7 +61,7 @@ Format per item:
   - `--recon-budget-seconds N` flag for explicit operator control.
   - Coverage on touched modules ≥ 90%.
 - **Cross-cuts** · QA-011 (plan panel WARNINGS row picks this up); QA-009 (auto-serve probes have same cold-start vulnerability); QA-005 (debug feed should show recon's per-probe progress so operators understand WHY recon is slow).
-- **Status** · open
+- **Status** · **PARTIALLY CLOSED** (2026-05-31, partial-fix commit follows this update) — defect #1 + #4 from the nested list ABOVE are closed: SwarmConfig default `recon_wall_seconds` raised from 90.0 to 300.0 (`src/agent_guardian/core/swarm.py:228`); new `--recon-budget-seconds N` CLI flag plumbed end-to-end (cli.py typer Option + 2 signatures + 2 callsites + SwarmConfig instantiation); regression test at `tests/unit/test_recon_budget_flag.py` covers the default-300 invariant + the custom-override path + the `--help` discoverability check; `agent-guardian scan --recon-budget-seconds 600 ...` now works. **Still open: defect #2** (silent minimal-fingerprint fallback should emit a prominent banner naming the 3 skipped categories) and **defect #3** (Phase 0 plan panel should add a WARNINGS row when `preflight_ms > 5000` predicting the recon-timeout risk). Both deferred to a follow-up since they're UI work in `red_team_panel.py` + `scan_plan_data.py` rather than the timeout-and-flag plumbing this commit covers.
 
 ---
 

@@ -225,7 +225,14 @@ class SwarmConfig:
     commander_model: str = "claude-haiku-4-5"
     attacker_model: str = "gpt-4o-mini"
     evaluator_model: str = "gpt-4o-mini"
-    recon_wall_seconds: float = 90.0
+    # Recon (black-box capability audit) wall budget. Raised from the legacy
+    # 90s default to 300s after QA-018: on Cloud Run / Lambda / Knative
+    # cold-start targets, 90s was routinely insufficient for the 10 deepen
+    # rounds to complete, and the swarm silently fell back to the minimal
+    # fingerprint and skipped 3 ASI agents. 300s clears cold-start cases
+    # cleanly without materially extending typical (5-15 min) scans.
+    # Operator can override via `--recon-budget-seconds` on the CLI.
+    recon_wall_seconds: float = 300.0
     # Max adaptive deepening rounds in the black-box capability audit (recon).
     recon_audit_rounds: int = 10
     overall_wall_seconds: float = 900.0

@@ -2465,6 +2465,18 @@ def scan(
             "Omit for no cap."
         ),
     ),
+    recon_budget_seconds: float = typer.Option(
+        300.0,
+        "--recon-budget-seconds",
+        help=(
+            "Wall-clock budget for the recon (capability audit) phase. "
+            "Default 300s = 5min, raised from 90s in QA-018 because Cloud Run "
+            "/ Lambda / Knative cold-start targets routinely timed out and the "
+            "swarm silently fell back to a minimal fingerprint that skipped "
+            "tool-abuse / memory-poison / a2a agents. Raise further for very "
+            "slow targets; lower for fast in-process scans."
+        ),
+    ),
     fail_under: int | None = typer.Option(
         None, "--fail-under", help="Exit 1 if final AIVSS < this value."
     ),
@@ -2725,6 +2737,7 @@ def scan(
                 evaluator_model=evaluator_model,
                 tier=tier,
                 budget_usd=budget_usd,
+                recon_budget_seconds=recon_budget_seconds,
                 fail_under=fail_under,
                 output=output,
                 output_path=output_path,
@@ -2771,6 +2784,7 @@ async def _run_scan(
     evaluator_model: str | None,
     tier: str | None,
     budget_usd: float | None,
+    recon_budget_seconds: float,
     fail_under: int | None,
     output: str,
     output_path: Path | None,
@@ -3072,6 +3086,7 @@ async def _run_scan(
             contract=contract,
             otel_endpoint=otel_endpoint,
             budget_usd=budget_usd,
+            recon_budget_seconds=recon_budget_seconds,
             debug_level=debug_level,
             debug_format=debug_format,
             legacy_board=legacy_board,
@@ -3123,6 +3138,7 @@ async def _run_scan_inner(
     contract: Path | None,
     otel_endpoint: str | None,
     budget_usd: float | None,
+    recon_budget_seconds: float,
     debug_level: int,
     debug_format: str,
     legacy_board: bool = False,
@@ -3228,10 +3244,13 @@ async def _run_scan_inner(
         usd_cap=budget_usd,
         # Shorter checkpoint than the library default so CLI runs feel responsive.
         checkpoint_interval_seconds=2.0,
-        # recon_wall_seconds intentionally left at the SwarmConfig default (90s);
-        # 5s caused recon to time out on any real LLM call (esp. rate-limited
-        # free-tier Gemini) and the swarm then produced fake "EXCELLENT" scores
-        # against an empty memory.
+        # QA-018: operator-controlled recon budget. SwarmConfig default is now
+        # 300s (raised from 90s) because Cloud Run / Lambda / Knative cold-start
+        # targets routinely timed out, silently fell back to the minimal
+        # fingerprint, and skipped 3 ASI agents. CLI default --recon-budget-seconds
+        # is also 300; operator can raise for very slow targets or lower for
+        # fast in-process scans.
+        recon_wall_seconds=recon_budget_seconds,
     )
 
     # Stage 1B -- project the contract's RoE budgets onto the engine's knobs.
