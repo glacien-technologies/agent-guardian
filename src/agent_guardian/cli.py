@@ -3564,13 +3564,49 @@ def main(
         is_eager=True,
         help="Show version and exit.",
     ),
+    log_level: str | None = typer.Option(
+        None,
+        "--log-level",
+        "-l",
+        help=(
+            "Logging level: debug / info / warning / error. Default is "
+            "INFO (or $AGENT_GUARDIAN_LOG_LEVEL). Pass debug to see every "
+            "per-turn agent decision + strategy rationale + judge "
+            "intermediate signals; pass warning to suppress the per-turn "
+            "trace and keep only warnings + errors."
+        ),
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Shortcut for ``--log-level debug``. Overrides --log-level when both are set.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Shortcut for ``--log-level warning``. Overrides --log-level when both are set.",
+    ),
 ) -> None:
     """AgentGuardian -- eleven-agent adversarial swarm CLI."""
     # Wire centralised logging FIRST so .env loading + every sub-command
-    # see structured logs. Default level is INFO; operators bump to DEBUG
-    # via AGENT_GUARDIAN_LOG_LEVEL=DEBUG when they need the full review
-    # trace. See ``agent_guardian.logging_setup``.
-    configure_logging()
+    # see structured logs. Precedence (locked):
+    #   1. ``--verbose`` / ``-v``  → DEBUG (highest priority shortcut)
+    #   2. ``--quiet``   / ``-q``  → WARNING
+    #   3. ``--log-level <name>``  → that level
+    #   4. ``$AGENT_GUARDIAN_LOG_LEVEL`` → that level (via configure_logging)
+    #   5. Default                 → INFO
+    effective_level: str | None
+    if verbose:
+        effective_level = "DEBUG"
+    elif quiet:
+        effective_level = "WARNING"
+    elif log_level:
+        effective_level = log_level.upper()
+    else:
+        effective_level = None  # configure_logging() reads the env var
+    configure_logging(level=effective_level)
     # Project-local .env auto-loading. Fires for every sub-command so
     # ``agent-guardian scan`` / ``doctor`` / ``serve`` all see the keys.
     # See ``_try_load_dotenv`` for the (deliberately conservative) lookup.
