@@ -207,7 +207,12 @@ def test_mission_kpi_tiles_render_view_model_values(client: TestClient, store: S
     assert "AIVSS" in body
     # Score 84 appears in the AIVSS tile (and the band label).
     assert "84" in body
-    assert "GOOD" in body
+    # band_label is now humanised (feedback-no-raw-enum-in-ui) — Title-case,
+    # never the raw uppercase enum token (``GOOD``). The raw enum value is
+    # still allowed to appear as a CSS class modifier hook
+    # (``--good`` / ``data-band="GOOD"``), but the visible label text is
+    # the humanised string.
+    assert "Good" in body
 
     # Findings tile (total = 6 findings)
     assert "Findings" in body
@@ -537,9 +542,7 @@ def test_mission_renders_clean_scan_with_no_findings(client: TestClient, store: 
     assert re.search(r'data-live="critical"[^>]*>0<', body)
 
 
-def test_mission_renders_for_in_flight_scan(
-    client: TestClient, store: ScanStore, tmp_path: Path
-) -> None:
+def test_mission_renders_for_in_flight_scan(client: TestClient, store: ScanStore) -> None:
     """A registered but not-yet-completed scan renders the awaiting-first-finding state."""
     scan_id = "cli-mission-running"
     # ScanStore.is_running() depends on register() — we simulate a registered

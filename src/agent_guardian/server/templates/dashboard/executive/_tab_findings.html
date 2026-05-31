@@ -27,6 +27,7 @@
     bar to jump to that severity grouping below.
   </p>
 
+  {% set tab_key = 'findings' %}
   {% include "dashboard/executive/_severity_bars.html" %}
 
   {% if findings_total == 0 %}
@@ -95,4 +96,5 @@
       </nav>
     {% endif %}
   {% endif %}
+  {% include "dashboard/executive/_reproducibility.html" %}
 </section>

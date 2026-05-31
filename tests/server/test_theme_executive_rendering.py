@@ -23,6 +23,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -215,10 +216,25 @@ def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanS
     # Topbar marker
     assert 'class="exec-topbar"' in body
     assert "AgentGuardian" in body
-    # KPI strip marker + the 8 locked tile labels
+    # KPI strip marker + the 8 locked tile labels. Each label now lives
+    # inside its eyebrow span beside an inline-SVG icon, so we check the
+    # tile+label pair via a per-key regex instead of a tight ">Label<".
     assert 'class="exec-kpi-strip"' in body
-    for label in ("AIVSS", "Band", "Findings", "Critical", "High", "Elapsed", "Cost", "Coverage"):
-        assert f">{label}<" in body, f"missing KPI tile label {label!r}"
+    for key, label in (
+        ("aivss", "AIVSS"),
+        ("band", "Band"),
+        ("findings", "Findings"),
+        ("critical", "Critical"),
+        ("high", "High"),
+        ("elapsed", "Elapsed"),
+        ("cost", "Cost"),
+        ("coverage", "Coverage"),
+    ):
+        pattern = re.compile(
+            rf'data-kpi="{key}".*?<span class="exec-kpi__label">.*?{label}.*?</span>',
+            re.DOTALL,
+        )
+        assert pattern.search(body), f"missing KPI tile {key!r} with label {label!r}"
 
 
 def test_executive_sticky_css_loaded(client: TestClient) -> None:
@@ -601,9 +617,12 @@ def test_executive_overview_renders_severity_bars_partial(
     next_idx = body.find('id="tabpanel-findings"', idx)
     overview_pane = body[idx:next_idx]
     assert 'data-component="severity-bars"' in overview_pane
-    assert 'id="exec-severity-bar"' in overview_pane
-    # The mono FIG. 2 eyebrow + serif headline.
-    assert "FIG. 2" in overview_pane
+    # Canvas id is tab-scoped (overview vs findings) to avoid duplicate-id
+    # collisions when the partial is included in both tabs.
+    assert 'id="exec-severity-bar-overview"' in overview_pane
+    # The mono FIG. 1 eyebrow + serif headline. Findings now sits on the
+    # LEFT of the side-by-side Overview grid, so FIG numbering puts it first.
+    assert "FIG. 1" in overview_pane
     assert "Findings by severity" in overview_pane
 
 
@@ -621,6 +640,9 @@ def test_executive_findings_tab_includes_severity_bars_and_jump_anchors(
     next_idx = body.find('id="tabpanel-probes"', idx)
     findings_pane = body[idx:next_idx]
     assert 'data-component="severity-bars"' in findings_pane
+    # Findings tab has its own canvas with a distinct id (prevents Chart.js
+    # double-init when the partial is included in both Overview + Findings).
+    assert 'id="exec-severity-bar-findings"' in findings_pane
     # The fixture seeds critical / high / medium → at least these anchors must
     # be present (low has no findings → no bucket → no anchor).
     assert 'id="exec-sev-critical"' in findings_pane
@@ -641,7 +663,9 @@ def test_executive_overview_renders_asi_radar_partial(client: TestClient, store:
     overview_pane = body[idx:next_idx]
     assert 'data-component="asi-radar"' in overview_pane
     assert 'id="exec-asi-radar"' in overview_pane
-    assert "FIG. 1" in overview_pane
+    # Radar now sits on the RIGHT of the side-by-side Overview grid, so it
+    # carries the FIG. 2 eyebrow (was FIG. 1 in the pre-side-by-side layout).
+    assert "FIG. 2" in overview_pane
     assert "Adversarial Surface Index" in overview_pane
 
 
@@ -678,19 +702,25 @@ def test_executive_agents_tab_renders_asi_rows_partial(
     assert agents_pane.count('class="exec-asi-list__item') == 10
 
 
-def test_executive_reproducibility_renders_in_layout_footer(
+def test_executive_reproducibility_renders_in_each_data_tab(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The reproducibility receipt renders exactly once per page, positioned
-    AFTER all role=tabpanel sections (i.e. as a footer to the main
-    container)."""
+    """The reproducibility receipt renders once per data tab — Overview,
+    Findings, Probes, Logs — and is intentionally absent from Agents.
+
+    Per the 2026-05-31 UX punch-list, the receipt was moved off the layout
+    footer and into the per-tab partials so the Agents tab can hide it
+    (the per-ASI breakdown there is the focal point and the receipt below
+    it created visual noise). See ``test_executive_reproducibility_per_tab``
+    for the per-tab DOM placement asserts."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    assert body.count('data-component="reproducibility"') == 1
-    # The 7 mono row labels are all present.
+    # Four data tabs include the receipt; Agents tab omits it.
+    assert body.count('data-component="reproducibility"') == 4
+    # The 7 mono row labels appear at least once.
     for label in (
         "SCAN_ID",
         "SEED",
@@ -701,16 +731,11 @@ def test_executive_reproducibility_renders_in_layout_footer(
         "EVIDENCE",
     ):
         assert label in body, f"reproducibility missing label {label}"
-    # The REPRODUCIBILITY mono eyebrow.
-    assert "REPRODUCIBILITY" in body
-    # The Copy button with the correct data-copy-target hook.
-    assert 'data-copy-target="#exec-repro-command"' in body
-    # The reproducibility section must appear AFTER all 5 tabpanels.
-    repro_idx = body.find('data-component="reproducibility"')
-    last_panel_idx = body.rfind('role="tabpanel"')
-    assert repro_idx > last_panel_idx, (
-        "reproducibility receipt must sit below all tabpanels in DOM order"
-    )
+    # The REPRODUCIBILITY mono eyebrow appears once per included tab.
+    assert body.count("REPRODUCIBILITY") >= 4
+    # The Copy button hook is the same across all 4 includes (Copy logic
+    # iterates [data-copy-target] via querySelectorAll).
+    assert body.count('data-copy-target="#exec-repro-command"') == 4
 
 
 def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> None:
@@ -772,3 +797,93 @@ def test_executive_clean_control_renders_all_5_new_partials(
     assert 'data-component="reproducibility"' in body
     # The findings empty-state copy is still wired through.
     assert "Nothing flagged yet." in body
+
+
+# ---------------------------------------------------------------------------
+# Judge-reasoning fallback (judge-reasoning-empty bug)
+# ---------------------------------------------------------------------------
+
+
+def _seed_memory_jsonl_without_judge(scan_dir: Path) -> dict[str, object]:
+    """Write one reflection record whose turn carries no judge reasoning /
+    confidence (mirrors recon-only attempts that never reached a judge).
+    Returns the inner turn dict.
+    """
+    turn = {
+        "agent": "asi01-recon",
+        "asi_category": "ASI01",
+        "csa_category": "GOAL_INSTRUCTION_MANIPULATION",
+        "turn": 1,
+        "strategy": "recon",
+        "prompt": "probe attempt without judge verdict",
+        "target_response": "target response without judge verdict",
+        # No verdict, confidence == 0, empty reasoning — by design.
+        "verdict": "",
+        "confidence": 0.0,
+        "reasoning": "",
+        "seed_id": "PROBE-RECON-001",
+        "attacker_refused": False,
+    }
+    record = {
+        "timestamp": "2026-05-27T12:30:00+00:00",
+        "record_type": "reflection",
+        "payload": {
+            "agent": turn["agent"],
+            "content": json.dumps(turn),
+        },
+    }
+    (scan_dir / "memory.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    return turn
+
+
+def test_executive_probes_tab_renders_judge_reasoning_fallback_when_empty(
+    client: TestClient, store: ScanStore
+) -> None:
+    """When a probe carries no judge reasoning (empty string) and confidence
+    is 0.0, the Probes tab must render the fallback prose AND a humanised
+    eyebrow — never an empty styled blockquote and never the literal
+    'confidence 0.00'.
+    """
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_memory_jsonl_without_judge(scan_dir)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+
+    idx = body.find('id="tabpanel-probes"')
+    next_panel_idx = body.find('id="tabpanel-agents"', idx)
+    probes_pane = body[idx:next_panel_idx]
+
+    # The hallmark of the bug is gone:
+    assert "confidence 0.00" not in probes_pane
+    # And we render a humanised eyebrow instead.
+    assert "no judge confidence" in probes_pane
+    # The empty styled blockquote is replaced by the fallback prose.
+    assert "Not graded per-turn" in probes_pane
+    assert "Findings tab for the rolled-up judge verdict" in probes_pane
+
+
+def test_executive_probes_tab_keeps_judge_reasoning_when_present(
+    client: TestClient, store: ScanStore
+) -> None:
+    """When a probe DOES carry judge reasoning + non-zero confidence,
+    the original eyebrow + blockquote render unchanged (no fallback)."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    # Use the existing helper that emits real reasoning + 0.85 confidence.
+    turns = _seed_memory_jsonl(scan_dir, count=1)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+
+    idx = body.find('id="tabpanel-probes"')
+    next_panel_idx = body.find('id="tabpanel-agents"', idx)
+    probes_pane = body[idx:next_panel_idx]
+
+    # Real reasoning shows up — the fallback prose does NOT.
+    assert str(turns[0]["reasoning"]) in probes_pane
+    assert "Not graded per-turn" not in probes_pane
+    assert "no judge confidence" not in probes_pane
+    # And the standard confidence eyebrow renders.
+    assert "confidence 0.85" in probes_pane

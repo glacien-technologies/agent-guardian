@@ -6,47 +6,82 @@
    Each tile reads from the existing shared payload — Executive does NOT
    introduce new KPI fields. Anywhere the value can be live-updated by the
    SSE patcher we mark it with ``data-live``.
+
+   Icons are inline SVG (Lucide paths, MIT-licensed) so they render on first
+   paint with no JS race window and add ~1.5 KB total vs ~50 KB for a CDN.
 #}
 <section class="exec-kpi-strip" aria-label="Scan key metrics">
 
   <div class="exec-kpi" data-kpi="aivss">
-    <span class="exec-kpi__label">AIVSS</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8z"/><path d="m9 12 2 2 4-4"/></svg>
+      AIVSS
+    </span>
     <span class="exec-kpi__value" data-live="aivss">{{ aivss_label }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.aivss }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="band">
-    <span class="exec-kpi__label">Band</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14 4 6"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+      Band
+    </span>
     <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="band">{{ band_label }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.band }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="findings">
-    <span class="exec-kpi__label">Findings</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      Findings
+    </span>
     <span class="exec-kpi__value" data-live="findings-total">{{ findings_total }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.findings }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="critical">
-    <span class="exec-kpi__label">Critical</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Critical
+    </span>
     <span class="exec-kpi__value exec-kpi__value--critical" data-live="critical">{{ counts.critical }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.critical }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="high">
-    <span class="exec-kpi__label">High</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      High
+    </span>
     <span class="exec-kpi__value exec-kpi__value--high" data-live="high">{{ counts.high }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.high }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="elapsed">
-    <span class="exec-kpi__label">Elapsed</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Elapsed
+    </span>
     <span class="exec-kpi__value" data-live="elapsed">{{ elapsed_label }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.elapsed }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="cost">
-    <span class="exec-kpi__label">Cost</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      Cost
+    </span>
     <span class="exec-kpi__value" data-live="usd">{{ usd_label }}</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.cost }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="coverage">
-    <span class="exec-kpi__label">Coverage</span>
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+      Coverage
+    </span>
     <span class="exec-kpi__value">{{ asi_covered }}/10</span>
+    <span class="exec-kpi__desc">{{ kpi_descriptions.coverage }}</span>
   </div>
 
 </section>

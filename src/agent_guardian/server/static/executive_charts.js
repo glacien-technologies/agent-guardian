@@ -163,94 +163,117 @@
 
   function mountSeverityBar() {
     if (!window.Chart) { return; }
-    var canvas = document.getElementById("exec-severity-bar");
-    if (!canvas) { return; }
-    var payload = parseChartPayload(canvas);
-    if (!payload || !Array.isArray(payload.rows)) { return; }
-    destroyExisting(canvas);
+    /* Multi-canvas init — one Chart.js instance per `.exec-severity-bar-canvas`.
+     * Overview and Findings each ship their own canvas with a tab-scoped id
+     * (`exec-severity-bar-overview`, `exec-severity-bar-findings`) so both
+     * panels render independently. Falls back to the legacy single-id lookup
+     * for backwards compatibility with any template that hasn't been
+     * migrated yet. */
+    var canvases = document.querySelectorAll("canvas.exec-severity-bar-canvas");
+    if (!canvases.length) {
+      var legacy = document.getElementById("exec-severity-bar");
+      if (!legacy) { return; }
+      canvases = [legacy];
+    }
 
-    var labels = payload.rows.map(function (r) {
-      return r.label || (r.severity || "").toUpperCase();
-    });
-    var counts = payload.rows.map(function (r) { return r.count || 0; });
-    var anchors = payload.rows.map(function (r) { return r.anchor; });
-    var colors = payload.rows.map(function (r) {
-      return readToken("--exec-sev-" + r.severity) || "#8b5cf6";
-    });
     var ink = readToken("--exec-ink") || "#1a1a1a";
     var subtle = readToken("--exec-ink-subtle") || "#8a8a8a";
     var grid = readToken("--exec-border-subtle") || "#e8e6e0";
     var bgElev = readToken("--exec-bg-elev") || "#ffffff";
+    var lastChart = null;
 
-    var chart = new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: labels,
-        datasets: [
-          {
-            data: counts,
-            backgroundColor: colors.map(function (c) { return withAlpha(c, 0.85); }),
-            borderColor: colors,
-            borderWidth: 1,
-            borderRadius: 4,
-            barThickness: 20,
-          },
-        ],
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            beginAtZero: true,
-            ticks: {
-              color: subtle,
-              font: { size: 11 },
-              precision: 0,
+    canvases.forEach(function (canvas) {
+      var payload = parseChartPayload(canvas);
+      if (!payload || !Array.isArray(payload.rows)) { return; }
+      /* Always tear down any prior Chart.js instance on this canvas before
+       * remounting. Guards against duplicate listeners on HTMX swaps + tab
+       * re-mounts (risk callout #1 in the design lock). */
+      destroyExisting(canvas);
+
+      var labels = payload.rows.map(function (r) {
+        return r.label || (r.severity || "").toUpperCase();
+      });
+      var counts = payload.rows.map(function (r) { return r.count || 0; });
+      var anchors = payload.rows.map(function (r) { return r.anchor; });
+      var colors = payload.rows.map(function (r) {
+        return readToken("--exec-sev-" + r.severity) || "#8b5cf6";
+      });
+
+      var chart = new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              data: counts,
+              backgroundColor: colors.map(function (c) { return withAlpha(c, 0.85); }),
+              borderColor: colors,
+              borderWidth: 1,
+              borderRadius: 4,
+              barThickness: 20,
             },
-            grid: { color: grid },
-          },
-          y: {
-            ticks: {
-              color: ink,
-              font: {
-                family: readToken("--exec-font-mono") || "monospace",
-                size: 11,
-                weight: "500",
+          ],
+        },
+        options: {
+          indexAxis: "y",
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              beginAtZero: true,
+              ticks: {
+                color: subtle,
+                font: { size: 11 },
+                precision: 0,
               },
+              grid: { color: grid },
             },
-            grid: { display: false },
+            y: {
+              ticks: {
+                color: ink,
+                font: {
+                  family: readToken("--exec-font-mono") || "monospace",
+                  size: 11,
+                  weight: "500",
+                },
+              },
+              grid: { display: false },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: ink,
+              titleColor: bgElev,
+              bodyColor: bgElev,
+              padding: 10,
+              displayColors: false,
+            },
+          },
+          onClick: function (_evt, els) {
+            if (!els.length) { return; }
+            var idx = els[0].index;
+            var anchor = anchors[idx];
+            if (!anchor) { return; }
+            /* getElementById is safer than querySelector when anchor is a
+             * "#id" string and avoids throwing on malformed selectors. */
+            var target = anchor.charAt(0) === "#"
+              ? document.getElementById(anchor.slice(1))
+              : document.querySelector(anchor);
+            if (!target) { return; }
+            var prefersReduced = window.matchMedia
+              && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            target.scrollIntoView({
+              behavior: prefersReduced ? "auto" : "smooth",
+              block: "start",
+            });
           },
         },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: ink,
-            titleColor: bgElev,
-            bodyColor: bgElev,
-            padding: 10,
-            displayColors: false,
-          },
-        },
-        onClick: function (_evt, els) {
-          if (!els.length) { return; }
-          var idx = els[0].index;
-          var anchor = anchors[idx];
-          if (!anchor) { return; }
-          var target = document.querySelector(anchor);
-          if (!target) { return; }
-          var prefersReduced = window.matchMedia
-            && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-          target.scrollIntoView({
-            behavior: prefersReduced ? "auto" : "smooth",
-            block: "start",
-          });
-        },
-      },
+      });
+      canvas.style.height = Math.max(160, labels.length * 36) + "px";
+      lastChart = chart;
     });
-    canvas.style.height = Math.max(160, labels.length * 36) + "px";
-    return chart;
+    return lastChart;
   }
 
   /* ----------------------------------------------------------------- */
@@ -302,10 +325,41 @@
   /* Bootstrap                                                          */
   /* ----------------------------------------------------------------- */
 
+  /* ----------------------------------------------------------------- */
+  /* Tab-visibility observer                                            */
+  /* ----------------------------------------------------------------- */
+
+  /* Chart.js sizes its canvas to the parent's measured box at construction
+   * time. Panels that start with `hidden` (Findings, Probes, Agents, Logs)
+   * have zero layout at init, so their charts come back as 0-tall blank
+   * boxes — visible as the original Findings-tab regression. Re-mounting
+   * when the panel becomes visible gives Chart.js a real bounding box to
+   * measure against and the bars animate in on first reveal. */
+  function watchPanelVisibility() {
+    if (typeof MutationObserver === "undefined") { return; }
+    var panels = document.querySelectorAll('[role="tabpanel"]');
+    panels.forEach(function (panel) {
+      if (panel.dataset.execChartObserver === "1") { return; }
+      panel.dataset.execChartObserver = "1";
+      var obs = new MutationObserver(function (records) {
+        for (var i = 0; i < records.length; i += 1) {
+          if (records[i].attributeName === "hidden"
+              && !panel.hasAttribute("hidden")) {
+            mountSeverityBar();
+            mountAsiRadar();
+            break;
+          }
+        }
+      });
+      obs.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+    });
+  }
+
   function init() {
     mountAsiRadar();
     mountSeverityBar();
     mountCopyButtons();
+    watchPanelVisibility();
   }
 
   if (document.readyState === "loading") {
@@ -319,6 +373,7 @@
     mountAsiRadar: mountAsiRadar,
     mountSeverityBar: mountSeverityBar,
     mountCopyButtons: mountCopyButtons,
+    watchPanelVisibility: watchPanelVisibility,
     readToken: readToken,
     withAlpha: withAlpha,
   };

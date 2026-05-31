@@ -59,6 +59,41 @@ from agent_guardian.models.severity import Severity, SeverityBand
 
 _LOG = logging.getLogger(__name__)
 
+# Humanised labels for the Executive BAND tile (and any other surface that
+# displays scan.band as visible text). The raw enum value (``not_evaluated``,
+# ``EXCELLENT``, …) is an internal token — feedback-no-raw-enum-in-ui requires
+# we never leak it verbatim to the operator. The mapping is intentionally
+# verbose enough to stand on its own without an accompanying score number
+# (the AIVSS hero already carries the number).
+_BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
+    SeverityBand.EXCELLENT: "Excellent",
+    SeverityBand.GOOD: "Good",
+    SeverityBand.WARNING: "Warning",
+    SeverityBand.POOR: "Poor",
+    SeverityBand.CRITICAL: "Critical",
+    SeverityBand.NOT_EVALUATED: "Not graded yet",
+}
+
+
+def _humanise_band(band: SeverityBand | None) -> str:
+    """Return a humanised, user-facing label for an AIVSS band.
+
+    Falls back to a title-cased best-effort rendering if a future band slips
+    past the mapping — never returns the raw underscore-bearing enum value
+    (see ``feedback_no_raw_enum_in_ui``).
+    """
+    if band is None:
+        return "Pending"
+    label = _BAND_LABELS.get(band)
+    if label is not None:
+        return label
+    # Defensive fallback — strip underscores, title-case. The mapping above
+    # covers every member of :class:`SeverityBand` so we should never hit
+    # this branch in practice; it exists so a future enum addition can't
+    # regress the "no raw enum text" guarantee.
+    return band.value.replace("_", " ").title()
+
+
 # Caps on the assembled lists. The probes_list is bounded so a long-running
 # scan doesn't blow the page render time; the logs_tail is FIFO-trimmed so
 # the operator always sees the most recent events. Both values are locked in
@@ -283,7 +318,7 @@ def _asi_rows(
         score_val = float(score_raw) if score_raw is not None else 0.0
         findings = findings_by_asi.get(code, {"critical": 0, "high": 0, "medium": 0, "low": 0})
         is_attention = (score_val < 70.0 and not is_pending) or findings["critical"] > 0
-        status_label, status_class = _status_for_row(scan, is_pending, score_val)
+        status_label, status_class = _status_for_row(scan, is_pending)
         rows.append(
             {
                 "code": code,
@@ -303,7 +338,7 @@ def _asi_rows(
     return rows
 
 
-def _status_for_row(scan: Scan | None, is_pending: bool, score: float) -> tuple[str, str]:
+def _status_for_row(scan: Scan | None, is_pending: bool) -> tuple[str, str]:
     """Return ``(label, class)`` for an ASI row's status pill."""
     if scan is not None and not is_pending:
         return ("complete", "done")
@@ -502,14 +537,14 @@ def build_dashboard_context(
 
     if scan is not None:
         aivss_label: str | int = scan.aivss
-        band_label = scan.band.value
+        band_label = _humanise_band(scan.band)
         band_class = _band_class(scan.band)
         needle_pct = _aivss_to_needle(scan.aivss)
         aggregate = scan.aivss + counts["critical"] * 2 + counts["high"] * 0.4
         score_sublabel = "tier-weighted, signed evidence"
     else:
         aivss_label = "—"
-        band_label = "PENDING"
+        band_label = "Pending"
         band_class = "unknown"
         needle_pct = None
         aggregate = 0.0
@@ -518,7 +553,7 @@ def build_dashboard_context(
     asi_rows = _asi_rows(scan, findings_by_asi)
     findings_page, pagination = _findings_page(scan, page=page, per_page=per_page)
     asi_dot_states = _asi_dot_states(scan, findings_by_asi)
-    asi_covered = sum(1 for code, b in findings_by_asi.items() if sum(b.values()) > 0)
+    asi_covered = sum(1 for b in findings_by_asi.values() if sum(b.values()) > 0)
 
     if scan is not None:
         commander_model = _engine_field(scan, "commander", "stub")
@@ -590,6 +625,19 @@ def build_dashboard_context(
         "score_sublabel": score_sublabel,
         "band_label": band_label,
         "band_class": band_class,
+        # KPI tile descriptions — one-line subtitles for the eight tiles in
+        # ``_kpi_strip.html``. Kept here (not in the template) so they can be
+        # unit-tested and overridden by callers without forking Jinja.
+        "kpi_descriptions": {
+            "aivss": "Composite agent safety score from adversarial testing",
+            "band": "Risk tier mapped from the AIVSS composite score",
+            "findings": "Distinct exploit attempts the swarm graded as valid",
+            "critical": "Findings with severity rating of Critical",
+            "high": "High-severity findings (CVSS 7.0-8.9 equivalent)",
+            "elapsed": "Wall-clock duration of the scan from start to finish",
+            "cost": "Total model API spend in USD for this scan",
+            "coverage": "Probe categories exercised out of 10 OWASP ASI dimensions",
+        },
         "needle_pct": needle_pct,
         "aggregate_label": f"{aggregate:.1f}",
         # Unicode MINUS SIGN (U+2212) is the typographically correct glyph for

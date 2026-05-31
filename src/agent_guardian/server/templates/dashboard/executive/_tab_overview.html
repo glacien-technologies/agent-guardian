@@ -14,6 +14,10 @@
          aria-labelledby="tab-overview"
          tabindex="0">
   {% include "dashboard/executive/_aivss_hero.html" %}
-  {% include "dashboard/executive/_severity_bars.html" %}
-  {% include "dashboard/executive/_asi_radar.html" %}
+  {% set tab_key = 'overview' %}
+  <div class="exec-overview-twocol">
+    {% include "dashboard/executive/_severity_bars.html" %}
+    {% include "dashboard/executive/_asi_radar.html" %}
+  </div>
+  {% include "dashboard/executive/_reproducibility.html" %}
 </section>

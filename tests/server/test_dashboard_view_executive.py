@@ -11,14 +11,25 @@ view-model layer is covered in isolation.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+from fastapi.testclient import TestClient
+
+from agent_guardian import __version__
+from agent_guardian.models.asi import AsiCategory
+from agent_guardian.models.scan import Scan
+from agent_guardian.models.severity import SeverityBand
+from agent_guardian.models.tier import Tier
+from agent_guardian.server import ScanStore, create_app
 from agent_guardian.server import dashboard_view as dv
 from agent_guardian.server.dashboard_view import (
     _assemble_logs_tail,
     _assemble_probes_list,
     _derive_log_level,
     _derive_log_summary,
+    _humanise_band,
     _parse_event_line,
     _parse_reflection_line,
     _timestamp_label,
@@ -357,3 +368,116 @@ def test_dashboard_view_module_caps_are_locked() -> None:
     """Locked constants — the design lock says 500 / 1000, never change without QA."""
     assert dv._PROBES_LIST_CAP == 500
     assert dv._LOGS_TAIL_CAP == 1000
+
+
+# ---------------------------------------------------------------------------
+# band_label humanisation (feedback-no-raw-enum-in-ui)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("band", "expected"),
+    [
+        (SeverityBand.EXCELLENT, "Excellent"),
+        (SeverityBand.GOOD, "Good"),
+        (SeverityBand.WARNING, "Warning"),
+        (SeverityBand.POOR, "Poor"),
+        (SeverityBand.CRITICAL, "Critical"),
+        (SeverityBand.NOT_EVALUATED, "Not graded yet"),
+    ],
+)
+def test_humanise_band_maps_every_member(band: SeverityBand, expected: str) -> None:
+    """Every :class:`SeverityBand` member must humanise — no raw enum text."""
+    label = _humanise_band(band)
+    assert label == expected
+    # And, crucially, never leak the underscore-bearing internal token.
+    assert "_" not in label
+
+
+def test_humanise_band_handles_none_with_pending_label() -> None:
+    """When no scan is loaded yet the helper returns a soft placeholder."""
+    assert _humanise_band(None) == "Pending"
+
+
+def _make_scan_with_band(band: SeverityBand, *, scan_id: str = "band-fixture") -> Scan:
+    """Build a minimal Scan with the requested band (no findings, stub engine)."""
+    return Scan(
+        id=scan_id,
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=0 if band is SeverityBand.NOT_EVALUATED else 84,
+        band=band,
+        sub_scores={},
+        findings=[],
+        asi_scores={cat: 0.0 for cat in AsiCategory},
+        duration_seconds=1.0,
+        cost_usd=0.0,
+        tokens_total=0,
+        mode="full",
+        scoring_valid=band is not SeverityBand.NOT_EVALUATED,
+        evaluation_mode="real" if band is not SeverityBand.NOT_EVALUATED else "stub",
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+    )
+
+
+def test_build_dashboard_context_band_label_never_raw_enum_for_not_evaluated() -> None:
+    """The view-model field must humanise NOT_EVALUATED before it reaches Jinja."""
+    scan = _make_scan_with_band(SeverityBand.NOT_EVALUATED)
+    ctx = build_dashboard_context(
+        scan_id=scan.id,
+        scan=scan,
+        is_running=False,
+        base_url="http://127.0.0.1:8000",
+        version_label="0.0.0",
+    )
+    assert ctx.payload["band_label"] == "Not graded yet"
+    assert "not_evaluated" not in ctx.payload["band_label"].lower()
+
+
+def test_build_dashboard_context_band_label_pending_when_scan_absent() -> None:
+    """No scan = soft 'Pending' placeholder; never the literal string PENDING."""
+    ctx = build_dashboard_context(
+        scan_id="sid",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8000",
+        version_label="0.0.0",
+    )
+    assert ctx.payload["band_label"] == "Pending"
+    assert "_" not in ctx.payload["band_label"]
+
+
+def test_rendered_executive_dashboard_never_leaks_not_evaluated_token(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: an Executive render of a NOT_EVALUATED scan must NOT contain
+    the raw ``not_evaluated`` token in any user-facing text node.
+
+    The literal token may still legitimately appear as a CSS modifier class
+    (``exec-kpi__value--not_evaluated``) — we check for the *visible* string
+    inside the BAND tile's value element instead.
+    """
+    store = ScanStore(root_dir=tmp_path)
+    scan = _make_scan_with_band(SeverityBand.NOT_EVALUATED, scan_id="exec-band-not-eval")
+    scan_dir = store.scan_dir(scan.id)
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    (scan_dir / "scan.json").write_text(scan.model_dump_json(indent=2), encoding="utf-8")
+
+    app = create_app(scan_store=store)
+    client = TestClient(app)
+    resp = client.get(f"/scans/{scan.id}?theme=executive")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # The humanised label is present, the raw enum token is not (as visible text).
+    assert "Not graded yet" in html
+    # The KPI tile must carry the humanised label, not the underscore token.
+    # We allow ``not_evaluated`` only as a CSS class modifier (``--not_evaluated``)
+    # — anywhere else (inside a ``>…<`` text node) is a regression.
+    assert ">not_evaluated<" not in html
+    assert ">NOT_EVALUATED<" not in html

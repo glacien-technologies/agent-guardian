@@ -35,11 +35,22 @@
             <pre class="exec-probe__prompt">{{ p.prompt }}</pre>
             <p class="exec-probe__label">Target response</p>
             <pre class="exec-probe__response">{{ p.target_response }}</pre>
-            <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(p.confidence) }})</p>
-            <blockquote class="exec-probe__reason">{{ p.reasoning }}</blockquote>
+            {% if p.confidence and p.confidence > 0.0 %}
+              <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(p.confidence) }})</p>
+            {% else %}
+              <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
+            {% endif %}
+            {% if p.reasoning %}
+              <blockquote class="exec-probe__reason">{{ p.reasoning }}</blockquote>
+            {% else %}
+              <p class="exec-probe__reason exec-probe__reason--empty">
+                Not graded per-turn — see the Findings tab for the rolled-up judge verdict.
+              </p>
+            {% endif %}
           </details>
         </li>
       {% endfor %}
     </ol>
   {% endif %}
+  {% include "dashboard/executive/_reproducibility.html" %}
 </section>

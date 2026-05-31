@@ -870,7 +870,9 @@ def test_bug2_score_card_with_partial_scan_renders_real_aivss() -> None:
     assert ctx.payload["aivss_label"] == 42
     # Band class is the lowercased band (not the broken-wire "unknown").
     assert ctx.payload["band_class"] == "not_evaluated"
-    assert ctx.payload["band_label"] == "not_evaluated"
+    # band_label is humanised for user-facing surfaces (feedback-no-raw-enum-in-ui).
+    # band_class stays as the raw enum value because it's a CSS modifier hook.
+    assert ctx.payload["band_label"] == "Not graded yet"
     # The needle resolves to the AIVSS percentage (not the broken-wire None).
     assert ctx.payload["needle_pct"] == 42.0
     # is_terminal must be False mid-flight so the SSE auto-refresh keeps
@@ -1070,7 +1072,8 @@ def test_in_flight_scan_with_no_partial_falls_back_to_running_placeholders() -> 
         version_label=__version__,
     )
     assert ctx.payload["aivss_label"] == "—"
-    assert ctx.payload["band_label"] == "PENDING"
+    # Humanised pending text (feedback-no-raw-enum-in-ui) — was "PENDING".
+    assert ctx.payload["band_label"] == "Pending"
     assert ctx.payload["is_terminal"] is False
     assert ctx.payload["counts"] == {
         "critical": 0,

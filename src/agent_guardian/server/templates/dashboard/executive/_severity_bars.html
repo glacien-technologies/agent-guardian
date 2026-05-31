@@ -25,17 +25,18 @@
         data-component="severity-bars"
         aria-labelledby="exec-chart-bar-caption">
   <figcaption id="exec-chart-bar-caption">
-    <span class="exec-chart__eyebrow">FIG. 2</span>
+    <span class="exec-chart__eyebrow">FIG. 1</span>
     <h3 class="exec-chart__title">Findings by severity</h3>
     <p class="exec-chart__lede">
       Click any bar to jump to that severity grouping below.
     </p>
   </figcaption>
   <div class="exec-chart__canvas-wrap exec-chart__canvas-wrap--bar">
-    <canvas id="exec-severity-bar"
-            class="exec-chart__canvas"
+    <canvas id="exec-severity-bar-{{ tab_key | default('overview') }}"
+            class="exec-chart__canvas exec-severity-bar-canvas"
             role="img"
             aria-label="Findings count grouped by severity, horizontal bar chart"
+            data-tab-key="{{ tab_key | default('overview') }}"
             data-chart='{{ _bar_payload | tojson }}'></canvas>
   </div>
   <details class="exec-chart__data-toggle">

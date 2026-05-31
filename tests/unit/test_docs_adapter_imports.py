@@ -1,21 +1,20 @@
 """Guard adapter docs against drifting back to fictional ``scan_*`` helpers.
 
-The old ``docs/adapters/{prompt,code,http,framework}.md`` quartet was split in
-the Diátaxis restructure into:
+History
+-------
 
-* ``docs/how-to/scan-a-system-prompt.md`` (was ``adapters/prompt.md``)
-* ``docs/how-to/scan-python-source.md``  (was ``adapters/code.md``)
-* ``docs/how-to/scan-an-http-endpoint.md`` (was ``adapters/http.md``)
-* ``docs/integrations/adapters/framework.md`` (was ``adapters/framework.md``)
-* ``docs/integrations/adapters/index.md`` (was ``adapters/index.md``)
+* Pre-QA-024: ``docs/adapters/{prompt,code,http,framework}.md`` quartet (MkDocs).
+* QA-024 Diátaxis restructure: split into ``docs/how-to/scan-*.md`` +
+  ``docs/integrations/adapters/{index,framework}.md``.
+* QA-025 Mintlify migration (2026-05-31): the how-to + integrations pages were
+  folded into the new ``docs/try/scan-*.mdx`` tutorials + the
+  ``docs/concepts/target-adapters.mdx`` reference page. File extensions
+  flipped from ``.md`` to ``.mdx``; fenced code-block syntax is unchanged.
 
-All five previously documented a ``from agent_guardian import scan_system_prompt``
-/ ``scan_code`` / ``scan_http`` / ``scan_framework`` surface that does not exist
-on the public package. The fix rewrote those snippets to use the real public
-surface — ``PromptAdapter``, ``CodeAdapter``, ``HttpAdapter``, the six concrete
-framework adapter classes, and ``SwarmCommander`` — and this test parses every
-Python fenced block from those new paths and asserts every
-``from agent_guardian import X`` symbol is in ``agent_guardian.__all__``.
+Every Python fenced block from those tutorial / reference pages parses every
+``from agent_guardian import X`` line and asserts the symbol is in
+``agent_guardian.__all__``. The fictional ``scan_system_prompt`` /
+``scan_code`` / ``scan_http`` / ``scan_framework`` symbols must never reappear.
 """
 
 from __future__ import annotations
@@ -29,14 +28,17 @@ import agent_guardian
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_DIR = REPO_ROOT / "docs"
-# The adapter how-to / integration docs live in two buckets after the
-# Diátaxis restructure. Walking both keeps the original guarantee.
+# Mintlify (.mdx) tutorial + reference pages that document the adapter
+# surface. Code-fence syntax is identical between .md and .mdx, so the
+# parser still works.
 ADAPTER_DOC_PATHS = [
-    DOCS_DIR / "how-to" / "scan-a-system-prompt.md",
-    DOCS_DIR / "how-to" / "scan-python-source.md",
-    DOCS_DIR / "how-to" / "scan-an-http-endpoint.md",
-    DOCS_DIR / "integrations" / "adapters" / "index.md",
-    DOCS_DIR / "integrations" / "adapters" / "framework.md",
+    DOCS_DIR / "try" / "scan-rest-api.mdx",
+    DOCS_DIR / "try" / "scan-langgraph.mdx",
+    DOCS_DIR / "try" / "scan-crewai.mdx",
+    DOCS_DIR / "try" / "scan-mcp-server.mdx",
+    DOCS_DIR / "try" / "scan-rag-app.mdx",
+    DOCS_DIR / "try" / "scan-with-docker.mdx",
+    DOCS_DIR / "concepts" / "target-adapters.mdx",
 ]
 
 _FENCE_RE = re.compile(r"```python\n(.*?)```", re.DOTALL)
@@ -86,8 +88,8 @@ def _parse_imports(block: str) -> list[str]:
 def test_adapter_docs_have_python_examples() -> None:
     blocks = _iter_python_blocks()
     assert blocks, (
-        "no python code blocks found under docs/how-to/scan-*.md or "
-        "docs/integrations/adapters/ — expected at least one"
+        "no python code blocks found under docs/try/scan-*.mdx or "
+        "docs/concepts/target-adapters.mdx — expected at least one"
     )
 
 

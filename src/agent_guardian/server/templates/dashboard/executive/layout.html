@@ -49,10 +49,9 @@
     {% include "dashboard/executive/_tab_probes.html" %}
     {% include "dashboard/executive/_tab_agents.html" %}
     {% include "dashboard/executive/_tab_logs.html" %}
-    {# Reproducibility receipt — placed OUTSIDE the tabpanels container so
-       it appears at the bottom of whichever tab is active (the tabpanels
-       are full-document siblings, not separately-scrolling regions). #}
-    {% include "dashboard/executive/_reproducibility.html" %}
+    {# Reproducibility receipt — now included per-tab (see _tab_overview /
+       _tab_findings / _tab_probes / _tab_logs). Intentionally omitted on
+       the Agents tab. #}
   </main>
 
   {# Live SSE patcher — mirrors the other themes so the same /scans/<id>/live
