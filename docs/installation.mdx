@@ -149,7 +149,7 @@ python: 3.11.13
 llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
 bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
 sandbox: importable
-pdf engine: none | none -- pip install 'agent-guardian[full]' or 'agent-guardian[pdf-fallback]' to enable --output pdf.
+pdf engine: none | reportlab 4.2 -- install 'agent-guardian[full]' to upgrade to WeasyPrint (higher-fidelity HTML→PDF).
 otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
 dashboard port 7474: free
 state dir: /Users/you/.agentguardian

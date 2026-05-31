@@ -84,7 +84,7 @@ python: 3.11.13
 llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
 bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
 sandbox: importable
-pdf engine: none | none -- pip install 'agent-guardian[full]' or 'agent-guardian[pdf-fallback]' to enable --output pdf.
+pdf engine: none | reportlab 4.2 -- install 'agent-guardian[full]' to upgrade to WeasyPrint (higher-fidelity HTML→PDF).
 otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
 dashboard port 7474: free
 state dir: /Users/you/.agentguardian
@@ -354,10 +354,135 @@ Model specs: `stub`, `openai:gpt-4o`, `anthropic:claude-haiku-4-5`,
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `pdf`. |
+| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `pdf`. All five work after a stock `pip install agent-guardian` — no extras required. |
 | `--output-path PATH` | unset | Where to write the report file. |
 | `--no-tui` | off | Disable the Rich progress panel. |
+| `--legacy-board` | off | Render the pre-QA-012 flat agent table instead of the new three-phase panels (Recon → Red Teaming → Findings). One-release deprecation escape hatch; will be removed in v1.2. |
 | `--config PATH` | auto-discovered | Override the default config file location. |
+
+<Tip>
+  ReportLab is bundled in the base install, so `--output pdf` writes a clean
+  single-page summary out of the box. Install `agent-guardian[full]` to upgrade
+  the PDF engine to WeasyPrint for higher-fidelity HTML→PDF rendering (rich
+  CSS layout, real typography). The dispatcher prefers WeasyPrint when its
+  native deps (`libpango` / `libcairo`) are available, and falls back to
+  ReportLab otherwise. Engine availability is validated at scan startup —
+  the scan never starts on a configuration that can't write its report.
+</Tip>
+
+#### Scan plan panel (QA-011)
+
+Before the first LLM call, AgentGuardian prints a one-screen "scan
+plan" panel summarising everything it just verified: target
+reachability, per-role model validation, budget caps, output engine
+availability, dashboard server status, and the safety guards in play.
+This catches the failure modes that used to surface only after 6
+minutes of LLM spend — missing PDF engine, unreachable target,
+dashboard server down, model id typo.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--yes`, `-y` | off | Skip the 5-second confirmation wait. Equivalent to `AGENT_GUARDIAN_NO_PLAN_CONFIRM=1`. Implicit when stdout is not a TTY or `$CI=true`. |
+| `--no-plan-confirm` | off | Alias for `--yes` — skip the wait without suppressing the panel. |
+| `--no-plan` | off | Skip the panel entirely. For ultra-quiet CI use. The dashboard URL is still emitted via the legacy one-line print so [QA-003](/_design/qa) holds. |
+
+What you'll see on an interactive scan:
+
+```text
+╭─ Scan plan · cli-6a04e02a7b5e ──────────────────────────────────────╮
+│                                                                     │
+│  TARGET                                                             │
+│    URL                  https://target.example.com/chat             │
+│    Mode                 endpoint                                    │
+│    Reachable            ✓ reachable in 247 ms                       │
+│    Multi-agent          no (single endpoint)                        │
+│  MODELS                                                             │
+│    Attacker             gemini:gemini-2.5-flash   ✓ validated       │
+│    Evaluator            gemini:gemini-2.5-flash   ✓ validated       │
+│    Commander            gemini:gemini-2.5-flash   ✓ validated       │
+│  BUDGET                                                             │
+│    Mode                 full (95% coverage threshold)               │
+│    Wall-clock cap       15 min                                      │
+│    USD cap              $0.1000                                     │
+│    Estimated cost       $0.0400 - $0.0800 (typical for full mode)   │
+│  OUTPUTS                                                            │
+│    --output pdf         ✓ reportlab                                 │
+│    --output-path        ~/finbot.pdf                                │
+│  DASHBOARD                                                          │
+│    URL                  http://127.0.0.1:7474/scans/cli-6a04e02a7b5e│
+│    Server status        ✓ auto-served (child spawned)               │
+│  SAFETY GUARDS                                                      │
+│    RoE blocklist        none                                        │
+│    Authorization        n/a                                         │
+│    Egress policy        unrestricted                                │
+│                                                                     │
+╰─────────────────────────────────────────────────────────────────────╯
+Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 5s)
+```
+
+Any ✗ row appends a `WARNINGS` footer with one line per ✗. The
+5-second timer keeps interactive use frictionless; scripted use opts
+out via `--yes` or one of the implicit skips:
+
+* `--yes` / `-y` (CLI)
+* `--no-plan-confirm` (CLI alias)
+* `--no-plan` (CLI; suppresses the panel itself)
+* `$AGENT_GUARDIAN_NO_PLAN_CONFIRM=1` (env)
+* `$CI=true` (env)
+* stdout is not a TTY (e.g. `agent-guardian scan ... | cat`)
+* stdin is not a TTY
+
+#### Phase composition (QA-012)
+
+Once the scan starts, the Rich Live region renders three phase-locked
+panels composed inside a single `rich.console.Group` so the QA-002
+"one Live region per scan" invariant holds — there is one Live frame,
+three panel sections, and Rich repaints them in place each tick.
+
+```text
+┌─ Phase 1 · Reconnaissance ──────────────────────────────────────────┐
+│  goal:          Black-box capability audit                          │
+│  target:        https://target.example.com/chat                     │
+│  what we found: 13 probes apply · 3 skipped · multi-agent: no       │
+│  status:        ◐ running (12s)                                     │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 2 · Red Teaming ─────────────────────────────────────────────┐
+│  Queued — waiting on reconnaissance to complete.                    │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 3 · Findings · 0 total · 0 critical · 0 high · 0 medium ─────┐
+│  Findings will appear here as red-team agents complete.             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+As later phases activate, earlier phases auto-collapse into a
+one-line summary so the operator's focus follows the active work:
+
+```text
+┌─ Phase 1 · Reconnaissance ✓ done (90.0s) · 13 probes apply ─────────┐
+┌─ Phase 2 · Red Teaming · 4m 12s elapsed · budget 47% ───────────────┐
+│  goal-hijack-agent  ASI01  ● done     9/12   3                      │
+│  privilege-agent    ASI03  ● done     6/12   2                      │
+│  supply-chain       ASI04  ◐ running  3/12   1                      │
+│  ...                                                                │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 3 · Findings · 6 total · 0 critical · 6 high ────────────────┐
+│  HIGH                                                               │
+│  ✗ ASI01-GH-004 · goal-hijack-agent · prompt-injection succeeded    │
+│  ✗ ASI01-GH-005 · secret-extraction · system-prompt leak            │
+│  ✗ ASI03-PR-002 · privilege-agent · cross-tenant data read          │
+│  ... (3 more streaming)                                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Findings stream in parallel with Phase 2 — every agent that completes
+with `findings_count > 0` projects rows into the severity-grouped list
+(CRITICAL → HIGH → MEDIUM → LOW → INFO). The `--debug` attack feed
+(QA-005) flows ABOVE the Live frame as scrollback, so panel borders
+never tear.
+
+Pass `--legacy-board` to opt into the pre-QA-012 flat agent table for
+one release. The flag is a deprecation escape hatch and will be
+removed in v1.2.
 
 #### Network + reachability
 

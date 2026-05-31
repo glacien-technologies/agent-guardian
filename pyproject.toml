@@ -77,6 +77,16 @@ dependencies = [
   # consumer so we declare it directly to keep the contract explicit.
   "jsonschema>=4.21",
   "exceptiongroup>=1.2; python_version<'3.11'",
+  # QA-010 — ``--output pdf`` is an advertised first-class flag and must work
+  # after a stock ``pip install agent-guardian``. ReportLab is pure-Python
+  # (~5 MB, Apache-2.0, no native compilation step), so it is safe as a
+  # default runtime dependency. WeasyPrint stays in the ``[full]`` extra
+  # for users who want the higher-fidelity HTML→PDF renderer (it requires
+  # native ``libpango`` / ``libcairo`` libraries that are not on bare CI
+  # runners). The PDF dispatcher in :mod:`agent_guardian.reports.pdf`
+  # already prefers WeasyPrint → ReportLab; promoting ReportLab into base
+  # only guarantees the fallback is always present.
+  "reportlab>=4.2",
 ]
 
 [project.optional-dependencies]
@@ -86,7 +96,13 @@ full = [
   "sentence-transformers>=3.3",
   "presidio-analyzer>=2.2",
 ]
-pdf-fallback = ["reportlab>=4.2"]
+# QA-010 deprecation alias — ReportLab is now in base. This extra is kept
+# empty for one release so ``pip install 'agent-guardian[pdf-fallback]'``
+# continues to resolve for users / scripts that still reference it.
+# Scheduled for removal in v1.2. A best-effort deprecation banner is
+# emitted from ``agent_guardian.__init__`` when the user's site-packages
+# were resolved through this extra (via ``importlib.metadata``).
+pdf-fallback = []
 # ``aws`` carries the optional botocore dependency that the production
 # Bedrock client uses for the AWS credential chain + SigV4 request signer.
 # It is intentionally NOT in base deps so users who never touch Bedrock

@@ -153,7 +153,9 @@ def test_log_message_appears_above_live_panel(
     # transient frames flush). Assert ordering.
     assert "hello from inside the live region" in text
     log_idx = text.index("hello from inside the live region")
-    panel_idx = text.index("AgentGuardian — swarm board")
+    # QA-012 — the swarm-board flat title was replaced by the
+    # three phase-panel titles. Phase 1 is always the first frame.
+    panel_idx = text.index("Phase 1 · Reconnaissance")
     assert log_idx < panel_idx, (
         "log line must serialize ABOVE the Live panel as scrollback; "
         f"got log_idx={log_idx}, panel_idx={panel_idx}"

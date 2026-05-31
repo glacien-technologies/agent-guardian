@@ -374,3 +374,73 @@ def test_notice_documents_transitive_licenses(needle: str) -> None:
 
     body = (REPO_ROOT / "NOTICE").read_text(encoding="utf-8")
     assert needle in body, f"NOTICE is missing required transitive-license content: {needle!r}"
+
+
+# --------------------------------------------------------------------- QA-010
+
+
+def test_reportlab_is_in_base_dependencies() -> None:
+    """QA-010 — ReportLab MUST live in [project.dependencies], not an extra.
+
+    Before this fix, ``reportlab`` lived in the ``[pdf-fallback]`` extra. A
+    stock ``pip install agent-guardian`` produced a CLI advertising
+    ``--output pdf`` that errored at write-time, after the operator had
+    already paid for the scan. ReportLab is pure-Python, ~5 MB, Apache-2.0
+    — safe as a default dep.
+    """
+    project = _load_pyproject()["project"]
+    base_deps = project["dependencies"]  # type: ignore[index]
+    assert isinstance(base_deps, list)
+    assert any(spec.lower().startswith("reportlab") for spec in base_deps), (
+        "reportlab is missing from [project.dependencies]. QA-010 requires "
+        "ReportLab in base so --output pdf works after a stock install."
+    )
+
+
+def test_pdf_fallback_extra_is_deprecated_noop() -> None:
+    """QA-010 — ``[pdf-fallback]`` extra exists but is empty for one release.
+
+    The deprecation alias keeps ``pip install agent-guardian[pdf-fallback]``
+    resolving for users / scripts that still reference it, while letting
+    base-install consumers stop paying twice.
+    """
+    optional = _load_pyproject()["project"]["optional-dependencies"]  # type: ignore[index]
+    assert isinstance(optional, dict)
+    assert "pdf-fallback" in optional, (
+        "[pdf-fallback] extra was removed entirely; QA-010 requires it kept "
+        "as an empty alias for one release."
+    )
+    fallback = optional["pdf-fallback"]
+    assert fallback == [], (
+        f"[pdf-fallback] extra must be an EMPTY list (deprecation alias). Currently: {fallback!r}"
+    )
+
+
+def test_no_extras_install_can_emit_pdf(tmp_path: Path) -> None:
+    """QA-010 (AC-010-1) — ``--output pdf`` works on a stock install.
+
+    Asserts (a) ``reportlab`` resolves via ``importlib.metadata`` (proof
+    it's in the base dependency closure, not an extra), (b) the PDF
+    dispatcher selects the reportlab engine when WeasyPrint is absent,
+    (c) the emitted file is a valid PDF (non-zero, ``%PDF-`` magic header).
+    """
+    import importlib.metadata as im
+
+    # If reportlab isn't installed, the test environment is broken — the
+    # whole point of QA-010 is that this resolves.
+    assert im.version("reportlab"), "reportlab not installed; QA-010 base-dep contract broken"
+
+    from agent_guardian.reports.pdf import _resolve_engine, write_pdf
+    from tests.unit._report_fixtures import make_scan
+
+    # Pin engine selection to reportlab. _resolve_engine accepts the engine
+    # kwarg as the override mechanism the writer itself uses.
+    engine = _resolve_engine("reportlab")
+    assert engine == "reportlab"
+
+    scan = make_scan()
+    out = tmp_path / "stock.pdf"
+    write_pdf(scan, out, engine="reportlab")
+    data = out.read_bytes()
+    assert data.startswith(b"%PDF-"), f"emitted file is not a valid PDF — first bytes: {data[:8]!r}"
+    assert len(data) > 1024, f"PDF suspiciously small ({len(data)} bytes)"

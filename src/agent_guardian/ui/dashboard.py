@@ -1,8 +1,14 @@
 """Rich Live-region renderable for the AgentGuardian scan TUI (QA-002).
 
 This module owns the *single source of truth* for what the scrollback
-shows during a scan: a :class:`rich.console.Group` composed of header
-panel, agent table, optional budget progress bars, and footer panel.
+shows during a scan. As of QA-012 the composition is a four-part
+``rich.console.Group``:
+
+* (optional) Phase 0 — the QA-011 Plan panel, rendered only during the
+  pre-swarm wait (``state.current_phase == "plan"``);
+* Phase 1 — :func:`agent_guardian.ui.recon_panel.build_recon_panel`;
+* Phase 2 — :func:`agent_guardian.ui.red_team_panel.build_red_team_panel`;
+* Phase 3 — :func:`agent_guardian.ui.findings_panel.build_findings_panel`.
 
 The renderer is **pure** — :func:`make_dashboard` is side-effect free
 and only consumes a :class:`DashboardState`. Callers update the state
@@ -10,22 +16,32 @@ and pass it to ``Live.update(make_dashboard(state))`` each tick. This
 keeps the smoking-gun race the old TUI had (a ``console.print(panel)``
 per event accumulating duplicate frames in scrollback) impossible by
 construction — there is exactly one renderable at any moment and Rich
-re-paints it in place.
+re-paints it in place. The QA-002 invariant is preserved by
+construction: the Group is one renderable, and the Plan panel is
+dropped from later frames so it never duplicates in scrollback.
 
-Color tokens are sourced from ``agent_guardian.logging_setup._AG_THEME``;
-this module does **not** hard-code any ANSI sequences.
+A ``legacy=True`` opt-in returns the pre-QA-012 flat agent table for
+one-release back-compat (the ``--legacy-board`` CLI flag); the helper
+functions ``_render_header`` / ``_render_agent_table`` /
+``_render_progress`` / ``_render_footer`` are kept module-private and
+re-exported with explicit names so the panel modules can compose them
+without forking the logic.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from agent_guardian.ui.findings_panel import FindingRow
+    from agent_guardian.ui.recon_panel import ReconSummary
 
 __all__ = [
     "AGENT_ROWS",
@@ -56,6 +72,12 @@ AGENT_ROWS: tuple[tuple[str, str], ...] = (
 AgentStatus = Literal["pending", "running", "done", "error", "skipped"]
 
 
+# QA-012 — phase tracker. ``plan`` is the QA-011 prelude (before swarm
+# start); ``recon`` / ``decompose`` / ``parallel`` / ``finalise`` mirror
+# the engine phases; ``done`` is post-scan_done.
+CurrentPhase = Literal["plan", "recon", "decompose", "parallel", "finalise", "done"]
+
+
 _STATUS_STYLE: dict[AgentStatus, str] = {
     "pending": "status.pending",
     "running": "status.running",
@@ -84,6 +106,17 @@ class DashboardState:
     :func:`make_dashboard`. All numeric fields default to safe zeros
     so a fresh ``DashboardState(scan_id=..., target_ref=..., tier=...)``
     renders an immediately-valid empty board.
+
+    QA-012 — additive fields for phase composition:
+
+    * ``current_phase`` — drives panel collapse/expand decisions.
+    * ``phase_durations`` — phase name → seconds; populated from
+      ``phase_done`` events.
+    * ``recon_summary`` — frozen recon snapshot; populated from
+      ``phase_done("recon")``.
+    * ``findings_streaming`` — append-only tuple of
+      :class:`FindingRow`; the Findings panel rebuilds from it on
+      each tick.
     """
 
     scan_id: str
@@ -99,6 +132,11 @@ class DashboardState:
     budget_tokens_cap: int | None = None
     budget_usd_spent: float = 0.0
     budget_usd_cap: float | None = None
+    # QA-012 — phase composition additions.
+    current_phase: CurrentPhase = "plan"
+    phase_durations: dict[str, float] = field(default_factory=dict)
+    recon_summary: ReconSummary | None = None
+    findings_streaming: tuple[FindingRow, ...] = ()
 
     def __post_init__(self) -> None:
         # Seed every known agent row with a "pending" status so the
@@ -191,18 +229,63 @@ def _render_footer(state: DashboardState) -> Panel:
     return Panel(grid, border_style="brand.dim")
 
 
-def make_dashboard(state: DashboardState) -> RenderableType:
-    """Build the swarm-board renderable from a :class:`DashboardState`.
+def _render_legacy(state: DashboardState) -> RenderableType:
+    """Pre-QA-012 flat composition — kept for ``--legacy-board``.
 
-    Returns a :class:`rich.console.Group` containing — in order —
-    the header panel, the agent table, an optional budget
-    :class:`rich.progress.Progress` (omitted when no caps set), and
-    the footer panel. The function is pure: two calls with the same
-    state produce equivalent renderables.
+    Identical to the pre-refactor :func:`make_dashboard` body:
+    header → table → (optional) progress → footer.
     """
     parts: list[RenderableType] = [_render_header(state), _render_agent_table(state)]
     progress = _render_progress(state)
     if progress is not None:
         parts.append(progress)
     parts.append(_render_footer(state))
+    return Group(*parts)
+
+
+def make_dashboard(
+    state: DashboardState,
+    *,
+    plan_panel: Panel | None = None,
+    debug_feed: RenderableType | None = None,
+    legacy: bool = False,
+) -> RenderableType:
+    """Build the swarm-board renderable from a :class:`DashboardState`.
+
+    QA-012 composition order (top → bottom):
+
+    1. (optional) ``plan_panel`` — the QA-011 Phase 0 panel. Rendered
+       only while ``state.current_phase == "plan"``; once the swarm
+       starts the composer drops it from later frames.
+    2. Phase 1 — Recon panel.
+    3. Phase 2 — Red Teaming panel.
+    4. Phase 3 — Findings panel.
+    5. (optional) ``debug_feed`` — QA-005's ``--debug`` attack feed
+       renderable, placed BELOW Phase 3 (per QA-012 design lock).
+
+    Pure — two calls with the same state produce equivalent
+    renderables. The Plan-panel drop after ``current_phase`` advances
+    is the load-bearing rule that keeps the QA-002 single-Live
+    invariant intact.
+
+    The ``legacy`` flag returns the pre-QA-012 flat agent table for one
+    release of opt-in back-compat (the ``--legacy-board`` CLI flag).
+    """
+    if legacy:
+        return _render_legacy(state)
+
+    # Late imports so a broken panel module doesn't make ``dashboard``
+    # untypeable on cold-start; the composer is forgiving.
+    from agent_guardian.ui.findings_panel import build_findings_panel
+    from agent_guardian.ui.recon_panel import build_recon_panel
+    from agent_guardian.ui.red_team_panel import build_red_team_panel
+
+    parts: list[RenderableType] = []
+    if plan_panel is not None and state.current_phase == "plan":
+        parts.append(plan_panel)
+    parts.append(build_recon_panel(state))
+    parts.append(build_red_team_panel(state))
+    parts.append(build_findings_panel(state))
+    if debug_feed is not None:
+        parts.append(debug_feed)
     return Group(*parts)

@@ -81,10 +81,13 @@ def test_renderer_writes_above_open_live_region() -> None:
         renderer.emit(_turn_record(verdict="fail"))
         live.refresh()
     text = console.export_text()
-    # The Live's swarm-board headers / labels appear, AND the reflection
+    # The Live's phase-panel headers appear, AND the reflection
     # block sections appear — both present means the renderer hasn't
-    # trampled the Live region.
-    assert "swarm board" in text.lower() or "scan_id" in text.lower()
+    # trampled the Live region. QA-012 — the swarm-board flat title
+    # is replaced by the three phase-panel titles.
+    assert (
+        "phase 1" in text.lower() or "reconnaissance" in text.lower() or "phase 3" in text.lower()
+    )
     assert "VERDICT" in text
     assert "PROMPT" in text
 

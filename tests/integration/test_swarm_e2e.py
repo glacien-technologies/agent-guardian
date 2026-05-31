@@ -243,9 +243,23 @@ async def test_swarm_emits_events_to_observer(
 
     kinds = [e.kind for e in events]
     # Required event kinds in order.
-    assert kinds[0] == "recon_start"
+    # QA-012 — the first emission is now ``phase_start("recon")`` so a
+    # phase-aware UI can flip into the Reconnaissance panel BEFORE the
+    # recon agent fires its own ``recon_start``. The pre-existing
+    # ``recon_start`` follows immediately after.
+    assert kinds[0] == "phase_start"
+    assert kinds[1] == "recon_start"
     assert "recon_done" in kinds
-    assert kinds[-1] == "scan_done"
+    # The final scan_done emit still arrives last among the legacy
+    # events; the new ``phase_done("finalise")`` arrives after it.
+    assert "scan_done" in kinds
+    # Phase boundary events for all four engine phases are present.
+    phase_events = [
+        e.payload.get("phase") for e in events if e.kind in ("phase_start", "phase_done")
+    ]
+    assert "recon" in phase_events
+    assert "parallel" in phase_events
+    assert "finalise" in phase_events
 
     # Every agent_start must have a matching agent_done.
     starts = kinds.count("agent_start")

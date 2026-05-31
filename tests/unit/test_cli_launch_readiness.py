@@ -271,6 +271,11 @@ def test_url_emission_runs_before_preflight_failure(runner: CliRunner, tmp_path:
                 "--no-tui",
                 "--mode",
                 "fast",
+                # QA-011 — the scan-plan panel absorbs URL emission into
+                # its DASHBOARD row. The ``▸ Scan cli-`` legacy line
+                # still emits on the ``--no-plan`` path, which this
+                # regression test continues to exercise.
+                "--no-plan",
             ],
         )
     output = _combined_output(result)

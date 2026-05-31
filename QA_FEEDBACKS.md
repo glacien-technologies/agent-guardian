@@ -129,7 +129,7 @@ Format per item:
   - QA-005 (attack feed) — feed cards flow below phase 3 Findings panel in `--debug` mode.
   - QA-003 (dashboard design) — the web dashboard already has this phase-separation in the saved design (the editorial-tech masthead-then-score-then-findings flow); CLI should match the same conceptual partition.
 
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31, commit `3812853`) — flat 13-row agent table replaced by three phase-locked panels (Recon → Red Teaming → Findings) composed inside the QA-002 single Live region via `ui/{recon,red_team,findings}_panel.py`; `SwarmObserver` emits `phase_start` / `phase_done` events for `recon` / `decompose` / `parallel` / `finalise` (additive `EventKind` Literals); `make_dashboard(state, plan_panel=None, debug_feed=None, legacy=False)` composes the three phase panels plus an optional Phase 0 plan panel (drops after `current_phase` advances) and an optional `--debug` attack-feed below Phase 3; `--legacy-board` opt-in flag preserves the flat board for one release. Coverage: dashboard 100%, red_team 100%, recon 99%, findings 97%, cli_tui 85% (overall 94%).
 
 ---
 
@@ -237,7 +237,7 @@ Format per item:
   - QA-010 (PDF engine in base) — plan panel surfaces output-engine availability for every advertised format.
   - QA-012 (phase-based CLI) — the plan panel is conceptually Phase 0 (Plan) preceding Phase 1 (Recon); the three should compose into a clean 4-phase narrative.
 
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31, commit `3812853`) — `ui/scan_plan.py` + `ui/scan_plan_data.py` emit a 7-row plan panel (`TARGET` / `MODELS` / `BUDGET` / `OUTPUTS` / `DASHBOARD` / `SAFETY GUARDS` / `WARNINGS`) with a 5-second default wait between model validation and swarm start. Five independent suppression triggers: `--yes` flag, `--no-plan-confirm` flag, non-TTY stdout, `$CI=true`, `$AGENT_GUARDIAN_NO_PLAN_CONFIRM=1`. The plan reuses QA-001's `validate_provider_model` for the `MODELS` row, QA-009's `auto_serve` probe for the `DASHBOARD` row, and QA-010's new `validate_output_engine_available` for the `OUTPUTS` row — so every ✓/✗ in the panel is sourced from the same primitive the scan will use later. Live S2 against the Cloud Run testbench shows the panel rendering correctly with all 7 rows; coverage `scan_plan` 99% + `scan_plan_data` 92% (38 unit/integration tests).
 
 ---
 
@@ -283,7 +283,7 @@ Format per item:
   - The WeasyPrint upgrade path (`agent-guardian[full]`) still gives users the higher-fidelity renderer when they want it.
   - `tests/test_packaging.py` includes a no-extras PDF emission smoke test.
 
-- **Status** · open (filed by manual testing 2026-05-31; not in flight)
+- **Status** · **CLOSED** (2026-05-31, commit `3812853`) — `reportlab>=4.2` promoted to base `[project.dependencies]` in `pyproject.toml`; `[pdf-fallback]` extra preserved as an empty-list transitional alias for one release with a deprecation banner emitted from `agent_guardian/__init__.py`. New `src/agent_guardian/reports/output_engines.py` exposes `validate_output_engine_available(format) -> EngineCheck` as the canonical fail-fast primitive — called from CLI scan-startup and from QA-011's `OUTPUTS` plan-panel row, so the user sees ✓/✗ BEFORE any LLM cost is burned. `tests/test_packaging.py` includes a no-extras PDF smoke test (fresh venv → `--output pdf` writes a non-zero-byte PDF). Live S1 against the Cloud Run testbench produced a valid 2.5 KB PDF from a fresh-venv install. Coverage `output_engines` 100%.
 
 ---
 

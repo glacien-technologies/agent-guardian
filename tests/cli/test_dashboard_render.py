@@ -49,7 +49,7 @@ def _record_console(width: int = 120) -> Console:
     )
 
 
-def _render_to_text(state: DashboardState, *, no_color: bool = False) -> str:
+def _render_to_text(state: DashboardState, *, no_color: bool = False, legacy: bool = False) -> str:
     console = Console(
         record=True,
         width=120,
@@ -58,38 +58,56 @@ def _render_to_text(state: DashboardState, *, no_color: bool = False) -> str:
         no_color=no_color,
         theme=_AG_THEME,
     )
-    console.print(make_dashboard(state))
+    console.print(make_dashboard(state, legacy=legacy))
     return console.export_text()
 
 
-def test_initial_state_renders_all_pending_pills() -> None:
-    """Empty state should list every known agent row in 'pending' status."""
+def test_initial_state_renders_all_pending_pills_legacy() -> None:
+    """The legacy-board renderable lists every known agent row in 'pending'.
+
+    QA-012 — the default composition is phase-based and shows panel
+    summaries instead of a full pending pill per agent on the very
+    first frame. The original assertion holds on the ``--legacy-board``
+    surface, which the test exercises directly.
+    """
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
-    text = _render_to_text(state)
+    text = _render_to_text(state, legacy=True)
     # All eleven rows show "pending"; recon row + 10 ASI rows.
     assert text.count("pending") >= len(AGENT_ROWS)
 
 
-def test_group_composition_order_header_table_footer() -> None:
-    """make_dashboard returns a Group with header → table → footer in order.
+def test_group_composition_order_three_phase_panels() -> None:
+    """make_dashboard returns a Group composing the three phase panels.
 
-    When no budget caps are set, the progress bars are omitted so the
-    Group has exactly three renderables.
+    QA-012 — the new default composition is
+    ``Group(recon_panel, red_team_panel, findings_panel)``. The Plan
+    panel is opt-in via ``plan_panel=`` and the debug-feed renderable
+    is opt-in via ``debug_feed=``; both default to None so a fresh
+    state yields exactly three Panel renderables.
     """
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
     group = make_dashboard(state)
     assert isinstance(group, Group)
     renderables = list(group.renderables)
     assert len(renderables) == 3
-    # The header and footer are Rich Panels; the middle slot is the table.
+    # All three phase blocks are Rich Panels.
     types = [type(r).__name__ for r in renderables]
-    assert types[0] == "Panel"
-    assert types[1] == "Table"
-    assert types[2] == "Panel"
+    assert types == ["Panel", "Panel", "Panel"]
 
 
-def test_group_composition_includes_progress_when_caps_set() -> None:
-    """When budget caps are configured the Group adds a Progress block."""
+def test_legacy_group_composition_order_header_table_footer() -> None:
+    """``legacy=True`` preserves the pre-QA-012 flat composition."""
+    state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
+    group = make_dashboard(state, legacy=True)
+    assert isinstance(group, Group)
+    renderables = list(group.renderables)
+    assert len(renderables) == 3
+    types = [type(r).__name__ for r in renderables]
+    assert types == ["Panel", "Table", "Panel"]
+
+
+def test_legacy_group_composition_includes_progress_when_caps_set() -> None:
+    """``legacy=True`` + budget caps -> Progress block in middle of group."""
     state = DashboardState(
         scan_id="abc",
         target_ref="t",
@@ -99,41 +117,40 @@ def test_group_composition_includes_progress_when_caps_set() -> None:
         budget_usd_cap=0.25,
         budget_usd_spent=0.05,
     )
-    group = make_dashboard(state)
+    group = make_dashboard(state, legacy=True)
     renderables = list(group.renderables)
     assert len(renderables) == 4
     assert type(renderables[2]).__name__ == "Progress"
 
 
-def test_progress_bars_hidden_when_caps_none() -> None:
-    """When no caps are set the rendered text contains no 'tokens' row."""
+def test_progress_bars_hidden_when_caps_none_legacy() -> None:
+    """When no caps are set the legacy renderable has no 'tokens' row."""
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
-    text = _render_to_text(state)
-    # No "0 / 10,000" row, no "USD" progress label in the text.
+    text = _render_to_text(state, legacy=True)
     assert "tokens" not in text.lower()
 
 
-def test_aivss_colour_threshold_low() -> None:
+def test_aivss_colour_threshold_low_legacy() -> None:
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto", provisional_aivss=42)
     console = _record_console()
-    console.print(make_dashboard(state))
+    console.print(make_dashboard(state, legacy=True))
     html = console.export_html(inline_styles=True)
     # aivss.low maps to green; check the rendered HTML contains it.
     assert "color: #008000" in html.lower() or "green" in html.lower()
 
 
-def test_aivss_colour_threshold_high() -> None:
+def test_aivss_colour_threshold_high_legacy() -> None:
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto", provisional_aivss=85)
     console = _record_console()
-    console.print(make_dashboard(state))
+    console.print(make_dashboard(state, legacy=True))
     html = console.export_html(inline_styles=True)
     # aivss.high maps to red.
     assert "#800000" in html.lower() or "red" in html.lower()
 
 
-def test_aivss_none_renders_em_dash() -> None:
+def test_aivss_none_renders_em_dash_legacy() -> None:
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto", provisional_aivss=None)
-    text = _render_to_text(state)
+    text = _render_to_text(state, legacy=True)
     assert "—" in text
 
 
@@ -152,17 +169,17 @@ def test_make_dashboard_is_pure_no_side_effects() -> None:
     assert a == b
 
 
-def test_dashboard_lists_agent_findings_count() -> None:
+def test_dashboard_lists_agent_findings_count_legacy() -> None:
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
     state.agent_findings["goal-hijack-agent"] = 4
-    text = _render_to_text(state)
+    text = _render_to_text(state, legacy=True)
     assert "4" in text
 
 
-def test_dashboard_lists_turn_progress_when_set() -> None:
+def test_dashboard_lists_turn_progress_when_set_legacy() -> None:
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
     state.agent_turns["tool-abuse-agent"] = (3, 12)
-    text = _render_to_text(state)
+    text = _render_to_text(state, legacy=True)
     assert "3/12" in text
 
 
@@ -179,12 +196,14 @@ def _make_event(kind: str, **extra: Any) -> SwarmEvent:
 def test_live_region_renders_exactly_one_panel_during_simulated_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 10-event simulated scan must yield one swarm-board panel.
+    """A 10-event simulated scan must yield one Phase 1 panel in scrollback.
 
-    The smoking-gun QA-002 regression was duplicate "AgentGuardian —
-    swarm board" panels in scrollback after each event; replacing
-    ``console.print(panel)`` with ``live.update(...)`` is what this
-    test guards.
+    The smoking-gun QA-002 regression was duplicate panels in
+    scrollback after each event; replacing ``console.print(panel)``
+    with ``live.update(...)`` is what this test guards. The QA-012
+    composition surfaces a "Phase 1 · Reconnaissance" title in the
+    final frame; the duplicate-frame regression would replay it once
+    per event.
     """
     console = _record_console(width=140)
     monkeypatch.setattr("agent_guardian.logging_setup._CONSOLE", console)
@@ -222,17 +241,35 @@ def test_live_region_renders_exactly_one_panel_during_simulated_scan(
     asyncio.run(_run())
 
     text = console.export_text()
-    assert text.count("AgentGuardian — swarm board") == 1
+    # Phase 1 panel rendered exactly once — duplicate-frame regression
+    # would replay the panel border per event. The phase tag is in the
+    # final frame's title once.
+    assert text.count("Phase 1 · Reconnaissance") == 1
+    # Phase 3 (Findings) panel rendered exactly once with the totals
+    # we projected from the three agent_done events (one finding each).
+    assert text.count("Phase 3 · Findings") == 1
 
 
 def test_live_region_includes_final_aivss_after_scan_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Provisional AIVSS lands on state on checkpoint; legacy footer
+    surfaces it directly. The QA-012 phase composition shows AIVSS as
+    part of the post-Live reproducibility line emitted by ``_run_scan``;
+    here we exercise the legacy-board path which still renders the
+    footer for the one-release deprecation window.
+    """
     console = _record_console()
     monkeypatch.setattr("agent_guardian.logging_setup._CONSOLE", console)
 
-    async def _run() -> None:
-        tui = ScanTUI(scan_id="scan-1", target_ref="testbench", tier="auto", console=console)
+    async def _run() -> ScanTUI:
+        tui = ScanTUI(
+            scan_id="scan-1",
+            target_ref="testbench",
+            tier="auto",
+            console=console,
+            legacy_board=True,
+        )
         async with tui:
             tui.handle_event(
                 _make_event(
@@ -241,8 +278,12 @@ def test_live_region_includes_final_aivss_after_scan_done(
                     decision=CheckpointDecision.CONTINUE,
                 )
             )
+        return tui
 
-    asyncio.run(_run())
+    tui = asyncio.run(_run())
+    # State carries the provisional AIVSS regardless of presentation mode.
+    assert tui._state.provisional_aivss == 77
+    # Legacy footer renders the value directly.
     assert "77" in console.export_text()
 
 

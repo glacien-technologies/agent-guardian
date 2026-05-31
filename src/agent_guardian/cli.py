@@ -2229,6 +2229,171 @@ def print_scan_urls(
 
 
 # ---------------------------------------------------------------------------
+# QA-011 — scan-plan panel confirmation gate
+# ---------------------------------------------------------------------------
+
+
+def _await_plan_confirmation(
+    *,
+    yes: bool,
+    timeout_seconds: float = 5.0,
+    stdin: Any = None,
+    stdout: Any = None,
+    environ: dict[str, str] | None = None,
+) -> str:
+    """Return ``"proceed"`` when the operator accepts or the timer fires.
+
+    Non-interactive shortcuts — return ``"proceed"`` immediately, no print:
+
+    * ``yes=True`` (``--yes`` / ``--no-plan-confirm``).
+    * ``$AGENT_GUARDIAN_NO_PLAN_CONFIRM=1``.
+    * ``$CI=true`` (or ``1`` / ``yes`` / ``on``).
+    * stdin / stdout is not a TTY (e.g. ``agent-guardian scan ... | cat``).
+
+    Interactive path: print
+
+        Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 5s)
+
+    then :func:`select.select` on ``stdin`` until either the timer fires
+    or any input arrives. ``KeyboardInterrupt`` → ``"abort"``.
+
+    Returns one of the literal strings ``"proceed"`` or ``"abort"``.
+    """
+    env = environ if environ is not None else dict(os.environ)
+    out = stdout if stdout is not None else sys.stdout
+    inp = stdin if stdin is not None else sys.stdin
+
+    if yes:
+        return "proceed"
+    if (env.get("AGENT_GUARDIAN_NO_PLAN_CONFIRM") or "").strip() == "1":
+        return "proceed"
+    ci = (env.get("CI") or "").strip().lower()
+    if ci in ("1", "true", "yes", "on"):
+        return "proceed"
+    isatty_out = getattr(out, "isatty", None)
+    if not (callable(isatty_out) and isatty_out()):
+        return "proceed"
+    isatty_in = getattr(inp, "isatty", None)
+    if not (callable(isatty_in) and isatty_in()):
+        return "proceed"
+
+    # Interactive path — print the prompt + wait for either Enter or timeout.
+    try:
+        out.write(
+            f"Press Enter to proceed, Ctrl-C to abort. (auto-proceed in {int(timeout_seconds)}s)\n"
+        )
+        flush_fn = getattr(out, "flush", None)
+        if callable(flush_fn):
+            with contextlib.suppress(Exception):
+                flush_fn()
+    except Exception:  # pragma: no cover - defensive
+        return "proceed"
+
+    try:
+        import select
+
+        ready, _, _ = select.select([inp], [], [], timeout_seconds)
+        if ready:
+            with contextlib.suppress(Exception):
+                inp.readline()
+        return "proceed"
+    except KeyboardInterrupt:
+        return "abort"
+    except Exception:  # pragma: no cover - defensive (closed stdin etc.)
+        return "proceed"
+
+
+def _resolve_plan_target_mode(
+    *,
+    target: str | None,
+    system_prompt: Path | None,
+    endpoint: str | None,
+    framework: str | None,
+    contract: Path | None,
+) -> str:
+    """Map the (mutually exclusive) ``--target`` family to a plan-row mode.
+
+    The CLI accepts exactly one of ``target`` / ``--system-prompt`` /
+    ``--endpoint`` / ``--framework`` / ``--contract``; we collapse the
+    chosen one to a short token for the TARGET row's "Mode" field.
+    """
+    if contract is not None:
+        return "contract"
+    if endpoint is not None:
+        return "endpoint"
+    if system_prompt is not None:
+        return "system_prompt"
+    if framework is not None:
+        return "framework"
+    if target is not None:
+        return "code"
+    # No target supplied at all — the downstream adapter builder will
+    # raise the real error. Surface the placeholder cleanly here.
+    return "endpoint"
+
+
+def _resolve_plan_multi_agent(
+    *,
+    endpoint: str | None,
+    contract: Path | None,
+) -> bool:
+    """Conservatively report whether the target is a multi-agent orchestrator.
+
+    Pre-scan we only have static evidence: the contract's
+    ``target.is_multi_agent`` flag if present, else ``False``. The recon
+    phase later upgrades this signal from the on-wire fingerprint.
+    """
+    if contract is None:
+        _ = endpoint  # reserved for future endpoint sniffing
+        return False
+    try:
+        from agent_guardian.contract import load_contract
+
+        doc = load_contract(contract)
+    except Exception:  # pragma: no cover - defensive (preflight catches first)
+        return False
+    return bool(getattr(doc.target, "is_multi_agent", False))
+
+
+def _resolve_safety_row(
+    *,
+    contract_path: Path | None,
+    target_url: str | None,
+) -> Any:
+    """Return a :class:`SafetyRow` for the plan panel's SAFETY GUARDS section.
+
+    For the contract path we pull RoE tools + authorization_ref +
+    egress policy from the parsed :class:`Contract`. For non-contract
+    scans we return ``None`` so the caller falls back to
+    :func:`agent_guardian.ui.scan_plan_data.default_safety_row`.
+    """
+    if contract_path is None:
+        return None
+    from agent_guardian.ui.scan_plan import SafetyRow
+
+    try:
+        from agent_guardian.contract import load_contract
+
+        doc = load_contract(contract_path)
+    except Exception:  # pragma: no cover - defensive
+        return None
+    roe = doc.roe
+    tools = roe.tools
+    blocklist = tuple(str(x) for x in (tools.blocklist if tools else None) or ())
+    allowlist = tuple(str(x) for x in (tools.allowlist if tools else None) or ())
+    auth_ref = (roe.authorization_ref or "").strip() or "n/a"
+    egress_label = "external allowed" if roe.data_egress.allow_external else "loopback only"
+    _ = target_url
+    return SafetyRow(
+        contract_path=str(contract_path),
+        roe_blocklist=blocklist,
+        roe_allowlist=allowlist,
+        authorization_ref=auth_ref,
+        egress_label=egress_label,
+    )
+
+
+# ---------------------------------------------------------------------------
 # scan command -- the big one
 # ---------------------------------------------------------------------------
 
@@ -2310,6 +2475,15 @@ def scan(
         None, "--output-path", help="Where to write the report file."
     ),
     no_tui: bool = typer.Option(False, "--no-tui", help="Disable the Rich progress panel."),
+    legacy_board: bool = typer.Option(
+        False,
+        "--legacy-board",
+        help=(
+            "Render the pre-QA-012 flat agent table instead of the new "
+            "three-phase panels (Recon -> Red Teaming -> Findings). "
+            "One-release deprecation window; will be removed in v1.2."
+        ),
+    ),
     config_path: Path | None = typer.Option(
         None, "--config", help="Override the default config file location."
     ),
@@ -2464,6 +2638,37 @@ def scan(
             "you Ctrl-C the command (ngrok-style)."
         ),
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help=(
+            "Skip the scan-plan confirmation wait (QA-011). Equivalent to "
+            "AGENT_GUARDIAN_NO_PLAN_CONFIRM=1. Implicit when stdout is not "
+            "a TTY or $CI=true. The plan panel is still printed once for "
+            "audit-trail purposes; the operator just doesn't have to "
+            "press Enter."
+        ),
+    ),
+    no_plan_confirm: bool = typer.Option(
+        False,
+        "--no-plan-confirm",
+        help=(
+            "Alias for --yes (QA-011). Skips the 5-second confirmation "
+            "wait without suppressing the panel. Use --no-plan to also "
+            "skip rendering the panel entirely."
+        ),
+    ),
+    no_plan: bool = typer.Option(
+        False,
+        "--no-plan",
+        help=(
+            "Skip the scan-plan panel entirely — no render, no wait "
+            "(QA-011). For ultra-quiet CI use. The dashboard URL is "
+            "still emitted via the legacy one-line print so QA-003 "
+            "stays intact."
+        ),
+    ),
 ) -> None:
     """Run an adversarial swarm scan against a target."""
     # v1.1 -- validate --mode before anything expensive (target load,
@@ -2541,6 +2746,9 @@ def scan(
                 debug_format=debug_format_norm,
                 no_serve=no_serve,
                 serve_grace_seconds=serve_grace_seconds,
+                yes=yes or no_plan_confirm,
+                no_plan=no_plan,
+                legacy_board=legacy_board,
             )
         )
     except KeyboardInterrupt:
@@ -2584,6 +2792,9 @@ async def _run_scan(
     debug_format: str = "text",
     no_serve: bool = False,
     serve_grace_seconds: int = 300,
+    yes: bool = False,
+    no_plan: bool = False,
+    legacy_board: bool = False,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -2627,15 +2838,20 @@ async def _run_scan(
     #     attacker == evaluator == commander. Caches per-session so resume /
     #     retry doesn't re-probe. ``--no-preflight`` skips it for users who
     #     deliberately want to dodge the probe (offline / air-gap).
-    if not no_preflight:
-        from agent_guardian.llm.validation import check_model_exists
+    #
+    #     QA-011 — retain ``model_results`` (role, spec, ModelValidationResult)
+    #     as we walk the spec set so the scan-plan panel's MODELS row can
+    #     surface the per-role outcome without re-probing.
+    from agent_guardian.llm.validation import ModelValidationResult, check_model_exists
 
-        seen_specs: set[str] = set()
+    model_results: list[tuple[str, str, ModelValidationResult]] = []
+    if not no_preflight:
+        spec_results: dict[str, ModelValidationResult] = {}
         for spec in (eff_attacker, eff_evaluator, eff_commander):
-            if spec in seen_specs:
+            if spec in spec_results:
                 continue
-            seen_specs.add(spec)
             mv = check_model_exists(spec)
+            spec_results[spec] = mv
             if not mv.valid:
                 typer.echo(mv.message, err=True)
                 if mv.status == "auth_failed":
@@ -2645,6 +2861,57 @@ async def _run_scan(
             if mv.status == "transient" and mv.message:
                 # Provider blip — keep going, but log honestly.
                 typer.echo(f"warning: {mv.message}", err=True)
+        # Project the per-spec results back onto the three roles (so a
+        # shared spec shows up as three rows pointing at one validation).
+        for role, spec in (
+            ("attacker", eff_attacker),
+            ("evaluator", eff_evaluator),
+            ("commander", eff_commander),
+        ):
+            result = spec_results.get(spec)
+            if result is not None:
+                model_results.append((role, spec, result))
+    else:
+        # ``--no-preflight`` — synthesize benign valid results so the plan
+        # panel still has rows to show; the real provider error (if any)
+        # surfaces at first call.
+        for role, spec in (
+            ("attacker", eff_attacker),
+            ("evaluator", eff_evaluator),
+            ("commander", eff_commander),
+        ):
+            model_results.append(
+                (
+                    role,
+                    spec,
+                    ModelValidationResult(valid=True, status="valid", model=spec),
+                )
+            )
+
+    # 6a-bis. QA-010 — pre-scan output-engine validation. Fail fast on a
+    #         missing engine so the operator never burns LLM budget on a
+    #         scan whose final artifact can't write. Same primitive feeds
+    #         QA-011's plan-panel OUTPUTS row (DRY by design).
+    from agent_guardian.reports.output_engines import (
+        EngineCheck,
+        validate_output_engine_available,
+    )
+
+    requested_formats: list[str] = [output]
+    engine_checks: list[EngineCheck] = []
+    for fmt in requested_formats:
+        check = validate_output_engine_available(fmt)
+        engine_checks.append(check)
+        if check.status == "missing":
+            typer.echo(
+                f"output engine for --output {fmt} is not available: "
+                f"{check.message}. Install with: {check.install_hint}",
+                err=True,
+            )
+            return EXIT_CONFIG
+        if check.status == "unknown_format":
+            typer.echo(check.message, err=True)
+            return EXIT_CONFIG
 
     # 6b. Build LLMs + target.
     try:
@@ -2690,7 +2957,86 @@ async def _run_scan(
         if (auto_serve_result.spawned or auto_serve_result.reused)
         else None
     )
-    print_scan_urls(scan_id, suppress=not publish, base_url=auto_serve_base_url)
+
+    # QA-011 — scan-plan (Phase 0) panel. Composed from the upstream
+    # probe results (``model_results`` from 6a, ``engine_checks`` from
+    # 6a-bis, the auto-serve outcome above) plus a one-shot endpoint
+    # reachability check hoisted from ``_run_scan_inner`` so the TARGET
+    # row's pill is honest. The DASHBOARD row absorbs the QA-003
+    # URL-emission line — we only fall back to the legacy
+    # ``print_scan_urls`` print on the ``--no-plan`` path.
+    plan_target_mode = _resolve_plan_target_mode(
+        target=target,
+        system_prompt=system_prompt,
+        endpoint=endpoint,
+        framework=framework,
+        contract=contract,
+    )
+    plan_reachable: bool | None = None
+    plan_latency_ms: int | None = None
+    plan_multi_agent = _resolve_plan_multi_agent(endpoint=endpoint, contract=contract)
+    if endpoint and not no_preflight and not _is_placeholder_endpoint(endpoint):
+        import time as _time
+
+        _t0 = _time.monotonic()
+        try:
+            plan_reachable = await _endpoint_reachability_preflight(endpoint)
+        except Exception:  # pragma: no cover - defensive
+            plan_reachable = False
+        plan_latency_ms = int((_time.monotonic() - _t0) * 1000)
+    plan_dashboard_url = (
+        f"{auto_serve_base_url}/scans/{scan_id}"
+        if auto_serve_base_url
+        else f"{_resolve_dashboard_base_url()}/scans/{scan_id}"
+    )
+
+    if not no_plan:
+        from agent_guardian.ui.scan_plan import build_plan_panel
+        from agent_guardian.ui.scan_plan_data import (
+            build_plan_context,
+            default_safety_row,
+        )
+
+        plan_ctx = build_plan_context(
+            scan_id=scan_id,
+            target_url=endpoint or target,
+            target_mode=plan_target_mode,
+            reachable=plan_reachable,
+            reachable_latency_ms=plan_latency_ms,
+            multi_agent=plan_multi_agent,
+            model_results=model_results,
+            budget_mode=mode,
+            wall_seconds_cap=int(cfg.swarm.budget.wall_seconds),
+            usd_cap=budget_usd,
+            requested_outputs=[(output, engine_checks[0], str(output_path or ""))],
+            auto_serve_result=auto_serve_result,
+            dashboard_url=plan_dashboard_url,
+            safety=_resolve_safety_row(
+                contract_path=contract,
+                target_url=endpoint or target,
+            )
+            or default_safety_row(target_url=endpoint or target),
+        )
+
+        # Print the panel via a dedicated Console — keeps it outside any
+        # Live region so the panel persists in scrollback once the swarm
+        # starts. ``Console().print(panel)`` honours $NO_COLOR / the
+        # active theme without us having to thread one through.
+        from rich.console import Console
+
+        Console().print(build_plan_panel(plan_ctx))
+
+        decision = _await_plan_confirmation(yes=yes)
+        if decision == "abort":
+            typer.echo("aborted at scan-plan confirmation.", err=True)
+            try:
+                auto_serve_manager.grace_wait()
+            finally:
+                auto_serve_manager.__exit__(None, None, None)
+            return EXIT_USER_INTERRUPT
+    else:
+        # --no-plan path: still emit the URL line so QA-003 holds.
+        print_scan_urls(scan_id, suppress=not publish, base_url=auto_serve_base_url)
 
     try:
         exit_code = await _run_scan_inner(
@@ -2728,6 +3074,7 @@ async def _run_scan(
             budget_usd=budget_usd,
             debug_level=debug_level,
             debug_format=debug_format,
+            legacy_board=legacy_board,
         )
     finally:
         # Grace period: keep the dashboard alive so the operator can click
@@ -2778,6 +3125,7 @@ async def _run_scan_inner(
     budget_usd: float | None,
     debug_level: int,
     debug_format: str,
+    legacy_board: bool = False,
 ) -> int:
     """Run the scan body. Extracted from ``_run_scan`` so the auto-serve
     context manager (QA-009) cleanly wraps every ``return EXIT_X`` exit
@@ -2970,6 +3318,7 @@ async def _run_scan_inner(
                 scan_id=scan_id,
                 target_ref=adapter.fingerprint().ref,
                 tier=tier_override.value if tier_override else "auto",
+                legacy_board=legacy_board,
             )
             tui.attach_to(swarm)
             async with tui:

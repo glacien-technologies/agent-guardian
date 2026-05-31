@@ -29,14 +29,25 @@ parallelism happens.
 
 ```mermaid
 flowchart TD
-    A[Target Agent<br/>--endpoint URL] --> B[Phase 1: Recon<br/>black-box capability audit]
+    A[Target Agent<br/>--endpoint URL] --> P0[Phase 0: Plan<br/>QA-011 scan-plan panel<br/>5s confirmation wait]
+    P0 --> B[Phase 1: Recon<br/>black-box capability audit]
     B --> C[Phase 2: Decompose<br/>pick applicable ASI agents]
-    C --> D[Phase 3: Parallel<br/>13 specialist agents attack]
+    C --> D[Phase 3: Parallel · Red Teaming<br/>13 specialist agents attack]
     D --> E[Evaluator<br/>LLM judges verdicts]
-    E --> F[Phase 4: Finalise<br/>compute AIVSS + bands]
+    E --> F[Phase 4: Finalise · Findings<br/>compute AIVSS + bands]
     F --> G[Evidence Pack<br/>signed report.json + SARIF + PDF]
     F --> H[Live Dashboard<br/>http://127.0.0.1:7474]
 ```
+
+The CLI renders four narrative phases that mirror those engine
+phases — **Plan → Recon → Red Teaming → Findings** — composed inside
+a single Rich Live region (QA-002 + QA-012). Phase 0 (Plan) is the
+QA-011 prelude panel that renders once before the swarm starts;
+Phases 1, 2, and 3 then own the three-panel composition for the
+remainder of the scan. As each phase completes, its panel collapses
+to a one-line summary so the operator's focus follows the active
+work. See [Phase composition](./reference/cli#phase-composition-qa-012)
+in the CLI reference for the rendered layouts.
 
 ### Phase 1 — Recon
 

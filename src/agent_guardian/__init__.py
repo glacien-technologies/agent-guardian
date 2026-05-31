@@ -327,3 +327,44 @@ __all__ = [
     "write_pdf",
     "write_sarif",
 ]
+
+
+def _emit_pdf_fallback_deprecation_banner() -> None:
+    """Warn once if the user installed via the deprecated ``[pdf-fallback]`` extra.
+
+    QA-010 moved ``reportlab`` into base dependencies, leaving ``[pdf-fallback]``
+    as an empty alias for one release. Detection is best-effort: we read the
+    distribution's ``Requires-Dist`` block via :mod:`importlib.metadata` and
+    look for the historical ``reportlab`` pin gated by
+    ``extra == 'pdf-fallback'``. If detection fails we stay silent — better
+    a missed banner than a misleading one.
+    """
+
+    import warnings as _warnings
+
+    try:
+        from importlib import metadata as _md
+
+        dist = _md.distribution("agent-guardian")
+        meta = dist.metadata
+        extras = meta.get_all("Provides-Extra") or []
+        if "pdf-fallback" not in extras:
+            return
+        requires = meta.get_all("Requires-Dist") or []
+        for entry in requires:
+            gated = "extra == 'pdf-fallback'" in entry or 'extra == "pdf-fallback"' in entry
+            if gated and "reportlab" in entry.lower():
+                _warnings.warn(
+                    "The 'pdf-fallback' extra is deprecated — ReportLab is now "
+                    "installed by default. The extra is a no-op alias and will be "
+                    "removed in v1.2. Drop '[pdf-fallback]' from your install "
+                    "command and use the base install instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return
+    except Exception:
+        return
+
+
+_emit_pdf_fallback_deprecation_banner()

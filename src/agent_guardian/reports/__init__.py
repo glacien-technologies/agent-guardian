@@ -22,6 +22,12 @@ from agent_guardian.reports.json_report import (
 )
 from agent_guardian.reports.junit import emit_junit, write_junit
 from agent_guardian.reports.markdown import emit_markdown, write_markdown
+from agent_guardian.reports.output_engines import (
+    ALL_FORMATS,
+    EngineCheck,
+    EngineStatus,
+    validate_output_engine_available,
+)
 from agent_guardian.reports.pdf import (
     PDF_ENV_VAR,
     PdfFeatureUnavailable,
@@ -37,10 +43,13 @@ from agent_guardian.reports.sarif import (
 )
 
 __all__ = [
+    "ALL_FORMATS",
     "PDF_ENV_VAR",
     "SARIF_SCHEMA",
     "SARIF_VERSION",
     "SCHEMA_VERSION",
+    "EngineCheck",
+    "EngineStatus",
     "PdfFeatureUnavailable",
     "ReportError",
     "VerifyResult",
@@ -52,6 +61,7 @@ __all__ = [
     "from_canonical_json",
     "sign_payload",
     "to_canonical_json",
+    "validate_output_engine_available",
     "verify_signatures",
     "write_json",
     "write_junit",

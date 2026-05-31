@@ -60,13 +60,51 @@ command, watch the swarm work.
 
 ## Expected output
 
-The first two lines are emitted immediately — the auto-served dashboard
-URL goes live before the swarm starts so you can watch the agents work:
+Before the first LLM call you'll see the **scan plan panel** — a
+one-screen summary of everything AgentGuardian just verified (target
+reachability, per-role model validation, output engine availability,
+dashboard server status, safety guards). It pauses for 5 seconds so
+you can Ctrl-C if anything looks off; press Enter to proceed
+immediately. Add `--yes` (or `-y`) for scripted runs.
 
 ```text
-▸ Scan cli-839d88f0b7a9 — track live at  http://127.0.0.1:7474/scans/cli-839d88f0b7a9
-▸ Report when complete                   http://127.0.0.1:7474/scans/cli-839d88f0b7a9/report
+╭─ Scan plan · cli-839d88f0b7a9 ──────────────────────────────────────╮
+│                                                                     │
+│  TARGET                                                             │
+│    URL                  https://...­.run.app/finbot/chat             │
+│    Reachable            ✓ reachable in 247 ms                       │
+│    Multi-agent          no (single endpoint)                        │
+│  MODELS                                                             │
+│    Attacker             gemini:gemini-2.5-flash   ✓ validated       │
+│    Evaluator            gemini:gemini-2.5-flash   ✓ validated       │
+│    Commander            gemini:gemini-2.5-flash   ✓ validated       │
+│  BUDGET                                                             │
+│    Mode                 full (95% coverage threshold)               │
+│    USD cap              $0.1000                                     │
+│    Estimated cost       $0.0400 - $0.0800 (typical for full mode)   │
+│  OUTPUTS                                                            │
+│    --output json        ✓ stdlib                                    │
+│  DASHBOARD                                                          │
+│    URL                  http://127.0.0.1:7474/scans/cli-839d88f0b7a9│
+│    Server status        ✓ auto-served (child spawned)               │
+│  SAFETY GUARDS                                                      │
+│    RoE blocklist        none                                        │
+│    Authorization        n/a                                         │
+│    Egress policy        unrestricted                                │
+│                                                                     │
+╰─────────────────────────────────────────────────────────────────────╯
+Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 5s)
 ```
+
+Once you accept (or the 5-second timer fires), the auto-served
+dashboard URL goes live and the swarm starts:
+
+```text
+phase recon: starting (scan_id=cli-839d88f0b7a9, wall_budget=90.0s)
+```
+
+The dashboard link from the `DASHBOARD` row above stays click-through
+for the duration of the scan and the 5-minute grace window after.
 
 Five to six minutes later, after 13 specialist agents have probed the
 endpoint in parallel through 84 attack turns, the final summary lands:
