@@ -943,7 +943,23 @@ def _parse_event_line(raw: str) -> dict[str, Any] | None:
 
 
 def _derive_log_level(kind: str, payload: dict[str, Any]) -> str:
-    """Derive the log level from event kind + payload (locked rules)."""
+    """Derive the log level from event kind + payload (locked rules).
+
+    For ``kind == "log"`` records (Python logging handler output, see
+    :class:`agent_guardian.server.partial_scan.JsonlLogHandler`), read
+    ``payload["level"]`` and map Python log-level names to the renderer's
+    three buckets — ``DEBUG``/``INFO`` → ``info``, ``WARNING``/``WARN`` →
+    ``warn``, ``ERROR``/``CRITICAL`` → ``error``. Unknown values fall back
+    to ``info``. All other ``kind`` values keep the original SwarmEvent
+    heuristic.
+    """
+    if kind == "log":
+        raw_level = str(payload.get("level", "")).strip().upper()
+        if raw_level in ("WARNING", "WARN"):
+            return "warn"
+        if raw_level in ("ERROR", "CRITICAL"):
+            return "error"
+        return "info"
     if kind == "agent_skipped":
         return "warn"
     if kind == "error" or bool(payload.get("error")):
@@ -952,16 +968,33 @@ def _derive_log_level(kind: str, payload: dict[str, Any]) -> str:
 
 
 def _derive_log_summary(kind: str, payload: dict[str, Any]) -> str:
-    """Derive the one-line log summary (locked priority order)."""
+    """Derive the one-line log summary (locked priority order).
+
+    For ``kind == "log"`` records, return ``"<logger> — <message>"`` (no
+    ``"log :: "`` prefix — the level pill already conveys the level and the
+    kind pill is hidden by the renderer). If the logger name is missing,
+    just return ``message``. If ``exc_info`` is present and the message is
+    short, append the first traceback line. All other ``kind`` values keep
+    the original SwarmEvent priority order (severity → reason → message →
+    bare kind).
+    """
+    if kind == "log":
+        message = str(payload.get("message", "")).strip()
+        logger = str(payload.get("logger", "")).strip()
+        if logger and message:
+            return f"{logger} — {message}"
+        if message:
+            return message
+        return logger or "log"
     severity = payload.get("severity")
     if severity:
         return f"{kind} :: severity={severity}"
     reason = payload.get("reason")
     if reason:
         return f"{kind} :: {reason}"
-    message = payload.get("message")
-    if message:
-        return f"{kind} :: {message}"
+    raw_message = payload.get("message")
+    if raw_message:
+        return f"{kind} :: {raw_message}"
     return kind
 
 

@@ -21,13 +21,13 @@
   {% else %}
     <ol class="exec-logs">
       {% for ev in logs_tail %}
-        <li class="exec-log exec-log--{{ ev.level }}" data-level="{{ ev.level }}" data-agent="{{ ev.agent }}">
+        <li class="exec-log exec-log--{{ ev.level }}{% if ev.kind == 'log' %} exec-log--cli{% endif %}" data-level="{{ ev.level }}" data-agent="{{ ev.agent }}" data-kind="{{ ev.kind }}">
           <time class="exec-log__time">{{ ev.timestamp_label }}</time>
           <span class="exec-log__level">{{ ev.level | upper }}</span>
-          <span class="exec-log__kind">{{ ev.kind }}</span>
-          {% if ev.agent %}<span class="exec-log__agent">{{ ev.agent }}</span>{% endif %}
+          {% if ev.kind != 'log' %}<span class="exec-log__kind">{{ ev.kind }}</span>{% endif %}
+          {% if ev.agent and ev.kind != 'log' %}<span class="exec-log__agent">{{ ev.agent }}</span>{% endif %}
           {% if ev.asi %}<span class="exec-log__asi">{{ ev.asi }}</span>{% endif %}
-          <span class="exec-log__msg">{{ ev.summary }}</span>
+          <span class="exec-log__msg{% if ev.kind == 'log' %} exec-log__msg--mono{% endif %}">{{ ev.summary }}</span>
         </li>
       {% endfor %}
     </ol>

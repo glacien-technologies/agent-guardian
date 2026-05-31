@@ -3293,6 +3293,7 @@ async def _run_scan_inner(
     # CLI feed renderer / TUI so those wrap our observer (and the partial
     # writer always runs, regardless of which optional UI was attached).
     from agent_guardian.server.partial_scan import (
+        install_jsonl_log_handler,
         make_events_writer,
         make_partial_writer,
     )
@@ -3308,6 +3309,13 @@ async def _run_scan_inner(
     # current observer (otel / store / partial_writer / TUI) so every
     # event lands on disk in addition to wherever else it was going.
     make_events_writer(swarm, partial_scan_dir)
+    # Pipe Python ``logging`` output (agent_guardian.* + httpx) into the
+    # same events.jsonl as ``kind="log"`` records so the Executive Logs
+    # tab renders a real CLI-style running log instead of just structured
+    # SwarmEvents. Idempotent: a second call for the same scan_dir is a
+    # no-op. Stays attached to the root logger until process exit — the
+    # CLI is a one-scan-per-process tool, so cleanup isn't required.
+    install_jsonl_log_handler(partial_scan_dir)
 
     # QA-005 — attach the reflection sink BEFORE the TUI so the renderer
     # wraps whatever observer is already wired (otel, store, etc.) and

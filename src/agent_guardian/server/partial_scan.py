@@ -28,10 +28,14 @@ the dashboard's view-model already handles gracefully.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import threading
+import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
+from logging import Handler, LogRecord, getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,8 +50,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PARTIAL_SCAN_FILENAME",
+    "JsonlLogHandler",
     "build_partial_scan",
+    "install_jsonl_log_handler",
     "is_terminal_scan_on_disk",
+    "make_events_writer",
     "make_partial_writer",
     "partial_scan_path",
     "read_partial_scan",
@@ -409,3 +416,154 @@ def make_events_writer(
 
     swarm.observer = _observer
     return _observer
+
+
+# ---------------------------------------------------------------------------
+# Python logging -> events.jsonl bridge (CLI-style running log in the
+# Executive Logs tab).
+# ---------------------------------------------------------------------------
+
+
+# Default logger allowlist. Records whose logger name starts with one of
+# these prefixes are forwarded to events.jsonl as ``kind="log"`` entries;
+# all others are dropped. Keeps the file tractable (~hundreds of lines per
+# scan, well under ``_LOGS_TAIL_CAP=1000``) and avoids spam from noisy deps
+# like urllib3 / asyncio. ``agent_guardian`` covers all 90 in-package
+# loggers (core.swarm, agents.*, llm.*, transports.*, server.*, cli, ...);
+# ``httpx`` adds one INFO line per HTTP request.
+_DEFAULT_LOG_ALLOWLIST: tuple[str, ...] = ("agent_guardian", "httpx")
+
+
+class JsonlLogHandler(Handler):
+    """``logging.Handler`` that appends records to ``<scan_dir>/events.jsonl``.
+
+    Wire format (matches the locked shape read by
+    :func:`agent_guardian.server.dashboard_view._parse_event_line`)::
+
+        {
+          "kind":      "log",
+          "timestamp": "<ISO-8601 UTC>",
+          "agent":     null,
+          "asi":       null,
+          "provisional_aivss": null,
+          "decision":  null,
+          "payload": {
+            "level":    "INFO|WARNING|ERROR|DEBUG|CRITICAL",
+            "logger":   "<record.name>",
+            "message":  "<record.getMessage()>",
+            "exc_info": "<formatted traceback>"   # optional, omitted if None
+          }
+        }
+
+    Thread safety: ``emit`` opens the file, appends one JSON line, and
+    closes the file under a ``threading.Lock``. Python log calls can land
+    on worker threads (httpx, aiohttp, asyncio executors), so a lock-per-
+    emit is required. POSIX guarantees that a single ``write()`` of a
+    short line is atomic, so the lock is belt-and-braces for short writes
+    and strictly necessary for longer multiline tracebacks.
+
+    Circular-logging guard: this handler MUST NOT call any logger itself
+    (no ``_LOG.warning(...)``) — that would re-enter ``emit`` and recurse.
+    All errors are swallowed silently. Failure to append a single line is
+    strictly less bad than crashing the swarm.
+
+    Volume control: pass ``allowlist`` (tuple of logger-name prefixes) to
+    filter inbound records. Default is ``("agent_guardian", "httpx")``.
+    Records whose ``record.name`` does not start with any prefix are
+    dropped before serialization.
+    """
+
+    def __init__(
+        self,
+        scan_dir: Path,
+        allowlist: tuple[str, ...] = _DEFAULT_LOG_ALLOWLIST,
+    ) -> None:
+        super().__init__()
+        self._events_path = scan_dir / "events.jsonl"
+        self._allowlist = tuple(allowlist)
+        self._write_lock = threading.Lock()
+        # Best-effort touch so the file exists even if no event fires
+        # before the first log record.
+        try:
+            scan_dir.mkdir(parents=True, exist_ok=True)
+            self._events_path.touch(exist_ok=True)
+        except OSError:
+            pass
+
+    @property
+    def scan_dir(self) -> Path:
+        """Return the directory whose ``events.jsonl`` this handler appends to."""
+        return self._events_path.parent
+
+    def _allowed(self, name: str) -> bool:
+        return any(name == prefix or name.startswith(prefix + ".") for prefix in self._allowlist)
+
+    def emit(self, record: LogRecord) -> None:
+        # Allowlist filter first so we never serialise records we'd drop.
+        if not self._allowed(record.name):
+            return
+        try:
+            message = record.getMessage()
+        except Exception:  # pragma: no cover -- defensive
+            message = str(record.msg)
+        payload: dict[str, object] = {
+            "level": record.levelname,
+            "logger": record.name,
+            "message": message,
+        }
+        if record.exc_info is not None:
+            with contextlib.suppress(Exception):
+                payload["exc_info"] = "".join(traceback.format_exception(*record.exc_info))
+        # Timestamp from the record (when the log call happened), not from
+        # emit() (when we serialise it) — matches SwarmEvent semantics.
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+        wire = {
+            "kind": "log",
+            "timestamp": ts,
+            "agent": None,
+            "asi": None,
+            "provisional_aivss": None,
+            "decision": None,
+            "payload": payload,
+        }
+        try:
+            line = json.dumps(wire, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return
+        with self._write_lock:
+            try:
+                with self._events_path.open("a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError:
+                # Silent — we are not allowed to log from a logging
+                # handler (recursive emit).
+                return
+
+
+def install_jsonl_log_handler(
+    scan_dir: Path,
+    allowlist: tuple[str, ...] = _DEFAULT_LOG_ALLOWLIST,
+) -> JsonlLogHandler:
+    """Attach a :class:`JsonlLogHandler` to the root logger.
+
+    Idempotent: if a :class:`JsonlLogHandler` for the same ``scan_dir`` is
+    already attached, the existing instance is returned and no second
+    handler is added. Prevents double-writes if the CLI accidentally calls
+    this twice (e.g. retry path).
+
+    The handler is attached at level ``DEBUG`` so the per-record allowlist
+    + the operator-configured root level decide what actually gets written.
+
+    Returns the handler so the caller can detach it on scan-end via
+    ``logging.getLogger().removeHandler(handler)`` if desired (not required
+    — leaving it attached until process exit is harmless).
+    """
+    root = getLogger()
+    resolved = scan_dir.resolve()
+    for existing in root.handlers:
+        if isinstance(existing, JsonlLogHandler) and existing.scan_dir.resolve() == resolved:
+            return existing
+    handler = JsonlLogHandler(scan_dir, allowlist=allowlist)
+    handler.setLevel(0)  # let the logger / root level decide
+    root.addHandler(handler)
+    return handler

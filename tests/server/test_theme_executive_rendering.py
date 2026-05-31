@@ -1019,3 +1019,114 @@ def test_executive_findings_tab_omits_evidence_when_none(
     findings_pane = body[idx:next_panel_idx]
     assert 'class="exec-finding__evidence"' not in findings_pane
     assert 'class="exec-finding__evidence-row"' not in findings_pane
+
+
+# ---------------------------------------------------------------------------
+# kind="log" CLI-style running log rendering (Executive Logs tab)
+# ---------------------------------------------------------------------------
+
+
+def test_executive_logs_tab_renders_kind_log_records_inline(
+    client: TestClient, store: ScanStore
+) -> None:
+    """Seed events.jsonl with one SwarmEvent + two ``kind='log'`` records and
+    assert all 3 render with the right level pill + summary text + that the
+    log rows omit the kind pill and agent column (locked decision #4)."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    events: list[dict[str, object]] = [
+        {
+            "kind": "scan_started",
+            "agent": None,
+            "asi": None,
+            "provisional_aivss": None,
+            "decision": None,
+            "timestamp": "2026-05-31T12:00:00+00:00",
+            "payload": {"message": "boot"},
+        },
+        {
+            "kind": "log",
+            "agent": None,
+            "asi": None,
+            "provisional_aivss": None,
+            "decision": None,
+            "timestamp": "2026-05-31T12:00:01+00:00",
+            "payload": {
+                "level": "INFO",
+                "logger": "httpx",
+                "message": "HTTP Request: POST https://api.example/v1 200 OK",
+            },
+        },
+        {
+            "kind": "log",
+            "agent": None,
+            "asi": None,
+            "provisional_aivss": None,
+            "decision": None,
+            "timestamp": "2026-05-31T12:00:02+00:00",
+            "payload": {
+                "level": "ERROR",
+                "logger": "agent_guardian.core.swarm",
+                "message": "commander timed out",
+                "exc_info": "Traceback (most recent call last):\n  RuntimeError: t/o",
+            },
+        },
+    ]
+    (scan_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-logs"')
+    logs_pane = body[idx:]
+
+    # SwarmEvent row renders with its kind label visible.
+    assert "scan_started" in logs_pane
+    # Both log rows render their formatted summary text.
+    assert "HTTP Request: POST https://api.example/v1 200 OK" in logs_pane
+    assert "commander timed out" in logs_pane
+    # The httpx logger name is prepended to the summary (em dash separator).
+    assert "httpx" in logs_pane
+    # Level pills carry the right level word (uppercased by the template).
+    assert "INFO" in logs_pane
+    assert "ERROR" in logs_pane
+    # CLI-style monospace marker class is applied to log rows.
+    assert "exec-log__msg--mono" in logs_pane
+    # The kind pill text "log" must NOT render inside its own pill element
+    # for kind='log' rows (the kind pill is hidden by the template). We
+    # verify by checking that no ``<span class="exec-log__kind">log</span>``
+    # appears in the logs pane.
+    assert '<span class="exec-log__kind">log</span>' not in logs_pane
+
+
+def test_executive_logs_tab_log_kind_does_not_render_agent_column(
+    client: TestClient, store: ScanStore
+) -> None:
+    """When kind='log', the agent column is hidden even if agent is set
+    (logger name is already in the summary). Locked decision #4."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    record = {
+        "kind": "log",
+        "agent": "should-not-render",
+        "asi": None,
+        "provisional_aivss": None,
+        "decision": None,
+        "timestamp": "2026-05-31T12:00:01+00:00",
+        "payload": {
+            "level": "INFO",
+            "logger": "httpx",
+            "message": "ping",
+        },
+    }
+    (scan_dir / "events.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    idx = body.find('id="tabpanel-logs"')
+    logs_pane = body[idx:]
+    # The agent column span must not appear with the suspect agent value.
+    assert '<span class="exec-log__agent">should-not-render</span>' not in logs_pane
+    # The summary text still renders.
+    assert "ping" in logs_pane

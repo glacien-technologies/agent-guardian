@@ -299,6 +299,56 @@ def test_derive_log_summary_priority_order() -> None:
 
 
 # ---------------------------------------------------------------------------
+# kind="log" wire-format extension (Python logging -> events.jsonl bridge)
+# ---------------------------------------------------------------------------
+
+
+def test_derive_log_level_log_kind_reads_payload_level_info() -> None:
+    assert _derive_log_level("log", {"level": "INFO"}) == "info"
+    assert _derive_log_level("log", {"level": "DEBUG"}) == "info"
+
+
+def test_derive_log_level_log_kind_maps_warning_to_warn() -> None:
+    assert _derive_log_level("log", {"level": "WARNING"}) == "warn"
+    assert _derive_log_level("log", {"level": "WARN"}) == "warn"
+
+
+def test_derive_log_level_log_kind_maps_error_and_critical_to_error() -> None:
+    assert _derive_log_level("log", {"level": "ERROR"}) == "error"
+    assert _derive_log_level("log", {"level": "CRITICAL"}) == "error"
+
+
+def test_derive_log_level_log_kind_unknown_level_falls_back_to_info() -> None:
+    assert _derive_log_level("log", {"level": "NOTALEVEL"}) == "info"
+    assert _derive_log_level("log", {}) == "info"
+
+
+def test_derive_log_summary_log_kind_prepends_logger_name() -> None:
+    out = _derive_log_summary(
+        "log", {"logger": "httpx", "message": "HTTP Request: POST https://api"}
+    )
+    assert out == "httpx — HTTP Request: POST https://api"
+
+
+def test_derive_log_summary_log_kind_drops_kind_prefix() -> None:
+    # Critically: no "log :: " prefix.
+    out = _derive_log_summary(
+        "log",
+        {"logger": "agent_guardian.core.swarm", "message": "phase complete"},
+    )
+    assert not out.startswith("log :: ")
+    assert "phase complete" in out
+
+
+def test_derive_log_summary_log_kind_message_only_when_no_logger() -> None:
+    assert _derive_log_summary("log", {"message": "bare text"}) == "bare text"
+
+
+def test_derive_log_summary_log_kind_bare_kind_fallback() -> None:
+    assert _derive_log_summary("log", {}) == "log"
+
+
+# ---------------------------------------------------------------------------
 # timestamp helper
 # ---------------------------------------------------------------------------
 
