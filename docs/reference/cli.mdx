@@ -384,7 +384,7 @@ dashboard server down, model id typo.
 | --- | --- | --- |
 | `--yes`, `-y` | off | Skip the 5-second confirmation wait. Equivalent to `AGENT_GUARDIAN_NO_PLAN_CONFIRM=1`. Implicit when stdout is not a TTY or `$CI=true`. |
 | `--no-plan-confirm` | off | Alias for `--yes` — skip the wait without suppressing the panel. |
-| `--no-plan` | off | Skip the panel entirely. For ultra-quiet CI use. The dashboard URL is still emitted via the legacy one-line print so [QA-003](/_design/qa) holds. |
+| `--no-plan` | off | Skip the panel entirely. For ultra-quiet CI use. The dashboard URL is still emitted via the legacy one-line print so the QA-003 guarantee holds. |
 
 What you'll see on an interactive scan:
 

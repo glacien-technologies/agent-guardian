@@ -1,13 +1,42 @@
 # AgentGuardian
 
-[![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
-[![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-brightgreen.svg)](#what-agentguardian-open-is-not)
+[![Local-first](https://img.shields.io/badge/local--first-yes-brightgreen.svg)](#what-agentguardian-open-is-not)
+[![Docker](https://img.shields.io/badge/docker-available-2496ED.svg?logo=docker)](Dockerfile)
+[![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
+[![GitHub Actions](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg?logo=githubactions)](.github/workflows/ci.yml)
+[![SARIF export](https://img.shields.io/badge/SARIF-export-purple.svg)](https://agentguardian.io/reports/sarif-export)
+[![OWASP ASI](https://img.shields.io/badge/OWASP-ASI%202026-orange.svg)](https://owasp.org/www-project-top-10-for-agentic-applications/)
+[![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![CI](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/glacien-technologies/agent-guardian/branch/main/graph/badge.svg)](https://codecov.io/gh/glacien-technologies/agent-guardian)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/glacien-technologies/agent-guardian/badge)](https://scorecard.dev/viewer/?uri=github.com/glacien-technologies/agent-guardian)
 [![Downloads](https://static.pepy.tech/badge/agent-guardian/month)](https://pepy.tech/project/agent-guardian)
-[![Docs](https://img.shields.io/badge/docs-GitHub-blue.svg)](https://github.com/glacien-technologies/agent-guardian/tree/main/docs)
+[![Docs](https://img.shields.io/badge/docs-agentguardian.io-blue.svg)](https://agentguardian.io)
+
+**Red team your AI agents before attackers do.**
+
+AgentGuardian is an open-source, local-first, Apache-2.0 licensed
+red-teaming toolkit for AI agents. Point it at your LangGraph, CrewAI,
+MCP server, RAG app, or REST-API agent — it deploys a swarm of 14
+specialist attackers against it under a Swarm Commander LLM, produces a
+deterministic 0–100 **AIVSS score** mapped to OWASP ASI 2026,
+MITRE ATLAS v5.4.0, and the CSA Agentic AI Red Teaming Guide, and
+emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
+
+```bash
+pip install agent-guardian
+
+# Run a 5-minute scan against your own agent (no API key required for stub mode)
+echo "You are a helpful customer-support bot." > prompt.txt
+agent-guardian scan --system-prompt prompt.txt --model stub --mode fast
+```
+
+Full docs: **[agentguardian.io](https://agentguardian.io)** ·
+Quickstart: **[agentguardian.io/quickstart](https://agentguardian.io/quickstart)**
+
+---
 
 <!--
 README badge row tracks Engineering Standards §11.1.
@@ -18,37 +47,25 @@ README badge row tracks Engineering Standards §11.1.
     https://www.bestpractices.dev (Standard §4.2) and provisioning the Discord
     server (Standard §6.7) are tracked in docs/operator-checklist.md. Shipping
     broken badges to PyPI hurts trust more than missing badges do.
-  * The Docs badge points at the GitHub-rendered docs tree until the
-    ``agentguardian.ai`` apex DNS lands; the Cloud Run mirror at
-    ``agent-guardian-web-u6tm6gzysq-uc.a.run.app/docs`` is the canonical host
-    today and the GitHub link is a stable fallback PyPI can resolve forever.
 
 The Scorecard badge will populate once .github/workflows/scorecard.yml runs
 its first weekly cron (Sundays 02:00 UTC).
 -->
 
-
-> Open-source multi-agent swarm framework for agentic AI red-teaming
-> with deterministic AIVSS scoring aligned to OWASP ASI, MITRE ATLAS,
-> and the CSA Agentic AI Red Teaming Guide. Eleven specialist agents
-> attack your AI agent in parallel under a Swarm Commander LLM. Output:
-> a deterministic 0–100 **AIVSS score** aligned with the OWASP Top 10
-> for Agentic Applications 2026, MITRE ATLAS v5.4.0, and the CSA
-> Agentic AI Red Teaming Guide.
-
 ## Why
 
 Single-chain red-teaming tools send one prompt at a time. Production
 agents compose tools, hold memory, talk to other agents, and run real
-code — and that surface needs eleven attackers working in concert.
+code — and that surface needs fourteen attackers working in concert.
 
 AgentGuardian deploys a **swarm**: a reconnaissance agent maps your
-target, then ten specialist agents (one per OWASP ASI category) attack
-concurrently, coordinated by a Swarm Commander that re-tasks idle agents
-and stops early on convergence. Every finding is triple-tagged with
-OWASP ASI, MITRE ATLAS, and CSA Agentic-RT categories.
+target, then specialist agents (one per OWASP ASI category, plus the
+A2A and cascading-failure attackers) attack concurrently, coordinated
+by a Swarm Commander that re-tasks idle agents and stops early on
+convergence. Every finding is triple-tagged with OWASP ASI, MITRE
+ATLAS, and CSA Agentic-RT categories.
 
-Read the full rationale: [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/why.md).
+Read the full rationale: [Why we built this](https://agentguardian.io/concepts/how-agentguardian-works).
 
 ## How it compares
 
@@ -92,7 +109,7 @@ agent-guardian serve
 agent-guardian badge $(agent-guardian last-score --score-only) --svg > badge.svg
 ```
 
-Full walkthrough: [Five-minute quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/tutorials/quickstart.md).
+Full walkthrough: [Five-minute quickstart](https://agentguardian.io/quickstart).
 
 ## Run with Docker
 
@@ -125,7 +142,7 @@ SARIF output uploads straight into GitHub's Security tab via
 ```
 
 Pair with `--fail-under <score>` on the scan step to gate the merge on
-an AIVSS threshold. See [`docs/concepts/scan-modes.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/scan-modes.md)
+an AIVSS threshold. See [scan modes](https://agentguardian.io/concepts/how-agentguardian-works)
 for per-mode cost / wall-time numbers and recommended thresholds.
 
 ## Architecture
@@ -161,27 +178,57 @@ for per-mode cost / wall-time numbers and recommended thresholds.
                 └─────────────────────────────────────────┘
 ```
 
-Full architecture: [docs/architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/architecture.md).
+Full architecture: [docs/architecture](https://agentguardian.io/concepts/how-agentguardian-works).
 
 ## Status
 
-**v1.0.0 — Generally Available.** Production/Stable on PyPI. The eleven-agent
-swarm, the deterministic AIVSS scorer, the live dashboard, and the
-Sigstore-signed evidence pipeline are all production-ready. Active development
-continues on the v1.1 stream (see CHANGELOG and roadmap).
+**v1.0.0 — Generally Available.** Production/Stable on PyPI. The
+multi-agent swarm, the deterministic AIVSS scorer, the live dashboard,
+and the Sigstore-signed evidence pipeline are all production-ready.
+Active development continues on the v1.1 stream (see CHANGELOG and
+roadmap).
 
-Roadmap: [docs/roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/roadmap.md).
+Roadmap: [docs/roadmap](https://agentguardian.io/community/roadmap).
+
+## What AgentGuardian is NOT
+
+To set expectations honestly — AgentGuardian is a **testing**
+toolkit. It is not, and is not trying to be:
+
+- **A runtime gateway.** It does not sit in front of your agent at
+  serve time. It does not gate, block, redact, or rewrite production
+  traffic.
+- **A guardrail product.** It does not enforce policy on a live
+  conversation.
+- **A policy proxy.** It does not mediate requests between your agent
+  and its LLM backend.
+- **A managed service.** Reports are written to your local disk. We do
+  not host them.
+- **A telemetry collector.** AgentGuardian does not phone home
+  by design.
+
+If you want runtime governance, managed evidence packs, team workflows,
+audit dashboards, or commercial SLA support, those live in
+**AgentGuardian Enterprise** from Glacien — see
+[agentguardian.io/enterprise](https://agentguardian.io/enterprise).
 
 ## Documentation
 
-- [Why we built this](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/why.md)
-- [Quickstart](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/tutorials/quickstart.md)
-- [Architecture](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/architecture.md)
-- [AIVSS formula](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/concepts/aivss.md)
-- [Adapters](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/integrations/adapters/index.md)
-- [API reference](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/api/index.md)
-- [Ethics and responsible use](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/security/ethics.md)
-- [Roadmap](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/reference/roadmap.md)
+- [Quickstart](https://agentguardian.io/quickstart) — 5 minutes from
+  `pip install` to your first report.
+- [How AgentGuardian works](https://agentguardian.io/concepts/how-agentguardian-works)
+  — the swarm architecture and scoring model.
+- [Attack library](https://agentguardian.io/attacks/overview) —
+  every probe and the ASI category it tests.
+- [Reports & evidence](https://agentguardian.io/reports/report-overview)
+  — output formats and how to read them.
+- [CI/CD integration](https://agentguardian.io/ci-cd/github-actions) —
+  GitHub Actions, GitLab CI, SARIF upload to GitHub Security.
+- [Open vs Enterprise](https://agentguardian.io/concepts/open-vs-enterprise)
+  — what's in OSS, what's in Enterprise.
+- [Research foundation](https://agentguardian.io/concepts/research-foundation)
+  — TAP, MAD-MAX, RedAgent, Co-RedTeam, MUZZLE, MITRE ATLAS, CSA,
+  AIVSS — the work this is built on.
 
 ## Contributing
 
@@ -201,7 +248,7 @@ public issue.
 AgentGuardian is for testing systems you own or are explicitly
 authorised to test. Use against third-party systems without
 authorisation is unlawful in most jurisdictions and a violation of
-these terms. See [Ethics](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/security/ethics.md).
+these terms. See [Ethics](https://agentguardian.io/community/security-policy).
 
 ## License
 

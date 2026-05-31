@@ -1,0 +1,221 @@
+---
+title: "Upload SARIF to GitHub"
+sidebarTitle: "Upload SARIF"
+description: "Surface AgentGuardian findings as inline annotations on the PR via GitHub Code Scanning."
+icon: "upload"
+---
+
+The SARIF emitter (`--output sarif`) produces a schema-validated SARIF
+2.1.0 file. Hand it to
+[`github/codeql-action/upload-sarif@v3`](https://github.com/github/codeql-action)
+and every finding appears as an inline annotation on the PR's Files
+changed view + a row in **Security → Code scanning**.
+
+## When to use this page
+
+- You already have an [AgentGuardian GitHub Actions workflow](/ci-cd/github-actions)
+  running and want the findings visible on the PR diff.
+- You're using GitHub Advanced Security (or a public repo) and want
+  the per-rule trend graphs that Code Scanning gives you for free.
+- You want the SARIF to ride along on a failed `--fail-under` gate so
+  reviewers can triage what failed without re-running locally.
+
+## The minimal recipe
+
+Add one extra step *after* the `agent-guardian scan` step. The
+`if: always()` is non-optional — without it a failed `--fail-under`
+gate would suppress the upload and you'd lose the annotations on the
+PR that needs them most.
+
+```yaml .github/workflows/agent-guardian.yml
+permissions:
+  contents: read
+  security-events: write   # required for upload-sarif
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install agent-guardian
+
+      - name: Run AgentGuardian
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          agent-guardian scan \
+            --framework langgraph \
+            --framework-ref my_app.graph:graph \
+            --model gemini:gemini-2.5-flash \
+            --mode full \
+            --output sarif \
+            --output-path scan.sarif \
+            --fail-under 70
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scan.sarif
+          category: agent-guardian
+```
+
+That's it. After the next push:
+
+1. The check appears in the PR conversation.
+2. Inline annotations land on the Files changed tab.
+3. Each finding appears in **Security → Code scanning** with a
+   per-rule trend.
+
+## The four non-obvious GHAS rules
+
+### 1. `permissions: security-events: write`
+
+Code Scanning rejects uploads from a job that doesn't carry the
+`security-events: write` permission. Set it at the workflow level
+(applies to every job) or per-job. Without it the upload fails with
+HTTP 403.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+```
+
+On a public repo that doesn't have GitHub Advanced Security, Code
+Scanning is still available for free — the upload still works.
+Private repos without Advanced Security can't upload SARIF.
+
+### 2. `if: always()` keeps the upload alive
+
+`agent-guardian scan` exits non-zero when `--fail-under` fires
+(`EXIT_FAIL_UNDER`, 1). Without `if: always()`, GitHub Actions skips
+every step after a failed step — and the upload step would never run.
+That defeats the purpose: the PR that failed the gate is exactly the
+PR that needs the annotations.
+
+```yaml
+- name: Upload SARIF to GitHub Code Scanning
+  if: always()           # critical
+  uses: github/codeql-action/upload-sarif@v3
+```
+
+### 3. `category` separates parallel scans
+
+If a single workflow runs more than one scan (e.g. two agents, or one
+scan for each `--tier`), pass `category` to keep their findings
+distinct in Code Scanning:
+
+```yaml
+- name: Upload SARIF (main agent)
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: scan-main.sarif
+    category: agent-guardian-main
+
+- name: Upload SARIF (admin agent)
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: scan-admin.sarif
+    category: agent-guardian-admin
+```
+
+Without `category`, the second upload overwrites the first on the PR.
+
+### 4. The action runs `sarif_file` through its own validator
+
+The upload action validates the SARIF against the GHAS schema *again*
+on the server. AgentGuardian's emitter already validates against the
+SARIF 2.1.0 schema before write — so a successful local emit is
+almost always a successful upload. The cases where the server-side
+validator still rejects:
+
+- A `results[].ruleId` that doesn't match any `rules[].id`.
+  AgentGuardian's emitter checks this, but a hand-edited SARIF can
+  drift.
+- A `level` value outside `error` / `warning` / `note`.
+- A non-UTF-8 file (shouldn't happen unless the SARIF was
+  re-encoded).
+
+## How findings render
+
+| AgentGuardian severity | SARIF `level` | Code Scanning surface |
+|---|---|---|
+| `critical` | `error` | Red square on PR; high-severity row in Security → Code scanning. |
+| `high` | `error` | Red square on PR; same row class as critical. |
+| `medium` | `warning` | Yellow triangle on PR; medium row. |
+| `low` | `note` | Grey dot on PR; note row. |
+
+The four-tier severity travels in `properties.aivss_severity` for
+tools that want it. See [SARIF export](/reports/sarif-export#how-severity-maps).
+
+## Resolving / dismissing findings
+
+GitHub Code Scanning lets reviewers dismiss findings inline with one
+of three reasons:
+
+| Dismissal reason | When to use |
+|---|---|
+| **False positive** | The judge verdict was wrong. File a PR adding a regression test. |
+| **Won't fix** | Risk accepted (e.g. an internal admin-only tool you've decided to keep wide). |
+| **Used in tests** | A finding triggered by a deliberately-vulnerable fixture in the repo. |
+
+Dismissed findings stay dismissed across re-uploads as long as the
+`ruleId` + location are stable. AgentGuardian uses the stable
+`probe_id` as `ruleId`, so the dismissal persists across scans —
+re-triggering the same probe doesn't surface the dismissed finding
+again.
+
+## Trend tracking
+
+Code Scanning's per-rule trend graph reads off the `rules[]` entries
+across scans. Because the rule id is the probe id, you get a stable
+trend per probe — "we used to land ASI01-GH-005 every PR, then we
+fixed the system prompt, now we don't" shows up as a clean drop.
+
+If you want a per-ASI trend instead of per-probe, use the
+[`scan.json`](/reports/json-export) and feed `asi_scores` into a
+dashboard — the SARIF surface is designed around per-rule resolution.
+
+## Anti-patterns
+
+<Warning>
+  **Don't** upload SARIF from a `--mode fast` or `--mode smart` scan
+  to Code Scanning. `mode_authoritative=false` runs are smoke checks
+  — surfacing those findings on the PR pollutes the trend graph with
+  noise from runs that haven't actually exercised the agent.
+</Warning>
+
+<Warning>
+  **Don't** strip the `properties.aivss_severity` field thinking SARIF
+  only needs `level`. Many AgentGuardian tools rely on it to split
+  the SARIF `error` level back into `critical` vs `high`.
+</Warning>
+
+<Warning>
+  **Don't** upload from a forked-PR run on a private repo. Forked PRs
+  don't get `security-events: write` even when the workflow asks for
+  it. Run the scan on a separate `workflow_run` trigger instead.
+</Warning>
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The full workflow YAML that produces the SARIF.
+  </Card>
+  <Card title="SARIF export" icon="shield-check" href="/reports/sarif-export">
+    What's inside the file the action uploads.
+  </Card>
+  <Card title="Fail builds on high risk" icon="circle-x" href="/ci-cd/fail-builds-on-high-risk">
+    Add a finding gate on top of the score gate.
+  </Card>
+  <Card title="GitLab CI" icon="gitlab" href="/ci-cd/gitlab-ci">
+    GitLab's `artifacts.reports.sast` is the equivalent contract.
+  </Card>
+</CardGroup>

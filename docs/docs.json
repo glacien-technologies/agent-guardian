@@ -2,7 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "AgentGuardian",
-  "description": "Open-source adversarial-swarm framework for red-teaming LLM agents. Find prompt-injection, tool-abuse and RAG-poisoning vulnerabilities before production.",
+  "description": "Open-source red-teaming toolkit for AI agents. Find prompt injection, tool abuse, RAG poisoning, memory attacks, and unsafe agent behavior before attackers do.",
   "colors": {
     "primary": "#8B5CF6",
     "light": "#A78BFA",
@@ -20,81 +20,76 @@
   "navigation": {
     "groups": [
       {
-        "group": "Get started",
+        "group": "Start Here",
         "icon": "rocket",
         "boost": 2,
         "pages": [
           "index",
           "quickstart",
           "installation",
-          "first-scan"
+          "start-here/try-the-demo-agent",
+          "start-here/understanding-your-first-report"
         ]
       },
       {
-        "group": "Concepts",
-        "icon": "compass",
+        "group": "Try AgentGuardian",
+        "icon": "play",
         "pages": [
-          "how-it-works",
-          "concepts/aivss",
-          "concepts/swarm",
-          "concepts/scan-modes",
-          "concepts/evidence-packs"
+          "try/scan-rest-api",
+          "try/scan-langgraph",
+          "try/scan-crewai",
+          "try/scan-mcp-server",
+          "try/scan-rag-app",
+          "try/scan-with-docker"
         ]
       },
       {
-        "group": "Attack library",
+        "group": "Attack Library",
         "icon": "shield-alert",
         "pages": [
           "attacks/overview",
           "attacks/prompt-injection",
           "attacks/tool-abuse",
-          "attacks/rag-poisoning"
+          "attacks/rag-poisoning",
+          "attacks/memory-poisoning",
+          "attacks/data-exfiltration",
+          "attacks/multi-agent-exploitation",
+          "attacks/cascading-failure"
         ]
       },
       {
-        "group": "Reports",
+        "group": "Reports & Evidence",
         "icon": "file-text",
         "pages": [
           "reports/overview",
-          "reports/signatures",
-          "reports/owasp-mapping"
+          "reports/aivss-score",
+          "reports/severity-levels",
+          "reports/evidence-timeline",
+          "reports/json-export",
+          "reports/markdown-export",
+          "reports/sarif-export"
         ]
       },
       {
         "group": "CI/CD",
         "icon": "git-branch",
         "pages": [
-          "ci/github-actions",
-          "ci/gitlab",
-          "ci-cd/security-gates",
-          "ci-cd/fail-builds-on-critical-findings"
+          "ci-cd/github-actions",
+          "ci-cd/gitlab-ci",
+          "ci-cd/fail-builds-on-high-risk",
+          "ci-cd/upload-sarif"
         ]
       },
       {
-        "group": "Examples",
-        "icon": "code",
+        "group": "Concepts",
+        "icon": "compass",
         "pages": [
-          "examples/langgraph-agent",
-          "examples/crewai-agent",
-          "examples/openai-agents",
-          "examples/mcp-server"
-        ]
-      },
-      {
-        "group": "Build with AgentGuardian",
-        "icon": "wrench",
-        "pages": [
-          "build-with/write-a-probe",
-          "build-with/write-an-adapter"
-        ]
-      },
-      {
-        "group": "Architecture",
-        "icon": "layers",
-        "pages": [
-          "architecture/system-overview",
-          "architecture/live-dashboard",
-          "architecture/observability"
+          "concepts/how-agentguardian-works",
+          "concepts/adversarial-swarm",
+          "concepts/target-adapters",
+          "concepts/evaluators",
+          "concepts/research-foundation",
+          "concepts/open-vs-enterprise"
         ]
       },
       {
@@ -102,17 +97,29 @@
         "icon": "book",
         "pages": [
           "reference/cli",
-          "reference/python-sdk",
           "reference/config",
-          "reference/error-codes",
-          "reference/report-schema"
+          "reference/python-sdk",
+          "reference/probe-schema",
+          "reference/report-schema",
+          "reference/exit-codes"
         ]
       },
       {
         "group": "Community",
         "icon": "users",
         "pages": [
-          "contributing"
+          "community/contributing",
+          "community/roadmap",
+          "community/security-policy",
+          "community/release-notes",
+          "community/support"
+        ]
+      },
+      {
+        "group": "Enterprise",
+        "icon": "briefcase",
+        "pages": [
+          "enterprise/index"
         ]
       }
     ],

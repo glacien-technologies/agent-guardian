@@ -4,16 +4,15 @@ description: "Install AgentGuardian with pip, pipx, uv, or Docker, plus the righ
 icon: "download"
 ---
 
-## What you get
+Pick one install path and go. All paths give you the `agent-guardian`
+CLI and the Python SDK; the base install already ships the full attack
+swarm, all five report writers (`json`, `sarif`, `junit`, `md`, `pdf`
+via ReportLab), the seed-probe corpus, the loopback dashboard, and the
+Ed25519 / HMAC signing primitives. Optional extras (WeasyPrint PDFs,
+OpenTelemetry, AWS Bedrock, Vertex AI, WebSocket / gRPC / browser
+transports, bundled demo agents) are opt-in below.
 
-A single `agent-guardian` CLI plus the Python SDK. The base install ships
-the full attack swarm, all five report writers (`json`, `sarif`, `junit`,
-`md`, `pdf` via ReportLab), the seed-probe corpus, the loopback dashboard,
-and the Ed25519 / HMAC signing primitives. Optional extras unlock heavier
-features: WeasyPrint PDFs, OpenTelemetry export, AWS Bedrock, Vertex AI,
-WebSocket / gRPC / browser transports, and the bundled demo agents.
-
-## When to use which install
+## Pick an install path
 
 | Install path                               | When to pick it                                                                  |
 |--------------------------------------------|----------------------------------------------------------------------------------|
@@ -304,8 +303,8 @@ working directory is loaded automatically at CLI startup (handled in
 
 ## Next step
 
-Run your first scan against a bundled demo agent:
+Run your first scan:
 
-- [Quickstart](/quickstart) — five minutes from `pip install` to your first AIVSS score.
-- [Your first scan](/first-scan) — deeper walkthrough against a deliberately-vulnerable LangGraph target.
-- [Contributing](/contributing) — set up the full dev environment with `uv sync --all-extras`.
+- [Quickstart](/quickstart) — three minutes from `pip install` to your first AIVSS score.
+- [Try the demo agent](/start-here/try-the-demo-agent) — point the scanner at a hosted, deliberately-vulnerable banking assistant.
+- [Contributing](/community/contributing) — set up the full dev environment with `uv sync --all-extras`.

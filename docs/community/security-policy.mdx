@@ -1,0 +1,124 @@
+---
+title: "Security policy"
+description: "Responsible-disclosure policy for AgentGuardian: GHSA preferred, security@glacien.ai fallback, 90-day coordinated-disclosure embargo."
+icon: "shield"
+---
+
+## TL;DR
+
+If you believe you have found a security vulnerability **in
+AgentGuardian itself**, please report it privately. **Do not file a
+public GitHub issue.**
+
+- **Preferred channel:** GitHub Security Advisories (private vulnerability
+  report). [Open a draft advisory](https://github.com/glacien-technologies/agent-guardian/security/advisories/new).
+- **Email fallback:** `security@glacien.ai` (use this only if you cannot
+  use GitHub).
+- **Embargo:** 90-day coordinated-disclosure embargo from first contact.
+
+The canonical, version-controlled policy is in
+[`SECURITY.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/SECURITY.md)
+at the repo root. This page summarises it for the docs site.
+
+## Scope
+
+In scope:
+
+- Bugs in the `agent-guardian` Python package on PyPI.
+- Bugs in the source under `src/agent_guardian/`.
+- Vulnerabilities in the official Docker image.
+- Vulnerabilities in the bundled examples that go beyond their
+  documented "deliberately vulnerable" surface.
+- Supply-chain issues with the release pipeline (Sigstore signatures,
+  GitHub release artifacts).
+
+Out of scope:
+
+- Vulnerabilities in **a target agent you scan with AgentGuardian** —
+  that's what the tool is *for*. Report those to the owner of the
+  target.
+- Vulnerabilities in third-party LLM providers (OpenAI, Anthropic,
+  Google, Mistral). Use the provider's own reporting channel.
+- "Vulnerable demo" issues in `examples/` — those agents are
+  intentionally vulnerable to exercise the scanner.
+- Issues in the marketing / docs site infrastructure (separate
+  repository).
+- Issues that require physical access to the developer's machine.
+
+## What to include in a report
+
+1. A short description of the vulnerability and its impact.
+2. The affected version(s) — output of `agent-guardian --version`.
+3. A minimal proof-of-concept or reproduction steps.
+4. Your name and (optionally) a handle you would like credited in
+   the published advisory.
+
+## Our commitment
+
+When you report a vulnerability:
+
+- We acknowledge receipt within **3 business days**.
+- We provide an initial assessment (severity + impact) within
+  **10 business days**.
+- We follow a **90-day coordinated-disclosure embargo** from first
+  contact. We will not publicly disclose details until the embargo
+  expires *or* a fix is shipped, whichever comes first.
+- We credit reporters in the public advisory unless asked otherwise.
+- We do not require a CLA, NDA, or any other side agreement. The DCO
+  on the public repo is sufficient for the fix PR.
+
+## Disclosure history
+
+Every handled disclosure (post-embargo) is recorded in
+[`docs/security/disclosure-history.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/security/disclosure-history.md)
+in the repo, with date, severity, and credited reporter.
+
+## Why we prefer GHSA over email
+
+GitHub Security Advisories give us:
+
+- End-to-end encryption between reporter and maintainers at rest.
+- A private fork to develop the fix in, with the original advisory
+  attached.
+- Built-in CVE assignment when the embargo lifts.
+- A clean publication path that automatically notifies dependents
+  via Dependabot.
+
+Plain email has none of those. The `security@glacien.ai` channel is
+kept as a fallback only — please use GHSA when you can.
+
+## Supply-chain integrity
+
+Every release artifact is signed via **Sigstore keyless OIDC** through
+the release workflow. To verify a release:
+
+```bash
+cosign verify-blob \
+  --bundle agent-guardian-<version>.tar.gz.sigstore \
+  --certificate-identity-regexp "https://github.com/glacien-technologies/agent-guardian/.github/workflows/release.yml@.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  agent-guardian-<version>.tar.gz
+```
+
+The release workflow is at
+[`.github/workflows/release.yml`](https://github.com/glacien-technologies/agent-guardian/blob/main/.github/workflows/release.yml).
+We deliberately do not use long-lived PGP keys — keyless OIDC is the
+canonical signing path.
+
+## Code of Conduct
+
+Security reports are subject to our
+[Code of Conduct](https://github.com/glacien-technologies/agent-guardian/blob/main/CODE_OF_CONDUCT.md).
+Threats, harassment, or extortion attached to a security report are
+treated as a Code of Conduct violation, not a vulnerability submission.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Support" icon="life-buoy" href="/community/support">
+    Non-security questions: Discussions for asking, Issues for filing bugs.
+  </Card>
+  <Card title="Contributing" icon="users" href="/community/contributing">
+    The DCO sign-off requirement applies to security-fix PRs too.
+  </Card>
+</CardGroup>

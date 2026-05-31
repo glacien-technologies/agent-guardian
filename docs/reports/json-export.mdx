@@ -1,0 +1,213 @@
+---
+title: "JSON export"
+sidebarTitle: "JSON export"
+description: "The canonical signed agentguardian-scan-v1 JSON — the report every other emitter is derived from."
+icon: "braces"
+---
+
+The JSON emitter is the source of truth. SARIF, JUnit, Markdown and
+PDF are all derived from the same `Scan` model that `--output json`
+serialises. When in doubt, read the JSON. Source:
+[`reports/json_report.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/json_report.py).
+
+## When to use this page
+
+- You want the raw machine-readable scan output for a custom dashboard
+  or threshold checker.
+- You're writing a parser and need the canonical-form guarantees
+  (sorted keys, deterministic shape).
+- You need a signed artifact for an audit trail.
+
+## Generate one
+
+```bash
+agent-guardian scan --system-prompt prompt.txt --model stub \
+  --output json --output-path scan.json
+```
+
+The same JSON is *always* persisted to
+`~/.agentguardian/scans/<scan_id>/scan.json` regardless of which
+`--output` you ask for — even a `--output pdf` run writes the canonical
+JSON alongside the PDF. `--output json --output-path scan.json` just
+adds a second copy at the path you name.
+
+You can also regenerate the JSON from a stored scan:
+
+```bash
+agent-guardian report cli-3a4c1d9c2840 --output json --output-path scan.json
+```
+
+## What you get
+
+The schema is `agentguardian-scan-v1` (`SCHEMA_VERSION` in
+`reports/json_report.py:52`). Top-level keys, in canonical (sorted)
+order:
+
+| Key | Type | Notes |
+|---|---|---|
+| `aivss` | `int` 0–100 | The headline score. |
+| `aivss_formula_version` | `str` | `aivss-v1`. Bumps on any scoring change. |
+| `asi_scores` | `{str: float}` | Per-category 0–100, keyed by `ASI01`–`ASI10`. |
+| `band` | `str` | `EXCELLENT` / `GOOD` / `WARNING` / `POOR` / `CRITICAL` / `not_evaluated`. |
+| `budget` | `object \| null` | Runtime USD outcome. |
+| `completeness` | `object \| null` | How much of the planned attack work ran. |
+| `cost_usd` | `float` | Actual LLM spend. |
+| `coverage` | `object` | Counters reconstructed from `memory.jsonl`. |
+| `coverage_grade` | `str` | `A`–`F`. `A` = every ASI category covered by real evidence. |
+| `created_at` | `str` (ISO 8601) | UTC if no tzinfo, else local-with-offset. |
+| `duration_seconds` | `float` | Wall-clock runtime. |
+| `engine` | `object \| null` | LLM model spec per role (`{commander, attacker, evaluator}` → model id). |
+| `evaluation_mode` | `str` | `real` ⇔ a real LLM judged turns; `stub` forces `band: not_evaluated`. |
+| `findings` | `Finding[]` | One entry per landed attack. See [Evidence timeline](/reports/evidence-timeline). |
+| `findings_summary` | `object` | Pre-aggregated counts by ASI / severity. |
+| `mode` | `str` | `fast` / `smart` / `full`. |
+| `mode_authoritative` | `bool` | `true` only for `full`. Veto for `--fail-under`. |
+| `package_version` | `str` | The `agent-guardian` PyPI version that emitted this. |
+| `probe_library_version` | `str` | `2026.05` etc. — bumps when the corpus changes. |
+| `scan_id` | `str` | Generated id (e.g. `cli-3a4c1d9c2840`). |
+| `scoring_valid` | `bool` | `false` for stub LLM / empty corpus. |
+| `signatures` | `object` | HMAC + Ed25519 blocks. Stripped before recomputing the signing input. |
+| `stopped_reason` | `str` | `completed` / `budget` / `early_stop` / `cancelled`. |
+| `sub_scores` | `{str: float}` | The six PRD §6 sub-scores. |
+| `target` | `object` | `{mode, ref, inferred_goal, profile_source}`. |
+| `tier` | `str` | Detected or forced tier (`T1`–`T4`). |
+| `tokens_total` | `int` | Total input+output tokens across all roles. |
+| `undertested` | `str[]` | ASI categories the scan launched but exercised too thinly. |
+
+The `audit` envelope is added under contract-driven scans (contract
+sha256, authorization ref, suppressed tool attempts, egress-refused
+turns). See
+[`reports/json_report.py:169`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/json_report.py#L169).
+
+## Canonical form (the rules that make it deterministic)
+
+Same inputs always produce byte-identical output. Three rules
+guarantee that:
+
+1. **`json.dumps(..., indent=2, sort_keys=True)`** — every object's
+   keys are sorted lexicographically before serialisation.
+2. **`signatures` is excluded from the signing input.** The HMAC + Ed25519
+   blocks are computed over `_strip_signatures(payload)` (everything
+   *except* the `signatures` field) so signing an already-signed
+   payload twice yields the same bytes.
+3. **PII redaction is on by default** (`redact_pii=True`). The shared
+   `redact_finding` helper scrubs all five fields *before*
+   serialisation — see [Evidence timeline](/reports/evidence-timeline#redaction-always-on).
+
+Together these mean: same scan, same redaction policy, same signing
+key → same bytes. That's the property `agent-guardian verify` relies
+on.
+
+## Signatures
+
+Every JSON report carries two signature channels under `signatures`:
+
+```json
+{
+  "signatures": {
+    "hmac_sha256": {
+      "alg": "hmac-sha256",
+      "value": "…",
+      "secret_id": "default"
+    },
+    "ed25519": {
+      "alg": "ed25519",
+      "public_key": "…",
+      "value": "…"
+    }
+  }
+}
+```
+
+- **HMAC-SHA256** — uses `AGENT_GUARDIAN_SIGNING_SECRET` (or the
+  documented default for local-only smoke). The public default is
+  *never* accepted on verify — without the real secret, the HMAC
+  channel is integrity-only.
+- **Ed25519** — uses a long-lived signer key under
+  `~/.agentguardian/keys/`. The public key is embedded so the report
+  is self-verifying for *integrity*; *trust* requires anchoring
+  (see below).
+
+The signing input is canonical JSON of the payload minus the
+`signatures` key. Verifiers reconstruct the same bytes and recompute
+both channels.
+
+## Verifying a JSON report
+
+`verify` is **fail-closed**: a green result requires a *pinned* trust
+anchor. Without one, integrity passes but the result is `UNANCHORED`
+and the command exits non-zero.
+
+```bash
+agent-guardian verify scan.json \
+  --pubkey-file ./trusted-signer.pub \
+  --secret "$AGENT_GUARDIAN_SIGNING_SECRET"
+```
+
+| Outcome | What it means | Exit |
+|---|---|---|
+| `schema: OK` + `HMAC: OK` + `Ed25519: OK` + `trust anchor: PINNED` | Bytes match + anchored to your pinned key. Quotable. | `0` |
+| `schema: OK` + integrity green + `trust anchor: UNANCHORED` | Bytes match but no anchor supplied. Don't quote. | `1` |
+| Any channel `FAIL` or schema invalid | Tampered or wrong-anchor. | `1` |
+
+The verify exit code is the same `EXIT_FAIL_UNDER` (1) a failed
+`--fail-under` gate uses — CI gates treat tamper and risk-floor
+identically.
+
+## Read it in this order
+
+When you first open a `scan.json`:
+
+1. **`band`** — first glance. Human label.
+2. **`aivss`** — score behind the band. Trust only when
+   `scoring_valid: true` AND `mode_authoritative: true`.
+3. **`evaluation_mode`** — `real` = a real LLM judged turns. `stub`
+   forces `band: not_evaluated` and the number is meaningless.
+4. **`mode_authoritative`** — `true` only for `--mode full`.
+5. **`coverage_grade`** + **`undertested`** — categories launched but
+   too thinly tested for "no findings" to be safety evidence.
+6. **`findings`** — sorted by severity then descending confidence.
+
+The Markdown emitter's top-5 follows the same rank, so a JSON-first
+reader and a Markdown-PR-comment reader see the same top findings in
+the same order.
+
+## Anti-patterns
+
+<Warning>
+  **Don't** treat `aivss` as authoritative without first checking
+  `mode_authoritative` AND `scoring_valid`. A `--mode fast` stub run
+  can still emit a 100 — and `--fail-under` will refuse to gate-pass
+  on it for exactly that reason.
+</Warning>
+
+<Warning>
+  **Don't** re-sign a modified payload to mask edits. The Ed25519
+  public key is embedded; anchoring on the *real* trusted public key
+  will reject a forged re-sign. The verify command's
+  `UNANCHORED` state is *not* an OK — gate on `ok=true`, not
+  `integrity_ok=true`.
+</Warning>
+
+<Warning>
+  **Don't** parse `aivss` out of stdout. Read the JSON. The
+  canonical artifact is always written; stdout is a UX surface that
+  may change.
+</Warning>
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="SARIF export" icon="shield-check" href="/reports/sarif-export">
+    The same findings as a SARIF 2.1.0 file for GitHub Code Scanning.
+  </Card>
+  <Card title="Markdown export" icon="file-text" href="/reports/markdown-export">
+    The same findings as a flat Markdown report for PR comments.
+  </Card>
+  <Card title="Report schema" icon="file-json" href="/reference/report-schema">
+    Field-by-field schema reference.
+  </Card>
+  <Card title="Upload SARIF to GitHub" icon="upload" href="/ci-cd/upload-sarif">
+    Walk-through for `github/codeql-action/upload-sarif@v3`.
+  </Card>
+</CardGroup>

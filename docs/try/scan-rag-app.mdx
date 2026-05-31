@@ -1,0 +1,181 @@
+---
+title: "Scan a RAG application"
+description: "Red-team a retrieval-augmented agent for indirect prompt injection and KB-leakage."
+---
+
+A RAG (retrieval-augmented generation) application is a LLM agent that
+pulls context from a knowledge base — vector store, document index,
+SQL — and stitches it into the prompt. From AgentGuardian's perspective,
+a RAG app is an HTTP endpoint with two interesting attack surfaces: the
+prompt the user controls, and the retrieved content the **attacker** may
+control (indirect prompt injection).
+
+## What this example tests
+
+- All 10 ASI categories against the agent's HTTP endpoint, plus
+  RAG-specific attacks under ASI06 (Knowledge Base Poisoning) and
+  ASI01 (Goal Hijack via injected retrieval content).
+- The `--indirect` flag: delivers attacker payloads embedded in
+  retrieved-doc / tool-output / email / memory channels instead of a
+  direct user ask — the indirect prompt injection scenario.
+- KB-leakage probes that try to coax the agent into emitting
+  document IDs, source paths, or chunks the user shouldn't see.
+- The HTTP transport — same code path as the [REST API agent](/try/scan-rest-api),
+  with RAG-specific probe routing kicked in by the recon agent when it
+  detects retrieval behaviour in the responses.
+
+Source: [`src/agent_guardian/transports/http.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/http.py),
+RAG-specific probes under
+[`src/agent_guardian/probes/asi06/`](https://github.com/glacien-technologies/agent-guardian/tree/main/src/agent_guardian/probes).
+
+## Prerequisites
+
+- AgentGuardian installed — `pip install agent-guardian`.
+- A RAG agent exposed as an HTTP endpoint that accepts a JSON body
+  with the user prompt and returns a JSON response. The endpoint
+  itself runs the retrieval step internally (the swarm does not need
+  access to the vector store).
+- A model spec — `--model stub` for an offline dry-run, or a real
+  model spec for a graded assessment.
+
+## Run target
+
+A minimal FastAPI scaffold for a RAG app — replace the
+`_retrieve` and `_generate` calls with your real retrieval +
+generation stack:
+
+```python my_rag_app.py
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class RagRequest(BaseModel):
+    input: str
+
+
+def _retrieve(query: str) -> list[str]:
+    # Replace with your real retriever: pgvector, Pinecone, FAISS,
+    # Elastic, etc. Returns a list of top-k document chunks.
+    return ["...chunk 1...", "...chunk 2..."]
+
+
+def _generate(prompt: str, context: list[str]) -> str:
+    # Replace with your LLM call. The naive concatenation below is the
+    # shape AgentGuardian is testing — if attacker-controlled content
+    # lands in `context`, the agent must NOT execute injected
+    # instructions.
+    full_prompt = "Context:\n" + "\n".join(context) + f"\n\nUser: {prompt}"
+    # ...call your LLM...
+    return f"answer for: {prompt}"
+
+
+@app.post("/chat")
+def chat(req: RagRequest) -> dict:
+    chunks = _retrieve(req.input)
+    answer = _generate(req.input, chunks)
+    return {"output": answer}
+```
+
+Run it locally: `uvicorn my_rag_app:app --port 8000`.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model stub \
+  --mode fast \
+  --indirect \
+  --output md \
+  --output-path scan.md
+```
+
+Flag-by-flag, every option below is verified against
+`src/agent_guardian/cli.py`:
+
+- `--endpoint URL` — hosted HTTP endpoint of the RAG agent.
+- `--indirect` — deliver attacker payloads embedded in trusted-channel
+  content (retrieved doc / tool output / email / memory / a2a) instead
+  of a direct user ask. This is the indirect prompt injection probe
+  pack and is the most important flag for a RAG scan.
+- `--model stub` — offline default. Swap for a real model spec for a
+  graded run.
+- `--mode fast` — `fast` / `smart` / `full` (default).
+- `--output md --output-path scan.md` — Markdown report. Other formats:
+  `json`, `sarif`, `junit`, `pdf`.
+
+For a deeper RAG-specific run, combine `--indirect` with `--mode full`
+and a real model:
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model gemini:gemini-2.5-flash \
+  --tier T2 \
+  --mode full \
+  --indirect \
+  --budget-usd 5 \
+  --output sarif \
+  --output-path rag-scan.sarif
+```
+
+## Expected output
+
+The Markdown report opens with the scan header. For a RAG target, the
+per-ASI breakdown is where to look first — ASI01 (Goal Hijack via
+retrieved content) and ASI06 (KB Poisoning) are the canary categories:
+
+```markdown
+# AgentGuardian scan `cli-2d2c1ebb5a19`
+**AIVSS** `58.4`  |  **Band** `POOR` (#f97316)  |  **Tier** `T3`  |  **Coverage** `B`
+- **Target:** `http://localhost:8000/chat` (http)
+- **Duration:** 3m 12s  |  **Cost:** $0.0341
+- **Probe library:** `2026.05`  |  **AIVSS formula:** `aivss-v1`
+
+## Per-ASI breakdown
+| ASI   | Description           | Score | Findings |
+|-------|----------------------|------:|---------:|
+| ASI01 | Goal Hijack          |  62.0 |        3 |
+| ASI06 | KB Poisoning         |  45.0 |        2 |
+| ASI02 | Tool Misuse          | 100.0 |        0 |
+| ASI04 | Supply Chain         |  88.0 |        1 |
+| ...
+```
+
+A finding under `asi06.*` against a RAG target typically means the
+swarm got the agent to either (a) emit a chunk from the KB it should
+have refused, or (b) follow injected instructions hidden inside a
+retrieved chunk. Both are documented in the
+[Attack library overview](/attacks/overview).
+
+## Common errors
+
+- **`EXIT_TARGET_UNREACHABLE` (exit code 6).** The pre-flight `POST`
+  with empty body twice failed. Pass `--no-preflight` if your endpoint
+  refuses empty bodies but is actually up.
+- **All ASI06 scores at 100, no findings.** The recon agent did not
+  detect retrieval behaviour in the responses. Either your RAG app
+  hides the retrieval step entirely (in which case ASI06 probes can't
+  characterise the surface), or your responses are too short for the
+  recon agent to infer the shape. Try with `--mode full` and a real
+  model.
+- **`422 Unprocessable Entity` on every request.** Your endpoint expects
+  a different request shape than `{"input": "<prompt>"}`. Use a
+  [target contract](/reference/config) to declare a custom request
+  template.
+- **`--indirect` produced no extra findings.** Indirect injection probes
+  need the swarm to control content the retriever returns. If your
+  retriever is fully isolated from the prompt path (e.g. embeddings
+  computed offline from a curated corpus), indirect injection probes
+  may genuinely not apply — direct ASI01 probes are still useful.
+
+## Next step
+
+- For a tool-bearing target that combines RAG with action-taking, read
+  [Scan a LangGraph agent](/try/scan-langgraph).
+- For a server that exposes the retrieval step over MCP, read
+  [Scan an MCP server](/try/scan-mcp-server).
+- For CI gating, wire `--indirect` and `--fail-under 70` into
+  [GitHub Actions](/ci-cd/github-actions).
