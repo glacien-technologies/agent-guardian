@@ -13,6 +13,43 @@ Format per item:
 - **Fix area** · file path / module
 - **Status** · open / queued / in-flight
 
+**Process rule:** every closure commit MUST flip the relevant `Status` lines here from `open` to `**CLOSED** (date, commit-sha) — one-line summary`. The file is the canonical truth; the grep-able state must match what's shipped on `main`.
+
+---
+
+## QA-015 — `scan_store.py` 72% coverage on pre-existing SSE / index branches
+
+- **Date surfaced** · 2026-05-31 (filed by `18f6cf1` dashboard data-flow reconcile)
+- **Severity** · low
+- **Found via** · the dashboard data-flow workflow's coverage report. `src/agent_guardian/server/scan_store.py` lands at 72% coverage; the uncovered regions are the SSE plumbing + scan-index rebuild paths + a few error-recovery branches — all PRE-EXISTING (not introduced by the partial-scan bridge in `18f6cf1`, which itself is well-tested).
+- **Fix area** · add tests in `tests/unit/test_server_scan_store.py` for the SSE event-stream branches + the index-rebuild paths + the error-recovery fallthroughs. Bumps the module to ≥90% to match the rest of the repo.
+- **Status** · open
+
+---
+
+## QA-014 — Docs cohort tests broken by 644401d Mintlify cutover; 89 failures+errors block repo-wide coverage gate
+
+- **Date surfaced** · 2026-05-31 (filed by `18f6cf1` dashboard data-flow reconcile)
+- **Severity** · medium (gates a downstream repo-wide quality check)
+- **Found via** · `pytest tests/` against `main` returns **29 failures + 60 errors** all in the docs cohort: `tests/unit/test_docs_site.py`, `test_docs_aivss_example.py`, `test_docs_probe_count.py`, `test_docs_adapter_imports.py`, `tests/docs/test_docs_cli_coverage.py`, `tests/architecture/test_hosted_docs_exist.py`, `tests/test_docs_version_consistency.py`. Reproducible on clean `main`. Root cause: commit `644401d` ("nuke MkDocs Material, scaffold Mintlify") removed `mkdocs.yml`, `scripts/build-docs.sh`, and the old `docs/*.md` files those tests asserted against. The tests still reference the MkDocs world.
+- **Why it matters** · the repo-wide `--cov-fail-under=90` gate currently can't be exercised on a clean `pytest` invocation because these failures derail collection downstream. Every PR's CI either has to scope-exclude these tests or accept a perpetual yellow.
+- **Two options to fix** ·
+  - **(a) Recommended** · rewrite each docs test to assert the Mintlify-equivalent property. E.g., `test_docs_cli_coverage.py` should assert every `--flag` in `cli.py --help` appears in `docs/reference/cli.mdx`; `test_docs_probe_count.py` should assert `docs/attacks/overview.mdx` lists the actual probe count from `src/agent_guardian/probes/asi*/`. The intent of each test survives the platform swap.
+  - **(b)** Move the entire docs cohort to `tests/docs/_legacy/` and add a `pytest.ini` skip, with a one-release window to rewrite.
+- **Fix area** · the 7 test files named above. Reference the Mintlify source-of-truth: `docs/reference/cli.mdx`, `docs/attacks/overview.mdx`, `docs/concepts/aivss.mdx`, `docs/architecture/hosted-dashboard.mdx`.
+- **Status** · open
+
+---
+
+## QA-013 — `cli.py:1847-1921` pre-existing `mypy --strict` errors on yaml stubs
+
+- **Date surfaced** · 2026-05-31 (filed by `18f6cf1` dashboard data-flow reconcile)
+- **Severity** · low (5 noisy errors in a strict run; not blocking any CI today)
+- **Found via** · `uv run mypy --strict src/agent_guardian/cli.py` reproduces 5 errors on clean `main`: lines 1847, 1848, 1907, 1908, 1921 — all on `yaml.safe_load`, `yaml.safe_dump`, `yaml.YAMLError`. The `PyYAML` package ships without type stubs by default.
+- **Fix area** · two-line fix: either (a) `uv pip install types-PyYAML` + add to `[project.dependencies]` typing extras, or (b) `import yaml` → `from yaml import YAMLError, safe_dump, safe_load` and let mypy infer at-site.
+- **Acceptance** · `mypy --strict` on `cli.py` returns 0 errors.
+- **Status** · open
+
 ---
 
 ## QA-012 — CLI flow should be phase-based (Recon → Red Teaming → Findings), not a flat agent list
@@ -453,7 +490,7 @@ Format per item:
 - No information leak: prompts and responses pass through the existing PII redactor (we saw redaction is already applied — `AML.T[REDACTED:PHONE_NUMBER]` in the sample) before display.
 - Performance: feed pagination at 100 events / page on the dashboard; CLI feed remains responsive even with 1000+ reflections.
 
-### Status · open (no implementation; design + UX spec captured)
+### Status · **CLOSED** (2026-05-31, commit `b1c10a5`) — SwarmObserver reflection events + `AttackFeedRenderer` + 3 debug levels (`--debug`, `--debug --debug`, `--debug-format json`) + dashboard reflection feed at `/scans/<id>/reflections.sse` (collapsible cards, filter chips, copy-as-curl). Coverage 94% on `ui/attack_feed.py`, 92% on `server/routes/reflections.py`. 51 new tests.
 
 - **Related QA items** · QA-002 (Live region must stay above the attack feed without re-render race) · QA-003 (dashboard design where the Findings feed component lives)
 
@@ -501,7 +538,7 @@ Format per item:
   - The remediation suggestion in the new branch is actionable: raise budget, switch mode — not "use a real model" (which they did).
 
 - **Related QA items** · cross-references the `gemini-3.5-flash` flow (QA-001 — fail-fast model validation) and the messy CLI UX (QA-002 — Live region vs logging race).
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31, commit `b1c10a5`) — `build_authoritativeness_warning` in `reports/warnings.py` branches on `(evaluation_mode, coverage_pct, mode_threshold)`. Stub copy preserved verbatim; new low-coverage-with-real-LLM branch names actual coverage % + active `--mode` threshold and recommends `--budget-usd` / `--budget-seconds` instead of the wrong "use a real --model". `MODE_AUTHORITATIVE_THRESHOLDS` consolidated as single source of truth. 100% coverage on `warnings.py`.
 
 ---
 
@@ -607,7 +644,7 @@ Format per item:
 - The hosted side verifies the report's Ed25519 signature before rendering; tampered reports are rejected with a clear error, not a 500.
 - All findings carry MITRE ATLAS + CSA cross-framework tags per the findings-feed design (the data is already in `Finding` model from the recent fix-commit `f16714a`'s probes-agents cluster).
 
-### Status · open (DO NOT IMPLEMENT — design and architecture captured for future work)
+### Status · **CLOSED** (2026-05-31, commit `b1c10a5`) — CLI emits clickable scan URL within first 2 lines (base configurable via `$AGENT_GUARDIAN_DASHBOARD_URL`); server dashboard rewritten to the saved editorial-tech design (topbar + masthead + AIVSS card + at-a-glance grid + ASI breakdown + findings feed + reproducibility receipt with Ed25519 fingerprint); hosted SaaS topology architecture-captured in `docs/architecture/hosted-dashboard.md` (not deployed; no CI references undeployed endpoint). Also subsequently extended in `f2186c9` (URL-before-preflight + cold-start tolerance) and `398a917` (QA-009 auto-serve).
 
 ---
 
@@ -704,7 +741,7 @@ Format per item:
   - `agent-guardian scan ... --no-tui --output json` emits NDJSON only, no Rich-rendered panels.
   - Memory footprint stays bounded (no panel-render-history accumulation).
 
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31, commit `b1c10a5`) — Single `rich.live.Live` held for entire scan lifetime; stdlib logging routed through `RichHandler` bound to same `Console` so log lines render ABOVE the Live region instead of tearing the panel border (the smoking-gun symptom in the original ticket). Process-singleton Console + AgentGuardian theme palette in `logging_setup.py`; `cli_tui.py` rewrite owns the lifecycle. Invariants A-E pass (single panel, log-above-panel ordering, all rows transition, AIVSS rendered, budget bars). The 30-duplicate-panels-per-87s-scan symptom is gone.
 
 ---
 
@@ -739,7 +776,7 @@ The check is cheap (1 anonymous OPTIONS request to a public Vertex publisher URL
 
 **Note on what triggered this addendum** · For `gemini-3.5-flash` specifically, the model is now available on BOTH AI Studio and Vertex (confirmed by `cli-3a4c1d9c2840` producing 16 findings via the `gemini:` prefix). The earlier "Vertex-only" claim in QA-001's diagnosis was wrong on that particular id. The dispatch-detection logic still matters for the general case (any newly-released Gemini that lands on Vertex first), and for `gemini-3.1-flash` which truly doesn't exist on either endpoint — the validator should distinguish "unknown on both" from "available on Vertex, missing on AI Studio".
 
-- **Status** · open
+- **Status** · **CLOSED** (2026-05-31, commit `b1c10a5`) — Eager `--model` validation at scan startup via per-provider HTTP probes (gemini, vertex, openai, anthropic, bedrock, ollama, stub); on Google AI 404, cross-checks Vertex AI publisher endpoint and suggests `--model vertex:<id>` if found. New `src/agent_guardian/llm/validation.py` (95% coverage, 50 tests); `difflib` "did you mean" suggestions. Live proof: `gemini:gemini-3.1-flash` now exits in 3.03s (28.7× faster than the previous 87s burnt-on-404 path) with a clean error. Addendum (Vertex on 401-inconclusive case) filed as QA-006.
 
 ### Reproduction
 
