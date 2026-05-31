@@ -151,11 +151,9 @@ def test_build_context_for_completed_scan_has_required_keys() -> None:
         "band_label",
         "band_class",
         "needle_pct",
-        "sub_scores",
         "asi_rows",
         "findings_page",
         "pagination",
-        "swarm_satellites",
         "package_version",
         "evidence_fingerprint",
         "counts",
@@ -163,9 +161,7 @@ def test_build_context_for_completed_scan_has_required_keys() -> None:
     assert required.issubset(ctx.payload.keys())
     assert ctx.payload["aivss_label"] == 84
     assert ctx.payload["band_class"] == "good"
-    assert len(ctx.payload["sub_scores"]) == 6
     assert len(ctx.payload["asi_rows"]) == 10
-    assert len(ctx.payload["swarm_satellites"]) == 11
 
 
 def test_build_context_for_in_flight_scan_has_pending_state() -> None:
@@ -294,11 +290,9 @@ def test_dashboard_renders_for_completed_scan(client: TestClient, store: ScanSto
     assert "dash-masthead" in body
     assert "dash-score-card" in body
     assert "dash-glance-grid" in body
-    assert "dash-bar-stack" in body
     assert "dash-asi-table" in body
     assert "dash-feed-list" in body
     assert "dash-repro__grid" in body
-    assert "dash-swarm__svg" in body
     # Editorial italic in masthead
     assert "is scoring 84" in body
     # Score number visible in main + penalty footer
@@ -353,15 +347,6 @@ def test_dashboard_brand_is_agentguardian_not_open(client: TestClient, store: Sc
     body = resp.text
     assert "AgentGuardian Open" not in body
     assert "AgentGuardian" in body
-
-
-def test_dashboard_includes_eleven_swarm_satellites(client: TestClient, store: ScanStore) -> None:
-    scan = _make_scan()
-    _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}")
-    body = resp.text
-    # Eleven data-slot satellites in the SVG.
-    assert body.count("data-slot=") == 11
 
 
 def test_dashboard_clean_control_zero_high_findings(client: TestClient, store: ScanStore) -> None:

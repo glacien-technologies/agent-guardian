@@ -34,20 +34,6 @@ __all__ = [
 ]
 
 
-# Sub-score key → (title, "from" label, attention threshold below baseline)
-_SUB_SCORE_DEFINITIONS: list[tuple[str, str, str]] = [
-    # The template at server/templates/dashboard/_sub_scores.html prepends
-    # "from " — keep these labels bare (no leading "from "), otherwise the
-    # rendered output reads "from from ASIxx". Captured by the live
-    # validation pass; one-token cosmetic fix.
-    ("prompt_injection_resistance", "Prompt injection resistance", "ASI01"),
-    ("tool_scope_safety", "Tool scope safety", "ASI02 + ASI03"),
-    ("pii_containment", "PII containment", "ASI02 + ASI06"),
-    ("memory_poisoning_resistance", "Memory poisoning resistance", "ASI06"),
-    ("excessive_agency_containment", "Excessive agency containment", "ASI03 + ASI05 + ASI08"),
-    ("hallucination_resistance", "Hallucination resistance", "ASI09"),
-]
-
 # ASI row metadata — subtitle + weight (matches the saved design).
 _ASI_ROW_META: dict[str, tuple[str, str, float, bool]] = {
     # code  : (title,                subtitle,                         weight, weight_high)
@@ -62,23 +48,6 @@ _ASI_ROW_META: dict[str, tuple[str, str, float, bool]] = {
     "ASI09": ("Trust exploit", "Manufactured authority · citations", 1.0, False),
     "ASI10": ("Behavioural drift", "Long horizon · sandbagging", 1.0, False),
 }
-
-
-# Eleven satellite agents around the target node (per the saved design + the
-# existing /scan/<id>/swarm view's eleven slots).
-_SWARM_SATELLITE_LABELS: list[str] = [
-    "recon",
-    "goal-hijack",
-    "tool-misuse",
-    "privilege",
-    "supply-chain",
-    "code-exec",
-    "memory",
-    "a2a",
-    "cascade",
-    "trust",
-    "drift",
-]
 
 
 @dataclass(frozen=True)
@@ -167,75 +136,6 @@ def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
     return out
 
 
-def _sub_score_rows(scan: Scan | None) -> tuple[list[dict[str, Any]], int]:
-    """Return ``(rows, attention_count)`` for the six sub-score axes."""
-    rows: list[dict[str, Any]] = []
-    attention = 0
-    baseline_default = 70.0  # T2 baseline visualised in the saved design
-    raw_sub_scores: dict[str, float] = dict(scan.sub_scores) if scan is not None else {}
-    for key, title, from_label in _SUB_SCORE_DEFINITIONS:
-        score = float(raw_sub_scores.get(key, 0.0))
-        score_pct = _fmt_pct(score)
-        delta = round(score - baseline_default, 1)
-        is_attention = score < baseline_default
-        if is_attention:
-            attention += 1
-        rows.append(
-            {
-                "title": title,
-                "from_label": from_label,
-                "score_pct": score_pct,
-                "score_label": f"{round(score)}" if scan is not None else "—",
-                "baseline_pct": baseline_default,
-                "delta": delta,
-                "delta_label": f"{delta:+.0f}",
-                "attention": is_attention,
-                "note_html": _sub_score_note(key, score, is_attention),
-            }
-        )
-    return rows, attention
-
-
-def _sub_score_note(key: str, score: float, is_attention: bool) -> str:
-    """Editorial copy per sub-score, matching the saved design's tone.
-
-    These are stable, hand-authored notes — not user content. They render as
-    Jinja ``|safe`` because they intentionally include ``<em>`` / ``<code>``.
-    """
-    notes = {
-        "prompt_injection_resistance": (
-            "Direct refusals are <strong>strong</strong>. Indirect injection via "
-            "tool-fetched documents <em>does</em> succeed in some scans."
-        ),
-        "tool_scope_safety": (
-            "The agent <em>refuses</em> most scope-expansion requests. Chain-exfil "
-            "through <code>fetch_url → summarize → store_memory</code> is the "
-            "common bypass."
-        ),
-        "pii_containment": (
-            "The agent rarely volunteered PII even under Crescendo escalation. "
-            "The redactor is doing its job."
-        ),
-        "memory_poisoning_resistance": (
-            "AgentPoison-style probes at <em>0.1%</em> poison rate occasionally "
-            "land — a persistent RAG trigger can survive a session restart."
-        ),
-        "excessive_agency_containment": (
-            "The agent asks before taking irreversible actions in most cases. A "
-            "retry-storm was induced but the circuit breaker caught it."
-        ),
-        "hallucination_resistance": (
-            "Confident-hallucination triggers occasionally land — the agent quoted "
-            "a fabricated statistic with no citation. Caught by the "
-            "<code>trust-exploit-agent</code>."
-        ),
-    }
-    base = notes.get(key, "")
-    if is_attention:
-        base = "<strong>Needs attention.</strong> " + base
-    return base
-
-
 def _asi_rows(
     scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]
 ) -> list[dict[str, Any]]:
@@ -278,29 +178,6 @@ def _status_for_row(scan: Scan | None, is_pending: bool, score: float) -> tuple[
     if is_pending:
         return ("12% · warming", "queued")
     return ("running", "running")
-
-
-def _swarm_satellite_positions(scan: Scan | None) -> list[dict[str, Any]]:
-    """Compute 11 satellite positions in polar coordinates around (360, 240)."""
-    cx, cy = 360.0, 240.0
-    radius = 170.0
-    satellites: list[dict[str, Any]] = []
-    n = len(_SWARM_SATELLITE_LABELS)
-    for i, label in enumerate(_SWARM_SATELLITE_LABELS):
-        angle = (2.0 * math.pi * i) / n - math.pi / 2.0
-        x = cx + radius * math.cos(angle)
-        y = cy + radius * math.sin(angle)
-        status = "done" if scan is not None else ("running" if i % 3 != 0 else "queued")
-        satellites.append(
-            {
-                "label": label,
-                "agent": label,
-                "status": status,
-                "x": round(x, 1),
-                "y": round(y, 1),
-            }
-        )
-    return satellites
 
 
 def _findings_page(
@@ -498,9 +375,7 @@ def build_dashboard_context(
         aggregate = 0.0
         score_sublabel = "tier-weighted, provisional"
 
-    sub_score_rows, attention = _sub_score_rows(scan)
     asi_rows = _asi_rows(scan, findings_by_asi)
-    swarm_satellites = _swarm_satellite_positions(scan)
     findings_page, pagination = _findings_page(scan, page=page, per_page=per_page)
     asi_dot_states = _asi_dot_states(scan, findings_by_asi)
     asi_covered = sum(1 for code, b in findings_by_asi.items() if sum(b.values()) > 0)
@@ -589,17 +464,12 @@ def build_dashboard_context(
         "findings_total": findings_total,
         "asi_covered": asi_covered,
         "asi_dot_states": asi_dot_states,
-        # Sub-scores
-        "sub_scores": sub_score_rows,
-        "attention_count": attention,
         "tier_number": (scan.tier.value if scan is not None else "T2").lstrip("T")[:1] or "2",
         # ASI breakdown
         "asi_rows": asi_rows,
         # Findings feed
         "findings_page": findings_page,
         "pagination": pagination,
-        # Swarm centerpiece
-        "swarm_satellites": swarm_satellites,
         # Reproducibility
         "package_version": package_version,
         "aivss_formula_version": aivss_formula_version,
