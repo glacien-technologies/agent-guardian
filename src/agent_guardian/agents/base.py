@@ -921,12 +921,16 @@ class AsiAgent(ABC):
                     self.budget.tokens_remaining,
                 )
                 break
-            _LOG.debug(
-                "agent %s turn %d: next_prompt[:80]=%r (est_tokens=%d)",
+            # INFO-level so the Executive Logs tab renders the full per-turn
+            # trace (operator request 2026-06-01 — show what was sent / what
+            # came back / how the judge ruled, not just httpx 200 OK).
+            _LOG.info(
+                "agent %s turn %d sending probe (strategy=%s est_tokens=%d): %s",
                 agent_name,
                 turns + 1,
-                result.text[:80],
+                strategy_name,
                 est_tokens,
+                result.text,
             )
 
             try:
@@ -982,11 +986,11 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
-            _LOG.debug(
-                "agent %s turn %d: target response[:120]=%r",
+            _LOG.info(
+                "agent %s turn %d target response: %s",
                 agent_name,
                 turns + 1,
-                target_response[:120],
+                target_response,
             )
 
             response_tokens = max(1, len(target_response) // 4)
@@ -1006,13 +1010,13 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
-            _LOG.debug(
-                "agent %s turn %d: judge verdict=%s confidence=%.2f reasoning[:80]=%r",
+            _LOG.info(
+                "agent %s turn %d judge verdict: %s (confidence %.2f) — %s",
                 agent_name,
                 turns + 1,
-                verdict.verdict,
+                verdict.verdict.upper(),
                 verdict.confidence,
-                (verdict.reasoning or "")[:80],
+                verdict.reasoning or "(no reasoning)",
             )
 
             turns += 1
