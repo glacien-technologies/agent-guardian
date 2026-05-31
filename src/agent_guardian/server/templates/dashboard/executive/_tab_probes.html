@@ -2,10 +2,9 @@
 
    Every reflection record the swarm produced — one row per judged turn. Data
    is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
-   (``probes_list``). Each row is expandable: click ``Prompt &middot; response
-   &middot; reasoning`` to drill into the verbatim attacker prompt / target
-   response / judge rationale. Empty-state copy preserves the
-   ``clean_control`` sentry.
+   (``probes_list``). Each row is expandable: click the ``See details``
+   button to drill into the verbatim request prompt / target response /
+   judge reasoning. Empty-state copy preserves the ``clean_control`` sentry.
 #}
 <section id="tabpanel-probes"
          role="tabpanel"
@@ -30,8 +29,11 @@
             <time class="exec-probe__time">{{ p.timestamp_label }}</time>
           </header>
           <details class="exec-probe__body">
-            <summary>Prompt &middot; response &middot; reasoning</summary>
-            <p class="exec-probe__label">Prompt</p>
+            <summary class="exec-details-toggle">
+              <span class="exec-details-toggle__label">See details</span>
+              <span class="exec-details-toggle__chevron" aria-hidden="true"></span>
+            </summary>
+            <p class="exec-probe__label">Request prompt</p>
             <pre class="exec-probe__prompt">{{ p.prompt }}</pre>
             <p class="exec-probe__label">Target response</p>
             <pre class="exec-probe__response">{{ p.target_response }}</pre>

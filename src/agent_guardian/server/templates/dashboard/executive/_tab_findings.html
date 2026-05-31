@@ -105,8 +105,11 @@
                           </div>
                           {% if f.evidence | length > 1 %}
                             <details class="exec-finding__evidence-body">
-                              <summary>Prompt &middot; response &middot; reasoning</summary>
-                              <p class="exec-probe__label">Prompt</p>
+                              <summary class="exec-details-toggle">
+                                <span class="exec-details-toggle__label">See details</span>
+                                <span class="exec-details-toggle__chevron" aria-hidden="true"></span>
+                              </summary>
+                              <p class="exec-probe__label">Request prompt</p>
                               <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
                               <p class="exec-probe__label">Target response</p>
                               <pre class="exec-probe__response">{{ ev.target_response }}</pre>
@@ -125,7 +128,7 @@
                             </details>
                           {% else %}
                             {# Single event: skip the second collapse, show inline. #}
-                            <p class="exec-probe__label">Prompt</p>
+                            <p class="exec-probe__label">Request prompt</p>
                             <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
                             <p class="exec-probe__label">Target response</p>
                             <pre class="exec-probe__response">{{ ev.target_response }}</pre>
