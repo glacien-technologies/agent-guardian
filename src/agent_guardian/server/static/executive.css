@@ -970,20 +970,43 @@ body.exec-body {
   flex-direction: column;
   gap: 0;
 }
+/* Each row is the <li>; the <details> inside takes the full width
+ * with no extra padding so the inner <summary> reads as a single
+ * tappable line. Adjacent rows are separated by a hairline border.
+ */
 .exec-finding__evidence-row {
-  padding: 16px 0;
+  padding: 0;
   border-top: 1px solid var(--exec-border-subtle);
 }
 .exec-finding__evidence-row:first-child {
   border-top: none;
-  padding-top: 4px;
 }
-.exec-finding__evidence-strip {
+.exec-finding__evidence-row > details {
+  width: 100%;
+}
+/* The summary IS the compact row: probe-id chip, agent, turn,
+ * timestamp on the left; spacer; right-aligned ``See details``
+ * pill on the right. Clicking anywhere on the row toggles the
+ * inline body.
+ */
+.exec-finding__evidence-summary {
+  cursor: pointer;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--exec-radius-sm);
+  transition: background 120ms ease-out;
+  user-select: none;
+}
+.exec-finding__evidence-summary:hover {
+  background: var(--exec-bg-sunken);
+}
+.exec-finding__evidence-summary::-webkit-details-marker { display: none; }
+.exec-finding__evidence-summary::marker { content: ""; }
+.exec-finding__evidence-summary:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: -2px;
 }
 .exec-finding__evidence-id {
   font-family: var(--exec-font-mono);
@@ -992,6 +1015,7 @@ body.exec-body {
   background: var(--exec-code-bg);
   padding: 1px 6px;
   border-radius: var(--exec-radius-sm);
+  flex-shrink: 0;
 }
 .exec-finding__evidence-agent,
 .exec-finding__evidence-turn {
@@ -999,28 +1023,60 @@ body.exec-body {
   font-size: 11px;
   color: var(--exec-ink-subtle);
   letter-spacing: 0.04em;
+  flex-shrink: 0;
 }
 .exec-finding__evidence-time {
   font-family: var(--exec-font-mono);
   font-size: 11px;
   color: var(--exec-ink-subtle);
-  margin-left: auto;
+  flex-shrink: 0;
 }
-.exec-finding__evidence-body > summary {
-  cursor: pointer;
-  font-family: var(--exec-font-mono);
+.exec-finding__evidence-spacer { flex: 1 1 auto; }
+/* Right-aligned "See details" pill — visually a small button but
+ * the entire row is the actual hit target, so this is just an
+ * affordance hint. */
+.exec-finding__evidence-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.625rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: 999px;
+  font-family: var(--exec-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--exec-ink-muted);
+  background: var(--exec-bg);
+  transition: color 120ms ease-out, border-color 120ms ease-out, background 120ms ease-out;
+  flex-shrink: 0;
+}
+.exec-finding__evidence-summary:hover .exec-finding__evidence-toggle {
   color: var(--exec-brand);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  padding: 4px 0;
+  border-color: var(--exec-brand);
+  background: var(--exec-brand-tint);
 }
-.exec-finding__evidence-body > summary::-webkit-details-marker { display: none; }
-.exec-finding__evidence-body > summary::marker { content: ""; }
-.exec-finding__evidence-body > summary:focus-visible {
-  outline: 2px solid var(--exec-brand);
-  outline-offset: 2px;
-  border-radius: var(--exec-radius-sm);
+details[open] > .exec-finding__evidence-summary .exec-finding__evidence-toggle-label::after {
+  content: " — collapse";
+  color: var(--exec-ink-subtle);
+  font-weight: 400;
 }
+details[open] > .exec-finding__evidence-summary .exec-details-toggle__chevron {
+  transform: rotate(225deg);
+  margin-top: 2px;
+}
+/* Inset the expanded body so it visually anchors under the summary
+ * row. Indented by the probe-id chip width + a soft violet left
+ * border to mark the relationship. */
+.exec-finding__evidence-detail {
+  padding: 0.25rem 0.75rem 1rem 1.25rem;
+  margin-left: 0.5rem;
+  border-left: 2px solid var(--exec-brand-tint);
+}
+/* Legacy ``.exec-finding__evidence-body > summary`` rules removed
+ * 2026-05-31: the new compact-row layout uses
+ * ``.exec-finding__evidence-summary`` (above), which has its own
+ * complete style block.
+ */
 
 /* ============================================================
  * 13.6 — Per-row "See details" toggle button

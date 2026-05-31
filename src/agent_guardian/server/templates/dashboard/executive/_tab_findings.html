@@ -94,21 +94,29 @@
                     </summary>
                     <ol class="exec-finding__evidence-list" role="list">
                       {% for ev in f.evidence %}
+                        {# Compact one-line row: clicking anywhere on the row
+                           toggles the inline details body. Strip + chevron
+                           live INSIDE the <summary> so the entire row is the
+                           hit-target. Single-event findings render with the
+                           details auto-open so the operator doesn't pay a
+                           second click for the common case. #}
                         <li class="exec-finding__evidence-row"
                             data-verdict="{{ ev.verdict }}"
                             data-agent="{{ ev.agent }}">
-                          <div class="exec-finding__evidence-strip">
-                            <code class="exec-finding__evidence-id">{{ ev.probe_id or '—' }}</code>
-                            <span class="exec-finding__evidence-agent">{{ ev.agent or '—' }}</span>
-                            <span class="exec-finding__evidence-turn">turn {{ ev.turn }}</span>
-                            <time class="exec-finding__evidence-time">{{ ev.timestamp_label }}</time>
-                          </div>
-                          {% if f.evidence | length > 1 %}
-                            <details class="exec-finding__evidence-body">
-                              <summary class="exec-details-toggle">
-                                <span class="exec-details-toggle__label">See details</span>
+                          <details class="exec-finding__evidence-body"
+                                   {% if f.evidence | length == 1 %}open{% endif %}>
+                            <summary class="exec-finding__evidence-summary">
+                              <code class="exec-finding__evidence-id">{{ ev.probe_id or '—' }}</code>
+                              <span class="exec-finding__evidence-agent">{{ ev.agent or '—' }}</span>
+                              <span class="exec-finding__evidence-turn">turn {{ ev.turn }}</span>
+                              <time class="exec-finding__evidence-time">{{ ev.timestamp_label }}</time>
+                              <span class="exec-finding__evidence-spacer"></span>
+                              <span class="exec-finding__evidence-toggle">
+                                <span class="exec-finding__evidence-toggle-label">See details</span>
                                 <span class="exec-details-toggle__chevron" aria-hidden="true"></span>
-                              </summary>
+                              </span>
+                            </summary>
+                            <div class="exec-finding__evidence-detail">
                               <p class="exec-probe__label">Request prompt</p>
                               <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
                               <p class="exec-probe__label">Target response</p>
@@ -125,26 +133,8 @@
                                   Not graded per-turn — see the Probes tab for the verbatim judge trail.
                                 </p>
                               {% endif %}
-                            </details>
-                          {% else %}
-                            {# Single event: skip the second collapse, show inline. #}
-                            <p class="exec-probe__label">Request prompt</p>
-                            <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
-                            <p class="exec-probe__label">Target response</p>
-                            <pre class="exec-probe__response">{{ ev.target_response }}</pre>
-                            {% if ev.confidence and ev.confidence > 0.0 %}
-                              <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(ev.confidence) }})</p>
-                            {% else %}
-                              <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
-                            {% endif %}
-                            {% if ev.reasoning %}
-                              <blockquote class="exec-probe__reason">{{ ev.reasoning }}</blockquote>
-                            {% else %}
-                              <p class="exec-probe__reason exec-probe__reason--empty">
-                                Not graded per-turn — see the Probes tab for the verbatim judge trail.
-                              </p>
-                            {% endif %}
-                          {% endif %}
+                            </div>
+                          </details>
                         </li>
                       {% endfor %}
                     </ol>
