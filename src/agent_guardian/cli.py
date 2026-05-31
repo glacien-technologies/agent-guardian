@@ -559,27 +559,42 @@ async def _endpoint_reachability_preflight(
     """
     import httpx
 
-    attempts = 0
-    # 5s timeout per attempt x 2 attempts = 10s budget. Generous on purpose:
-    # Cloud Run / Lambda cold starts on a first POST routinely take 3-5s, and
-    # we'd rather wait an extra few seconds than mis-classify a cold target
-    # as unreachable.
-    timeout = httpx.Timeout(5.0)
+    # Cold-start-tolerant preflight: 3 attempts with progressive per-attempt
+    # timeouts (5s, 10s, 15s; ≤30s total worst-case). Cloud Run / Lambda /
+    # Knative often spin down after a few minutes idle; the first POST after
+    # spin-down can take 6-12s for container boot + TLS handshake + first
+    # response. A flat 5s x 2 (the previous code) routinely false-positived
+    # UNREACHABLE against fully-healthy testbenches. Empirically attempt 1
+    # succeeds for warm targets (~250ms); attempt 2 catches cold starts
+    # (~5-10s); attempt 3 is the long-tail backstop.
     body: dict[str, Any] = sample_body if sample_body is not None else {"input": "ping"}
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for _ in range(2):
+    per_attempt_timeouts = (5.0, 10.0, 15.0)
+    last_exc: Exception | None = None
+    for attempt, secs in enumerate(per_attempt_timeouts):
+        async with httpx.AsyncClient(timeout=httpx.Timeout(secs)) as client:
             try:
                 await client.post(endpoint, json=body)
                 # Any HTTP response (200, 404, 422, 500, …) means the listener
                 # is up. 422 from a schema-protected FastAPI endpoint is the
                 # canonical "reachable, schema-protected" case — log it but do
                 # NOT treat it as unreachable.
+                if attempt > 0:
+                    _LOG.info(
+                        "endpoint preflight: %s reachable after %d attempt(s) "
+                        "(target was likely cold-starting)",
+                        endpoint,
+                        attempt + 1,
+                    )
                 return True
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+                last_exc = exc
                 _LOG.debug(
-                    "endpoint preflight: attempt %d for %s failed (%s)", attempts, endpoint, exc
+                    "endpoint preflight: attempt %d/%d for %s failed (%s)",
+                    attempt + 1,
+                    len(per_attempt_timeouts),
+                    endpoint,
+                    exc,
                 )
-                attempts += 1
             except httpx.HTTPError as exc:
                 # Any other transport error (PoolTimeout, RemoteProtocolError, etc.)
                 # is treated as "reachable" -- we got far enough to be the
@@ -590,6 +605,13 @@ async def _endpoint_reachability_preflight(
                     exc,
                 )
                 return True
+    if last_exc is not None:
+        _LOG.warning(
+            "endpoint preflight: %s unreachable after %d attempts (last error: %s)",
+            endpoint,
+            len(per_attempt_timeouts),
+            last_exc,
+        )
     return False
 
 
@@ -2600,10 +2622,21 @@ async def _run_scan(
         typer.echo(f"llm config error: {exc}", err=True)
         return EXIT_LLM_PROVIDER
 
+    # Generate scan_id + emit dashboard URLs BEFORE the target preflight, so
+    # the operator gets the scan URL even if preflight subsequently fails
+    # (cold-start race, transient network blip, etc.). This matches the
+    # published QA-003 contract: "URL within the first 2 lines of stdout,
+    # always". The pre-existing behavior (emit AFTER preflight) silently
+    # swallowed the URL on every preflight failure, leaving the operator
+    # with only a cryptic "target unreachable" line.
+    scan_id = f"cli-{uuid.uuid4().hex[:12]}"
+    print_scan_urls(scan_id, suppress=not publish)
+
     # Stage 1B -- a --contract run replaces the four legacy target modes with a
     # contract-built adapter + RoE controller + OTel observer. The non-contract
     # path below is left byte-for-byte unchanged.
     contract_ctx: _ContractScanContext | None = None
+    adapter: TargetAdapter
     if contract is not None:
         if any((target, system_prompt, endpoint, framework, framework_ref)):
             typer.echo(
@@ -2623,7 +2656,7 @@ async def _run_scan(
         except ContractError as exc:
             typer.echo(f"contract error: {exc}", err=True)
             return EXIT_CONFIG
-        adapter: TargetAdapter = contract_ctx.adapter
+        adapter = contract_ctx.adapter
     else:
         # Pre-scan reachability preflight for --endpoint mode (#3). A hosted
         # target that is unreachable would otherwise burn the full LLM budget
@@ -2633,7 +2666,13 @@ async def _run_scan(
         if endpoint and not no_preflight and not _is_placeholder_endpoint(endpoint):
             reachable = await _endpoint_reachability_preflight(endpoint)
             if not reachable:
-                typer.echo(f"target unreachable: {endpoint}", err=True)
+                typer.echo(
+                    f"target unreachable: {endpoint}\n"
+                    "  - if the target is on Cloud Run / Lambda and hasn't been hit "
+                    "recently, retry once to warm it up\n"
+                    "  - or re-run with --no-preflight to skip this check",
+                    err=True,
+                )
                 return EXIT_TARGET_UNREACHABLE
         try:
             adapter = build_target_adapter(
@@ -2651,17 +2690,6 @@ async def _run_scan(
         except FileNotFoundError as exc:
             typer.echo(f"target unreachable: {exc}", err=True)
             return EXIT_TARGET_UNREACHABLE
-
-    # 7. Build swarm.
-    scan_id = f"cli-{uuid.uuid4().hex[:12]}"
-    # QA-003 — emit the live-dashboard URLs at scan start so the operator can
-    # share / open them BEFORE the swarm finishes. Runs after model + target
-    # are resolved (so we never print a URL for a scan that's about to abort)
-    # and BEFORE any heavy work (so the URL is in the first two lines of
-    # stdout, which is the published contract). ``--no-publish`` suppresses
-    # emission entirely; the ``AGENT_GUARDIAN_DISABLE_URL_EMISSION`` env switch
-    # is the operator-rescue alternative.
-    print_scan_urls(scan_id, suppress=not publish)
     # v1.1 mode resolution. ScanMode validates against the {fast,smart,full}
     # vocabulary; anything else is a user error worth surfacing as
     # EXIT_CONFIG rather than crashing the SwarmConfig constructor.

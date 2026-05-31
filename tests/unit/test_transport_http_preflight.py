@@ -98,7 +98,9 @@ async def test_connect_error_marks_unreachable() -> None:
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is False
     # Two attempts before giving up.
-    assert route.call_count == 2
+    # 3 attempts with progressive timeout backoff (5s / 10s / 15s) tolerate
+    # Cloud Run cold starts; only exhaust marks unreachable.
+    assert route.call_count == 3
 
 
 @respx.mock
@@ -108,7 +110,9 @@ async def test_read_timeout_marks_unreachable() -> None:
     route = respx.post(ENDPOINT).mock(side_effect=httpx.ReadTimeout("read timed out"))
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is False
-    assert route.call_count == 2
+    # 3 attempts with progressive timeout backoff (5s / 10s / 15s) tolerate
+    # Cloud Run cold starts; only exhaust marks unreachable.
+    assert route.call_count == 3
 
 
 @respx.mock
@@ -119,3 +123,40 @@ async def test_5xx_is_reachable() -> None:
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is True
     assert route.called
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_cold_start_recovers_on_attempt_two() -> None:
+    """Cloud Run cold start: 1st POST times out (container booting), 2nd POST succeeds.
+
+    Regression: the previous 5s x 2 budget false-positived UNREACHABLE on
+    healthy testbenches whose first POST after idle exceeded 5s. The 3-attempt
+    progressive-backoff budget must recover cleanly on attempt 2 without the
+    operator needing to retry the whole scan.
+    """
+    route = respx.post(ENDPOINT).mock(
+        side_effect=[
+            httpx.ConnectTimeout("cold start"),
+            httpx.Response(200, json={"output": {"text": "pong"}}),
+        ]
+    )
+    reachable = await _endpoint_reachability_preflight(ENDPOINT)
+    assert reachable is True
+    assert route.call_count == 2
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_cold_start_recovers_on_attempt_three() -> None:
+    """Long-tail cold start: first 2 POSTs time out, 3rd succeeds. Must still be reachable."""
+    route = respx.post(ENDPOINT).mock(
+        side_effect=[
+            httpx.ConnectTimeout("cold start 1"),
+            httpx.ReadTimeout("cold start 2"),
+            httpx.Response(200, json={"output": {"text": "pong"}}),
+        ]
+    )
+    reachable = await _endpoint_reachability_preflight(ENDPOINT)
+    assert reachable is True
+    assert route.call_count == 3

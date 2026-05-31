@@ -245,6 +245,49 @@ def test_endpoint_preflight_unreachable_exits_3(runner: CliRunner, tmp_path: Pat
     assert "target unreachable" in _combined_output(result).lower()
 
 
+def test_url_emission_runs_before_preflight_failure(runner: CliRunner, tmp_path: Path) -> None:
+    """The dashboard URL must appear in stdout even when preflight subsequently fails.
+
+    Regression: pre-fix, ``print_scan_urls`` was called after the preflight
+    check, so a preflight failure (cold-start race against Cloud Run, network
+    blip) killed the scan without ever emitting the scan URL. The operator
+    was left with only ``target unreachable: <endpoint>`` and no way to
+    cross-reference the failed scan in the dashboard. The fix lifts URL
+    emission ahead of the preflight call so the URL is always in the first
+    couple of stdout lines, regardless of preflight outcome.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        router.post("https://api.realhost.invalid/v1/chat").mock(
+            side_effect=httpx.ConnectError("simulated cold start exhaustion")
+        )
+        result = runner.invoke(
+            app,
+            [
+                "scan",
+                "--endpoint",
+                "https://api.realhost.invalid/v1/chat",
+                "--model",
+                "stub",
+                "--no-tui",
+                "--mode",
+                "fast",
+            ],
+        )
+    output = _combined_output(result)
+    assert result.exit_code == EXIT_TARGET_UNREACHABLE
+    # The URL emission line must be present (proves it ran before preflight).
+    assert "▸ Scan cli-" in output
+    assert "/scans/cli-" in output
+    # And it must appear before the unreachable banner, not after.
+    url_idx = output.find("▸ Scan cli-")
+    err_idx = output.lower().find("target unreachable")
+    assert url_idx >= 0 and err_idx >= 0
+    assert url_idx < err_idx, (
+        "URL emission must precede preflight-failure banner; "
+        f"observed URL at offset {url_idx}, banner at {err_idx}"
+    )
+
+
 def test_endpoint_preflight_no_preflight_flag_skips(runner: CliRunner, tmp_path: Path) -> None:
     """--no-preflight escapes the preflight; the scan can then proceed."""
     # We mock the post so the scan runs through; the preflight should NOT fire.

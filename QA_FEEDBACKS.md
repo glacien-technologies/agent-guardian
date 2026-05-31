@@ -15,6 +15,38 @@ Format per item:
 
 ---
 
+## QA-009 — Scan URL is dead on arrival when `serve` isn't running; user gets `ERR_CONNECTION_REFUSED`
+
+- **Date surfaced** · 2026-05-31 (post-QA-001..005 closure manual testing)
+- **Severity** · medium (the QA-003 URL emission is the headline UX win; serving a dead URL is worse than not emitting one)
+- **Found via** · user ran `agent-guardian scan ... --endpoint <testbench>/finbot/chat` with `gemini-3.5-flash`, scan completed, clicked the emitted `▸ Scan cli-839d88f0b7a9 — track live at http://127.0.0.1:7474/scans/cli-839d88f0b7a9` URL in their terminal; Chrome rendered `This site can't be reached — 127.0.0.1 refused to connect — ERR_CONNECTION_REFUSED`. `agent-guardian serve` was not running.
+
+- **What's wrong** · QA-003 ships a clickable scan URL within the first 2 lines of stdout (good). But the URL points to a server (`agent-guardian serve`, default loopback :7474) that the user has to manually start in another terminal first. There's no signal in the scan output that `serve` is required, no liveness probe, no auto-start, no graceful fallback. The first-time user clicks the URL, gets a connection-refused page, and concludes the dashboard is broken — when really they just needed a second terminal.
+
+- **What's right** · the data IS on disk — `~/.agentguardian/scans/cli-839d88f0b7a9/` has `report.json`, `memory.jsonl`, `stats.json`, etc. — so the scan worked. `serve` would render it perfectly. The gap is purely about discoverability / lifecycle.
+
+- **Three options for the fix** (ordered by recommended-ness):
+
+  - **(a) Recommended — liveness probe + instruction line.** Before printing the URL, do a fast (50ms) TCP probe to `127.0.0.1:7474`. If alive, emit the URL as today. If not alive, append a one-line instruction:
+    ```
+    ▸ Scan cli-839d88f0b7a9 — track live at  http://127.0.0.1:7474/scans/cli-839d88f0b7a9
+    ▸ Report when complete                    http://127.0.0.1:7474/scans/cli-839d88f0b7a9/report
+       (server not running — start it with `agent-guardian serve` in another terminal)
+    ```
+    Cheap, zero lifecycle complexity, eliminates 100% of the user confusion.
+
+  - **(b) Auto-start `serve` as a background child of `scan`.** Spawn the server with the right port + signal-handler that shuts it down when the scan command exits (or after a 5-minute grace period for the user to read the final report). Lifecycle complexity: port conflict if user already has serve running; what if scan is killed with SIGKILL — orphan server; cross-platform process management. Best UX when it works but most failure modes.
+
+  - **(c) Explicit instruction line, always.** Print "→ Run `agent-guardian serve` in another terminal to open this URL" beside the URL unconditionally. Safe minimum; uglier than (a) because it nags even when serve IS running. Probably worth doing as a stopgap before (a) lands.
+
+- **Fix area** · `src/agent_guardian/cli.py` `print_scan_urls()` function — add the loopback probe (option a) inline. Test: `tests/cli/test_scan_url_emission.py::test_url_emission_adds_serve_instruction_when_server_not_running` (mock the probe to return down, assert instruction line is present; mock probe up, assert instruction absent).
+
+- **Acceptance** · clicking the URL in the first 30 seconds of seeing it always either (i) opens the dashboard if serve is running, or (ii) gives the user clear visible context that serve isn't running and they need to start it.
+
+- **Status** · open
+
+---
+
 ## QA-008 — Gemini API timeout cascade can outlive the user's wall budget
 
 - **Date surfaced** · 2026-05-31 (live validation of QA-001..005 closure)
