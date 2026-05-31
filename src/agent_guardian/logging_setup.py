@@ -21,9 +21,14 @@ Design notes
   CLI calls this on every sub-command; the runner calls it on import;
   tests that want a different level pass ``force=True``.
 * **Noisy-dep gating.** ``httpx``, ``httpcore``, ``urllib3`` and the
-  Gemini SDK emit DEBUG lines for every HTTP byte by default. We pin
-  them to ``max(level, INFO)`` unless the operator explicitly asked
-  for DEBUG (in which case the noise is intentional and useful).
+  Gemini SDK emit an INFO line for every HTTP request (and DEBUG
+  lines for every byte). At INFO that drowns the swarm-board signal
+  (QA-019). We pin them to ``max(level, WARNING)`` so the default
+  INFO scan is quiet; the operator can opt in to the network-level
+  trace via ``AGENT_GUARDIAN_LOG_LEVEL=DEBUG`` (root falls to DEBUG
+  and the pin is lifted) or by calling
+  ``logging.getLogger("httpx").setLevel(logging.INFO)`` after
+  ``configure_logging`` returns.
 """
 
 from __future__ import annotations
@@ -464,10 +469,15 @@ def configure_logging(
     redactor = _RedactingFilter()
     for handler in logging.getLogger().handlers:
         handler.addFilter(redactor)
-    # Quiet down chatty deps unless the operator explicitly asked for DEBUG.
+    # QA-019: pin chatty HTTP deps to WARNING by default so the swarm-board
+    # signal isn't drowned by one ``INFO HTTP Request: ... 200 OK`` per probe.
+    # At DEBUG the operator explicitly opted in to the noise — leave them
+    # inheriting the root level. At INFO/WARNING/ERROR/CRITICAL we clamp to
+    # max(resolved, WARNING) so resolved=ERROR still escalates correctly
+    # while resolved=INFO is quieted from INFO down to WARNING.
     if resolved > logging.DEBUG:
         for noisy in ("httpx", "httpcore", "urllib3", "google_genai.models"):
-            logging.getLogger(noisy).setLevel(max(resolved, logging.INFO))
+            logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))
     _CONFIGURED = True
 
 

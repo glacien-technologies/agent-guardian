@@ -1,0 +1,40 @@
+# Optional local stack for the Ollama demo target.
+#
+#   docker compose -f examples/ollama_local/docker-compose.yml up
+#
+# The ``ollama`` service runs the local model server; the ``agent`` service
+# runs the FastAPI wrapper and reaches Ollama at ``http://ollama:11434``.
+# Once both containers are healthy, scan from the host with:
+#
+#   agent-guardian scan --endpoint http://localhost:8000/chat \
+#       --model stub --mode fast --output md --output-path scan.md
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  agent:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ../..:/app
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      AG_DEMO_OLLAMA_MODEL: llama3.1
+    command: >
+      bash -lc "pip install --no-cache-dir fastapi uvicorn httpx pydantic
+      && uvicorn examples.ollama_local.serve:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+volumes:
+  ollama-data:

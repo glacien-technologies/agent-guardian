@@ -1,0 +1,67 @@
+name: Feature or probe request
+description: Propose a new feature, probe, adapter, report format, or behaviour change.
+title: "[feat] <short summary>"
+labels: ["kind/feature", "kind/roadmap-candidate", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for concrete proposals. For open-ended direction-setting, start a [Roadmap Discussion](https://github.com/glacien-technologies/agent-guardian/discussions/categories/roadmap) instead.
+
+        See [`ROADMAP.md`](../../ROADMAP.md) for the current 90-day cycle's themes before filing — your idea may already be in flight.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface does this touch?
+      options:
+        - Probe (corpus, ASI category)
+        - ASI agent / strategy
+        - Adapter (framework or transport)
+        - LLM provider
+        - Report writer (SARIF / JSON / JUnit / Markdown / PDF / bundle)
+        - CLI flag / UX
+        - Live dashboard / server
+        - CI integration (GitHub Actions / GitLab CI / etc.)
+        - Documentation
+        - Other (specify below)
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve? Who hits it, how often, and what do they do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Concrete change — new flag, new probe ID, new function signature, new report field, etc. Sketches and pseudocode are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What does "done" look like? Tests, docs, CHANGELOG entry, etc.
+      placeholder: |
+        - [ ] New flag documented in CLI --help and `docs/`.
+        - [ ] Unit tests covering the success and failure paths.
+        - [ ] CHANGELOG entry under [Unreleased].
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Other approaches you rejected and why.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I read `ROADMAP.md` and checked this is not already in flight.
+          required: true
+        - label: This is a feature request, not a vulnerability report.
+          required: true

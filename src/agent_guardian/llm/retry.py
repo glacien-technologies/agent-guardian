@@ -16,10 +16,12 @@ import asyncio
 import contextlib
 import logging
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from agent_guardian.llm.errors import (
+    LLMBudgetExceededError,
     LLMRateLimitError,
     LLMTimeoutError,
     LLMTransientError,
@@ -28,6 +30,7 @@ from agent_guardian.llm.errors import (
 __all__ = [
     "AGENT_LOOP_MAX_RETRIES",
     "AGENT_LOOP_MAX_SECONDS",
+    "DEFAULT_LLM_RETRY_CAP",
     "compute_delay",
     "with_backoff",
 ]
@@ -50,6 +53,17 @@ _DEFAULT_RETRY_ON: tuple[type[Exception], ...] = (
 # interrupts within seconds rather than minutes.
 AGENT_LOOP_MAX_RETRIES = 3
 AGENT_LOOP_MAX_SECONDS = 15.0
+
+# QA-008 — public ``with_backoff`` retry ceiling, lowered from the legacy 6.
+# With base=1s, factor=2, max=60s the legacy ceiling soaked up to ~63s of
+# wallclock for a single LLM call when a provider entered a hard 5xx /
+# timeout cycle; combined with a 300s scan-wide budget that cascade could
+# blow the budget by 50%+ before the swarm-level guillotine tripped.
+# 3 retries (≈1+2+4 ≈ 7s) bounds the aggregate per-call worst case while
+# still absorbing typical transient blips. Callers that genuinely need
+# 6 retries (e.g. mcp transport with long-tail provider quirks) pass
+# ``max_retries=`` explicitly.
+DEFAULT_LLM_RETRY_CAP = 3
 
 
 def compute_delay(
@@ -140,11 +154,15 @@ async def with_backoff(
     factor: float = 2.0,
     jitter_pct: float = 0.25,
     max_seconds: float = 60.0,
-    max_retries: int = 6,
+    max_retries: int = DEFAULT_LLM_RETRY_CAP,
     retry_on: tuple[type[Exception], ...] = _DEFAULT_RETRY_ON,
     rng: random.Random | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     cancel_event: asyncio.Event | None = None,
+    deadline_monotonic: float | None = None,
+    scan_start_monotonic: float | None = None,
+    budget_seconds: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> T:
     """Call ``coro_factory()`` with exponential backoff on retryable errors.
 
@@ -159,9 +177,51 @@ async def with_backoff(
     seconds. On cancellation we re-raise the last retryable exception
     immediately rather than starting a fresh attempt, so the caller can see
     "we gave up because we were asked to stop".
+
+    QA-008 wall-budget guillotine
+    -----------------------------
+    When ``deadline_monotonic`` is supplied (an absolute ``time.monotonic()``
+    timestamp), the helper checks the clock before each attempt and before
+    each backoff sleep. If the clock has already passed the deadline, or
+    the *computed* sleep would push us past it, we raise
+    :class:`LLMBudgetExceededError` immediately instead of sleeping or
+    starting another attempt. ``scan_start_monotonic`` and
+    ``budget_seconds`` are accepted as a convenience for callers who carry
+    the start time and budget separately; passing both is equivalent to
+    ``deadline_monotonic=scan_start + budget_seconds``. ``monotonic`` is
+    injectable for deterministic tests.
+
+    The guillotine deliberately raises a non-retryable error so any
+    *outer* retry wrapper does NOT re-enter the cascade. The most recent
+    retryable exception is attached as ``LLMBudgetExceededError.cause``
+    so the operator can see what was failing when the budget tripped.
     """
+    deadline = _resolve_deadline(
+        deadline_monotonic=deadline_monotonic,
+        scan_start_monotonic=scan_start_monotonic,
+        budget_seconds=budget_seconds,
+    )
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
+        # Wall-budget pre-attempt check. We do this BEFORE the cancel-event
+        # check so a scan that has blown its budget surfaces a precise
+        # ``LLMBudgetExceededError`` rather than a generic CancelledError
+        # if both fire on the same tick.
+        if deadline is not None and monotonic() >= deadline:
+            elapsed_at = _elapsed_for_log(scan_start_monotonic, monotonic)
+            budget_at = _budget_for_log(budget_seconds, deadline, scan_start_monotonic)
+            _LOG.warning(
+                "retry budget guillotine before attempt %d: elapsed=%.2fs budget=%.2fs",
+                attempt,
+                elapsed_at,
+                budget_at,
+            )
+            raise LLMBudgetExceededError(
+                f"wall budget exhausted before attempt {attempt + 1}",
+                elapsed=elapsed_at,
+                budget=budget_at,
+                cause=last_exc,
+            )
         if cancel_event is not None and cancel_event.is_set():
             if last_exc is not None:
                 _LOG.info(
@@ -198,6 +258,30 @@ async def with_backoff(
                     max_seconds=max_seconds,
                     rng=rng,
                 )
+            # Wall-budget look-ahead. If the sleep would push us past the
+            # deadline, refuse to sleep -- raise the guillotine now so the
+            # operator's wall budget is honoured to within ~one attempt.
+            if deadline is not None and monotonic() + delay >= deadline:
+                elapsed_at = _elapsed_for_log(scan_start_monotonic, monotonic)
+                budget_at = _budget_for_log(budget_seconds, deadline, scan_start_monotonic)
+                _LOG.warning(
+                    "retry budget guillotine mid-backoff after %d attempts "
+                    "(would-sleep=%.2fs, elapsed=%.2fs, budget=%.2fs): %s: %s",
+                    attempt + 1,
+                    delay,
+                    elapsed_at,
+                    budget_at,
+                    type(exc).__name__,
+                    exc,
+                )
+                raise LLMBudgetExceededError(
+                    f"wall budget would be exhausted by next backoff "
+                    f"(elapsed={elapsed_at:.2f}s, budget={budget_at:.2f}s, "
+                    f"would_sleep={delay:.2f}s)",
+                    elapsed=elapsed_at,
+                    budget=budget_at,
+                    cause=exc,
+                ) from exc
             _LOG.warning(
                 "retry %d/%d (%s: %s) — backoff %.2fs",
                 attempt + 1,
@@ -219,3 +303,50 @@ async def with_backoff(
                 raise exc
     assert last_exc is not None  # invariant: only reachable after a retryable raise
     raise last_exc
+
+
+def _resolve_deadline(
+    *,
+    deadline_monotonic: float | None,
+    scan_start_monotonic: float | None,
+    budget_seconds: float | None,
+) -> float | None:
+    """Resolve the absolute monotonic deadline from the caller's args.
+
+    Prefers an explicit ``deadline_monotonic``. Otherwise computes
+    ``scan_start + budget`` when both are provided. Returns ``None`` when
+    no budget was requested (the legacy no-guillotine path).
+    """
+    if deadline_monotonic is not None:
+        return deadline_monotonic
+    if scan_start_monotonic is not None and budget_seconds is not None:
+        return scan_start_monotonic + budget_seconds
+    return None
+
+
+def _elapsed_for_log(
+    scan_start_monotonic: float | None,
+    monotonic: Callable[[], float],
+) -> float:
+    """Best-effort 'seconds since scan start' for the guillotine log line.
+
+    Returns ``0.0`` when the caller passed a bare ``deadline_monotonic``
+    without ``scan_start_monotonic`` -- the log line still records the
+    budget overshoot, just without a phase-relative timestamp.
+    """
+    if scan_start_monotonic is None:
+        return 0.0
+    return max(0.0, monotonic() - scan_start_monotonic)
+
+
+def _budget_for_log(
+    budget_seconds: float | None,
+    deadline: float,
+    scan_start_monotonic: float | None,
+) -> float:
+    """Resolve the 'budget' figure to report in the guillotine log."""
+    if budget_seconds is not None:
+        return budget_seconds
+    if scan_start_monotonic is not None:
+        return max(0.0, deadline - scan_start_monotonic)
+    return 0.0

@@ -1,0 +1,71 @@
+# Pre-commit hook registry for agent-guardian.
+#
+# Consumers wire this into their .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/glacien-technologies/agent-guardian
+#       rev: v1.0.0
+#       hooks:
+#         - id: agentguardian-scan-prompt
+#           files: ^prompts/.*\.txt$
+#
+# Each hook below targets one concrete scan flow. They all default to
+# `--model stub` so a pre-commit run never hits a paid provider; consumers
+# override via `args:` when they want a real scan.
+
+- id: agentguardian-scan-prompt
+  name: AgentGuardian — scan system prompt
+  description: Run agent-guardian against a system-prompt file and write a SARIF report.
+  entry: agent-guardian
+  args:
+    - scan
+    - --model
+    - stub
+    - --mode
+    - fast
+    - --output
+    - sarif
+    - --output-path
+    - .agentguardian/pre-commit.sarif
+  language: python
+  language_version: python3
+  additional_dependencies:
+    - agent-guardian
+  pass_filenames: false
+  stages: [pre-commit, manual]
+  require_serial: true
+
+- id: agentguardian-scan-code
+  name: AgentGuardian — scan code target
+  description: Run agent-guardian against a Python dotted reference (file:attr).
+  entry: agent-guardian
+  args:
+    - scan
+    - --model
+    - stub
+    - --mode
+    - fast
+    - --output
+    - sarif
+    - --output-path
+    - .agentguardian/pre-commit.sarif
+  language: python
+  language_version: python3
+  additional_dependencies:
+    - agent-guardian
+  pass_filenames: false
+  stages: [manual]
+  require_serial: true
+
+- id: agentguardian-doctor
+  name: AgentGuardian — environment doctor
+  description: Run `agent-guardian doctor` to verify the install before commit.
+  entry: agent-guardian
+  args: [doctor]
+  language: python
+  language_version: python3
+  additional_dependencies:
+    - agent-guardian
+  pass_filenames: false
+  stages: [pre-commit, manual]
+  require_serial: true

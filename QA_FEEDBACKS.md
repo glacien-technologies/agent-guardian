@@ -82,7 +82,7 @@ Format per item:
 - **Found via** · the theme workflow's QualityGate phase reported `scan.py` at 88% coverage — below the ≥90% bar. The uncovered regions are the **SSE event-stream branches** + the **redirect-on-unknown-scan** path. **PRE-EXISTING** baseline (the theme work itself added covered code at 100%; the 88% reflects untouched older paths).
 - **Fix area** · add `tests/server/test_scan_route_sse.py` covering the SSE handler's keepalive + abort branches; add `tests/server/test_scan_route_unknown_id.py` covering the redirect path. Touches no production code.
 - **Acceptance** · `scan.py` coverage ≥ 90%.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `<SHA>`) — coverage of `src/agent_guardian/server/routes/scan.py` raised from 88% → 100% via two new test modules (`tests/server/test_scan_route_sse.py` 5 tests + `tests/server/test_scan_route_unknown_id.py` 6 tests) that lock the SSE deadline/keepalive/equal-snapshot/OSError-stat branches and every redirect-on-unknown-scan + page-param + scan.raw.json-decode-failure path. No production code touched.
 
 ---
 

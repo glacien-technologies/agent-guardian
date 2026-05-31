@@ -1,0 +1,54 @@
+name: Security-adjacent observation (non-vulnerability)
+description: Report a hardening opportunity, supply-chain concern, or security-relevant doc gap that is NOT itself an exploitable vulnerability.
+title: "[security-note] <short summary>"
+labels: ["kind/security-note", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ## STOP — is this an exploitable vulnerability?
+        >
+        > **If yes, do not file this form.** Open a private report via
+        > [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new)
+        > or email `security@glacien.ai`. See [SECURITY.md](../SECURITY.md) for the
+        > full coordinated-disclosure policy. Filing exploitable details in
+        > public issues breaks the 90-day embargo and harms users.
+
+        Use this form for security-relevant observations that are **not** themselves exploitable — e.g.
+        a missing hardening flag, an outdated transitive dependency, an unclear section in
+        `SECURITY.md`, a Scorecard finding worth discussing in public, or a supply-chain process
+        improvement.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Hardening recommendation (config, default, lint)
+        - Supply-chain process (build, sign, release)
+        - Dependency hygiene (transitive, license, EOL)
+        - Documentation gap (SECURITY.md / reproducible-builds / disclosure-history)
+        - OpenSSF Scorecard finding
+        - Other (specify below)
+    validations:
+      required: true
+  - type: textarea
+    id: observation
+    attributes:
+      label: Observation
+      description: What you noticed, with a link to the relevant file or workflow if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change (optional)
+      description: How you would address it. A PR is the most persuasive form.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: This is NOT an exploitable vulnerability. If unsure, I have used GitHub Security Advisories instead.
+          required: true
+        - label: I have read [SECURITY.md](../SECURITY.md).
+          required: true

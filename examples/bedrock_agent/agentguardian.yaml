@@ -1,0 +1,19 @@
+version: 1
+target:
+  name: bedrock-demo
+  environment: staging
+  transport:
+    kind: bedrock_agent
+    region: us-east-1
+    agent_id: ${env:BEDROCK_AGENT_ID}
+    agent_alias_id: ${env:BEDROCK_AGENT_ALIAS_ID}
+    enable_trace: true
+  auth:
+    kind: aws_sigv4
+    service: bedrock
+    region: us-east-1
+  response:
+    output_path: $.output.text
+roe:
+  data_egress:
+    allow_external: false

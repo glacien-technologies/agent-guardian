@@ -64,6 +64,11 @@ def test_configure_logging_redacts_emitted_output() -> None:
     _reset_for_tests()
     try:
         configure_logging(level="INFO", stream=buf, force=True)
+        # QA-019: httpx is pinned to WARNING by default, so to verify the
+        # redaction filter is wired to the handler we opt back in to INFO
+        # on the httpx logger (the documented escape hatch). The point of
+        # this test is the redaction wiring, not the noisy-dep pin.
+        logging.getLogger("httpx").setLevel(logging.INFO)
         logging.getLogger("httpx").info(
             "HTTP Request: %s", "https://x/v1?key=AIzaSyD_TOPSECRET_123"
         )

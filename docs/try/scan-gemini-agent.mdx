@@ -1,0 +1,108 @@
+---
+title: "Scan a Gemini Vertex agent"
+description: "Drive a Vertex AI reasoning engine via a target contract."
+---
+
+Scan a Vertex AI reasoning engine (Agent Engine) end-to-end through the
+`:query` endpoint. The transport is contract-only — Vertex agents carry
+server-side session state via a `session_id` and authenticate via GCP
+Application Default Credentials (ADC).
+
+## What this example tests
+
+- All 10 ASI categories against a Vertex reasoning engine.
+- GCP ADC auth via the `[gcp]` extra (`google-auth`).
+- The `server_session` pattern — AgentGuardian reuses the swarm session
+  as Vertex's `session_id` so conversation state carries between turns.
+
+Source: [`src/agent_guardian/transports/vertex_agent.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/vertex_agent.py),
+[`src/agent_guardian/contract/schema.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/contract/schema.py)
+(`VertexAgentTransport`).
+
+## Prerequisites
+
+- AgentGuardian with the GCP extra installed:
+  `pip install 'agent-guardian[gcp]'`.
+- A Vertex AI reasoning engine deployed in your GCP project. See the
+  [Vertex AI Agent Engine overview](https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview).
+- `gcloud auth application-default login` already run (or a
+  service-account JSON exported via `GOOGLE_APPLICATION_CREDENTIALS`).
+- The project id, location, and reasoning-engine id.
+
+## Run target
+
+The target itself is your deployed Vertex agent. Export the env vars the
+contract dereferences:
+
+```bash
+export GCP_PROJECT=...
+export GCP_LOCATION=us-central1
+export VERTEX_REASONING_ENGINE_ID=...
+```
+
+The bundled contract (`examples/gemini_agent/agentguardian.yaml`):
+
+```yaml agentguardian.yaml
+version: 1
+target:
+  name: gemini-vertex-demo
+  environment: staging
+  transport:
+    kind: vertex_agent
+    project: ${env:GCP_PROJECT}
+    location: ${env:GCP_LOCATION}
+    reasoning_engine_id: ${env:VERTEX_REASONING_ENGINE_ID}
+  auth:
+    kind: gcp_adc
+  response:
+    output_path: $.output
+roe:
+  data_egress:
+    allow_external: false
+```
+
+Every transport field is verified against `VertexAgentTransport` in
+`src/agent_guardian/contract/schema.py`.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --contract examples/gemini_agent/agentguardian.yaml \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+For a graded run on Gemini itself, set `--model gemini:gemini-2.5-flash`
+(or any other AI Studio model spec) — the model that grades the swarm is
+independent of the model running inside your reasoning engine.
+
+## Expected output
+
+`examples/gemini_agent/sample-scan.json` ships a committed reference
+shape (env-redacted) for a `--model stub` contract run.
+
+## Common errors
+
+- **`ImportError: google-auth is required for GCP ADC`.** Install the
+  GCP extra: `pip install 'agent-guardian[gcp]'`.
+- **`DefaultCredentialsError`.** ADC is not configured. Run
+  `gcloud auth application-default login` or set
+  `GOOGLE_APPLICATION_CREDENTIALS` to a service-account JSON.
+- **`PermissionDenied` on `:query`.** The caller principal is missing
+  `aiplatform.reasoningEngines.query` on the engine. Grant the
+  `Vertex AI User` role.
+- **`NotFound: reasoning engine ...`.** Project, location, or engine id
+  is wrong. Use `gcloud ai reasoning-engines list --region <LOCATION>`
+  to confirm.
+
+## Next step
+
+- For an AWS-deployed target, read
+  [Scan a Bedrock agent](/try/scan-bedrock-agent).
+- For an in-process Gemini-backed demo (no Vertex deployment required),
+  the LangGraph fixtures under `examples/langgraph/` call Gemini via the
+  AI Studio OpenAI shim — see
+  [Scan a LangGraph agent](/try/scan-langgraph).

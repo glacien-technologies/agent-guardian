@@ -27,6 +27,7 @@ from agent_guardian.llm.bedrock import (
 )
 from agent_guardian.llm.errors import (
     LLMAuthError,
+    LLMBudgetExceededError,
     LLMError,
     LLMPermanentError,
     LLMRateLimitError,
@@ -52,6 +53,7 @@ __all__ = [
     "BedrockClient",
     "GeminiClient",
     "LLMAuthError",
+    "LLMBudgetExceededError",
     "LLMError",
     "LLMMessage",
     "LLMPermanentError",

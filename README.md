@@ -14,8 +14,18 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/glacien-technologies/agent-guardian/badge)](https://scorecard.dev/viewer/?uri=github.com/glacien-technologies/agent-guardian)
 [![Downloads](https://static.pepy.tech/badge/agent-guardian/month)](https://pepy.tech/project/agent-guardian)
 [![Docs](https://img.shields.io/badge/docs-agentguardian.io-blue.svg)](https://agentguardian.io)
+[![Project Status: Active](https://img.shields.io/badge/Project_Status-Active-brightgreen.svg)](https://agentguardian.io/community/release-cadence)
+[![Release cadence: weekly](https://img.shields.io/badge/Release_Cadence-Weekly_(90d)-blue.svg)](https://agentguardian.io/community/release-cadence)
 
-**Red team your AI agents before attackers do.**
+> **Status:** Active · v1.0.0 (Stable on PyPI) · See [CHANGELOG](CHANGELOG.md) and [ROADMAP](https://agentguardian.io/community/roadmap).
+
+**Red team your AI agents before attackers do — find prompt injection, tool abuse, RAG poisoning, memory attacks, and unsafe agent behavior in 5 minutes.**
+
+<p align="center">
+  <img src="docs/_assets/demo-scan.gif" alt="AgentGuardian scanning a local agent and rendering findings in the live dashboard" width="820">
+  <br>
+  <sub>30-second demo: <code>agent-guardian scan</code> against a local agent, findings rendered live at <code>http://localhost:7474</code>.</sub>
+</p>
 
 AgentGuardian is an open-source, local-first, Apache-2.0 licensed
 red-teaming toolkit for AI agents. Point it at your LangGraph, CrewAI,
@@ -24,6 +34,10 @@ specialist attackers against it under a Swarm Commander LLM, produces a
 deterministic 0–100 **AIVSS score** mapped to OWASP ASI 2026,
 MITRE ATLAS v5.4.0, and the CSA Agentic AI Red Teaming Guide, and
 emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
+
+**Supported targets:** LangGraph · CrewAI · OpenAI Agents SDK · MCP servers · A2A endpoints · any HTTP/REST agent · raw system prompts.
+
+**Reports:** SARIF (for GitHub Security tab) · JSON · JUnit · Markdown · PDF · HTML ([sample](docs/_assets/sample-scan-report.html)).
 
 ```bash
 pip install agent-guardian
@@ -34,7 +48,8 @@ agent-guardian scan --system-prompt prompt.txt --model stub --mode fast
 ```
 
 Full docs: **[agentguardian.io](https://agentguardian.io)** ·
-Quickstart: **[agentguardian.io/quickstart](https://agentguardian.io/quickstart)**
+Quickstart: **[agentguardian.io/quickstart](https://agentguardian.io/quickstart)** ·
+Press kit: **[gtm/press-kit](gtm/press-kit/)**
 
 ---
 
@@ -87,6 +102,24 @@ the maintained alternatives instead.
 packs that map to OWASP LLM Top 10, MITRE ATLAS, and the EU AI Act risk taxonomy.
 The "own taxonomy" wording that appeared here in earlier drafts referred to
 Promptfoo's eval framework, not its red-team product — corrected for accuracy.
+
+## What it tests — 10 OWASP ASI 2026 categories, 96 probes
+
+| ASI    | Category                | Probes | What it covers                                                                 |
+|--------|-------------------------|:------:|--------------------------------------------------------------------------------|
+| ASI01  | Goal Hijack             |   9    | Direct / indirect prompt injection, role-swap, EchoLeak zero-click, persona-break jailbreak. |
+| ASI02  | Tool Misuse             |   8    | Argument injection, chain exfiltration, scope expansion, recursion bombs.       |
+| ASI03  | Privilege Abuse         |   9    | Cross-tenant reads, JIT credential bypass, role inheritance, scope-token replay. |
+| ASI04  | Supply Chain            |   8    | MCP server poisoning, registry spoofing, plugin hijack, poisoned fine-tunes.    |
+| ASI05  | Code Execution          |   8    | Sandbox escape, unsafe pickle, shell meta-injection, lockfile poisoning.        |
+| ASI06  | Memory Poisoning        |  13    | RAG corpus inject, persistent triggers, cross-tenant vector bleed, HITL bypass. |
+| ASI07  | Agent-to-Agent (A2A)    |   8    | Supervisor impersonation, message-bus spoofing, confused deputy, downgrade.     |
+| ASI08  | Cascading Failures      |   8    | Retry storms, alarm suppression, dependency cascade, feedback amplification.    |
+| ASI09  | Trust Exploitation      |  17    | Output-reflection XSS, fabricated citations, denial-of-wallet, jailbreaks.      |
+| ASI10  | Rogue Agents (drift)    |   8    | Long-horizon drift, mode shift, capability mask, self-replicate via API.        |
+
+**Total: 96 probes**, all triple-tagged with OWASP ASI 2026, MITRE ATLAS v5.4.0, and CSA Agentic-RT categories.
+Full catalogue: [agentguardian.io/attacks/overview](https://agentguardian.io/attacks/overview) · enumerate locally with `agent-guardian list-probes`.
 
 ## Quickstart
 
@@ -182,13 +215,14 @@ Full architecture: [docs/architecture](https://agentguardian.io/concepts/how-age
 
 ## Status
 
-**v1.0.0 — Generally Available.** Production/Stable on PyPI. The
-multi-agent swarm, the deterministic AIVSS scorer, the live dashboard,
-and the Sigstore-signed evidence pipeline are all production-ready.
-Active development continues on the v1.1 stream (see CHANGELOG and
-roadmap).
+**v1.0.0 — Generally Available · Active development.** Production/Stable
+on PyPI. The multi-agent swarm, the deterministic AIVSS scorer, the live
+dashboard, and the Sigstore-signed evidence pipeline are all
+production-ready. v1.1 work is tracked in the [CHANGELOG](CHANGELOG.md)
+under `[1.1.0] — Unreleased`.
 
-Roadmap: [docs/roadmap](https://agentguardian.io/community/roadmap).
+Roadmap: [agentguardian.io/community/roadmap](https://agentguardian.io/community/roadmap) ·
+Release cadence and SLAs: see [GOVERNANCE](governance.md).
 
 ## What AgentGuardian is NOT
 

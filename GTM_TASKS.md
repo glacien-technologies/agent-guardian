@@ -40,8 +40,8 @@ Running list of go-to-market tasks for AgentGuardian OSS. Read-and-pick: pick a 
   - **Channel order (locked):** GitHub release → Hacker News (Show HN) → Reddit (r/LocalLLaMA → r/MachineLearning → r/cybersecurity → r/netsec → r/LLMDevs) → Product Hunt → LinkedIn founder post → X/Twitter → Dev.to/Medium repost → YouTube demo → security/AI engineering newsletters → OWASP GenAI + LangChain + MCP communities.
   - **Tone template (locked):** "We built an open-source tool to red team AI agents for prompt injection, tool abuse, RAG poisoning, and unsafe tool calls. Here is a vulnerable demo agent and the report it generates. Feedback welcome." NOT: "Excited to announce..."
   - Each post links to: the live testbench, GitHub repo, Mintlify docs Quickstart, 60-second demo video.
-- **Acceptance** · Each channel post is captured in a `gtm/launch-posts.md` file (linked URLs + dates + traction numbers). Hacker News post does not get flagged. Product Hunt launch has at least one comment thread the founder responds to.
-- **Cross-cuts** · GTM-007 (uses the launch blog as the canonical link); GTM-006 (uses our `awesome-agent-security` repo as a credibility receipt).
+- **Acceptance** · The `gtm/` launch operational kit is shipped (tone rules, schedule, per-channel copy, response templates, newsletter outreach pack, metrics file). Each live channel post is captured as a row in `gtm/launch-posts.md` with the URL, UTC timestamp, and the @24h / @7d traction numbers. Hacker News post does not get flagged. Product Hunt launch has at least one comment thread the founder responds to.
+- **Cross-cuts** · GTM-007 (uses the launch blog at `docs/blog/introducing-agentguardian.mdx` as the canonical link); GTM-006 (uses our `awesome-agent-security` repo as a credibility receipt); GTM-003 (the live testbench + `examples/vulnerable-langgraph-agent/` is the central proof point every channel post links to).
 - **Status** · open
 
 ---
@@ -73,7 +73,8 @@ Running list of go-to-market tasks for AgentGuardian OSS. Read-and-pick: pick a 
   - **Human:** submit PRs to: `awesome-llm-security`, `awesome-ai-agents`, `awesome-langchain`, `awesome-mcp`, `awesome-rag`, `awesome-cybersecurity`, `awesome-devsecops`. PR titles and copy follow the technical-not-marketing tone from GTM-008.
 - **Acceptance** · GitHub topics set; `awesome-agent-security` repo public with ≥30 high-quality entries; ≥3 awesome-list PRs merged.
 - **Cross-cuts** · GTM-007 (deep-dive + walkthrough are linkable resources); GTM-009 (cadence keeps the awesome-list fresh).
-- **Status** · open
+- **Artefacts** · `gtm/discoverability.md` (locked topic list, PR tracker, tone templates); `gtm/awesome-agent-security-README.md` (drop-in content, 30 entries); `gtm/awesome-agent-security-CONTRIBUTING.md`; `gtm/awesome-agent-security-LICENSE`. `pyproject.toml` description updated to match the new GitHub repo description.
+- **Status** · open — repo metadata + curated content drafted in `gtm/`; pending operator steps: set topics + description via GitHub UI, push external repo, submit awesome-list PRs (see `gtm/discoverability.md`).
 
 ---
 
@@ -91,7 +92,7 @@ Running list of go-to-market tasks for AgentGuardian OSS. Read-and-pick: pick a 
   - **HTML report sample** — committed at `docs/_assets/sample-report.html` so the README can show "here's what the report looks like" without running anything.
 - **Acceptance** · Action installable from `glacien-technologies/agent-guardian@v1` in any GitHub repo's workflow. Docker image runs the testbench scan from `docker run`. SARIF upload renders as expected in GitHub Code Scanning UI. Pre-commit hook can be added with `pre-commit install`.
 - **Cross-cuts** · QA-010 (PDF in base, in flight as `w36fii88l`) — once that lands, the HTML report sample can be paired with a PDF sample too.
-- **Status** · open
+- **Status** · closed (composite action at `.github/actions/agentguardian-scan/`, pre-commit registry at `.pre-commit-hooks.yaml`, sample at `docs/_assets/sample-report.html`, validator at `.github/workflows/validate-action.yml`, integration guide at `INTEGRATION.md`).
 
 ---
 
@@ -127,7 +128,8 @@ Running list of go-to-market tasks for AgentGuardian OSS. Read-and-pick: pick a 
   - The 5 agents shipping today (finbot, support_bot, coding_assistant, travel_concierge, clean_control) are renamed for the OSS audience (e.g. `vulnerable-langgraph-agent`, `vulnerable-rag-agent`, `vulnerable-mcp-server`, `vulnerable-tool-agent`, `defended-baseline-agent`).
 - **Acceptance** · `docker compose up` + `agent-guardian scan --endpoint http://localhost:8000/chat` produces a real finding in under 5 minutes from a fresh clone, no GCP setup required.
 - **Cross-cuts** · GTM-004 (the per-framework examples can lift from this); GTM-005 (Docker image story leverages the docker-compose pattern); GTM-007 (the demo video uses this).
-- **Status** · open
+- **New repo location** · `/Users/mobionix/workspace/Glacien/agentguardian-vulnerable-agents/` (local, pre-push). Ports 5 renamed agents from the testbench; stub-mode adapter ships so `GEMINI_API_KEY` is optional.
+- **Status** · in-progress
 
 ---
 

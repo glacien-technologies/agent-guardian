@@ -1,0 +1,104 @@
+---
+title: "Scan a FastAPI chatbot"
+description: "Point AgentGuardian at any FastAPI agent endpoint with --endpoint — no framework required."
+---
+
+The smallest target AgentGuardian can scan is a FastAPI app with a single
+`/chat` endpoint accepting `{"input": "..."}` and returning
+`{"output": "..."}`. No agent framework, no in-process adapter — just the
+HTTP transport.
+
+## What this example tests
+
+- All 10 ASI categories at the HTTP boundary.
+- The `--endpoint` mode's pre-flight reachability check (an unreachable
+  target fails fast with `EXIT_TARGET_UNREACHABLE` before any LLM budget
+  is spent).
+- The default `{"input": "<prompt>"}` request template (no contract
+  required).
+
+Source: [`src/agent_guardian/transports/http.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/http.py).
+
+## Prerequisites
+
+- AgentGuardian installed — `pip install agent-guardian`.
+- A FastAPI agent reachable at an HTTP URL. Use the bundled
+  [`examples/fastapi_chatbot/`](https://github.com/glacien-technologies/agent-guardian/tree/main/examples/fastapi_chatbot)
+  fixture or your own.
+- A model spec — `--model stub` for an offline dry-run, or a real model
+  spec for a graded assessment.
+
+## Run target
+
+The bundled fixture is a hermetic stub — no LLM calls, deterministic
+responses:
+
+```bash
+uv sync --extra examples
+uv run uvicorn examples.fastapi_chatbot.serve:app --port 8000
+```
+
+Or write your own (the absolute minimum):
+
+```python my_agent.py
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class ChatRequest(BaseModel):
+    input: str
+
+
+@app.post("/chat")
+def chat(req: ChatRequest) -> dict:
+    return {"output": f"You said: {req.input}"}
+```
+
+Run it: `uvicorn my_agent:app --port 8000`.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+Flag-by-flag, every option below is verified against
+`src/agent_guardian/cli.py`:
+
+- `--endpoint URL` — hosted HTTP endpoint of the FastAPI agent.
+- `--model stub` — offline default. Swap for a real model spec
+  (`openai:gpt-4o`, `gemini:gemini-2.5-flash`, `ollama:llama3.1`) for a
+  graded run.
+- `--mode fast` — `fast` / `smart` / `full` (default).
+- `--output md --output-path scan.md` — Markdown report. Other formats:
+  `json`, `sarif`, `junit`, `pdf`.
+
+## Expected output
+
+`examples/fastapi_chatbot/sample-scan.json` ships a committed reference
+scan for `--model stub`. A real-model run typically produces a populated
+`severity_counts` block and a non-null `aivss_score`.
+
+## Common errors
+
+- **`EXIT_TARGET_UNREACHABLE` (exit code 6).** Two empty-body `POST`s
+  with a 2 s timeout both failed. Pass `--no-preflight` if your endpoint
+  refuses empty bodies but is actually up.
+- **`422 Unprocessable Entity` on every request.** Your endpoint expects
+  a different request shape than `{"input": "..."}`. Declare a target
+  contract with the custom shape — see
+  [Config file reference](/reference/config).
+
+## Next step
+
+- For a tool-bearing target with framework-adapter visibility, read
+  [Scan a LangGraph agent](/try/scan-langgraph).
+- For a retrieval-augmented target, read
+  [Scan a RAG application](/try/scan-rag-app).

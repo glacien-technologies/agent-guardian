@@ -1839,13 +1839,15 @@ def _contract_url_is_placeholder(contract_path: Path) -> bool:
     Used by ``init --yes`` so a CI scaffold doesn't auto-fail on a contract
     whose URL is still the default ``https://api.example.com/v1/chat``.
     """
-    import yaml
+    # QA-013: import symbols at-site so mypy --strict resolves them against the
+    # types-pyyaml stubs (no `Module has no attribute "YAMLError"` / `no-untyped-call`).
+    from yaml import YAMLError, safe_load
 
     from agent_guardian.contract.wizard import WizardDefaults
 
     try:
-        data = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError) as exc:  # pragma: no cover -- defensive
+        data = safe_load(contract_path.read_text(encoding="utf-8")) or {}
+    except (OSError, YAMLError) as exc:  # pragma: no cover -- defensive
         _LOG.debug(
             "init: could not read contract %s (%s) -- assuming non-placeholder", contract_path, exc
         )
@@ -1891,7 +1893,9 @@ def contract_migrate(
     ),
 ) -> None:
     """Migrate a contract toward the current schema version."""
-    import yaml
+    # QA-013: import symbols at-site so mypy --strict resolves them against the
+    # types-pyyaml stubs (no `Module has no attribute "YAMLError"` / `no-untyped-call`).
+    from yaml import YAMLError, safe_dump, safe_load
 
     from agent_guardian.contract import migrate_contract
     from agent_guardian.contract.errors import (
@@ -1904,8 +1908,8 @@ def contract_migrate(
         typer.echo(f"contract file not found: {file}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
     try:
-        data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
+        data = safe_load(file.read_text(encoding="utf-8")) or {}
+    except YAMLError as exc:
         typer.echo(f"could not read contract YAML: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     if not isinstance(data, dict):
@@ -1918,7 +1922,7 @@ def contract_migrate(
         typer.echo(f"migration failed: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    rendered = yaml.safe_dump(migrated, sort_keys=False, default_flow_style=False)
+    rendered = safe_dump(migrated, sort_keys=False, default_flow_style=False)
     if write:
         file.write_text(rendered, encoding="utf-8")
         typer.echo(f"migrated contract written to {file}")
@@ -2172,6 +2176,51 @@ def _resolve_dashboard_base_url() -> str:
     return base or DEFAULT_DASHBOARD_URL
 
 
+def _emit_json_banner(
+    *,
+    scan_id: str,
+    kind: str,
+    payload: dict[str, Any],
+    write: Any = None,
+) -> None:
+    """Emit one ``record_type=banner`` NDJSON line to stdout.
+
+    QA-007 — when ``--debug-format json`` is active every stdout line must
+    be parseable JSON so ``jq -c '.'`` pipelines see no parse errors. The
+    pre-fix CLI emitted the budget banner + the two ``print_scan_urls``
+    lines as human-readable text, contaminating the NDJSON stream with
+    3 unparseable lines at scan start. This helper is the JSON-mode
+    equivalent: it folds a banner-style record (budget / scan_url /
+    plan_summary) into a single NDJSON line that mirrors the
+    ``record_type="reflection"`` envelope already produced by
+    :mod:`agent_guardian.ui.attack_feed`.
+
+    Args:
+        scan_id: Scan id (empty string allowed for pre-id emissions).
+        kind: One of ``"budget_cap"``, ``"scan_url"``, ``"plan_summary"``.
+            Free-form ``payload.kind`` — downstream tools select on it.
+        payload: Arbitrary JSON-serialisable mapping for the ``kind``.
+            The helper merges ``{"kind": kind}`` into it so the operator
+            can filter with ``jq 'select(.payload.kind=="scan_url")'``.
+        write: Optional ``write(str) -> None`` callable. Defaults to
+            ``sys.stdout.write``; tests inject a buffer.
+    """
+    record = {
+        "record_type": "banner",
+        "scan_id": scan_id,
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "payload": {"kind": kind, **payload},
+    }
+    line = json.dumps(record, separators=(",", ":"), sort_keys=True)
+    write_fn = write if write is not None else sys.stdout.write
+    write_fn(line + "\n")
+    if write is None:
+        flush = getattr(sys.stdout, "flush", None)
+        if flush is not None:
+            with contextlib.suppress(Exception):
+                flush()
+
+
 def _osc8(url: str, text: str) -> str:
     """Wrap ``text`` in an OSC 8 hyperlink escape so terminals make it clickable."""
     # OSC 8 framing:  ESC ] 8 ; params ; URI BEL  text  ESC ] 8 ; ; BEL
@@ -2190,6 +2239,7 @@ def print_scan_urls(
     suppress: bool = False,
     base_url: str | None = None,
     write: Any = None,
+    debug_format: str = "text",
 ) -> None:
     """Emit the two scan-URL lines to stdout.
 
@@ -2202,6 +2252,14 @@ def print_scan_urls(
         base_url: Override the resolved base URL. Useful for tests.
         write: Optional ``write(str) -> None`` callable. Defaults to
             ``sys.stdout.write``; tests inject a buffer.
+        debug_format: When ``"json"`` (QA-007), emit a single
+            ``record_type=banner`` NDJSON line instead of the two
+            ``▸``-prefixed text lines. Keeps the stdout stream pure NDJSON
+            so ``jq -c '.'`` consumers see zero parse errors. The JSON
+            payload exposes ``scan_url`` + ``report_url`` as fields so
+            downstream tooling reads them via ``.payload.scan_url``
+            instead of regex-scraping the editorial text. Defaults to
+            ``"text"`` so existing callers / tests are untouched.
     """
     if suppress or os.environ.get("AGENT_GUARDIAN_DISABLE_URL_EMISSION") == "1":
         return
@@ -2210,6 +2268,21 @@ def print_scan_urls(
         base = base[:-1]
     scan_url = f"{base}/scans/{scan_id}"
     report_url = f"{base}/scans/{scan_id}/report"
+    if (debug_format or "").lower().strip() == "json":
+        # QA-007 — JSON mode: fold both URLs into one NDJSON line so the
+        # stream stays parseable. No OSC 8 (NDJSON consumers are never a
+        # TTY by construction — they are ``jq`` / ``tee`` / a file).
+        _emit_json_banner(
+            scan_id=scan_id,
+            kind="scan_url",
+            payload={
+                "scan_url": scan_url,
+                "report_url": report_url,
+                "dashboard_base_url": base,
+            },
+            write=write,
+        )
+        return
     write_fn = write if write is not None else sys.stdout.write
     if _stdout_is_tty() and write is None:
         track_text = _osc8(scan_url, scan_url)
@@ -2830,7 +2903,35 @@ async def _run_scan(
     #    gone. --budget-usd is now a *runtime* cap metered against actual spend:
     #    the swarm soft-stops new attack turns at 80% and reserves the rest for
     #    the finalise phase + report. Omit it to run uncapped.
-    if budget_usd is not None:
+    #
+    #    QA-007 — when ``--debug-format json`` is active the human-readable
+    #    line is replaced by a single ``record_type=banner`` NDJSON record
+    #    so the stream stays pure NDJSON for ``jq`` consumers.
+    if (debug_format or "").lower().strip() == "json":
+        if budget_usd is not None:
+            _emit_json_banner(
+                scan_id="",
+                kind="budget_cap",
+                payload={
+                    "usd_cap": float(budget_usd),
+                    "soft_stop_pct": 80,
+                    "message": (
+                        f"budget cap: ${budget_usd:.4f} "
+                        "(soft-stops new attack turns at 80%, reserves the rest for the report)"
+                    ),
+                },
+            )
+        else:
+            _emit_json_banner(
+                scan_id="",
+                kind="budget_cap",
+                payload={
+                    "usd_cap": None,
+                    "soft_stop_pct": None,
+                    "message": "no budget cap (running to completion)",
+                },
+            )
+    elif budget_usd is not None:
         typer.echo(
             f"budget cap: ${budget_usd:.4f} "
             "(soft-stops new attack turns at 80%, reserves the rest for the report)"
@@ -3004,7 +3105,8 @@ async def _run_scan(
         else f"{_resolve_dashboard_base_url()}/scans/{scan_id}"
     )
 
-    if not no_plan:
+    json_mode = (debug_format or "").lower().strip() == "json"
+    if not no_plan and not json_mode:
         from agent_guardian.ui.scan_plan import build_plan_panel
         from agent_guardian.ui.scan_plan_data import (
             build_plan_context,
@@ -3048,9 +3150,57 @@ async def _run_scan(
             finally:
                 auto_serve_manager.__exit__(None, None, None)
             return EXIT_USER_INTERRUPT
+    elif json_mode:
+        # QA-007 — JSON mode: the Rich plan panel can't be expressed as
+        # NDJSON, so emit a compact ``plan_summary`` banner record + the
+        # ``scan_url`` banner instead. Confirmation gate is still called
+        # so ``--yes`` semantics survive; in practice JSON mode implies
+        # a non-TTY pipe and the gate short-circuits to ``proceed``.
+        _emit_json_banner(
+            scan_id=scan_id,
+            kind="plan_summary",
+            payload={
+                "target": endpoint or target or "",
+                "target_mode": plan_target_mode,
+                "reachable": plan_reachable,
+                "reachable_latency_ms": plan_latency_ms,
+                "multi_agent": plan_multi_agent,
+                "models": [
+                    {"role": role, "spec": spec, "valid": bool(result.valid)}
+                    for role, spec, result in model_results
+                ],
+                "budget_mode": mode,
+                "wall_seconds_cap": int(cfg.swarm.budget.wall_seconds),
+                "usd_cap": budget_usd,
+                "requested_output": output,
+                "auto_serve_spawned": bool(getattr(auto_serve_result, "spawned", False)),
+                "auto_serve_reused": bool(getattr(auto_serve_result, "reused", False)),
+                "auto_serve_suppression": getattr(auto_serve_result, "suppression_reason", None),
+                "dashboard_url": plan_dashboard_url,
+            },
+        )
+        print_scan_urls(
+            scan_id,
+            suppress=not publish,
+            base_url=auto_serve_base_url,
+            debug_format="json",
+        )
+        decision = _await_plan_confirmation(yes=yes)
+        if decision == "abort":
+            typer.echo("aborted at scan-plan confirmation.", err=True)
+            try:
+                auto_serve_manager.grace_wait()
+            finally:
+                auto_serve_manager.__exit__(None, None, None)
+            return EXIT_USER_INTERRUPT
     else:
         # --no-plan path: still emit the URL line so QA-003 holds.
-        print_scan_urls(scan_id, suppress=not publish, base_url=auto_serve_base_url)
+        print_scan_urls(
+            scan_id,
+            suppress=not publish,
+            base_url=auto_serve_base_url,
+            debug_format=debug_format,
+        )
 
     try:
         exit_code = await _run_scan_inner(

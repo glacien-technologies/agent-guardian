@@ -44,6 +44,16 @@
         ]
       },
       {
+        "group": "Vulnerable Demo Agents",
+        "icon": "target",
+        "pages": [
+          "vulnerable-agents/index",
+          "vulnerable-agents/quick-start",
+          "vulnerable-agents/agent-descriptions",
+          "vulnerable-agents/sample-findings"
+        ]
+      },
+      {
         "group": "Attack Library",
         "icon": "shield-alert",
         "pages": [
@@ -75,6 +85,7 @@
         "icon": "git-branch",
         "pages": [
           "ci-cd/github-actions",
+          "ci-cd/composite-action",
           "ci-cd/gitlab-ci",
           "ci-cd/fail-builds-on-high-risk",
           "ci-cd/upload-sarif"
@@ -89,7 +100,18 @@
           "concepts/target-adapters",
           "concepts/evaluators",
           "concepts/research-foundation",
-          "concepts/open-vs-enterprise"
+          "concepts/open-vs-enterprise",
+          "concepts/agent-guardian-vs"
+        ]
+      },
+      {
+        "group": "Blog",
+        "icon": "newspaper",
+        "pages": [
+          "blog/index",
+          "blog/introducing-agentguardian",
+          "blog/prompt-injection-to-tool-abuse",
+          "blog/breaking-a-langgraph-agent"
         ]
       },
       {
@@ -112,6 +134,7 @@
           "community/roadmap",
           "community/security-policy",
           "community/release-notes",
+          "community/release-cadence",
           "community/support"
         ]
       },

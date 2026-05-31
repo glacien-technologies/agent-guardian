@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a defect in agent-guardian (CLI, library, server, adapter, probe, report writer).
+title: "[bug] <short summary>"
+labels: ["kind/bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. A few notes before you start:
+
+        - **Security issues do not go here.** Use [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new) per [SECURITY.md](../SECURITY.md).
+        - **Questions go to [Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)**, not Issues.
+        - The more specific the reproduction, the faster the fix.
+  - type: input
+    id: version
+    attributes:
+      label: agent-guardian version
+      description: Output of `agent-guardian --version`.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "3.11.9"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other (specify in description)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - pip
+        - pipx
+        - uv
+        - Docker (Dockerfile / compose)
+        - From source (git clone)
+        - Other (specify in description)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: The exact commands, configuration, and (if relevant) target setup that triggers the bug. Minimal repro is best.
+      placeholder: |
+        1. pip install agent-guardian==1.1.0
+        2. echo "You are a helpful bot." > prompt.txt
+        3. agent-guardian scan --system-prompt prompt.txt --model stub --mode fast
+        4. ...
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened. Paste full stack traces inside a ``` block.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / scan output (optional)
+      description: Relevant excerpts from the scan transcript, server logs, or SARIF / JSON report. Redact secrets first.
+      render: shell
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues and Discussions for this bug.
+          required: true
+        - label: I am not reporting a security vulnerability here (those go through GitHub Security Advisories).
+          required: true

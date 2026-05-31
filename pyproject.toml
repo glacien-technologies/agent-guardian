@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-guardian"
 dynamic = ["version"]
-description = "Adversarial swarm framework for agentic AI red-teaming. Eleven specialist agents, deterministic AIVSS score, OWASP ASI / MITRE ATLAS / CSA aligned."
+description = "Open-source red teaming toolkit for AI agents, RAG systems, MCP servers, and tool-using LLM applications."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = { text = "Apache-2.0" }
@@ -152,6 +152,14 @@ examples = [
   "langchain-core>=0.3",
   "openai>=1.50",
   "openai-agents>=0.3",
+]
+# ``examples-crewai`` is a sibling of ``examples`` — opt-in CrewAI for the
+# CrewAI demo target under ``examples/crewai/``. Kept in its own extra so
+# the LangGraph + OpenAI Agents trio stays independent of CrewAI's
+# transitive dependency graph. Install via
+# ``uv sync --extra examples --extra examples-crewai``.
+examples-crewai = [
+  "crewai>=0.55",
 ]
 # ``ws`` carries the websockets client used by the ``websocket`` contract
 # transport. It is strictly opt-in like ``aws`` / ``gcp``: the transport's

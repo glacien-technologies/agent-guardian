@@ -9,6 +9,7 @@ from __future__ import annotations
 
 __all__ = [
     "LLMAuthError",
+    "LLMBudgetExceededError",
     "LLMError",
     "LLMPermanentError",
     "LLMRateLimitError",
@@ -52,3 +53,33 @@ class LLMPermanentError(LLMError):
 
 class LLMResponseFormatError(LLMError):
     """Provider returned 200 but the payload was missing required fields."""
+
+
+class LLMBudgetExceededError(LLMError):
+    """Wall-clock budget exhausted mid-retry (QA-008 guillotine).
+
+    Raised by :func:`agent_guardian.llm.retry.with_backoff` when a
+    ``deadline_monotonic`` was supplied and ``time.monotonic()`` has passed
+    it before the next retry attempt. Deliberately NOT a subclass of
+    :class:`LLMTimeoutError` so callers (and any *outer* retry wrapper) do
+    NOT retry it — the whole point is to stop the cascade.
+
+    Carries:
+    * ``elapsed`` — seconds since ``scan_start`` when the guillotine fired.
+    * ``budget`` — the wall budget the caller asked us to honour.
+    * ``cause`` — the most recent retryable exception we were backing off
+      on, preserved so the operator can see *why* we were retrying.
+    """
+
+    def __init__(
+        self,
+        message: str = "wall budget exhausted mid-retry",
+        *,
+        elapsed: float,
+        budget: float,
+        cause: Exception | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.elapsed = elapsed
+        self.budget = budget
+        self.cause = cause

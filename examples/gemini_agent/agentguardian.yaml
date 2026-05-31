@@ -1,0 +1,16 @@
+version: 1
+target:
+  name: gemini-vertex-demo
+  environment: staging
+  transport:
+    kind: vertex_agent
+    project: ${env:GCP_PROJECT}
+    location: ${env:GCP_LOCATION}
+    reasoning_engine_id: ${env:VERTEX_REASONING_ENGINE_ID}
+  auth:
+    kind: gcp_adc
+  response:
+    output_path: $.output
+roe:
+  data_egress:
+    allow_external: false

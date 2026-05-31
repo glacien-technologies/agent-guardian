@@ -1,0 +1,221 @@
+name: AgentGuardian scan
+description: Run an AgentGuardian adversarial-swarm scan and upload SARIF to GitHub Code Scanning.
+author: Glacien Technologies
+
+# Composite action surface for `agent-guardian scan`. Mirrors the CLI flags
+# documented in docs/ci-cd/github-actions.mdx so a consumer can lift their
+# existing workflow step into `uses:` form without rewriting flags.
+#
+# The action installs the published wheel from PyPI, runs the scan with the
+# requested target/mode/model, then (optionally) uploads the resulting SARIF
+# to GitHub Advanced Security via github/codeql-action/upload-sarif.
+#
+# Auth: the calling workflow must grant `security-events: write` for SARIF
+# upload. The wrapping `permissions:` block is the caller's responsibility,
+# not ours — composite actions cannot declare repo-level permissions.
+
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  target:
+    description: >-
+      Positional scan target (dotted path or file:attr). Mutually exclusive
+      with system-prompt, endpoint, and framework. Leave empty when using
+      one of the other target inputs.
+    required: false
+    default: ""
+  system-prompt:
+    description: Path to a system prompt file (prompt-only target).
+    required: false
+    default: ""
+  endpoint:
+    description: Hosted HTTP endpoint URL of the target agent.
+    required: false
+    default: ""
+  framework:
+    description: >-
+      Framework kind. One of: adk, autogen, crewai, langgraph, openai_agents,
+      strands. Pair with `framework-ref`.
+    required: false
+    default: ""
+  framework-ref:
+    description: >-
+      Python dotted reference (MODULE:ATTR) to the framework-native object
+      (e.g. 'my_app.graph:graph'). Required when `framework` is set.
+    required: false
+    default: ""
+  model:
+    description: >-
+      LLM model spec passed to `--model`. Defaults to `stub` so a scan
+      completes without any provider key (note: stub scans are
+      non-authoritative and always fail `fail-under`). Examples:
+      `openai:gpt-4o`, `anthropic:claude-haiku-4-5`, `gemini:gemini-2.5-flash`.
+    required: false
+    default: stub
+  mode:
+    description: Scan mode passed to `--mode`. One of fast, smart, full.
+    required: false
+    default: full
+  budget-usd:
+    description: Runtime USD cap passed to `--budget-usd`. Empty disables the cap.
+    required: false
+    default: ""
+  fail-under:
+    description: >-
+      Minimum AIVSS for exit-0. Below this the scan exits 1 and the workflow
+      fails (after SARIF upload). Set to empty string to skip the gate.
+    required: false
+    default: "70"
+  output-path:
+    description: Path the SARIF report is written to.
+    required: false
+    default: agentguardian-scan.sarif
+  upload-sarif:
+    description: >-
+      When `true` (default), upload the SARIF to GitHub Code Scanning via
+      github/codeql-action/upload-sarif@v3. Set `false` to skip (e.g. when
+      Advanced Security is not enabled on the repository).
+    required: false
+    default: "true"
+  category:
+    description: SARIF category used by GitHub Code Scanning to group runs.
+    required: false
+    default: agentguardian
+  agent-guardian-version:
+    description: >-
+      Version specifier passed to `pip install`. Defaults to the latest
+      published release. Examples: `1.0.0`, `>=1.0,<2`, `` (latest).
+    required: false
+    default: ""
+  python-version:
+    description: Python version installed via actions/setup-python.
+    required: false
+    default: "3.12"
+  extra-args:
+    description: >-
+      Extra flags appended verbatim to `agent-guardian scan`. Use sparingly;
+      prefer named inputs above.
+    required: false
+    default: ""
+
+outputs:
+  sarif-path:
+    description: Filesystem path of the SARIF report written by the scan.
+    value: ${{ steps.scan.outputs.sarif-path }}
+  exit-code:
+    description: Exit code returned by `agent-guardian scan` (0 pass, 1 gate failure, see docs/reference/exit-codes).
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install agent-guardian
+      shell: bash
+      run: |
+        set -euo pipefail
+        spec="agent-guardian"
+        if [ -n "${{ inputs.agent-guardian-version }}" ]; then
+          spec="agent-guardian${{ inputs.agent-guardian-version }}"
+          case "${{ inputs.agent-guardian-version }}" in
+            "="*|">"*|"<"*|"~"*|"!"*) ;;
+            *) spec="agent-guardian==${{ inputs.agent-guardian-version }}" ;;
+          esac
+        fi
+        python -m pip install --upgrade pip
+        python -m pip install "$spec"
+        agent-guardian --version
+
+    - name: Run agent-guardian scan
+      id: scan
+      shell: bash
+      env:
+        AG_TARGET: ${{ inputs.target }}
+        AG_SYSTEM_PROMPT: ${{ inputs.system-prompt }}
+        AG_ENDPOINT: ${{ inputs.endpoint }}
+        AG_FRAMEWORK: ${{ inputs.framework }}
+        AG_FRAMEWORK_REF: ${{ inputs.framework-ref }}
+        AG_MODEL: ${{ inputs.model }}
+        AG_MODE: ${{ inputs.mode }}
+        AG_BUDGET_USD: ${{ inputs.budget-usd }}
+        AG_FAIL_UNDER: ${{ inputs.fail-under }}
+        AG_OUTPUT_PATH: ${{ inputs.output-path }}
+        AG_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set -uo pipefail
+        args=(scan)
+        if [ -n "$AG_TARGET" ]; then
+          args+=("$AG_TARGET")
+        fi
+        if [ -n "$AG_SYSTEM_PROMPT" ]; then
+          args+=(--system-prompt "$AG_SYSTEM_PROMPT")
+        fi
+        if [ -n "$AG_ENDPOINT" ]; then
+          args+=(--endpoint "$AG_ENDPOINT")
+        fi
+        if [ -n "$AG_FRAMEWORK" ]; then
+          args+=(--framework "$AG_FRAMEWORK")
+        fi
+        if [ -n "$AG_FRAMEWORK_REF" ]; then
+          args+=(--framework-ref "$AG_FRAMEWORK_REF")
+        fi
+        args+=(--model "$AG_MODEL" --mode "$AG_MODE")
+        if [ -n "$AG_BUDGET_USD" ]; then
+          args+=(--budget-usd "$AG_BUDGET_USD")
+        fi
+        if [ -n "$AG_FAIL_UNDER" ]; then
+          args+=(--fail-under "$AG_FAIL_UNDER")
+        fi
+        args+=(--output sarif --output-path "$AG_OUTPUT_PATH")
+        if [ -n "$AG_EXTRA_ARGS" ]; then
+          # shellcheck disable=SC2206
+          extra=( $AG_EXTRA_ARGS )
+          args+=("${extra[@]}")
+        fi
+        echo "::group::agent-guardian ${args[*]}"
+        set +e
+        agent-guardian "${args[@]}"
+        rc=$?
+        set -e
+        echo "::endgroup::"
+        echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+        echo "sarif-path=$AG_OUTPUT_PATH" >> "$GITHUB_OUTPUT"
+        if [ ! -s "$AG_OUTPUT_PATH" ]; then
+          echo "::error::SARIF report not produced at $AG_OUTPUT_PATH (exit $rc)"
+          exit "$rc"
+        fi
+        exit 0
+
+    - name: Upload SARIF to GitHub Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && steps.scan.outputs.sarif-path != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-path }}
+        category: ${{ inputs.category }}
+
+    - name: Upload SARIF as workflow artifact
+      if: ${{ always() && steps.scan.outputs.sarif-path != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: agentguardian-sarif
+        path: ${{ steps.scan.outputs.sarif-path }}
+        if-no-files-found: warn
+
+    - name: Surface scan exit code
+      if: ${{ always() }}
+      shell: bash
+      env:
+        SCAN_EXIT: ${{ steps.scan.outputs.exit-code }}
+      run: |
+        set -e
+        if [ "${SCAN_EXIT:-0}" != "0" ]; then
+          echo "::error::agent-guardian scan exited ${SCAN_EXIT} (see docs/reference/exit-codes)."
+          exit "${SCAN_EXIT}"
+        fi
+        echo "agent-guardian scan exited 0"

@@ -1,0 +1,39 @@
+name: examples-ci
+
+on:
+  pull_request:
+    paths:
+      - "examples/**"
+      - ".github/workflows/examples-ci.yml"
+      - "pyproject.toml"
+  push:
+    branches: [main]
+    paths:
+      - "examples/**"
+      - ".github/workflows/examples-ci.yml"
+      - "pyproject.toml"
+
+jobs:
+  validate-examples:
+    name: Validate framework example targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install agent-guardian + example deps
+        run: uv sync --extra examples --extra dev
+
+      - name: Validate example targets
+        env:
+          AG_VALIDATE_BEDROCK: "0"
+          AG_VALIDATE_VERTEX: "0"
+        run: uv run python examples/ci/validate_examples.py

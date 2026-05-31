@@ -1,0 +1,35 @@
+{
+  "scan_id": "cli-bedrock-sample-0001",
+  "schema_version": "1.0",
+  "probe_library_version": "2026.05",
+  "aivss_formula": "aivss-v1",
+  "target": {
+    "mode": "contract",
+    "name": "bedrock-demo",
+    "environment": "staging",
+    "transport": {
+      "kind": "bedrock_agent",
+      "region": "us-east-1",
+      "agent_id": "REDACTED",
+      "agent_alias_id": "REDACTED",
+      "session_modes": ["server_session"]
+    }
+  },
+  "config": {
+    "model": "stub",
+    "mode": "fast",
+    "tier": "T3"
+  },
+  "aivss_score": null,
+  "band": "not_evaluated",
+  "duration_seconds": 4.12,
+  "cost_usd": 0.0,
+  "severity_counts": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "findings": [],
+  "notes": "Stub-model run via Bedrock Agent Runtime InvokeAgent with SigV4 auth. Re-run with --model anthropic:claude-haiku-4-5 for a graded scan."
+}

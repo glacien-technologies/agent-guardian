@@ -1,0 +1,76 @@
+name: Stale issue responder
+
+# GTM-009 / docs/community/release-cadence.mdx.
+#
+# Enforces the back half of the issue-response SLA:
+#   * 21 days with no maintainer activity -> bot acknowledges, applies
+#     `stale`, and pings the release-manager on-call.
+#   * A further 21 days of silence -> bot closes with a pointer back to
+#     Discussions.
+#
+# The bot is the floor. Maintainers are expected to acknowledge within
+# 48 hours during the first-90-days window; this workflow only catches
+# what slipped through.
+#
+# Exemptions: any issue labelled `pinned`, `critical`, `security`, or
+# `tracked` is left alone forever.
+
+on:
+  schedule:
+    # 07:17 UTC daily. Off-peak vs. the publish workflow's tag-triggered
+    # runs and the scorecard's Sunday 02:00 cron.
+    - cron: "17 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stale-issue-responder
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 21
+          days-before-issue-close: 21
+          # PRs are governed by reviewer SLA, not the issue cadence —
+          # leave them to CODEOWNERS reviewers.
+          days-before-pr-stale: -1
+          days-before-pr-close: -1
+          stale-issue-label: "stale"
+          exempt-issue-labels: "pinned,critical,security,tracked"
+          remove-stale-when-updated: true
+          operations-per-run: 60
+          ascending: true
+          stale-issue-message: |
+            Hi — this issue has been quiet for 21 days, so the
+            cadence-discipline bot is bumping it.
+
+            During the first 90 days after v1.0 we promise a
+            maintainer acknowledgement within 48 hours and at minimum
+            one human comment per open issue per week. If you are
+            still seeing this problem on the latest release, a quick
+            reply with the version (`agent-guardian --version`) and a
+            minimal repro keeps the issue alive.
+
+            The on-call release manager for the current week is
+            listed in [MAINTAINERS.md](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md#on-call-rotation).
+            cc @glacien-technologies/maintainers
+
+            Cadence policy: https://agentguardian.io/community/release-cadence
+          close-issue-message: |
+            Closing as inactive — 42 days with no maintainer or
+            reporter activity. This is not a verdict on the bug; it is
+            housekeeping so the open-issue count reflects what we are
+            actively working on.
+
+            If the problem still reproduces on the latest release,
+            please reopen with the version and a minimal repro, or
+            start a thread in [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)
+            if you would like design input before filing.
+          close-issue-reason: "not_planned"

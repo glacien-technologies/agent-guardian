@@ -1,0 +1,153 @@
+---
+title: "Release cadence"
+description: "How often AgentGuardian ships, what triggers a release, and the issue-response SLA we hold ourselves to during the first 90 days."
+icon: "calendar-clock"
+---
+
+AgentGuardian's maintenance posture is public on purpose. If you're
+evaluating us against another OSS red-teaming tool, you should be able
+to see — without reading commit logs — that someone is paying
+attention this week.
+
+## Cadence
+
+| Window | Promise |
+|---|---|
+| **First 90 days post-v1.0** (2026-05-27 → 2026-08-25) | A release every **Tuesday at 18:00 UTC**, even if the only change is a documentation fix. |
+| **Steady state (day 91+)** | Release whenever `## [Unreleased]` in [`CHANGELOG.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md) accumulates user-visible changes, at minimum once per month. |
+| **Security fixes** | Out-of-cycle on the day the patch is ready. Tracked in [`SECURITY.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/SECURITY.md). |
+
+The on-call release manager for the current week is recorded in
+[`MAINTAINERS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md#on-call-rotation).
+
+## What triggers a release
+
+We cut a release when **either** condition is true:
+
+1. `## [Unreleased]` in `CHANGELOG.md` has at least one bullet, **and** it is
+   a Tuesday during the first-90-days window.
+2. A security fix is ready (any day, any week).
+
+A week with zero shipped changes is not silently skipped — we either
+ship a docs/test-only patch release or post a one-line note in
+[GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)
+explaining the gap. Silence is the failure mode we are designing against.
+
+## How a release is cut
+
+The release manager runs:
+
+```bash
+./scripts/release.sh 1.1.0
+git push origin main
+git push origin v1.1.0
+```
+
+`scripts/release.sh` does five things and refuses to do anything else:
+
+1. Validates the working tree is clean and on `main`.
+2. Bumps `src/agent_guardian/_version.py` (hatch's version source).
+3. Promotes `## [Unreleased]` to `## [<version>] — <date>` in `CHANGELOG.md`
+   and inserts a fresh empty `## [Unreleased]` stub.
+4. Creates a DCO-signed commit (`chore(release): v<version>`).
+5. Creates an annotated tag `v<version>` whose body is the new
+   changelog section.
+
+The tag push triggers
+[`.github/workflows/publish.yml`](https://github.com/glacien-technologies/agent-guardian/blob/main/.github/workflows/publish.yml),
+which builds the wheel + sdist reproducibly, generates a CycloneDX
+SBOM, signs every artifact with Sigstore, and publishes to PyPI via
+[Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — no
+long-lived API tokens. The GitHub Release is created with the signed
+artifacts attached; the release manager pastes the changelog body into
+the Release notes textarea after the workflow goes green.
+
+## Changelog conventions
+
+We follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+[Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
+
+### Section headings
+
+| Heading | Means |
+|---|---|
+| `### Added` | New user-visible feature. |
+| `### Changed` | User-visible behaviour change that is not a bug fix. |
+| `### Deprecated` | Still works, scheduled for removal. |
+| `### Removed` | Removed in this release (was previously deprecated). |
+| `### Fixed` | Bug fix. |
+| `### Security` | Security fix. Link the advisory. |
+
+### Bullet style
+
+During the M2 architecture push we wrote multi-paragraph bullets
+because they documented foundational work. Steady-state weeks should
+**not** ship that volume. The rule is:
+
+- **One to two sentences per bullet.** First sentence: what changed.
+  Second sentence: why it matters to a user.
+- **Link the PR or commit.** Format: `[#123](https://github.com/glacien-technologies/agent-guardian/pull/123)`.
+- **Reference the test that locks it in,** e.g. `tests/unit/test_thing.py::test_specific_case`.
+
+Anything longer than three sentences belongs in a docs page or the
+release-announcement blog post, not in `CHANGELOG.md`.
+
+### Semver policy
+
+| Change | Bump |
+|---|---|
+| Bug fix, docs fix, test-only change, dependency pin within a compatible range | `PATCH` (1.1.0 → 1.1.1) |
+| New CLI flag, new public Python API, new probe, new agent, new report format | `MINOR` (1.1.0 → 1.2.0) |
+| Removed or renamed CLI flag, removed Python API, breaking SARIF schema change, behaviour change that breaks a documented invariant | `MAJOR` (1.1.0 → 2.0.0) |
+
+Default-on behaviour changes are major even if the *signature* is
+unchanged. The v1.1.0 mode-default flip from `smart` to `full` is the
+reference case — it landed as a minor only because the prior default
+was not yet documented as stable.
+
+## Issue-response SLA
+
+During the first-90-days window we promise:
+
+- **Acknowledgement within 48 hours, Monday–Friday UTC.** "Acknowledgement"
+  means a maintainer has commented on the issue with either a triage
+  label, a reproduction question, or a fix ETA. It does not mean the
+  bug is fixed.
+- **One human comment per week on every open issue,** even if the
+  comment is "still investigating." Silence past seven days is a
+  process failure, not a busy week.
+- **Critical and security issues are acknowledged within 24 hours,
+  any day.** Use the private vulnerability-report channel in
+  [`SECURITY.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/SECURITY.md)
+  for anything you would not want public.
+
+The
+[`.github/workflows/stale-issue-responder.yml`](https://github.com/glacien-technologies/agent-guardian/blob/main/.github/workflows/stale-issue-responder.yml)
+workflow enforces the back half of this promise mechanically:
+
+- After 21 days with no maintainer comment, the bot posts an
+  acknowledgement and applies the `stale` label.
+- After a further 21 days with no further activity, the bot closes
+  the issue with a pointer back to Discussions.
+- Issues labelled `pinned`, `critical`, `security`, or `tracked` are
+  exempt from both steps.
+
+The bot is the floor, not the ceiling. The expectation on
+maintainers is the 48-hour acknowledgement — the bot exists so a
+dropped ball is visible, not so triage can wait three weeks.
+
+## Where this is reported
+
+- The "Project Status: Active" badge in the [repo README](https://github.com/glacien-technologies/agent-guardian#agentguardian)
+  is the at-a-glance signal.
+- [PyPI's release history](https://pypi.org/project/agent-guardian/#history)
+  is the audit log.
+- [GitHub Releases](https://github.com/glacien-technologies/agent-guardian/releases)
+  carries the signed artifacts.
+- The current on-call release manager is in
+  [`MAINTAINERS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md).
+
+If the README badge ever says "Active" and the PyPI release history
+disagrees by more than 30 days, that is a bug. File it in
+[Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)
+and the release manager will respond within the SLA above.

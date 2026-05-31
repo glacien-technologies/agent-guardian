@@ -1,0 +1,103 @@
+---
+title: "Scan an Ollama-backed agent"
+description: "Red-team an agent whose model backend is a local Ollama instance."
+---
+
+Ollama runs open-weights models locally on `http://localhost:11434`. The
+target AgentGuardian scans is still an HTTP agent — the agent's *model
+backend* happens to be Ollama. Point `--endpoint` at the agent.
+
+## What this example tests
+
+- All 10 ASI categories against an HTTP-exposed agent backed by an
+  on-device model.
+- The `ollama:` model spec for the swarm itself (`--model
+  ollama:llama3.1`) — graded scans with no external API costs.
+
+## Prerequisites
+
+- AgentGuardian installed — `pip install agent-guardian`.
+- Ollama installed and running locally: `ollama serve`.
+- A model pulled into Ollama: `ollama pull llama3.1`.
+- The bundled
+  [`examples/ollama_local/`](https://github.com/glacien-technologies/agent-guardian/tree/main/examples/ollama_local)
+  fixture, or your own agent that calls Ollama.
+
+## Run target
+
+Host install:
+
+```bash
+ollama serve &
+ollama pull llama3.1
+uv sync --extra examples
+uv run uvicorn examples.ollama_local.serve:app --port 8000
+```
+
+Or Docker Compose (Ollama + the FastAPI agent in one stack):
+
+```bash
+docker compose -f examples/ollama_local/docker-compose.yml up
+docker compose -f examples/ollama_local/docker-compose.yml exec ollama ollama pull llama3.1
+```
+
+The bundled agent reads `OLLAMA_BASE_URL` and `AG_DEMO_OLLAMA_MODEL` from
+the environment so both invocation patterns work without code edits.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+For a graded run with the same Ollama instance driving the swarm:
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model ollama:llama3.1 \
+  --mode smart \
+  --output md \
+  --output-path scan.md
+```
+
+Flag-by-flag, every option below is verified against
+`src/agent_guardian/cli.py`:
+
+- `--endpoint URL` — hosted HTTP endpoint of the agent.
+- `--model stub` / `--model ollama:<name>` — stub is offline; the Ollama
+  spec drives the swarm with the same local instance the agent uses.
+- `--mode fast` — `fast` / `smart` / `full` (default).
+- `--output md --output-path scan.md` — Markdown report.
+
+## Expected output
+
+`examples/ollama_local/sample-scan.json` ships a committed reference
+scan for `--model stub`. The `notes` field documents what changes when
+you swap in `ollama:llama3.1`.
+
+## Common errors
+
+- **`ollama-demo: cannot reach Ollama at http://localhost:11434`.** The
+  bundled agent returns this string when Ollama is not running. Start
+  it with `ollama serve` and re-pull the model.
+- **Scan stalls with `--model ollama:<name>`.** The swarm is blocked
+  waiting for Ollama to load the model into memory. Run a single warm-up
+  prompt against Ollama first (`curl -s http://localhost:11434/api/chat
+  -d '{"model":"llama3.1","stream":false,"messages":[{"role":"user","content":"hi"}]}'`).
+- **`Pull complete` but scan still uses a different model.** Ollama
+  serves the model named in the request — confirm
+  `AG_DEMO_OLLAMA_MODEL` matches the model you pulled.
+
+## Next step
+
+- For a full local-CI loop with no external dependencies, combine the
+  Ollama stack with [GitHub Actions](/ci-cd/github-actions) using a
+  self-hosted runner.
+- For a tool-bearing target, read
+  [Scan a LangGraph agent](/try/scan-langgraph).

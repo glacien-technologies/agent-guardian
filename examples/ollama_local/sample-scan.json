@@ -1,0 +1,29 @@
+{
+  "scan_id": "cli-ollama-sample-0001",
+  "schema_version": "1.0",
+  "probe_library_version": "2026.05",
+  "aivss_formula": "aivss-v1",
+  "target": {
+    "mode": "endpoint",
+    "endpoint": "http://localhost:8000/chat",
+    "transport": "http"
+  },
+  "config": {
+    "model": "stub",
+    "mode": "fast",
+    "tier": "T4",
+    "notes": "Target model backend is local Ollama (llama3.1)."
+  },
+  "aivss_score": null,
+  "band": "not_evaluated",
+  "duration_seconds": 1.32,
+  "cost_usd": 0.0,
+  "severity_counts": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "findings": [],
+  "notes": "Stub-model run. Re-run with --model ollama:llama3.1 for an on-device graded scan."
+}

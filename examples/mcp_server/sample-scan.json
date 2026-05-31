@@ -1,0 +1,38 @@
+{
+  "scan_id": "cli-mcp-sample-0001",
+  "schema_version": "1.0",
+  "probe_library_version": "2026.05",
+  "aivss_formula": "aivss-v1",
+  "target": {
+    "mode": "contract",
+    "name": "mcp-demo",
+    "environment": "staging",
+    "transport": {
+      "kind": "mcp",
+      "endpoint": "http://localhost:8765/rpc",
+      "supports_tools": true,
+      "session_modes": ["stateless", "server_session"],
+      "discovered_tools": ["search", "delete_everything"]
+    }
+  },
+  "config": {
+    "model": "stub",
+    "mode": "fast",
+    "tier": "T3"
+  },
+  "aivss_score": null,
+  "band": "not_evaluated",
+  "duration_seconds": 0.83,
+  "cost_usd": 0.0,
+  "roe": {
+    "tools_blocked": ["delete_everything"]
+  },
+  "severity_counts": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "findings": [],
+  "notes": "Stub-model contract run against the bundled MCP demo server. The destructive 'delete_everything' tool was blocked by the RoE before any call reached the server."
+}

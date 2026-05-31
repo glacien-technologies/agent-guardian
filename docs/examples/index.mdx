@@ -1,0 +1,49 @@
+---
+title: "Framework examples"
+description: "Runnable example targets for every framework AgentGuardian supports — CrewAI, LangGraph, OpenAI Agents, MCP servers, RAG apps, FastAPI, Ollama, Bedrock, and Gemini."
+---
+
+Every example in this section is a runnable target you can scan with
+`agent-guardian` in under two minutes. Each one ships with a `README`,
+a launch command, and a committed `sample-scan.json` so you can compare
+your run against a known-good baseline.
+
+## Matrix
+
+| Framework            | Adapter / transport     | Code dir                          | Walkthrough                                     |
+|----------------------|-------------------------|-----------------------------------|-------------------------------------------------|
+| LangGraph            | `--framework langgraph` | `examples/langgraph/`             | [Scan a LangGraph agent](/try/scan-langgraph)   |
+| OpenAI Agents SDK    | `--framework openai_agents` | `examples/openai_agents/`     | [Scan a LangGraph agent](/try/scan-langgraph) (same pattern; see the OpenAI Agents fixtures) |
+| CrewAI               | `--framework crewai`    | `examples/crewai/`                | [Scan a CrewAI agent](/try/scan-crewai)         |
+| MCP server           | contract (`mcp` transport) | `examples/mcp_server/`         | [Scan an MCP server](/try/scan-mcp-server)      |
+| RAG app              | `--endpoint` + `--indirect` | `examples/rag_app/`           | [Scan a RAG application](/try/scan-rag-app)     |
+| FastAPI chatbot      | `--endpoint`            | `examples/fastapi_chatbot/`       | [Scan a FastAPI chatbot](/try/scan-fastapi-chatbot) |
+| Ollama (local model) | `--endpoint`            | `examples/ollama_local/`          | [Scan an Ollama-backed agent](/try/scan-ollama) |
+| AWS Bedrock Agent    | contract (`bedrock_agent`) | `examples/bedrock_agent/`      | [Scan a Bedrock agent](/try/scan-bedrock-agent) |
+| Gemini (Vertex)      | contract (`vertex_agent`)  | `examples/gemini_agent/`       | [Scan a Gemini Vertex agent](/try/scan-gemini-agent) |
+
+## Conventions
+
+Every example directory follows the same shape:
+
+* `agent.py` (or `agentguardian.yaml`) — the target itself.
+* `serve.py` — optional FastAPI wrapper so the target can be scanned via
+  `--endpoint`.
+* `README.md` — install, run, scan, expected output.
+* `sample-scan.json` — committed reference scan output.
+* `docker-compose.yml` — optional, when the example needs a local
+  service (Ollama, etc.).
+
+All examples are validated in CI by
+[`examples/ci/validate_examples.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/examples/ci/validate_examples.py).
+
+## Picking a starting point
+
+* You have an HTTP/JSON agent → [FastAPI chatbot](/try/scan-fastapi-chatbot).
+* You have a multi-agent crew → [CrewAI](/try/scan-crewai).
+* You have a graph of nodes and tools → [LangGraph](/try/scan-langgraph).
+* You expose tools over MCP → [MCP server](/try/scan-mcp-server).
+* You retrieve documents at request time → [RAG app](/try/scan-rag-app).
+* You run a local model → [Ollama](/try/scan-ollama).
+* You deploy on AWS → [Bedrock Agent](/try/scan-bedrock-agent).
+* You deploy on GCP → [Gemini Vertex Agent](/try/scan-gemini-agent).

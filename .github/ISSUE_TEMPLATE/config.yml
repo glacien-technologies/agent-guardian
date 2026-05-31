@@ -1,0 +1,14 @@
+# Routes the GitHub "New issue" picker. Blank issues are disabled because
+# every credible report fits one of the three forms below or belongs in
+# Discussions / Security Advisories.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private disclosure)
+    url: https://github.com/glacien-technologies/agent-guardian/security/advisories/new
+    about: Report a vulnerability privately via GitHub Security Advisories. Do NOT open a public issue. See SECURITY.md for the full policy.
+  - name: Question or general discussion
+    url: https://github.com/glacien-technologies/agent-guardian/discussions
+    about: Open a Discussion for usage questions, design ideas, roadmap input, or anything not yet a confirmed bug.
+  - name: Roadmap input
+    url: https://github.com/glacien-technologies/agent-guardian/discussions/categories/roadmap
+    about: Propose or vote on items in the current 90-day roadmap cycle (see ROADMAP.md).

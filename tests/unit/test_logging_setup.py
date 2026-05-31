@@ -101,14 +101,19 @@ def test_unknown_level_string_falls_back_to_info(monkeypatch: pytest.MonkeyPatch
     assert logging.getLogger().getEffectiveLevel() == logging.INFO
 
 
-def test_noisy_dependencies_pinned_at_info_when_caller_runs_info(
+def test_noisy_dependencies_pinned_at_warning_when_caller_runs_info(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # QA-019: at the default INFO level, httpx/httpcore/urllib3 must be
+    # pinned to WARNING so the operator does NOT see one
+    # ``INFO HTTP Request: METHOD url "HTTP/1.1 200 OK"`` per probe drown
+    # the swarm board. WARNING (and above) is the contract — exactly
+    # WARNING is the expected pin.
     logging_setup.configure_logging(level="INFO", force=True)
-    # httpx, httpcore et al. must not fall below INFO when the operator
-    # runs at INFO — otherwise a single HTTP call balloons the log.
-    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.INFO
-    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.INFO
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_not_pinned_when_caller_runs_debug(
@@ -121,6 +126,32 @@ def test_noisy_dependencies_not_pinned_when_caller_runs_debug(
     # Effective level inherits from root (DEBUG) when no explicit level is set.
     # If we pinned them, this assertion would fail.
     assert httpx_logger.getEffectiveLevel() == logging.DEBUG
+
+
+def test_noisy_dependencies_escalate_above_warning_when_caller_runs_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # QA-019: the WARNING pin is a *floor*, not a ceiling. An operator
+    # running at ERROR (e.g. a quiet CI job that only wants alerts) must
+    # see the noisy deps clamped to ERROR, not relaxed back down to
+    # WARNING. Locks the ``max(resolved, WARNING)`` direction.
+    logging_setup.configure_logging(level="ERROR", force=True)
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.ERROR
+    assert logging.getLogger("httpcore").getEffectiveLevel() == logging.ERROR
+
+
+def test_operator_can_opt_back_in_to_httpx_info_after_configure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # QA-019 acceptance: operators who want the network-level info can
+    # opt in via ``logging.getLogger("httpx").setLevel(logging.INFO)``
+    # AFTER configure_logging returns. The pin must not be reapplied on
+    # subsequent calls without ``force=True``.
+    logging_setup.configure_logging(level="INFO", force=True)
+    logging.getLogger("httpx").setLevel(logging.INFO)
+    # Second call without force is a no-op — must NOT re-pin to WARNING.
+    logging_setup.configure_logging(level="INFO")
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.INFO
 
 
 def test_custom_stream_is_used() -> None:

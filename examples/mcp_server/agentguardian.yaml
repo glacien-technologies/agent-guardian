@@ -1,0 +1,19 @@
+version: 1
+target:
+  name: mcp-demo
+  environment: staging
+  transport:
+    kind: mcp
+    url: http://localhost:8765/rpc
+    transport_type: streamable_http
+    entry_tool: search
+    prompt_argument: input
+    init_timeout_ms: 30000
+  response:
+    output_path: $.result.content[0].text
+roe:
+  data_egress:
+    allow_external: false
+  tools:
+    allowlist: [search]
+    blocklist: [delete_everything]

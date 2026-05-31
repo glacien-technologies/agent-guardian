@@ -1,0 +1,6 @@
+# Local-only operator scratch files (drafts, A/B variants, screenshots).
+# Anything checked in to gtm/ should be reproducible launch artifacts;
+# personal notes and one-off variants stay local.
+*.local.md
+*.draft.md
+screenshots/
