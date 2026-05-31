@@ -110,6 +110,20 @@
                               <span class="exec-finding__evidence-agent">{{ ev.agent or '—' }}</span>
                               <span class="exec-finding__evidence-turn">turn {{ ev.turn }}</span>
                               <time class="exec-finding__evidence-time">{{ ev.timestamp_label }}</time>
+                              {# Verdict badge — operator-aligned labels.
+                                 ``fail`` in the AgentGuardian model means the
+                                 TARGET was compromised (exploit succeeded), so
+                                 we render it as EXPLOITED in red. ``pass``
+                                 means the target refused / defended, so it
+                                 renders as DEFENDED in green. ``inconclusive``
+                                 → amber. Empty/unset → muted PENDING. #}
+                              <span class="exec-finding__evidence-verdict exec-finding__evidence-verdict--{{ ev.verdict or 'unknown' }}">
+                                {%- if ev.verdict == 'fail' -%}EXPLOITED
+                                {%- elif ev.verdict == 'pass' -%}DEFENDED
+                                {%- elif ev.verdict == 'inconclusive' -%}INCONCLUSIVE
+                                {%- else -%}PENDING
+                                {%- endif -%}
+                              </span>
                               <span class="exec-finding__evidence-spacer"></span>
                               <span class="exec-finding__evidence-toggle">
                                 <span class="exec-finding__evidence-toggle-label">See details</span>

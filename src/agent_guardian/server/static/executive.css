@@ -1072,6 +1072,83 @@ details[open] > .exec-finding__evidence-summary .exec-details-toggle__chevron {
   margin-left: 0.5rem;
   border-left: 2px solid var(--exec-brand-tint);
 }
+
+/* ============================================================
+ * 13.6 — Verdict differentiation (red / green / amber)
+ *
+ * Each evidence row carries ``data-verdict="<value>"``. AgentGuardian
+ * judge values (see ``agents/base.py``):
+ *   - ``fail``         → target was COMPROMISED (exploit landed). RED.
+ *   - ``pass``         → target REFUSED / defended. GREEN.
+ *   - ``inconclusive`` → judge couldn't decide. AMBER.
+ *   - empty / unset    → not yet graded. MUTED.
+ *
+ * Three visual signals: left accent bar on the summary row,
+ * matching colour on the detail-body left rule when expanded,
+ * and a pill verdict badge inline before the toggle.
+ * ============================================================ */
+.exec-finding__evidence-verdict {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+  border: 1px solid transparent;
+}
+.exec-finding__evidence-verdict--fail {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 20%, transparent);
+}
+.exec-finding__evidence-verdict--pass {
+  background: var(--exec-sev-low-bg);
+  color: var(--exec-sev-low);
+  border-color: color-mix(in srgb, var(--exec-sev-low) 25%, transparent);
+}
+.exec-finding__evidence-verdict--inconclusive {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 25%, transparent);
+}
+.exec-finding__evidence-verdict--unknown {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+}
+
+/* Left accent bar on each row, painted via inset border on the
+ * summary so the entire row carries the verdict signal — readable
+ * at a glance when scanning the list without expanding rows. */
+.exec-finding__evidence-row[data-verdict="fail"] > details > .exec-finding__evidence-summary {
+  box-shadow: inset 3px 0 0 var(--exec-sev-critical);
+}
+.exec-finding__evidence-row[data-verdict="pass"] > details > .exec-finding__evidence-summary {
+  box-shadow: inset 3px 0 0 var(--exec-sev-low);
+}
+.exec-finding__evidence-row[data-verdict="inconclusive"] > details > .exec-finding__evidence-summary {
+  box-shadow: inset 3px 0 0 var(--exec-sev-medium);
+}
+
+/* Detail-body left rule matches the verdict colour so the
+ * relationship between the summary and the expanded body is
+ * visually continuous. */
+.exec-finding__evidence-row[data-verdict="fail"] .exec-finding__evidence-detail {
+  border-left-color: var(--exec-sev-critical);
+}
+.exec-finding__evidence-row[data-verdict="pass"] .exec-finding__evidence-detail {
+  border-left-color: var(--exec-sev-low);
+}
+.exec-finding__evidence-row[data-verdict="inconclusive"] .exec-finding__evidence-detail {
+  border-left-color: var(--exec-sev-medium);
+}
+
 /* Legacy ``.exec-finding__evidence-body > summary`` rules removed
  * 2026-05-31: the new compact-row layout uses
  * ``.exec-finding__evidence-summary`` (above), which has its own
