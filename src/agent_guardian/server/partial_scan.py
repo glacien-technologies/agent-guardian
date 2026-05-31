@@ -287,3 +287,125 @@ def make_partial_writer(
 
     swarm.observer = _observer
     return _observer
+
+
+def _event_to_jsonable(event: SwarmEvent) -> dict[str, object]:
+    """Convert a :class:`SwarmEvent` into the JSON shape that
+    ``dashboard_view._parse_event_line`` reads.
+
+    Locked wire format (matches the fixture used by the Logs tab tests):
+
+      {
+        "kind":               "<EventKind.value>",
+        "timestamp":          "<ISO 8601 UTC>",
+        "agent":              "<str or null>",
+        "asi":                "<AsiCategory.value or null>",
+        "provisional_aivss":  <int or null>,
+        "decision":           "<CheckpointDecision.value or null>",
+        "payload":            { ... arbitrary JSON-safe payload ... }
+      }
+
+    Enum members are flattened to their ``.value`` so the on-disk file is
+    self-describing and stable across Python versions. ``datetime`` is
+    rendered as ISO 8601 with UTC offset preserved.
+    """
+    asi_val = event.asi.value if event.asi is not None else None
+    decision_val = event.decision.value if event.decision is not None else None
+    # ``payload`` is a dict[str, object]; most callers stuff primitives in.
+    # Defensive: if a caller stuffed in a non-JSON-safe value, fall back to
+    # ``str()`` so we never silently drop the line.
+    safe_payload: dict[str, object] = {}
+    for k, v in (event.payload or {}).items():
+        key = str(k)
+        try:
+            json.dumps(v)
+        except (TypeError, ValueError):
+            safe_payload[key] = str(v)
+        else:
+            safe_payload[key] = v
+    # ``EventKind`` is a ``Literal[...]`` string union, not an Enum — the
+    # value is already a plain ``str`` at this point.
+    return {
+        "kind": str(event.kind),
+        "timestamp": event.timestamp.isoformat(),
+        "agent": event.agent,
+        "asi": asi_val,
+        "provisional_aivss": event.provisional_aivss,
+        "decision": decision_val,
+        "payload": safe_payload,
+    }
+
+
+def make_events_writer(
+    swarm: SwarmCommander,
+    scan_dir: Path,
+) -> Callable[[SwarmEvent], None]:
+    """Return a swarm observer that appends every event as a JSON line to
+    ``<scan_dir>/events.jsonl``.
+
+    The Executive theme's Logs tab (``_tab_logs.html``) reads from this
+    file via ``dashboard_view._assemble_logs_tail``. Before this writer
+    landed (2026-05-31), the file was never created — only the dashboard
+    server's in-process ``ScanStore.append_event`` knew how to write it,
+    and the CLI scanner had no path to that code, so every operator's
+    Logs tab read empty.
+
+    Wire format: see :func:`_event_to_jsonable`. One event per line,
+    fsync-free (the dashboard reader handles partial/torn lines via
+    ``_parse_event_line``'s ``JSONDecodeError`` swallow).
+
+    The returned closure chains onto the swarm's pre-existing observer
+    (CLI feed renderer, otel exporter, partial writer, etc.) — mirrors
+    the wrap pattern in :func:`make_partial_writer`. Failure to append
+    is logged but never re-raised, so a full disk or a permissions blip
+    can't break the swarm.
+    """
+    prior_observer = swarm.observer
+    events_path = scan_dir / "events.jsonl"
+    # Touch the file so the dashboard sees an empty (but present) log even
+    # on the very first event-less moment of a scan. Open mode is "a" so
+    # parallel writes from a paused-and-resumed scan append rather than
+    # truncate.
+    try:
+        events_path.touch(exist_ok=True)
+    except OSError as exc:  # pragma: no cover -- defensive
+        _LOG.warning(
+            "events_writer: failed to touch %s (%s: %s)",
+            events_path,
+            type(exc).__name__,
+            exc,
+        )
+
+    def _observer(event: SwarmEvent) -> None:
+        if prior_observer is not None:
+            try:
+                prior_observer(event)
+            except Exception as exc:  # pragma: no cover -- defensive
+                _LOG.warning(
+                    "events_writer: prior observer raised %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+        try:
+            line = json.dumps(_event_to_jsonable(event), ensure_ascii=False)
+        except (TypeError, ValueError) as exc:  # pragma: no cover
+            _LOG.warning(
+                "events_writer: failed to serialise event kind=%r (%s: %s)",
+                str(event.kind),
+                type(exc).__name__,
+                exc,
+            )
+            return
+        try:
+            with events_path.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError as exc:  # pragma: no cover -- defensive
+            _LOG.warning(
+                "events_writer: append to %s failed (%s: %s)",
+                events_path,
+                type(exc).__name__,
+                exc,
+            )
+
+    swarm.observer = _observer
+    return _observer

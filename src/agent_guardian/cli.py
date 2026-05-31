@@ -3292,11 +3292,22 @@ async def _run_scan_inner(
     # the always-zero / always-"running" placeholders. Wired *before* the
     # CLI feed renderer / TUI so those wrap our observer (and the partial
     # writer always runs, regardless of which optional UI was attached).
-    from agent_guardian.server.partial_scan import make_partial_writer
+    from agent_guardian.server.partial_scan import (
+        make_events_writer,
+        make_partial_writer,
+    )
 
     partial_scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
     partial_scan_dir.mkdir(parents=True, exist_ok=True)
     make_partial_writer(swarm, partial_scan_dir)
+    # ``events.jsonl`` is the source of truth the Executive theme's Logs
+    # tab reads (see ``dashboard_view._assemble_logs_tail``). Before
+    # 2026-05-31 nobody wrote it from the CLI path, so every operator's
+    # Logs tab rendered the empty-state copy regardless of how many
+    # events the swarm actually emitted. The events writer wraps the
+    # current observer (otel / store / partial_writer / TUI) so every
+    # event lands on disk in addition to wherever else it was going.
+    make_events_writer(swarm, partial_scan_dir)
 
     # QA-005 — attach the reflection sink BEFORE the TUI so the renderer
     # wraps whatever observer is already wired (otel, store, etc.) and
