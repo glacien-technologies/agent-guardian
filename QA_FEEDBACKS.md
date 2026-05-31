@@ -17,6 +17,54 @@ Format per item:
 
 ---
 
+## QA-019 — `httpx INFO HTTP Request: ... 200 OK` log noise drowns the swarm-board signal
+
+- **Date surfaced** · 2026-05-31 (manual scan against testbench with `--mode full`)
+- **Severity** · medium (every operator running a real scan sees ~50-100 of these per minute; signal-to-noise ratio is terrible)
+- **Found via** · stdlib `httpx` logger is at INFO level by default. Every POST/GET emits `INFO HTTP Request: METHOD url "HTTP/1.1 200 OK"`. Tells the operator that a request was made but not WHAT was sent / received / judged. The actual swarm board (Phase 2 panel) is supposed to be the signal layer, but the httpx INFO lines leak into stdout above the Live region and pollute the scrollback.
+- **Two clean fixes:**
+  - **(a) Recommended** · raise `httpx` logger to `WARNING` by default in `src/agent_guardian/logging_setup.py`. Operators who want the network-level info can opt in via `AGENT_GUARDIAN_LOG_LEVEL=DEBUG` or directly set `logging.getLogger("httpx").setLevel(logging.INFO)`.
+  - **(b)** Replace `httpx` INFO lines with a richer per-probe summary at INFO level (`probe ASI01-GH-001 attempted (turn 1/12) → target refused → judge: pass`). Higher signal-density. Should compose with QA-005's `--debug` attack feed below.
+- **Fix area** · `src/agent_guardian/logging_setup.py` — set `httpx` + `httpcore` + `urllib3` loggers to `WARNING` in the default configure path.
+- **Acceptance** · default scan stdout shows ≤ 5 lines per minute of network-level noise; operators who want it can opt in via env var.
+- **Status** · open
+
+---
+
+## QA-018 — Recon 90s timeout silently weakens scan by skipping 3 ASI agents; user is not warned
+
+- **Date surfaced** · 2026-05-31 (manual scan against testbench finbot endpoint; user log captured)
+- **Severity** · **high** (silently reduces the security tool's coverage on the exact targets it most needs to test — slow / cold-starting hosted agents, which are the realistic production case)
+- **Found via** · live scan against `https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat` (Cloud Run, cold start). Sequence:
+  1. Preflight reachability took 11.6 seconds (cold start)
+  2. Recon got 90 seconds for its black-box capability audit
+  3. Each round-trip is 2-5s while the target is warming up
+  4. At 90s recon hadn't completed → `WARNING recon timed out after 90.0s — using minimal fingerprint`
+  5. Minimal fingerprint sets `fp.has_tools=False`, `fp.has_memory=False`, `fp.is_multi_agent=False`
+  6. **3 agents silently skipped** in the next phase: `tool-abuse-agent` (ASI02), `memory-poison-agent` (ASI06), `a2a-agent` (ASI07)
+  7. Scan proceeds with 13 of 16 specialists; 3 OWASP-LLM categories get **zero coverage**
+  8. Phase 0 plan panel (QA-011) did NOT predict this; Phase 1 recon panel just shows `0 probes apply`; there is no banner / warning / "you missed three categories" message anywhere
+- **Compounding factor:** the testbench's `finbot` deliberately plants vulnerabilities in those exact categories (`LLM02` cross-tenant PII leak, `LLM06` destructive tools, `LLM10` unbounded consumption via the multi-agent path). The minimal-fingerprint path **misses real planted vulnerabilities** on the canonical demo target.
+- **Three nested defects:**
+  1. **90s budget is too tight for Cloud Run / Lambda / Knative cold-start targets.** A 3s-per-probe × 10 deepen rounds + reachability + warmup ≈ 40s minimum; very common to hit 90s. Raise default to 180s (still fits well inside a 5-15 min scan) OR adaptive: keep deepening until N consecutive probes return no new info, with a hard cap of 300s.
+  2. **Falling back to minimal fingerprint should be an explicit operator choice**, not a silent default. Options: (i) fail-fast with a clear message + suggestion to set `--recon-budget-seconds 300`; (ii) prompt y/N in interactive mode; (iii) proceed but emit a prominent banner in the swarm board: `⚠ Recon timed out; 3 categories (ASI02 tool-abuse, ASI06 memory poison, ASI07 a2a) will NOT be tested`.
+  3. **The Phase 0 plan panel (QA-011) does not predict this**. The TARGET row shows `reachable in 11628 ms` — a clear cold-start signal. The plan panel should add a WARNINGS row: `⚠ Target preflight took 11.6s (cold start) → recon likely won't complete in default 90s budget → consider --recon-budget-seconds 300 or expect ASI02/06/07 to be skipped`.
+- **Fix area** ·
+  - `src/agent_guardian/core/swarm.py` — recon budget; new `--recon-budget-seconds` CLI flag (default 180s).
+  - `src/agent_guardian/agents/recon.py` — emit a high-severity warning event on minimal-fingerprint fallback that bubbles into the swarm board + the final report's `audit.warnings` list.
+  - `src/agent_guardian/ui/scan_plan_data.py` — if `preflight_ms > 5000`, add a WARNINGS row predicting the recon-timeout risk; offer the `--recon-budget-seconds` suggestion inline.
+  - `src/agent_guardian/ui/red_team_panel.py` — banner row at top when minimal-fingerprint was used; list the skipped categories.
+- **Acceptance** ·
+  - Default recon budget raised to 180s (≥ 90% of Cloud Run cold-start targets fingerprint cleanly).
+  - When recon DOES fall back, the operator sees a prominent banner naming the skipped categories.
+  - Phase 0 plan panel adds a "cold-start risk" WARNINGS row when `preflight_ms > 5000`.
+  - `--recon-budget-seconds N` flag for explicit operator control.
+  - Coverage on touched modules ≥ 90%.
+- **Cross-cuts** · QA-011 (plan panel WARNINGS row picks this up); QA-009 (auto-serve probes have same cold-start vulnerability); QA-005 (debug feed should show recon's per-probe progress so operators understand WHY recon is slow).
+- **Status** · open
+
+---
+
 ## QA-015 — `scan_store.py` 72% coverage on pre-existing SSE / index branches
 
 - **Date surfaced** · 2026-05-31 (filed by `18f6cf1` dashboard data-flow reconcile)
