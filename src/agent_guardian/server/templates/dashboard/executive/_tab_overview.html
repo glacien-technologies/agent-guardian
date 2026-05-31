@@ -1,0 +1,61 @@
+{# Executive — Overview tab panel (default active).
+
+   Compact summary: AIVSS card + band + top-3 critical findings teaser. Lede
+   uses the same hand-tuned ``lede_html`` the Editorial masthead renders, so
+   the editorial copy is reused across themes.
+#}
+<section id="tabpanel-overview"
+         role="tabpanel"
+         aria-labelledby="tab-overview"
+         tabindex="0">
+  <div class="exec-overview">
+    <article class="exec-overview__score">
+      <p class="exec-overview__eyebrow">AIVSS score</p>
+      <p class="exec-overview__score-num" data-live="aivss">{{ aivss_label }}</p>
+      <p class="exec-overview__band exec-overview__band--{{ band_class }}"
+         data-live="band">{{ band_label }}</p>
+      <p class="exec-overview__lede">{{ lede_html | safe }}</p>
+      <dl class="exec-overview__kv">
+        <dt>Target</dt><dd><code>{{ target_ref }}</code></dd>
+        <dt>Tier</dt><dd>{{ tier_label }}</dd>
+        <dt>Started</dt><dd>{{ started_at_label }}</dd>
+        <dt>Elapsed</dt><dd data-live="elapsed">{{ elapsed_label }}</dd>
+      </dl>
+    </article>
+
+    <article class="exec-overview__teaser">
+      <p class="exec-overview__eyebrow">Top critical findings</p>
+      {% if findings_total == 0 %}
+        <p class="exec-empty">No findings yet. The swarm is still landing probes.</p>
+      {% else %}
+        <ol class="exec-overview__list">
+          {% for f in findings_page[:3] %}
+            <li>
+              <span class="exec-sev exec-sev--{{ f.severity_class }}">{{ f.severity_label }}</span>
+              <code class="exec-overview__list-id">{{ f.id }}</code>
+              <span class="exec-overview__list-summary">{{ f.summary }}</span>
+              <small class="exec-overview__list-meta">{{ f.asi_code }} &middot; <code>{{ f.probe_id }}</code></small>
+            </li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+    </article>
+
+    <article class="exec-overview__asi">
+      <p class="exec-overview__eyebrow">ASI breakdown</p>
+      <ol class="exec-overview__asi-list">
+        {% for row in asi_rows %}
+          <li class="exec-overview__asi-row">
+            <code class="exec-overview__asi-code">{{ row.code }}</code>
+            <span class="exec-overview__asi-name">{{ row.name }}</span>
+            <span class="exec-overview__asi-bar" aria-hidden="true">
+              <span class="exec-overview__asi-bar-fill"
+                    style="width: {{ row.score_pct }}%"></span>
+            </span>
+            <span class="exec-overview__asi-score">{{ row.score_label }}</span>
+          </li>
+        {% endfor %}
+      </ol>
+    </article>
+  </div>
+</section>

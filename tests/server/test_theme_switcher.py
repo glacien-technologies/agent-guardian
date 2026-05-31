@@ -124,6 +124,17 @@ def test_resolve_theme_constants_match_template_map() -> None:
     # Editorial MUST map to the pre-existing template path so the legacy
     # byte-for-byte behaviour is preserved.
     assert DASHBOARD_THEME_TEMPLATES["editorial"] == "dashboard/scan_detail.html"
+    # Executive (QA-023) joins the registry — slug + template path locked.
+    assert "executive" in DASHBOARD_THEMES
+    assert DASHBOARD_THEME_TEMPLATES["executive"] == "dashboard/executive/layout.html"
+
+
+def test_resolve_theme_executive_is_accepted() -> None:
+    """``executive`` is a valid theme slug (QA-023)."""
+    assert resolve_theme("executive", None) == "executive"
+    # Case-insensitive (precedent from the other themes).
+    assert resolve_theme("EXECUTIVE", None) == "executive"
+    assert resolve_theme("  Executive  ", None) == "executive"
 
 
 @pytest.mark.parametrize("slug", list(DASHBOARD_THEMES))
@@ -224,6 +235,24 @@ def test_route_query_param_ide_picks_ide_template(client: TestClient, store: Sca
     resp = client.get(f"/scan/{scan.id}?theme=ide")
     assert resp.status_code == 200
     assert 'data-theme="ide"' in resp.text
+
+
+def test_route_query_param_executive_picks_executive_template(
+    client: TestClient, store: ScanStore
+) -> None:
+    """``?theme=executive`` renders the Executive Dashboard layout (QA-023)."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    assert resp.status_code == 200, resp.text[:500]
+    # Distinguishing marker — Executive's <html> carries data-theme="executive".
+    assert 'data-theme="executive"' in resp.text
+    # Locked tab list (5 tabs in locked order).
+    body = resp.text
+    for tab_id in ("tab-overview", "tab-findings", "tab-probes", "tab-agents", "tab-logs"):
+        assert f'id="{tab_id}"' in body
+    # The locked findings heading must appear in the Executive theme too.
+    assert "All findings so far." in body
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +406,7 @@ def test_route_switcher_marks_current_theme(
 
 @pytest.mark.parametrize("theme", list(DASHBOARD_THEMES))
 def test_route_switcher_lists_every_theme(client: TestClient, store: ScanStore, theme: str) -> None:
-    """The switcher dropdown lists all four locked themes regardless of context."""
+    """The switcher dropdown lists every locked theme regardless of context."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme={theme}")
@@ -385,6 +414,17 @@ def test_route_switcher_lists_every_theme(client: TestClient, store: ScanStore, 
     body = resp.text
     for slug in DASHBOARD_THEMES:
         assert f'value="{slug}"' in body, f"missing theme option {slug} in {theme} render"
+
+
+def test_route_switcher_labels_executive_option(client: TestClient, store: ScanStore) -> None:
+    """The switcher dropdown carries the human-readable ``Executive Dashboard`` label (QA-023)."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=editorial")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'value="executive"' in body
+    assert "Executive Dashboard" in body
 
 
 # ---------------------------------------------------------------------------

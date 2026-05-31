@@ -1,0 +1,45 @@
+{# Executive — Probes tab panel.
+
+   Every reflection record the swarm produced — one row per judged turn. Data
+   is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
+   (``probes_list``). Each row is expandable: click ``Prompt &middot; response
+   &middot; reasoning`` to drill into the verbatim attacker prompt / target
+   response / judge rationale. Empty-state copy preserves the
+   ``clean_control`` sentry.
+#}
+<section id="tabpanel-probes"
+         role="tabpanel"
+         aria-labelledby="tab-probes"
+         tabindex="0"
+         hidden>
+  <h2 class="exec-section-title">All probes attempted.</h2>
+  <p class="exec-section-lede">
+    {{ probes_list | length }} attempts &middot; each row is one judged turn.
+  </p>
+  {% if probes_list | length == 0 %}
+    <p class="exec-empty">No probe attempts recorded yet.</p>
+  {% else %}
+    <ol class="exec-probes-list">
+      {% for p in probes_list %}
+        <li class="exec-probe" data-verdict="{{ p.verdict }}" data-agent="{{ p.agent }}" data-asi="{{ p.asi_category }}">
+          <header class="exec-probe__head">
+            <code class="exec-probe__id">{{ p.probe_id or '—' }}</code>
+            <span class="exec-probe__agent">{{ p.agent or '—' }}</span>
+            <span class="exec-probe__asi">{{ p.asi_category or '—' }}</span>
+            <span class="exec-probe__verdict exec-probe__verdict--{{ p.verdict }}">{{ p.verdict | upper }}</span>
+            <time class="exec-probe__time">{{ p.timestamp_label }}</time>
+          </header>
+          <details class="exec-probe__body">
+            <summary>Prompt &middot; response &middot; reasoning</summary>
+            <p class="exec-probe__label">Prompt</p>
+            <pre class="exec-probe__prompt">{{ p.prompt }}</pre>
+            <p class="exec-probe__label">Target response</p>
+            <pre class="exec-probe__response">{{ p.target_response }}</pre>
+            <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(p.confidence) }})</p>
+            <blockquote class="exec-probe__reason">{{ p.reasoning }}</blockquote>
+          </details>
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</section>

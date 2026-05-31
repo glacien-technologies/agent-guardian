@@ -1,0 +1,61 @@
+{# Executive — Findings tab panel.
+
+   The literal greppable heading ``All findings so far.`` lives here so the
+   Executive theme's findings region matches the other four. Each finding card
+   carries severity / id / summary / agent / ASI / probe metadata. Empty-state
+   copy preserves the ``clean_control`` sentry.
+#}
+<section id="tabpanel-findings"
+         role="tabpanel"
+         aria-labelledby="tab-findings"
+         tabindex="0"
+         hidden>
+  <h2 class="exec-section-title">All findings so far.</h2>
+  <p class="exec-section-lede">
+    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality.
+  </p>
+  {% if findings_total == 0 %}
+    <p class="exec-empty">Nothing flagged yet.</p>
+  {% else %}
+    <ol class="exec-findings-list" data-live="findings-list">
+      {% for f in findings_page %}
+        <li class="exec-finding"
+            id="finding-{{ f.id }}"
+            data-severity="{{ f.severity_class }}">
+          <header class="exec-finding__head">
+            <span class="exec-sev exec-sev--{{ f.severity_class }}">{{ f.severity_label }}</span>
+            <code class="exec-finding__id">{{ f.id }}</code>
+            <span class="exec-finding__title">{{ f.summary }}</span>
+            <time class="exec-finding__time">{{ f.created_label }}</time>
+          </header>
+          <dl class="exec-finding__meta">
+            <dt>ASI</dt><dd><code>{{ f.asi_code }}</code></dd>
+            <dt>CSA</dt><dd><code>{{ f.csa_code }}</code></dd>
+            <dt>Probe</dt><dd><code>{{ f.probe_id }}</code></dd>
+            <dt>ATLAS</dt>
+            <dd>
+              {% if f.atlas %}
+                {% for technique in f.atlas %}<code>{{ technique }}</code>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+              {% else %}
+                <span class="exec-finding__none">&mdash;</span>
+              {% endif %}
+            </dd>
+          </dl>
+        </li>
+      {% endfor %}
+    </ol>
+    {% if pagination.total_pages > 1 %}
+      <nav class="exec-pager" aria-label="Findings pagination">
+        <span class="exec-pager__range">
+          Showing {{ pagination.start }}&ndash;{{ pagination.end }} of {{ pagination.total }}
+        </span>
+        <div class="exec-pager__buttons">
+          {% for p in pagination.pages %}
+            <a class="exec-pager__btn{% if p == pagination.current %} exec-pager__btn--active{% endif %}"
+               href="?theme=executive&amp;page={{ p }}#tab=findings">{{ p }}</a>
+          {% endfor %}
+        </div>
+      </nav>
+    {% endif %}
+  {% endif %}
+</section>

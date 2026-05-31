@@ -1,0 +1,52 @@
+{# Executive — sticky KPI strip (layer 2).
+
+   Eight tiles in a responsive grid; locked left-to-right order:
+     AIVSS / Band / Findings / Critical / High / Elapsed / Cost / Coverage
+
+   Each tile reads from the existing shared payload — Executive does NOT
+   introduce new KPI fields. Anywhere the value can be live-updated by the
+   SSE patcher we mark it with ``data-live``.
+#}
+<section class="exec-kpi-strip" aria-label="Scan key metrics">
+
+  <div class="exec-kpi" data-kpi="aivss">
+    <span class="exec-kpi__label">AIVSS</span>
+    <span class="exec-kpi__value" data-live="aivss">{{ aivss_label }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="band">
+    <span class="exec-kpi__label">Band</span>
+    <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="band">{{ band_label }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="findings">
+    <span class="exec-kpi__label">Findings</span>
+    <span class="exec-kpi__value" data-live="findings-total">{{ findings_total }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="critical">
+    <span class="exec-kpi__label">Critical</span>
+    <span class="exec-kpi__value exec-kpi__value--critical" data-live="critical">{{ counts.critical }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="high">
+    <span class="exec-kpi__label">High</span>
+    <span class="exec-kpi__value exec-kpi__value--high" data-live="high">{{ counts.high }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="elapsed">
+    <span class="exec-kpi__label">Elapsed</span>
+    <span class="exec-kpi__value" data-live="elapsed">{{ elapsed_label }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="cost">
+    <span class="exec-kpi__label">Cost</span>
+    <span class="exec-kpi__value" data-live="usd">{{ usd_label }}</span>
+  </div>
+
+  <div class="exec-kpi" data-kpi="coverage">
+    <span class="exec-kpi__label">Coverage</span>
+    <span class="exec-kpi__value">{{ asi_covered }}/10</span>
+  </div>
+
+</section>

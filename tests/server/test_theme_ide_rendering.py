@@ -170,6 +170,10 @@ def test_ide_layout_primitives_present(client: TestClient, store: ScanStore) -> 
     toggle_count = body.count("data-ide-theme-toggle")
     assert toggle_count >= 2, "expected at least 2 theme-toggle entry points"
 
+    # Cross-theme locked findings heading (QA-023): every theme renders the
+    # verbatim string "All findings so far." in its findings region.
+    assert "All findings so far." in body
+
 
 # ---------------------------------------------------------------------------
 # 2. Shared theme switcher partial included (AC-2).

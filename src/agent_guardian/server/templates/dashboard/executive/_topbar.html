@@ -1,0 +1,21 @@
+{# Executive — sticky topbar (layer 1).
+
+   Brand mark + scan-id crumb on the left; shared theme switcher partial on
+   the right. Same partial every other theme embeds, so the 5-entry dropdown
+   appears identically with Executive marked ``selected``.
+#}
+<header class="exec-topbar" role="banner">
+  <div class="exec-topbar__brand">
+    <span class="exec-topbar__mark" aria-hidden="true">AG</span>
+    <span class="exec-topbar__title">AgentGuardian</span>
+    <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
+  </div>
+  <div class="exec-topbar__right">
+    <div class="exec-topbar__locality exec-topbar__locality--{{ 'local' if is_local else 'hosted' }}"
+         aria-label="{{ locality_label }}">
+      <span class="exec-topbar__locality-dot" aria-hidden="true"></span>
+      <span class="exec-topbar__locality-label">{{ locality_label }}</span>
+    </div>
+    {% include "dashboard/_theme_switcher.html" %}
+  </div>
+</header>

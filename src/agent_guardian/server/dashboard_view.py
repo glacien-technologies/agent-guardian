@@ -37,16 +37,29 @@ byte-for-byte equivalent to the pre-QA-020 behaviour.
 
 from __future__ import annotations
 
+import json
+import logging
 import math
 import os
 import urllib.parse
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
+
+_LOG = logging.getLogger(__name__)
+
+# Caps on the assembled lists. The probes_list is bounded so a long-running
+# scan doesn't blow the page render time; the logs_tail is FIFO-trimmed so
+# the operator always sees the most recent events. Both values are locked in
+# the design doc (DESIGN_LOCK §3.3).
+_PROBES_LIST_CAP: Final[int] = 500
+_LOGS_TAIL_CAP: Final[int] = 1000
 
 __all__ = [
     "AGENT_GUARDIAN_DASHBOARD_THEME_ENV",
@@ -70,12 +83,14 @@ DASHBOARD_THEMES: Final[tuple[str, ...]] = (
     "mission",
     "narrative",
     "ide",
+    "executive",
 )
 DASHBOARD_THEME_TEMPLATES: Final[Mapping[str, str]] = {
     "editorial": "dashboard/scan_detail.html",
     "mission": "dashboard/mission/layout.html",
     "narrative": "dashboard/narrative/layout.html",
     "ide": "dashboard/ide/layout.html",
+    "executive": "dashboard/executive/layout.html",
 }
 
 
@@ -440,6 +455,7 @@ def build_dashboard_context(
     page: int = 1,
     per_page: int = 15,
     is_terminal: bool | None = None,
+    scan_dir: Path | None = None,
 ) -> DashboardContext:
     """Build the Jinja context for the live dashboard render.
 
@@ -583,8 +599,208 @@ def build_dashboard_context(
         "aivss_formula_version": aivss_formula_version,
         "rng_seed": "—",
         "evidence_fingerprint": evidence_fingerprint,
+        # Executive theme — Probes + Logs tabs (additive; other themes ignore).
+        # Both lists are always present (empty when scan_dir is None or files
+        # are missing) so template authors can iterate without guarding.
+        "probes_list": _assemble_probes_list(scan_dir),
+        "logs_tail": _assemble_logs_tail(scan_dir),
     }
     return DashboardContext(payload=payload)
+
+
+def _assemble_probes_list(scan_dir: Path | None) -> list[dict[str, Any]]:
+    """Read every ``record_type=reflection`` row from ``<scan_dir>/memory.jsonl``.
+
+    Each reflection record's ``payload.content`` is a JSON-encoded ``turn_record``
+    written by ``agents/base.py``. We decode the inner JSON, surface the locked
+    Executive-tab fields, and emit a flat dict ready for the Jinja template.
+
+    Capped at :data:`_PROBES_LIST_CAP` entries (keeps the oldest ``N`` —
+    chronological order preserved); the cap protects long-running scans from
+    blowing the page render.
+
+    Returns an empty list when ``scan_dir`` is ``None``, the file is missing,
+    or every line is malformed. Never raises — disk / parse failures are
+    swallowed (warned at DEBUG level) so a corrupt memory.jsonl never 500s the
+    dashboard.
+    """
+    if scan_dir is None:
+        return []
+    path = scan_dir / "memory.jsonl"
+    if not path.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                record = _parse_reflection_line(stripped)
+                if record is not None:
+                    out.append(record)
+                if len(out) >= _PROBES_LIST_CAP:
+                    break
+    except OSError as exc:  # pragma: no cover — disk-level failure
+        _LOG.debug("dashboard_view: memory.jsonl read failed (%s)", exc)
+        return []
+    return out
+
+
+def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
+    """Parse a single ``memory.jsonl`` line into the locked probe shape.
+
+    Returns ``None`` for non-reflection records and for malformed JSON — the
+    caller filters those out. The inner ``turn_record`` lives JSON-encoded
+    inside ``payload.content``; we decode it, then cherry-pick the locked
+    fields with safe defaults.
+    """
+    try:
+        rec = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(rec, dict):
+        return None
+    if rec.get("record_type") != "reflection":
+        return None
+    payload = rec.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    content_raw = payload.get("content")
+    turn: dict[str, Any] = {}
+    if isinstance(content_raw, str) and content_raw:
+        try:
+            decoded = json.loads(content_raw)
+        except (ValueError, json.JSONDecodeError):
+            decoded = None
+        if isinstance(decoded, dict):
+            turn = decoded
+    timestamp_label = _timestamp_label(rec.get("timestamp"))
+    seed_id = turn.get("seed_id")
+    probe_id = str(seed_id) if seed_id else ""
+    return {
+        "agent": str(turn.get("agent", payload.get("agent", ""))),
+        "asi_category": str(turn.get("asi_category", "")),
+        "csa_category": str(turn.get("csa_category", "")),
+        "turn": int(turn.get("turn", 0) or 0),
+        "strategy": str(turn.get("strategy", "")),
+        "probe_id": probe_id,
+        "prompt": str(turn.get("prompt", "")),
+        "target_response": str(turn.get("target_response", "")),
+        "verdict": str(turn.get("verdict", "")),
+        "confidence": float(turn.get("confidence", 0.0) or 0.0),
+        "reasoning": str(turn.get("reasoning", "")),
+        "timestamp_label": timestamp_label,
+        "attacker_refused": bool(turn.get("attacker_refused", False)),
+    }
+
+
+def _assemble_logs_tail(scan_dir: Path | None) -> list[dict[str, Any]]:
+    """Read ``<scan_dir>/events.jsonl`` and emit the locked log-tail shape.
+
+    Each line is one ``SwarmEvent`` payload (see ``scan_store.event_to_payload``).
+    We derive a ``level`` (``info`` / ``warn`` / ``error``) and a one-line
+    ``summary`` from the event kind + payload so the Executive Logs tab can
+    render a colour-coded feed without re-implementing the heuristics in Jinja.
+
+    FIFO-capped at :data:`_LOGS_TAIL_CAP` entries — keeps the most recent
+    ``N``. Returns an empty list when ``scan_dir`` is ``None`` or the file is
+    missing. Never raises.
+    """
+    if scan_dir is None:
+        return []
+    path = scan_dir / "events.jsonl"
+    if not path.is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                entry = _parse_event_line(stripped)
+                if entry is not None:
+                    out.append(entry)
+    except OSError as exc:  # pragma: no cover — disk-level failure
+        _LOG.debug("dashboard_view: events.jsonl read failed (%s)", exc)
+        return []
+    # FIFO tail — drop oldest beyond the cap so the operator always sees the
+    # freshest events. The list is already chronological (append-only writer).
+    if len(out) > _LOGS_TAIL_CAP:
+        out = out[-_LOGS_TAIL_CAP:]
+    return out
+
+
+def _parse_event_line(raw: str) -> dict[str, Any] | None:
+    """Parse a single ``events.jsonl`` line into the locked log entry shape.
+
+    Returns ``None`` for malformed JSON or non-dict rows.
+    """
+    try:
+        rec = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(rec, dict):
+        return None
+    kind = str(rec.get("kind", ""))
+    agent = rec.get("agent")
+    asi = rec.get("asi")
+    decision = rec.get("decision")
+    payload = rec.get("payload")
+    payload_dict: dict[str, Any] = payload if isinstance(payload, dict) else {}
+    level = _derive_log_level(kind, payload_dict)
+    summary = _derive_log_summary(kind, payload_dict)
+    payload_keys = sorted(str(k) for k in payload_dict)
+    return {
+        "timestamp_label": _timestamp_label(rec.get("timestamp")),
+        "kind": kind,
+        "agent": str(agent) if agent else "",
+        "asi": str(asi) if asi else "",
+        "decision": str(decision) if decision else "",
+        "level": level,
+        "summary": summary,
+        "payload_keys": payload_keys,
+    }
+
+
+def _derive_log_level(kind: str, payload: dict[str, Any]) -> str:
+    """Derive the log level from event kind + payload (locked rules)."""
+    if kind == "agent_skipped":
+        return "warn"
+    if kind == "error" or bool(payload.get("error")):
+        return "error"
+    return "info"
+
+
+def _derive_log_summary(kind: str, payload: dict[str, Any]) -> str:
+    """Derive the one-line log summary (locked priority order)."""
+    severity = payload.get("severity")
+    if severity:
+        return f"{kind} :: severity={severity}"
+    reason = payload.get("reason")
+    if reason:
+        return f"{kind} :: {reason}"
+    message = payload.get("message")
+    if message:
+        return f"{kind} :: {message}"
+    return kind
+
+
+def _timestamp_label(raw: Any) -> str:
+    """Render an ISO-8601 timestamp string as ``HH:MM:SS`` UTC.
+
+    Returns an empty string when ``raw`` is missing / not a string / unparseable.
+    """
+    if not isinstance(raw, str) or not raw:
+        return ""
+    try:
+        # Tolerate both ``Z`` and explicit offsets.
+        normalised = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalised)
+    except ValueError:
+        return ""
+    return dt.strftime("%H:%M:%S")
 
 
 def _probes_estimate(scan: Scan | None) -> int:

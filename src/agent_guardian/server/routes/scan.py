@@ -119,6 +119,7 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         started_at_label=started_label,
         page=page,
         is_terminal=terminal_on_disk and not is_running,
+        scan_dir=scan_dir,
     )
     # Theme resolution: query param > $AGENT_GUARDIAN_DASHBOARD_THEME > 'editorial'.
     # Invalid theme names fall through silently to the next priority (see
@@ -223,6 +224,7 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
                 elapsed_seconds=elapsed,
                 started_at_label=_started_at_label(mtime),
                 is_terminal=terminal_on_disk and not is_running,
+                scan_dir=scan_dir,
             )
             snapshot = live_snapshot(ctx)
             if snapshot != last_snapshot:

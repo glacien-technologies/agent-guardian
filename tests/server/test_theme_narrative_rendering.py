@@ -178,6 +178,10 @@ def test_narrative_theme_renders_for_completed_scan(client: TestClient, store: S
     assert "nr-footer" in body
     assert f"v{__version__}" in body
 
+    # Cross-theme locked findings heading (QA-023): every theme renders the
+    # verbatim string "All findings so far." in its findings region.
+    assert "All findings so far." in body
+
 
 def test_narrative_charts_radar_and_bar_canvases_present(
     client: TestClient, store: ScanStore

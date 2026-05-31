@@ -7,7 +7,7 @@
    first-paint redirect.
 
    Context (set by ``scan.scan_view`` — see routes/scan.py):
-     * ``active_theme``   — current slug, one of editorial|mission|narrative|ide
+     * ``active_theme``   — current slug, one of editorial|mission|narrative|ide|executive
      * ``theme_choices``  — ordered list of slugs; iteration drives the menu
      * ``scan_id``        — the scan id used to build each option's href
 
@@ -15,18 +15,20 @@
    route hasn't enriched the context yet (e.g. partial rendering in tests).
 #}
 {% set _active = active_theme if active_theme is defined and active_theme else 'editorial' %}
-{% set _choices = theme_choices if theme_choices is defined and theme_choices else ['editorial', 'mission', 'narrative', 'ide'] %}
+{% set _choices = theme_choices if theme_choices is defined and theme_choices else ['editorial', 'mission', 'narrative', 'ide', 'executive'] %}
 {% set _labels = {
   'editorial': 'Editorial',
   'mission':   'Mission Control',
   'narrative': 'Narrative Report',
   'ide':       'IDE / Terminal',
+  'executive': 'Executive Dashboard',
 } %}
 {% set _subtitles = {
   'editorial': 'Briefing layout',
   'mission':   'Ops dashboard',
   'narrative': 'Stakeholder report',
   'ide':       'Developer console',
+  'executive': 'KPI strip + tabs',
 } %}
 <div class="ag-theme-switcher" data-ag-theme-switcher data-active-theme="{{ _active }}" role="group" aria-label="Dashboard theme">
   <label class="ag-theme-switcher__label" for="ag-theme-switcher-select">theme</label>

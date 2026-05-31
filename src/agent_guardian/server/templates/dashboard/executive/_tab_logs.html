@@ -1,0 +1,35 @@
+{# Executive — Logs tab panel.
+
+   Static snapshot of ``events.jsonl`` for the scan, read at request time by
+   the shared view-model (``logs_tail``). Each row carries
+   timestamp / level / kind / agent / asi / summary. Snapshot-only — no
+   websocket / SSE on this pane; operator presses F5 to refresh.
+
+   Empty-state copy preserves the ``clean_control`` sentry.
+#}
+<section id="tabpanel-logs"
+         role="tabpanel"
+         aria-labelledby="tab-logs"
+         tabindex="0"
+         hidden>
+  <h2 class="exec-section-title">Scan log tail.</h2>
+  <p class="exec-section-lede">
+    {{ logs_tail | length }} events &middot; press <kbd>F5</kbd> to refresh.
+  </p>
+  {% if logs_tail | length == 0 %}
+    <p class="exec-empty">No log events recorded yet.</p>
+  {% else %}
+    <ol class="exec-logs">
+      {% for ev in logs_tail %}
+        <li class="exec-log exec-log--{{ ev.level }}" data-level="{{ ev.level }}" data-agent="{{ ev.agent }}">
+          <time class="exec-log__time">{{ ev.timestamp_label }}</time>
+          <span class="exec-log__level">{{ ev.level | upper }}</span>
+          <span class="exec-log__kind">{{ ev.kind }}</span>
+          {% if ev.agent %}<span class="exec-log__agent">{{ ev.agent }}</span>{% endif %}
+          {% if ev.asi %}<span class="exec-log__asi">{{ ev.asi }}</span>{% endif %}
+          <span class="exec-log__msg">{{ ev.summary }}</span>
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+</section>

@@ -162,6 +162,10 @@ def test_mission_renders_layout_with_all_components(client: TestClient, store: S
     assert "mission__table" in body
     assert "mission__tbody" in body
 
+    # Cross-theme locked findings heading (QA-023): every theme renders the
+    # verbatim string "All findings so far." in its findings region.
+    assert "All findings so far." in body
+
     # Slide-over
     assert 'id="mission-slideover"' in body
     assert 'role="dialog"' in body

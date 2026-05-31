@@ -1,0 +1,75 @@
+{# Executive Dashboard — Theme E root layout (QA-023).
+
+   Single server-rendered HTML document. Every tab pane is in the DOM at all
+   times; ``executive_tabs.js`` toggles the ``hidden`` attribute on click /
+   keyboard activation. URL fragment ``#tab=<slug>`` is read on load and
+   ``history.replaceState``-d on activation.
+
+   Sticky stack (from top to bottom, ordered for sticky-offset math):
+     1. Topbar       — brand + theme switcher dropdown (sticky layer 1)
+     2. KPI strip    — 8 tiles (sticky layer 2)
+     3. Tab bar      — WAI-ARIA tablist, 5 buttons (sticky layer 3)
+     4. Main content — 5 ``<section role="tabpanel">`` panes
+
+   Same shared view-model contract as every other theme; the only Executive-
+   specific payload fields are ``probes_list`` and ``logs_tail`` (additive in
+   :func:`build_dashboard_context`).
+#}
+<!doctype html>
+<html lang="en" data-theme="executive">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="dark light" />
+  <title>{{ page_title }} · Executive Dashboard · AgentGuardian</title>
+  <link rel="stylesheet" href="/static/colors_and_type.css" />
+  <link rel="stylesheet" href="/static/executive.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2213%22%20fill%3D%22none%22%20stroke%3D%22%236d9eeb%22%20stroke-width%3D%221.6%22%2F%3E%3C%2Fsvg%3E" />
+  <script src="/static/executive_tabs.js" defer></script>
+</head>
+<body class="exec-body"
+      data-scan-id="{{ scan_id }}"
+      data-is-running="{{ 'true' if is_running else 'false' }}"
+      data-is-terminal="{{ 'true' if is_terminal else 'false' }}">
+
+  {% include "dashboard/executive/_topbar.html" %}
+  {% include "dashboard/executive/_kpi_strip.html" %}
+  {% include "dashboard/executive/_tab_bar.html" %}
+
+  <main class="exec-main" role="main">
+    {% include "dashboard/executive/_tab_overview.html" %}
+    {% include "dashboard/executive/_tab_findings.html" %}
+    {% include "dashboard/executive/_tab_probes.html" %}
+    {% include "dashboard/executive/_tab_agents.html" %}
+    {% include "dashboard/executive/_tab_logs.html" %}
+  </main>
+
+  {# Live SSE patcher — mirrors the other themes so the same /scans/<id>/live
+     stream drives Executive's KPI strip identically. Snapshot-only updates;
+     ``probes_list`` / ``logs_tail`` are NOT data-live (operator F5 refreshes). #}
+  <script>
+  (function () {
+    var body = document.body;
+    var scanId = body.getAttribute('data-scan-id');
+    if (!scanId) { return; }
+    if (body.getAttribute('data-is-terminal') === 'true') { return; }
+    if (typeof EventSource === 'undefined') { return; }
+    var url = '/scans/' + encodeURIComponent(scanId) + '/live';
+    var es = new EventSource(url);
+    es.addEventListener('snapshot', function (evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        document.querySelectorAll('[data-live]').forEach(function (node) {
+          var key = node.getAttribute('data-live');
+          if (data[key] === undefined) { return; }
+          node.textContent = data[key];
+        });
+      } catch (err) { /* swallow */ }
+    });
+    es.addEventListener('scan_done', function () { es.close(); });
+    es.onerror = function () { /* browser auto-reconnects */ };
+  })();
+  </script>
+</body>
+</html>
