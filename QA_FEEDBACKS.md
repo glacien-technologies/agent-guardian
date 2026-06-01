@@ -17,6 +17,45 @@ Format per item:
 
 ---
 
+## QA-029 — Findings tab UX: remove the duplicated `Findings by severity` chart at the top of the tab; make the per-finding `N evidence events` outer drawer read as an obvious click-to-expand button (chevron + hover state) instead of a styled inline link; remove the Reproducibility receipt from the Findings tab
+
+- **Date filed** · 2026-06-01
+- **Severity** · medium / UX — Findings tab is the primary triage surface; current layout costs the operator a full viewport scroll before they reach the first finding card (chart they can already see on Overview) AND obscures the click-to-expand affordance on the per-finding evidence drawer (operator has to discover the drawer is interactive).
+- **Found via** · 2026-06-01 operator screenshots of the Findings tab (scan `cli-ea162256679e`). Three coordinated UX defects.
+- **Scope** · Three concrete sub-asks:
+
+  1. **Remove the `Findings by severity` bar chart from the top of the Findings tab.** The same chart already lives in the Overview tab (FIG. 1, side-by-side with the ASI radar). Rendering it again at the top of the Findings tab adds nothing — the operator just scrolled past it on Overview, and the per-severity counts are already visible in the section headings (`● CRITICAL  2 findings`, `● HIGH  9 findings`, etc.) right where each severity bucket starts. Removing the duplicate buys ~640 px of vertical real-estate so the first finding card is above the fold.
+
+     Implementation: in `src/agent_guardian/server/templates/dashboard/executive/_tab_findings.html`, remove the `{% set tab_key = 'findings' %}` + `{% include "dashboard/executive/_severity_bars.html" %}` block (the two lines just below the `<p class="exec-section-lede">…</p>` lede paragraph). The Overview tab's include stays untouched. Also remove the corresponding `data-component="severity-bars"` test assertions in `test_executive_findings_tab_includes_severity_bars_and_jump_anchors` (`tests/server/test_theme_executive_rendering.py`) — that test was locking the now-redundant include; replace with `test_executive_findings_tab_omits_severity_bars` that asserts the chart is NOT rendered on the Findings tab. Click-to-jump anchors (`#exec-sev-critical` / `#exec-sev-high` / `#exec-sev-medium` / `#exec-sev-low`) are unaffected — they stay on the per-severity bucket wrappers; Overview's bar chart still points at them.
+
+  2. **Make the per-finding `N evidence events · X EXPLOITED · Y DEFENDED` outer drawer obviously interactive.** Currently the summary line renders in violet brand-color (the `.exec-finding__evidence > summary` CSS rule) which is a brand-color hint, but the operator doesn't read it as a button. They have to hover-discover that clicking opens a drawer. Compare: the inner per-evidence-row summary (the compact "See details" pill we shipped in `743149a` / `4e7c19f`) DOES read as a button because it has a border + pill chrome + chevron — but the OUTER drawer summary (the "N evidence events" line above it) doesn't.
+
+     Implementation: restyle `.exec-finding__evidence > summary` to read as a real click-to-expand control:
+     - Add an inline `▾` chevron span (positioned at the right of the line via `margin-left: auto` on a `<span class="exec-finding__evidence-chevron">` inside the summary).
+     - The chevron rotates 180° on `details[open] > summary` (matches the inner pill's chevron behaviour from `743149a`).
+     - Add subtle hover lift: `background: var(--exec-bg-sunken); border-radius: var(--exec-radius-sm); padding: 0.375rem 0.625rem` on the summary so the whole line reads as a clickable row.
+     - Prepend the summary text with a leading icon-like glyph (e.g. an inline-SVG `chevron-right` rotated 90° on open) OR simply tighten the wording to `Click to view evidence` when closed and `Hide evidence` when open. (Operator preference: explicit verb beats a chevron alone.)
+     - Lock with a Jinja-aware Selenium-style render test: assert the summary has `cursor: pointer` (already does via reset) AND a chevron span AND the summary background changes on `[open]` state. Functional: keyboard-focus on `<summary>` triggers `:focus-visible` ring (already covered by existing rule).
+
+     Idiom alignment: this mirrors the `.exec-finding__evidence-summary` pattern from the per-row collapsible (`4e7c19f`) — chevron + hover bg + the whole row is the hit-target.
+
+  3. **Remove the Reproducibility receipt from the Findings tab.** Same idiom as the QA-026 fix that removed it from the Agents tab — the receipt currently appears at the bottom of every data tab (Overview / Findings / Probes / Logs) per the QA-026 refactor, but on the Findings tab specifically it sits below a long list of finding cards (often 15+ items) where the operator is deep in triage and the receipt below the last card just creates visual noise + a confusing "is this another finding?" double-take.
+
+     Implementation: in `src/agent_guardian/server/templates/dashboard/executive/_tab_findings.html`, remove the trailing `{% include "dashboard/executive/_reproducibility.html" %}` line just above the `</section>` closer. Keep the include on Overview / Probes / Logs as the canonical reproducibility surfaces — operator can copy the repro shell from any of those three tabs. Update the QA-026-era `test_executive_reproducibility_renders_in_each_data_tab` assertion from `body.count('data-component="reproducibility"') == 4` → `== 3`, with the missing tab now being Findings (was: missing tab = Agents). Lock with a new `test_executive_findings_tab_omits_reproducibility` that asserts the receipt is NOT inside the Findings tabpanel HTML.
+
+- **Acceptance** ·
+  1. Findings tab no longer renders `<figure class="exec-chart exec-chart--bar" data-component="severity-bars">`. The existing `test_executive_findings_tab_includes_severity_bars_and_jump_anchors` flips to `test_executive_findings_tab_omits_severity_bars` and passes.
+  2. First finding card is above the fold on a 1080p screen (no scroll required to see the first `<li class="exec-finding">`).
+  3. Per-finding `N evidence events` summary visibly reads as a clickable control: chevron present, hover lifts the background, label changes between "Click to view evidence" (closed) and "Hide evidence" (open). Keyboard reachable via Tab → Enter expands the drawer.
+  4. The inner "See details" per-evidence-row pill from `743149a` / `4e7c19f` stays unchanged.
+  5. Reproducibility receipt no longer renders inside `#tabpanel-findings`. The receipt count across the rendered HTML drops from 4 to 3 (Overview / Probes / Logs only); Agents stays excluded (per QA-026); Findings now also excluded (this QA).
+  6. pytest server suite green; live verify on a real scan with 5+ findings confirms operator-evident interactivity.
+- **Cross-cuts** · QA-026 (the outer-drawer summary was added in the same QA-026 commit that introduced the per-finding evidence). QA-028 (this is the natural follow-up Findings-tab UX polish to QA-028's Overview-tab polish — both clean up duplicated / unclear interactions on the Executive theme).
+- **Risk callouts** · The severity bar chart removal MUST stay scoped to the Findings tab — the Overview tab's instance (FIG. 1 + click-to-jump-to-Findings anchors) is the canonical one and must remain. Tests: when removing the include from `_tab_findings.html`, also delete the now-orphan `data-tab-key="findings"` canvas id branch in `executive_charts.js` (the multi-canvas mount loop from `2e25153` will harmlessly skip the missing canvas, but the dead branch is technical debt). Outer drawer relabel: "Click to view evidence" / "Hide evidence" must NOT swallow the existing evidence_stats pill text (`1 EXPLOITED 1 DEFENDED 1 INCONCLUSIVE`). Render order: chevron + label LEFT, stats pills RIGHT, evidence drawer body BELOW.
+- **Status** · open
+
+---
+
 ## QA-028 — Executive Overview tab UX polish: KPI tile descriptions to hover-tooltips behind an info icon · per-tile mini-charts (gauge / bar / sparkline) · shrink + square-up the Findings-by-severity + ASI-radar pair · drop the FIG. 1 / FIG. 2 eyebrow labels
 
 - **Date filed** · 2026-06-01
