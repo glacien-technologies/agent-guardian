@@ -137,6 +137,10 @@ class DashboardState:
     phase_durations: dict[str, float] = field(default_factory=dict)
     recon_summary: ReconSummary | None = None
     findings_streaming: tuple[FindingRow, ...] = ()
+    # PhaseC — multi-turn plan label + attachment count per agent. Both
+    # additive; absent keys render the legacy cell unchanged.
+    agent_plan_label: dict[str, str] = field(default_factory=dict)
+    agent_attachment_counts: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Seed every known agent row with a "pending" status so the
@@ -174,6 +178,13 @@ def _render_agent_table(state: DashboardState) -> Table:
         asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"
         turn_pair = state.agent_turns.get(name)
         turn_str = f"{turn_pair[0]}/{turn_pair[1]}" if turn_pair else "—"
+        # PhaseC — append plan badge + attachment glyph when present.
+        plan_label = state.agent_plan_label.get(name, "")
+        if plan_label:
+            turn_str = f"{turn_str} (plan: {plan_label})"
+        att_count = state.agent_attachment_counts.get(name, 0)
+        if att_count > 0:
+            turn_str = f"{turn_str} [+{att_count} att]"
         table.add_row(
             Text(name, style=status_style),
             Text(asi, style=asi_style),

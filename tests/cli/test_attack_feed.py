@@ -304,3 +304,96 @@ def test_strategy_section_includes_rationale_when_present() -> None:
     console.print(render_reflection_block(_turn_record()))
     text = console.export_text()
     assert "rationale: pair-initial" in text
+
+
+# ---------------------------------------------------------------------------
+# PhaseC — multi-turn plan label + probe attachment surface in the reflection
+# panel. Renderer-side; payload contract is documented in the cli_tui
+# observer wiring.
+# ---------------------------------------------------------------------------
+
+
+def test_title_appends_plan_label_when_plan_name_present() -> None:
+    """``turn N/M (plan: <name>)`` lands when turn_record carries plan_name."""
+    turn = _turn_record()
+    turn["plan_name"] = "asi06-iterative-fact-reinforcement"
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "turn 2/4 (plan: asi06-iterative-fact-reinforcement)" in text
+
+
+def test_title_reads_plan_from_strategy_metadata_when_top_level_absent() -> None:
+    """Legacy turn_records stamp the plan name on strategy_metadata only."""
+    turn = _turn_record(strategy="multi_turn_plan")
+    turn["strategy_metadata"] = {
+        "rationale": "pair-initial",
+        "phase_c_c1_plan_name": "asi06-iterative-fact-reinforcement",
+    }
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "plan: asi06-iterative-fact-reinforcement" in text
+
+
+def test_strategy_section_prefixes_multi_turn_badge() -> None:
+    """A MultiTurnPlanStrategy emit shows ``[multi-turn]`` ahead of the name."""
+    turn = _turn_record(strategy="multi_turn_plan")
+    turn["strategy_metadata"] = {
+        "rationale": "pair-initial",
+        "phase_c_c1_plan_name": "demo-plan",
+    }
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "[multi-turn]" in text
+
+
+def test_attachments_section_renders_summary_when_present() -> None:
+    """ATTACHMENTS section lists mime/size/alt and is hidden when empty."""
+    turn = _turn_record()
+    turn["attachments"] = [
+        {
+            "mime_type": "image/png",
+            "size_bytes": 1024,
+            "alt_text": "login-screen",
+        },
+        {
+            "mime_type": "image/jpeg",
+            "size_bytes": 2048,
+            "alt_text": "screenshot-2",
+        },
+    ]
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "ATTACHMENTS" in text
+    assert "image/png" in text
+    assert "login-screen" in text
+    assert "image/jpeg" in text
+
+
+def test_attachments_section_omitted_when_no_attachments() -> None:
+    """No attachments → no ATTACHMENTS section in the rendered panel."""
+    console = _record_console(width=200)
+    console.print(render_reflection_block(_turn_record()))
+    text = console.export_text()
+    assert "ATTACHMENTS" not in text
+
+
+def test_attachments_section_omits_b64_payload_field() -> None:
+    """Defence-in-depth: even if a stale path leaks the b64 blob, we don't
+    print it. The renderer only reads mime_type / size_bytes / alt_text."""
+    turn = _turn_record()
+    turn["attachments"] = [
+        {
+            "mime_type": "image/png",
+            "size_bytes": 9,
+            "alt_text": "tiny",
+            "b64_payload": "iVBORw0KGgo=",
+        },
+    ]
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "iVBORw0KGgo=" not in text

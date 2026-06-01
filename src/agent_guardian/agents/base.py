@@ -1139,6 +1139,7 @@ class AsiAgent(ABC):
                 "mitre_techniques": [str(t) for t in self.default_mitre_techniques],
                 "csa_category": self.default_csa_category.value,
                 "turn": turns,
+                "max_turns": self.budget.max_turns,
                 "strategy": strategy_name,
                 "prompt": result.text,
                 "rationale": getattr(result, "rationale", ""),
@@ -1151,6 +1152,25 @@ class AsiAgent(ABC):
                 "attacker_refused": attacker_refused_val,
                 "attacker_refusal_text": attacker_refusal_text_val,
             }
+            # PhaseC — lift multi-turn plan + attachment summary onto the
+            # top-level record so the TUI / SSE consumers don't have to
+            # peek into strategy_metadata. Absent keys leave the record
+            # unchanged so single-turn strategies stay byte-equivalent.
+            plan_name_val = strat_meta.get("plan_name") or strat_meta.get("phase_c_c1_plan_name")
+            if isinstance(plan_name_val, str) and plan_name_val:
+                turn_record["plan_name"] = plan_name_val
+            plan_turn_idx = strat_meta.get("plan_turn_index")
+            if isinstance(plan_turn_idx, int):
+                turn_record["plan_turn_index"] = plan_turn_idx
+            plan_total = strat_meta.get("plan_total_turns")
+            if isinstance(plan_total, int):
+                turn_record["plan_total_turns"] = plan_total
+            attachments_meta = strat_meta.get("attachments")
+            if isinstance(attachments_meta, list) and attachments_meta:
+                # Pass through the strategy's redacted summary list verbatim
+                # (mime_type / size_bytes / alt_text) — never raw bytes.
+                turn_record["attachments"] = attachments_meta
+                turn_record["attachments_count"] = len(attachments_meta)
             try:
                 await memory.write_reflection(
                     agent_name,

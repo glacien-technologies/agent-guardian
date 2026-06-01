@@ -134,9 +134,57 @@ def _format_strategy(turn: Mapping[str, Any]) -> str:
     rationale = ""
     if isinstance(meta, Mapping):
         rationale = str(meta.get("rationale", "")).strip()
+    # PhaseC — prefix a "[multi-turn]" badge when the strategy stack is a
+    # MultiTurnPlanStrategy. The strategy's ``.name`` is "multi_turn_plan"
+    # and its metadata stamps ``phase_c_c1_plan_name``; either signal is
+    # sufficient evidence for the badge.
+    is_multi_turn = strategy == "multi_turn_plan" or (
+        isinstance(meta, Mapping) and bool(meta.get("phase_c_c1_plan_name"))
+    )
+    prefix = "[multi-turn] " if is_multi_turn else ""
     if rationale:
-        return f"{strategy} (rationale: {rationale})"
-    return strategy
+        return f"{prefix}{strategy} (rationale: {rationale})"
+    return f"{prefix}{strategy}"
+
+
+def _plan_name_for(turn: Mapping[str, Any]) -> str:
+    """Resolve the active plan name from turn_record / strategy_metadata."""
+    plan = turn.get("plan_name")
+    if isinstance(plan, str) and plan.strip():
+        return plan.strip()
+    meta = turn.get("strategy_metadata")
+    if isinstance(meta, Mapping):
+        meta_name = meta.get("phase_c_c1_plan_name")
+        if isinstance(meta_name, str) and meta_name.strip():
+            return meta_name.strip()
+    return ""
+
+
+def _format_attachments(turn: Mapping[str, Any]) -> str:
+    """One-line summary of probe attachments riding with this turn.
+
+    Reads the redacted summary list ``attachments`` (mime_type / size_bytes
+    / alt_text) — never the b64 payload — so PII/size hygiene is preserved
+    and the renderer never decodes binary data. Returns ``"—"`` when none.
+    """
+    items = turn.get("attachments")
+    if not isinstance(items, list) or not items:
+        return "—"
+    parts: list[str] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        mime = str(item.get("mime_type", "?"))
+        alt = str(item.get("alt_text", "")).strip()
+        size = item.get("size_bytes")
+        size_str = f" {int(size):,}B" if isinstance(size, int) and size > 0 else ""
+        if alt:
+            parts.append(f"{mime}{size_str} '{alt}'")
+        else:
+            parts.append(f"{mime}{size_str}")
+    if not parts:
+        return "—"
+    return f"{len(parts)} · " + ", ".join(parts)
 
 
 def _build_panel_body(turn: Mapping[str, Any], *, full: bool) -> RenderableType:
@@ -152,6 +200,11 @@ def _build_panel_body(turn: Mapping[str, Any], *, full: bool) -> RenderableType:
     reasoning = str(turn.get("reasoning", "")).strip() or "—"
 
     sections.append(_Section(label="PROMPT", body=_maybe_truncate(prompt, full=full)))
+    # PhaseC.C4 — surface probe attachments between PROMPT and TARGET
+    # RESPONSE so an operator sees exactly what travelled with the prompt.
+    attachments_body = _format_attachments(turn)
+    if attachments_body != "—":
+        sections.append(_Section(label="ATTACHMENTS", body=attachments_body))
     sections.append(_Section(label="TARGET RESPONSE", body=_maybe_truncate(response, full=full)))
 
     verdict = str(turn.get("verdict", "—"))
@@ -175,7 +228,12 @@ def _build_panel_body(turn: Mapping[str, Any], *, full: bool) -> RenderableType:
 
 
 def _title_text(turn: Mapping[str, Any]) -> Text:
-    """The panel title — cyan agent name then ASI · turn N/M · seed id."""
+    """The panel title — cyan agent name then ASI · turn N/M · seed id.
+
+    PhaseC — when the active strategy is a MultiTurnPlanStrategy the
+    turn label is widened to ``turn N/M (plan: <plan-name>)`` so the
+    operator sees the campaign label alongside the per-turn counter.
+    """
     agent = str(turn.get("agent", "agent"))
     asi = str(turn.get("asi_category", "—"))
     turn_n = turn.get("turn")
@@ -186,6 +244,9 @@ def _title_text(turn: Mapping[str, Any]) -> Text:
         turn_label = f"turn {turn_n}"
     else:
         turn_label = "turn ?"
+    plan_name = _plan_name_for(turn)
+    if plan_name:
+        turn_label = f"{turn_label} (plan: {plan_name})"
     seed_id = str(turn.get("seed_id", "")).strip()
     seed_label = f"seed {seed_id}" if seed_id else "seed —"
     asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"

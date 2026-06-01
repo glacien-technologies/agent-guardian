@@ -279,7 +279,15 @@ class MultiTurnPlanStrategy(Strategy):
         )
         return NextPrompt(
             text=rendered,
-            metadata={"phase_c_c1_plan_name": self._plan.name, "turn_index": current_idx},
+            metadata={
+                "phase_c_c1_plan_name": self._plan.name,
+                "turn_index": current_idx,
+                # PhaseC — surfaced into turn_record + observer payloads so
+                # the TUI's per-turn label can render "turn N/M (plan: X)".
+                "plan_name": self._plan.name,
+                "plan_turn_index": current_idx,
+                "plan_total_turns": len(self._plan.planned_turns),
+            },
         )
 
     def _render(self, template: str) -> str:
