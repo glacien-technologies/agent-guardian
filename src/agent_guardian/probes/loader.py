@@ -24,6 +24,7 @@ __all__ = [
     "load_all_probes",
     "load_probes_for_asi",
     "load_recon_probes",
+    "load_vision_probes",
     "seeds_for_asi_with_provenance",
 ]
 
@@ -77,7 +78,11 @@ def _iter_probe_files(root: Path) -> list[Path]:
     standard ASI attack-probe corpus.
     """
     candidates = [*root.rglob("*.yaml"), *root.rglob("*.yml")]
-    excluded = {"_meta", "recon", "multi_turn_plans"}
+    # WHY: asi11/ holds vision-injection probes (Phase C.C4d) exposed via
+    # load_vision_probes() — kept out of the ASI attack corpus so the
+    # 120/4/124 corpus-size assertion and per-AsiCategory counts stay stable
+    # until the full ASI11_VISION enum migration lands.
+    excluded = {"_meta", "recon", "multi_turn_plans", "asi11"}
     return sorted(p for p in candidates if not excluded.intersection(p.parts))
 
 
@@ -222,6 +227,46 @@ def load_recon_probes(*, strict: bool = False) -> list[Probe]:
     probes.sort(key=lambda p: p.id)
     _LOG.debug(
         "PhaseC.C5 load_recon_probes: loaded=%d ids=%s",
+        len(probes),
+        [p.id for p in probes],
+    )
+    return probes
+
+
+def load_vision_probes(*, strict: bool = False) -> list[Probe]:
+    """Load every probe under the bundled ``asi11/`` subdirectory.
+
+    Phase C.C4d ASI11_VISION corpus: probes that carry one or more
+    image attachments (typographic injection, screenshot injection,
+    steganography, ASCII art, QR codes, homoglyph, alt-text bypass,
+    rendered-prompt leak). Kept separate from ``load_all_probes`` so
+    the canonical ASI attack corpus size + per-ASI counts stay stable
+    until the full ASI11_VISION enum migration lands.
+
+    Each vision probe still carries an ``asi: ASI0N`` enum value to
+    satisfy the triple-framework gate — vision injection is treated as
+    an ASI01 (Goal Hijack) variant in the schema. The ASI11_VISION
+    sentinel lives in the probe ``id`` prefix.
+    """
+    root = find_corpus_root() / "asi11"
+    if not root.exists():
+        _LOG.debug("vision probe root %s missing — returning empty list", root)
+        return []
+    candidates = sorted([*root.rglob("*.yaml"), *root.rglob("*.yml")])
+    if not candidates:
+        return []
+    probes: list[Probe] = []
+    for yml in candidates:
+        try:
+            probes.append(load_probe(yml))
+        except ProbeValidationError as exc:
+            if strict:
+                raise
+            _LOG.warning("skipping malformed vision probe %s: %s", yml, exc)
+            continue
+    probes.sort(key=lambda p: p.id)
+    _LOG.debug(
+        "PhaseC.C4d load_vision_probes: loaded=%d ids=%s",
         len(probes),
         [p.id for p in probes],
     )
