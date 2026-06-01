@@ -17,6 +17,51 @@ Format per item:
 
 ---
 
+## QA-028 — Executive Overview tab UX polish: KPI tile descriptions to hover-tooltips behind an info icon · per-tile mini-charts (gauge / bar / sparkline) · shrink + square-up the Findings-by-severity + ASI-radar pair · drop the FIG. 1 / FIG. 2 eyebrow labels
+
+- **Date filed** · 2026-06-01
+- **Severity** · medium / UX — the Overview tab is the operator's first paint after a scan; current layout costs ~30% vertical real-estate to always-on description text and oversized charts. Compresses the at-a-glance pattern operators came for.
+- **Found via** · 2026-06-01 operator screenshots of the post-`9478554` Executive Overview tab (scan `cli-6398b31ef7e0`, AIVSS 37, 15 findings, band `Not graded yet`). Three coordinated UX defects flagged across the three Overview rows.
+- **Scope** · Three concrete sub-asks (one per row of the Overview tab):
+
+  **Row 1 — KPI strip (the 8 tiles AIVSS / BAND / FINDINGS / CRITICAL / HIGH / ELAPSED / COST / COVERAGE):**
+  1. **Hide the always-on tile descriptions behind a hover `ⓘ` icon.** Currently each tile renders its one-line description (e.g. "Composite agent safety score from adversarial testing") below the value as static text. Operator wants the description to surface only when they hover (or click on touch) a small info icon placed next to the tile's eyebrow label. Default state: tile shows ONLY the eyebrow + value, much more compact. The `kpi_descriptions` dict from QA-026 stays as the source of truth; only the render mode changes. Use a native `<button aria-describedby>` + a popover positioned with CSS (`position: absolute; top: 100%; left: 0; opacity: 0; transition: opacity 120ms`) — no JS dependency, just a `:hover` / `:focus` state change. Keyboard accessibility preserved via `:focus-visible` (tab into the `ⓘ` button → popover opens).
+  2. **Add a small inline mini-chart per tile** so the value reads at a glance. Per-tile target visualisations:
+     - **AIVSS** → a small radial gauge (semi-circle) tinted by the band class (red below 40, amber 40-79, green 80+). Shows the 0-100 scale with the current score as a needle or filled arc.
+     - **BAND** → a tiny 5-segment horizontal bar (Critical / Poor / Warning / Good / Excellent) with the current segment highlighted. Same colours as the existing `_aivss_hero.html` band axis but at KPI-tile scale (~32 px tall).
+     - **FINDINGS** → a small stacked bar (4 segments coloured by severity) showing the relative critical / high / medium / low mix of findings.
+     - **CRITICAL** → a small red dot grid or alert glyph cluster — purely visual emphasis since the value is a small int.
+     - **HIGH** → same idiom as CRITICAL but amber.
+     - **ELAPSED** → a small horizontal progress bar showing the fraction of the wall-clock budget consumed (or full bar when the cap is uncapped per QA-027 — render as a "no cap" indicator).
+     - **COST** → a small horizontal progress bar against the USD cap (or "no cap" indicator).
+     - **COVERAGE** → a small 10-segment pie or grid (10 = all ASI categories) with covered ones filled. The "7/10" text becomes the headline + the visualisation reinforces it.
+     Implementation note: all 8 charts should be inline SVG (no Chart.js for the KPI tiles — they're too small to benefit and the lazy Chart.js init would delay first-paint). Reuse the existing `--exec-sev-*` tokens for colour.
+
+  **Row 2 — AIVSS hero card** (the big "37" + "NOT GRADED YET" pill + 5-segment band axis): NO changes asked in this round. Keep as-is.
+
+  **Row 3 — Side-by-side `Findings by severity` (bar) + `Adversarial Surface Index per category` (radar) pair:**
+  3a. **Shrink and square-up.** Current vertical extent is ~480 px each, taking nearly a full screen. Reduce to ~360 px max-height and constrain the radar to an aspect-ratio ≈ 1 so it reads as a square card. The bar chart can stay rectangular but should also lose ~25% of its vertical (drop the 360 px min-height set in commit `e0eaa5a` down to ~280 px). Net effect: row 3 fits in less than half a viewport scroll.
+  3b. **Drop the FIG. 1 / FIG. 2 eyebrow labels.** Operator finds them academic/distracting. Replace the `<span class="exec-chart__eyebrow">FIG. 1</span>` line in `_severity_bars.html` and the equivalent in `_asi_radar.html` with nothing (just the serif headline + lede). The CSS rule `.exec-chart__eyebrow` may stay for other contexts but the partials stop emitting the FIG.x string. Locked decision: this is the Executive theme — the headline already reads as a header without scientific paper-style figure numbering.
+
+- **Fix area** · Three coordinated builders:
+  1. **`_kpi_strip.html` + `executive.css`** — replace the always-on `<span class="exec-kpi__desc">` block with a `<button class="exec-kpi__info" aria-describedby="kpi-{key}-desc">ⓘ</button>` + a sibling `<div class="exec-kpi__desc-popover" id="kpi-{key}-desc" role="tooltip">...</div>`. CSS handles open/close on `:hover` and `:focus-within`. The popover is positioned absolute below the tile and z-indexed above adjacent tiles so it doesn't clip.
+  2. **`_kpi_strip.html` + per-tile mini-chart partials** — author 8 small inline-SVG partials (`_kpi_chart_aivss.html` / `_kpi_chart_band.html` / etc.) and include the right one inside each `data-kpi="{key}"` tile via Jinja `{% if key == 'aivss' %}{% include ... %}{% endif %}` chain or a precomputed `kpi_chart_partial` dict on the view-model. Reuse `kpi_descriptions` + `band_class` view-model fields; no new payload keys needed for AIVSS / BAND / COVERAGE / ELAPSED / COST. Add a small `kpi_chart_data` dict on the view-model for the per-severity stacked bar on FINDINGS (just `{critical, high, medium, low}` counts — already available from `counts`).
+  3. **`_severity_bars.html` + `_asi_radar.html` + `executive.css` + `executive_charts.js`** — remove the FIG.x `<span>`, shrink the `.exec-overview-twocol .exec-chart__canvas-wrap` min-height from 360 → 280 (bar) and add a `max-width: <600px>; aspect-ratio: 1 / 1; margin: 0 auto` on the radar's wrap so it renders as a centred square. Chart.js `maintainAspectRatio: false` stays (otherwise the JS will fight the CSS aspect-ratio); confirm the radar doesn't distort by spot-checking the legend + axes labels post-shrink.
+
+- **Acceptance** ·
+  1. KPI strip vertical height drops from current ~140 px per tile to ~64 px per tile (eyebrow + value only) until the operator hovers the `ⓘ`.
+  2. Every tile renders a meaningful per-tile mini-chart at ≤ 64 px tall.
+  3. The AIVSS hero card (row 2) is unchanged.
+  4. The two row-3 charts fit in a single viewport scroll on a 1080p screen — bar chart ~280 px tall, radar square (~360 × 360 px) and centred in its grid cell.
+  5. No FIG. 1 / FIG. 2 text appears anywhere in the rendered Overview HTML.
+  6. Lighthouse / WAI-ARIA: the `ⓘ` tooltip is reachable by keyboard (tab into button → tooltip opens via `:focus-visible`), screen-reader announces the description via `aria-describedby`.
+  7. pytest server suite still green (the existing KPI-tile + chart-partial tests will need a small refresh).
+- **Cross-cuts** · QA-026 (this is the natural follow-up to the QA-026 KPI icons + descriptions ship; the descriptions stay in the view-model, the render mode flips). QA-027 (the ELAPSED + COST tile mini-charts should respect the "no cap" state when their respective caps are uncapped — render a flat / "∞" indicator rather than a 0% progress bar).
+- **Risk callouts** · Tooltip positioning on the rightmost two tiles (COST + COVERAGE) needs a `right: 0; left: auto` flip so the popover doesn't clip the page edge. The FINDINGS stacked-bar should clamp to ≥ 1 px per non-zero segment so a scan with 1 critical + 20 high doesn't render the critical segment invisible.
+- **Status** · open
+
+---
+
 ## QA-027 — Remove the 900s `overall_wall_seconds` cap; let the scan run as long as it needs (no `--budget-seconds` flag, no hardcoded ceiling)
 
 - **Date filed** · 2026-06-01
