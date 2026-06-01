@@ -17,6 +17,24 @@ Format per item:
 
 ---
 
+## QA-027 — Remove the 900s `overall_wall_seconds` cap; let the scan run as long as it needs (no `--budget-seconds` flag, no hardcoded ceiling)
+
+- **Date filed** · 2026-06-01
+- **Severity** · medium / UX — directly affects operators who want an authoritative `--mode full` band call on targets that take longer than 15 minutes to fully probe (Cloud Run cold starts, slow on-prem agents, big-tool RAG agents). The current cap silently caps coverage and forces the band tile to render "Not graded yet", which is the symptom that surfaced this request.
+- **Found via** · 2026-06-01 operator session against the Cloud Run testbench (`cli-6398b31ef7e0`): a `--mode full` scan finished at 65% coverage in 7.4 min — under the 15-min wall-clock — because the per-agent token ceiling tripped first. Operator asked how to lift the budget; investigation surfaced that the 15-min `overall_wall_seconds = 900.0` default in `src/agent_guardian/core/swarm.py:238` is hardcoded with NO CLI override and NO env var (only a contract-file knob via `cfg.swarm.budget.wall_seconds`). Operator response: "remove the budget seconds at all. don't be limit it to 30 mins or anything. not required."
+- **Symptom** · `--mode full` scan ends with `scoring_valid=False` because the operator hit the (hidden) 15-min ceiling before reaching 95% coverage, OR has to author a contract YAML just to extend the wall budget for what should be a one-shot CLI scan.
+- **Expected** · The wall-clock cap is **uncapped by default**. The scan runs as long as the swarm needs (bounded only by USD budget if the operator set one, by Ctrl+C, and by the per-agent token / per-finding cap that already exist independently). Operators who DO want a wall-clock cap pass `--budget-seconds N` (parallel to the existing `--budget-usd N`); operators who want unbounded explicitly pass `--budget-seconds 0` or simply omit the flag.
+- **Root cause hypothesis** · Pre-v1.0 the 15-min ceiling was a guardrail against runaway scans in CI. Post-v1.0 (and post-cap-removal philosophy applied to `_LOGS_TAIL_CAP` in commit `2e25153` on 2026-05-31), arbitrary caps the operator can't opt out of are a UX anti-pattern. The right defaults for an OSS toolkit are "do what I told you; if you wanted a cap you'd have asked for one."
+- **Fix area** · Three coordinated changes:
+  1. `src/agent_guardian/core/swarm.py:238` — change `overall_wall_seconds: float = 900.0` → `overall_wall_seconds: float | None = None`. Type-thread through `_run_inner` / `asyncio.wait_for(..., timeout=)` so `None` means "no `wait_for` wrapper at all" (asyncio's `wait_for(timeout=None)` semantically means infinity, but route the no-timeout path explicitly to avoid the legacy 0 → instant-fire footgun).
+  2. `src/agent_guardian/cli.py` — add `--budget-seconds <float>` Option on the `scan` command (default `None` = uncapped). Thread it through `_run_scan` / `_run_scan_inner` and into `SwarmConfig(overall_wall_seconds=...)`. Update the plan panel's BUDGET section: when `None`, render `Wall-clock cap   uncapped` (mirrors the existing `USD cap   uncapped` style). When set, show `Wall-clock cap   <N> min` like today.
+  3. `tests/unit/test_swarm_config.py` (new file) — lock the new default + the `wait_for` no-timeout branch + the plan-panel `uncapped` render. Also a CLI integration test for `--budget-seconds`.
+- **Acceptance** · (1) `SwarmConfig().overall_wall_seconds is None`. (2) `agent-guardian scan ...` with no `--budget-seconds` runs to swarm-natural completion (USD cap, per-agent token cap, or `scan_done` end-of-plan) without ever hitting a wall-clock kill. (3) `agent-guardian scan --budget-seconds 600 ...` does kill at 10 min. (4) plan panel BUDGET section renders `Wall-clock cap   uncapped` when not set; pytest 2575+ pass; no regression on the existing `wall_seconds_remaining` checkpoint metric (it should report `inf` or be omitted when uncapped, NOT 0).
+- **Cross-cuts** · Parallel to `_LOGS_TAIL_CAP = None` precedent (commit `2e25153`, 2026-05-31, operator request: "don't keep the log limit of 1000"). Same philosophy applied to wall-clock. Also note: this is the second time the "no arbitrary cap" rule has been requested by the operator — the broader principle (default uncapped; opt-in cap via CLI flag) is now a saved feedback memory.
+- **Status** · open
+
+---
+
 ## QA-026 — Executive dashboard UX punch list (10 issues from operator screenshots)
 
 - **Date filed** · 2026-05-31 (filed AND closed in same commit, per process rule)
