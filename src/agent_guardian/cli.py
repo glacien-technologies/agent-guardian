@@ -214,6 +214,23 @@ scan_app = typer.Typer(
 )
 app.add_typer(scan_app, name="scans")
 
+# Phase C, C3 — AgentDojo benchmark adapter. ``agent-guardian agentdojo run``
+# loads an AgentDojo task suite (banking / slack / travel / workspace) and
+# evaluates the target against the canonical prompt-injection benchmark.
+# The ``[agentdojo]`` extra wires the full upstream corpus; without it, a
+# tiny vendored fallback exercises the runner end-to-end.
+agentdojo_app = typer.Typer(
+    name="agentdojo",
+    help=(
+        "Run the AgentDojo (Debenedetti et al. 2024) prompt-injection "
+        "benchmark against a target. Install the optional extra "
+        "(`pip install 'agent-guardian[agentdojo]'`) for the full upstream "
+        "corpus; without it a vendored smoke corpus is used."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(agentdojo_app, name="agentdojo")
+
 
 # ---------------------------------------------------------------------------
 # State persistence (first-run banner, last-score)
@@ -2137,6 +2154,103 @@ def scans_purge(
         typer.echo(f"  - {child.name}")
         if not dry_run:
             _rmtree_quiet(child)
+
+
+# ---------------------------------------------------------------------------
+# AgentDojo benchmark subcommand (Phase C, C3)
+# ---------------------------------------------------------------------------
+#
+# Loads an AgentDojo (Debenedetti et al. NeurIPS 2024) task suite and runs
+# it against the target. The output is an AgentDojo-shaped JSON report
+# (utility_count / attack_count / utility_attack_count / per_attacker_strategy)
+# so cross-paper numbers stay comparable.
+#
+# When ``--require-upstream`` is set the command refuses to fall back to the
+# vendored smoke corpus -- intended for CI / leaderboard-reproduction runs.
+
+
+@agentdojo_app.command("run")
+def agentdojo_run(
+    suite: str = typer.Option(
+        ...,
+        "--suite",
+        "-s",
+        help=(
+            "AgentDojo suite name. Canonical suites: banking, slack, travel, "
+            "workspace. Any suite the installed `agentdojo` package exposes also works."
+        ),
+    ),
+    target: str = typer.Option(
+        ...,
+        "--target",
+        "-t",
+        help=(
+            "Target endpoint URL (HTTP target). For non-HTTP targets use the "
+            "library API: `agent_guardian.adapters.agentdojo.run_agentdojo_suite`."
+        ),
+    ),
+    output_path: Path | None = typer.Option(
+        None,
+        "--output-path",
+        "-o",
+        help="Where to write the AgentDojo-shaped JSON report. Default: stdout.",
+    ),
+    max_concurrency: int = typer.Option(
+        8,
+        "--max-concurrency",
+        help=(
+            "Bounded fan-out for per-task adapter calls. Default 8; raise for "
+            "fast in-process targets, lower for rate-limited APIs."
+        ),
+    ),
+    require_upstream: bool = typer.Option(
+        False,
+        "--require-upstream",
+        help=(
+            "Fail with a clear error when the optional `agentdojo` package is "
+            "not installed, instead of falling back to the vendored smoke "
+            "corpus. Use this for CI / leaderboard-reproduction runs."
+        ),
+    ),
+) -> None:
+    """Run an AgentDojo benchmark suite against ``--target``.
+
+    Install the full upstream corpus with:
+
+        pip install 'agent-guardian[agentdojo]'
+    """
+    from agent_guardian.adapters.agentdojo import (
+        AgentDojoUnavailableError,
+        run_agentdojo_suite,
+    )
+
+    adapter = HttpAdapter(endpoint=target, shape="generic")
+    try:
+        report = asyncio.run(
+            run_agentdojo_suite(
+                suite,
+                adapter,
+                max_concurrency=max_concurrency,
+                allow_vendored=not require_upstream,
+            )
+        )
+    except AgentDojoUnavailableError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(EXIT_CONFIG) from exc
+    except ValueError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(EXIT_CONFIG) from exc
+    finally:
+        with contextlib.suppress(Exception):
+            asyncio.run(adapter.aclose())
+
+    payload = json.dumps(report.to_dict(), indent=2, sort_keys=True)
+    if output_path is None:
+        typer.echo(payload)
+    else:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(payload, encoding="utf-8")
+        typer.echo(f"wrote AgentDojo report to {output_path}")
 
 
 # ---------------------------------------------------------------------------

@@ -182,6 +182,14 @@ grpc = [
 browser = [
   "playwright>=1.40",
 ]
+# ``agentdojo`` carries the upstream Debenedetti et al. 2024 benchmark package
+# used by the AgentDojo adapter (Phase C, C3). Strictly opt-in: the adapter
+# falls back to a tiny vendored smoke corpus when this extra is absent so the
+# default install stays lean. Install for full leaderboard-comparable runs:
+# ``pip install 'agent-guardian[agentdojo]'``.
+agentdojo = [
+  "agentdojo>=0.1",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
@@ -332,6 +340,16 @@ follow_imports = "skip"
 # are reached via attribute access), so no ``grpc.*`` submodule pattern is used.
 [[tool.mypy.overrides]]
 module = ["websockets.*", "grpc", "playwright.*"]
+ignore_missing_imports = true
+
+# agentdojo is an optional dependency (the ``[agentdojo]`` extra) used only by
+# the AgentDojo benchmark adapter (Phase C, C3). The import sits inside a
+# try/except so the adapter falls back to its vendored smoke corpus when the
+# extra is absent. Silence the missing-import noise once for the whole project
+# so mypy behaves identically whether or not the extra is installed
+# (precedent: ``botocore.*`` / ``google.*`` / ``opentelemetry.*``).
+[[tool.mypy.overrides]]
+module = ["agentdojo.*"]
 ignore_missing_imports = true
 
 # jsonschema has incomplete first-party stubs and ships none of its own. We
