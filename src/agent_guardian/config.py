@@ -46,13 +46,29 @@ class SwarmBudgetConfig(BaseModel):
 
 
 class SwarmConfig(BaseModel):
-    """Swarm-level knobs — model identifiers and budget."""
+    """Swarm-level knobs — model identifiers and budget.
+
+    Phase B.B4 adds the ``judge_cross_family_enforced`` toggle. Per the
+    DECISIONS block ('Cross-family judges enforced by default in scan
+    config'), the default is ``True``: the swarm refuses any judge panel
+    that does not span at least two distinct LLM families (openai /
+    anthropic / google / meta). When the operator picks a same-family
+    attacker + judge (e.g. both gemini), construction of the PanelJudge
+    raises ``ValueError`` and the agent layer falls back to a single
+    judge with a WARNING log — the scan does NOT silently proceed.
+
+    Enabling a 3-judge panel multiplies evaluator-LLM spend by ~3x
+    relative to a single-judge baseline. The existing AgentBudget token
+    accounting tracks evaluator calls, so no new cost ceiling is
+    required.
+    """
 
     commander_model: str = "claude-haiku-4-5"
     attacker_model: str = "gpt-4o-mini"
     evaluator_model: str = "gpt-4o-mini"
     max_parallel_agents: int = Field(default=11, ge=1, le=11)
     budget: SwarmBudgetConfig = Field(default_factory=SwarmBudgetConfig)
+    judge_cross_family_enforced: bool = True
     model_config = ConfigDict(extra="forbid")
 
 

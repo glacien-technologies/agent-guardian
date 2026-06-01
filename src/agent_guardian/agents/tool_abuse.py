@@ -83,24 +83,40 @@ Specifically:
             return wrapped
         from agent_guardian.strategies.mad_max import MadMaxStrategy
         from agent_guardian.strategies.pair import PAIRStrategy
-        from agent_guardian.strategies.tool_exfil import ToolExfilStrategy
 
         # Phase A.A2 — sibling-swap: a stalling ToolExfil pivots to PAIR
         # and vice versa. asi_category=ASI02 is the Phase A allowed family.
-        result = MadMaxStrategy(
-            ctx,
-            children=[
-                ReflectiveStrategy(
-                    ToolExfilStrategy(ctx),
-                    sibling=PAIRStrategy(ctx),
-                    asi_category=AsiCategory.ASI02,
-                ),
-                ReflectiveStrategy(
-                    PAIRStrategy(ctx),
-                    sibling=ToolExfilStrategy(ctx),
-                    asi_category=AsiCategory.ASI02,
-                ),
-            ],
+        # Phase B.B2 — additionally consult SIBLING_MAP[ASI02] and add one
+        # operator-seeded ReflectiveStrategy per mapped operator (capped at
+        # max_siblings=2 in the helper).
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+        )
+        from agent_guardian.strategies.tool_exfil import ToolExfilStrategy
+
+        bw_siblings = build_sibling_strategy(AsiCategory.ASI02, ctx, PAIRStrategy(ctx))
+        children: list[Strategy] = [
+            ReflectiveStrategy(
+                ToolExfilStrategy(ctx),
+                sibling=PAIRStrategy(ctx),
+                asi_category=AsiCategory.ASI02,
+            ),
+            ReflectiveStrategy(
+                PAIRStrategy(ctx),
+                sibling=ToolExfilStrategy(ctx),
+                asi_category=AsiCategory.ASI02,
+            ),
+        ]
+        for sib in bw_siblings:
+            children.append(ReflectiveStrategy(sib, sibling=None, asi_category=AsiCategory.ASI02))
+        result = MadMaxStrategy(ctx, children=children)
+        _LOG.debug(
+            "PhaseB.B2 ToolAbuseAgent.strategy_stack: asi=ASI02 "
+            "operators=%s n_siblings_added=%d total_children=%d",
+            SIBLING_MAP[AsiCategory.ASI02],
+            len(bw_siblings),
+            len(children),
         )
         _LOG.debug(
             "PhaseA.A2 ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "

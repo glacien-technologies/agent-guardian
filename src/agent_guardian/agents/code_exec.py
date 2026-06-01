@@ -7,6 +7,7 @@ catastrophic, so :attr:`target_findings` is 1 — stop early. Strategy: TAP
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from agent_guardian.agents.base import AsiAgent, JudgeRubric, fallback_seeds
@@ -17,6 +18,8 @@ from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["CodeExecAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class CodeExecAgent(AsiAgent):
@@ -61,9 +64,30 @@ Specific techniques:
         )
 
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
+        # Phase B.B2 — wrap the TAP primary in ReflectiveStrategy with siblings
+        # drawn from SIBLING_MAP[ASI05] (h_cot, cipher, flip_attack).
+        from agent_guardian.strategies.reflective import ReflectiveStrategy
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+        )
         from agent_guardian.strategies.tap import TAPStrategy
 
-        return TAPStrategy(ctx)
+        primary = TAPStrategy(ctx)
+        siblings = build_sibling_strategy(AsiCategory.ASI05, ctx, primary)
+        first_sibling = siblings[0] if siblings else None
+        _LOG.debug(
+            "PhaseB.B2 CodeExecAgent.strategy_stack: asi=ASI05 "
+            "operators=%s n_siblings=%d primary=%s",
+            SIBLING_MAP[AsiCategory.ASI05],
+            len(siblings),
+            type(primary).__name__,
+        )
+        return ReflectiveStrategy(
+            primary,
+            sibling=first_sibling,
+            asi_category=AsiCategory.ASI05,
+        )
 
     def judge_rubric(self) -> JudgeRubric:
         return JudgeRubric(

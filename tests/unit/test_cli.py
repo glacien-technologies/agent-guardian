@@ -106,7 +106,8 @@ def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     # attack score) for a current total of 100. The corpus-version
     # stamp is also printed.
     assert "Probe corpus version" in result.stdout
-    assert "Found 100 probes" in result.stdout
+    # Phase B.B5 added 3 ASI01 H-CoT probes -> 99 attack + 4 judge = 103 total.
+    assert "Found 103 probes" in result.stdout
     # At least one ID from each category should appear.
     for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
         assert asi in result.stdout
@@ -119,8 +120,9 @@ def test_list_probes_with_asi_filter(runner: CliRunner) -> None:
     # the scoring-trust belt-and-suspenders pass = 9 attack probes. Phase
     # A.A4 added 3 JDG-* judge-evaluation probes tagged with asi=ASI01
     # (defended-marker-injection + paraphrase-consistency + calibration-set)
-    # for a current total of 12.
-    assert "Found 12 probes (filtered by ASI01)" in result.stdout
+    # for a subtotal of 12. Phase B.B5 added 3 ASI01 H-CoT injection probes
+    # for a current total of 15.
+    assert "Found 15 probes (filtered by ASI01)" in result.stdout
     assert "ASI02" not in result.stdout
 
 

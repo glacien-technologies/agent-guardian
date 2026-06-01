@@ -11,18 +11,45 @@ from agent_guardian.strategies.base import (
 from agent_guardian.strategies.crescendo import CrescendoStrategy
 from agent_guardian.strategies.fuzz import FuzzStrategy
 from agent_guardian.strategies.mad_max import MadMaxStrategy
+from agent_guardian.strategies.mutator import (
+    ArtPrompt,
+    BoN,
+    CipherMutator,
+    DeceptiveDelightMutator,
+    FlipAttack,
+    HCoTMutator,
+    LowResourceMutator,
+    ManyShotMutator,
+    MutatorRegistry,
+    PAPMutator,
+    PAPScheme,
+    SkeletonKeyMutator,
+    apply_mutation,
+)
 from agent_guardian.strategies.pair import PAIRStrategy
 from agent_guardian.strategies.reflective import ReflectiveStrategy
 from agent_guardian.strategies.tap import TAPStrategy
 from agent_guardian.strategies.tool_exfil import ToolExfilStrategy
 
 __all__ = [
+    "ArtPrompt",
+    "BoN",
+    "CipherMutator",
     "CrescendoStrategy",
+    "DeceptiveDelightMutator",
+    "FlipAttack",
     "FuzzStrategy",
+    "HCoTMutator",
+    "LowResourceMutator",
     "MadMaxStrategy",
+    "ManyShotMutator",
+    "MutatorRegistry",
     "NextPrompt",
     "PAIRStrategy",
+    "PAPMutator",
+    "PAPScheme",
     "ReflectiveStrategy",
+    "SkeletonKeyMutator",
     "Strategy",
     "StrategyContext",
     "StrategyDone",
@@ -30,4 +57,5 @@ __all__ = [
     "TAPStrategy",
     "ToolExfilStrategy",
     "Turn",
+    "apply_mutation",
 ]

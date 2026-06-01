@@ -56,6 +56,16 @@ Techniques in your toolbox include:
         from agent_guardian.probes.loader import seeds_for_asi_with_provenance
 
         seeds = seeds_for_asi_with_provenance(self.asi_category)
+        # Phase B.B5 — count and log every H-CoT probe (ASI01-HCOT-*) that
+        # landed via the corpus loader so a forensic replay can confirm the
+        # three reasoning-model probes were discovered (and not silently
+        # filtered out by a directory-mismatch issue).
+        hcot_ids = sorted({s.probe_id for s in seeds if s.probe_id.startswith("ASI01-HCOT")})
+        _LOG.debug(
+            "PhaseB.B5 H-CoT probes loaded: count=%d probe_ids=%s",
+            len(hcot_ids),
+            hcot_ids,
+        )
         if seeds:
             return seeds
         return fallback_seeds(
@@ -73,30 +83,104 @@ Techniques in your toolbox include:
         from agent_guardian.strategies.crescendo import CrescendoStrategy
         from agent_guardian.strategies.mad_max import MadMaxStrategy
         from agent_guardian.strategies.reflective import ReflectiveStrategy
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+            mutate_seeds,
+        )
         from agent_guardian.strategies.tap import TAPStrategy
 
-        # Phase A.A2 — wrap each child in a ReflectiveStrategy whose sibling
-        # is the OTHER inner strategy. A 2-consecutive-DEFENDED stall on TAP
-        # pivots ACT to Crescendo, and vice versa. asi_category=ASI01 is
-        # the Phase A allowed family for this wrapper.
-        result = MadMaxStrategy(
+        # Phase A.A2 baseline — two ReflectiveStrategy children, TAP↔Crescendo.
+        children: list[Strategy] = [
+            ReflectiveStrategy(
+                TAPStrategy(ctx),
+                sibling=CrescendoStrategy(ctx),
+                asi_category=AsiCategory.ASI01,
+            ),
+            ReflectiveStrategy(
+                CrescendoStrategy(ctx),
+                sibling=TAPStrategy(ctx),
+                asi_category=AsiCategory.ASI01,
+            ),
+        ]
+
+        # Phase B.B3 — full pilot. Build operator-mutated sibling pools from
+        # SIBLING_MAP[ASI01] and add them to the MadMax bandit pool:
+        #
+        #   * Pool A — TAPStrategy seeded with operator-A mutated seeds,
+        #     wrapped in ReflectiveStrategy with another mutator sibling.
+        #   * Pool B — CrescendoStrategy seeded with operator-B mutated seeds,
+        #     wrapped in ReflectiveStrategy.
+        #
+        # The bandit picks whichever child performs best on this run.
+        operators = SIBLING_MAP[AsiCategory.ASI01]
+        mutator_siblings = build_sibling_strategy(
+            AsiCategory.ASI01,
             ctx,
-            children=[
+            TAPStrategy(ctx),
+            max_siblings=len(operators),
+        )
+
+        # For each mutator-sibling, wrap it in a ReflectiveStrategy with a
+        # *different* operator-mutated seed as its sibling pivot target so
+        # a stalled pool can flip to a second operator without repeating.
+        siblings_added = 0
+        for i, mutator_sib in enumerate(mutator_siblings):
+            op_used = operators[i] if i < len(operators) else operators[0]
+            # Build a 2nd-level mutator sibling using the next-in-list operator
+            # so a stalled primary can pivot to a fundamentally different
+            # transformation rather than the same operator twice.
+            secondary_op = operators[(i + 1) % len(operators)]
+            secondary_seeds = mutate_seeds(
+                [s for s in ctx.seeds if isinstance(s, ProbeSeed)],
+                secondary_op,
+                ctx.rng,
+            )
+            from agent_guardian.strategies.base import StrategyContext as _SC
+
+            secondary_ctx = _SC(
+                attacker_llm=ctx.attacker_llm,
+                attacker_model=ctx.attacker_model,
+                goal=ctx.goal,
+                seeds=secondary_seeds,
+                memory=ctx.memory,
+                rng=ctx.rng,
+                max_turns=ctx.max_turns,
+                attack_specialization=ctx.attack_specialization,
+                declared_tools=list(ctx.declared_tools),
+                declared_memory_keys=list(ctx.declared_memory_keys),
+                surface_notes=ctx.surface_notes,
+            )
+            secondary_sib = CrescendoStrategy(secondary_ctx)
+            children.append(
                 ReflectiveStrategy(
-                    TAPStrategy(ctx),
-                    sibling=CrescendoStrategy(ctx),
+                    mutator_sib,
+                    sibling=secondary_sib,
                     asi_category=AsiCategory.ASI01,
-                ),
-                ReflectiveStrategy(
-                    CrescendoStrategy(ctx),
-                    sibling=TAPStrategy(ctx),
-                    asi_category=AsiCategory.ASI01,
-                ),
-            ],
+                )
+            )
+            siblings_added += 1
+            _LOG.debug(
+                "PhaseB.B3 sibling instantiated: operator=%s "
+                "mutated_seed_count=%d strategy_class=%s",
+                op_used,
+                len(mutator_sib.ctx.seeds),
+                type(mutator_sib).__name__,
+            )
+
+        result = MadMaxStrategy(ctx, children=children)
+        total_seeds = sum(len(c.ctx.seeds) for c in children)
+        _LOG.info(
+            "PhaseB.B3 ASI01 pilot strategy_stack built: primary=%s siblings=%s total_seeds=%d",
+            "MadMaxStrategy",
+            [type(c).__name__ for c in children],
+            total_seeds,
         )
         _LOG.debug(
             "PhaseA.A2 GoalHijackAgent.strategy_stack: constructed MadMaxStrategy "
-            "over 2 ReflectiveStrategy children for ASI01"
+            "over %d ReflectiveStrategy children for ASI01 (B3 added=%d)",
+            len(children),
+            siblings_added,
         )
         return result
 

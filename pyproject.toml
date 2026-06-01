@@ -367,6 +367,10 @@ norecursedirs = [
   ".venv",
 ]
 addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "phaseA: Phase A audit-tagged tests (sibling-strategy carryover, etc.)",
+  "phaseB: Phase B audit-tagged tests (mutators, judges, seed store, sibling map, H-CoT, ATLAS enum)",
+]
 
 [tool.coverage.run]
 source = ["src/agent_guardian"]

@@ -170,7 +170,11 @@ async def test_seed_id_threads_into_reflection_and_coverage(tmp_path: Path) -> N
         seed_id = turn.get("seed_id")
         assert seed_id, f"reflection missing seed_id: {turn}"
         seed_ids_seen.add(seed_id)
-        assert seed_id in valid_probe_ids, f"unknown seed_id: {seed_id!r}"
+        # Phase B.B2 — mutator-seeded reflective siblings carry a
+        # ``<parent>-mutant-<operator>`` provenance id; the parent id is
+        # recoverable by stripping the ``-mutant-...`` suffix.
+        parent_id = seed_id.split("-mutant-", 1)[0]
+        assert parent_id in valid_probe_ids, f"unknown seed_id: {seed_id!r}"
 
     assert reflection_count > 0
     assert seed_ids_seen, "no seed_ids were threaded through"
@@ -180,7 +184,8 @@ async def test_seed_id_threads_into_reflection_and_coverage(tmp_path: Path) -> N
     cov = compute_coverage_from_memory(scan, memory_path=memory_file)
     assert cov["probes_attempted"], "probes_attempted must be populated"
     for pid in cov["probes_attempted"]:
-        assert pid in valid_probe_ids
+        parent_id = pid.split("-mutant-", 1)[0]
+        assert parent_id in valid_probe_ids
 
 
 async def test_attacker_refusal_persists_in_reflection(tmp_path: Path) -> None:
@@ -197,7 +202,12 @@ async def test_attacker_refusal_persists_in_reflection(tmp_path: Path) -> None:
         .default(json.dumps({"verdict": "pass", "confidence": 0.5, "reasoning": "ok"}))
         .build()
     )
-    budget = AgentBudget(tokens_remaining=50_000, max_turns=2)
+    # Phase B.B3 expanded the GoalHijackAgent strategy pool from 2 to ~6
+    # children; with max_turns=2 the bandit may never pick the
+    # attacker-LLM-driven branch within the budget. Bumping max_turns to
+    # 6 keeps the test's intent (at least one turn records the refusal)
+    # without weakening any other invariant.
+    budget = AgentBudget(tokens_remaining=80_000, max_turns=6)
     agent = GoalHijackAgent(
         attacker_llm=attacker,
         evaluator_llm=judge,

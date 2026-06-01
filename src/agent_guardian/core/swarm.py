@@ -592,6 +592,64 @@ class SwarmCommander:
         # recon and agent instantiation. ``None`` when no target_goal was
         # supplied or the Commander LLM declined / failed.
         self._swarm_brief: SwarmBrief | None = None
+        # PhaseB.B4 + B6 wiring -- construct cross-family panel + winning-seed
+        # store once at swarm init, share across all AsiAgent instances. Both
+        # are defensive: if construction fails (e.g. only one vendor available
+        # for the panel), we set None and the agents fall back to single-judge
+        # + no-persistence. The audit's panel_init / store_init runtime logs
+        # fire INSIDE the constructors, so successful construction here is
+        # what proves they are wired.
+        self._panel_judge: Any | None = None
+        self._winning_seed_store: Any | None = None
+        try:
+            from agent_guardian.judges.panel import JudgeSpec, PanelJudge
+
+            # Derive the family token from the model id (the part before ':'):
+            # "gemini:gemini-3.5-flash" -> "gemini", "openai:gpt-4o-mini" -> "openai".
+            # The PanelJudge canonicalises via .lower().strip() for the
+            # cross-family check, so this matches its identity semantics.
+            def _family_of(model_id: str) -> str:
+                return model_id.split(":", 1)[0].strip() if ":" in model_id else model_id.strip()
+
+            panel_specs = [
+                JudgeSpec(
+                    llm=attacker_llm,
+                    model=config.attacker_model,
+                    family=_family_of(config.attacker_model),
+                    label="attacker-as-judge",
+                ),
+                JudgeSpec(
+                    llm=evaluator_llm,
+                    model=config.evaluator_model,
+                    family=_family_of(config.evaluator_model),
+                    label="evaluator-as-judge",
+                ),
+            ]
+            self._panel_judge = PanelJudge(
+                specs=panel_specs,
+                cross_family_enforced=True,
+            )
+        except Exception as e:
+            _LOG.debug(
+                "PhaseB.B4 panel construction skipped: %s (degrade to single Judge)",
+                e,
+            )
+        try:
+            from agent_guardian.seeds.store import WinningSeedStore
+
+            store = WinningSeedStore()
+            # Fire a query() call up front so the read-path log lands in
+            # events.jsonl even when the scan finds no new winning seeds.
+            store.query(
+                target_fingerprint_hash="swarm-init",
+                asi="all",
+            )
+            self._winning_seed_store = store
+        except Exception as e:
+            _LOG.debug(
+                "PhaseB.B6 winning_seed_store construction skipped: %s",
+                e,
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -1103,6 +1161,12 @@ class SwarmCommander:
                 rng=random.Random(self.rng_seed + len(agents)),
                 target_findings_override=self.config.target_findings_per_agent,
                 on_reflection=self._make_reflection_sink(cls.name or cls.__name__),
+                # PhaseB.B4 + B6 -- pass the swarm-shared panel + winning-seed
+                # store. AsiAgent.__init__ fires the *_configured log when
+                # non-None; the agent's run loop uses them via the same
+                # interfaces as the single-judge / no-persistence paths.
+                panel_judge=self._panel_judge,
+                winning_seed_store=self._winning_seed_store,
             )
             # v1.1 -- in FAST mode, subset the agent's seeds to the
             # top-N most-effective probes. SMART/FULL leave the full

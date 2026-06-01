@@ -382,6 +382,8 @@ class AsiAgent(ABC):
         rng: random.Random | None = None,
         target_findings_override: int | None = None,
         on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
+        panel_judge: Any | None = None,
+        winning_seed_store: Any | None = None,
     ) -> None:
         # Wrap both LLM clients in usage-tracking decorators so every
         # ``.complete(...)`` call folds its returned :class:`LLMUsage` into
@@ -415,6 +417,26 @@ class AsiAgent(ABC):
             model=evaluator_model,
             rubric=self.judge_rubric(),
         )
+        # Phase B.B4 — optional panel-of-judges ensemble. When provided we
+        # use it in place of the single Judge for verdict() calls. A
+        # misconfigured panel (cross-family enforcement failure raised at
+        # construction time) is caught by the caller; if a non-None panel
+        # is wired here the agent loop uses it.
+        self.panel_judge = panel_judge
+        if panel_judge is not None:
+            _LOG.debug(
+                "PhaseB.B4 AsiAgent.__init__: panel_judge configured — "
+                "single Judge will be bypassed for verdict calls",
+            )
+        # Phase B.B6 — optional cross-scan winning-seed persistence. When
+        # provided AND enabled, every verdict='fail' turn writes a record
+        # into the store after PII scrubbing.
+        self.winning_seed_store = winning_seed_store
+        if winning_seed_store is not None:
+            _LOG.debug(
+                "PhaseB.B6 AsiAgent.__init__: winning_seed_store configured (enabled=%s)",
+                getattr(winning_seed_store, "enabled", "unknown"),
+            )
         # Spec §6 — optional per-agent brief attached by SwarmCommander
         # after Commander goal-decomposition. None means the standard
         # seed pass runs without a goal-specific overlay. See
@@ -998,7 +1020,18 @@ class AsiAgent(ABC):
             self.budget.deduct_tokens(min(response_tokens, self.budget.tokens_remaining))
 
             try:
-                verdict = await self.judge.verdict(result.text, target_response)
+                # Phase B.B4 — prefer the optional PanelJudge over the
+                # single Judge when configured. Both expose the same
+                # async verdict(prompt, target_response) -> JudgeVerdict.
+                if self.panel_judge is not None:
+                    _LOG.debug(
+                        "PhaseB.B4 verdict path: agent=%s turn=%d using PanelJudge",
+                        agent_name,
+                        turns + 1,
+                    )
+                    verdict = await self.panel_judge.verdict(result.text, target_response)
+                else:
+                    verdict = await self.judge.verdict(result.text, target_response)
             except Exception as exc:  # pragma: no cover — defensive: judge should not raise
                 terminated_by = "error"
                 error = f"judge.verdict raised {type(exc).__name__}: {exc}"
@@ -1220,6 +1253,43 @@ class AsiAgent(ABC):
                     verdict.confidence,
                     turns,
                 )
+                # Phase B.B6 — persist this winning seed (the prompt that
+                # tripped a verdict=='fail') into the cross-scan store so
+                # future scans against the same fingerprint can warm-start
+                # from it. The store handles PII scrubbing and retention
+                # internally. ``mutant_operator`` is stamped by
+                # mutator-aware strategies via NextPrompt.metadata; absent
+                # otherwise.
+                if self.winning_seed_store is not None:
+                    try:
+                        target_hash = getattr(fingerprint, "hash", None) or getattr(
+                            fingerprint, "fingerprint_hash", "unknown"
+                        )
+                        mutant_operator = ""
+                        if isinstance(strat_meta, dict):
+                            mo = strat_meta.get("mutant_operator") or strat_meta.get("mutant")
+                            mutant_operator = str(mo) if mo else ""
+                        ok = self.winning_seed_store.insert_seed(
+                            target_fingerprint_hash=str(target_hash),
+                            asi=self.asi_category.value,
+                            seed_text=result.text,
+                            verdict=verdict.verdict,
+                            confidence=float(verdict.confidence),
+                            mutant=mutant_operator,
+                        )
+                        _LOG.debug(
+                            "PhaseB.B6 winning_seed_store.persist: agent=%s asi=%s "
+                            "mutant=%s persisted=%s",
+                            agent_name,
+                            self.asi_category.value,
+                            mutant_operator,
+                            ok,
+                        )
+                    except Exception as exc:  # pragma: no cover — defensive
+                        _LOG.warning(
+                            "PhaseB.B6 winning_seed_store.persist failed (%s) — continuing",
+                            exc,
+                        )
 
         duration = time.monotonic() - start
         tokens = self._snapshot_tokens()
@@ -1309,6 +1379,21 @@ class AsiAgent(ABC):
         seed_id_val = meta.get("seed_id")
         seed_probe_id = str(seed_id_val) if seed_id_val else ""
         seed = self._seed_index.get(seed_probe_id) if seed_probe_id else None
+        # Phase B.B2 — mutator-seeded reflective siblings stamp probe ids of
+        # the form ``<parent>-mutant-<operator>``. The _seed_index does not
+        # hold the mutant id; resolve to the parent so the finding still
+        # inherits the parent's severity / mitre_atlas / csa_category. The
+        # mutant operator name is recoverable from the suffix for audit.
+        if seed is None and "-mutant-" in seed_probe_id:
+            parent_probe_id = seed_probe_id.split("-mutant-", 1)[0]
+            seed = self._seed_index.get(parent_probe_id)
+            if seed is not None:
+                _LOG.debug(
+                    "PhaseB.B2 _build_finding: resolved mutant probe_id=%s -> "
+                    "parent=%s for severity/mitre/csa inheritance",
+                    seed_probe_id,
+                    parent_probe_id,
+                )
         # #22 — use the real probe id from the seed pool when available, only
         # fall back to the synthetic ``<agent>-<asi>`` id when this is a
         # strategy-internal turn that wasn't seeded by any corpus probe (e.g.
