@@ -3,6 +3,7 @@ name: plugin-hijack
 asi: ASI04
 mitre_atlas:
   - AML.T0048
+  - AML.T0060  # ML Supply Chain Compromise (MITRE ATLAS v5.4.0 Feb 2026)
   - Publish Poisoned AI Agent Tool
 csa_category: supply-chain-dependency
 severity: medium

@@ -283,3 +283,197 @@ def test_cascade_agent_strategy_stack_is_crescendo() -> None:
     )
     strategy = agent.strategy_stack(ctx)
     assert isinstance(strategy, CrescendoStrategy)
+
+
+# ---------------------------------------------------------------------------
+# Phase A.A1 — judge verdict triple wired through Turn.metadata + ctx
+# ---------------------------------------------------------------------------
+
+
+async def test_turn_metadata_contains_all_three_judge_keys(tmp_path: Any) -> None:
+    """Phase A.A1 gate — Turn.metadata must carry judge_verdict + judge_confidence + judge_reasoning.
+
+    The prior implementation wrote only two of the three keys; the audit
+    gate caught it. This test pins the contract: all three keys must be
+    present in history[0].metadata after a single judged turn. We capture
+    history directly via a Strategy wrapper that records every list it is
+    called with so the assertion runs against the real in-memory Turn,
+    not the redacted on-disk reflection record.
+    """
+    from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.goal_hijack import GoalHijackAgent
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.llm.stub import StubScript
+    from agent_guardian.strategies.base import Turn
+    from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+    captured_histories: list[list[Turn]] = []
+
+    class _CapturingCrescendo(CrescendoStrategy):
+        async def generate_next(self, history, target_response):  # type: ignore[override]
+            # Snapshot the history (Turn objects are frozen-ish so a shallow
+            # copy is enough) BEFORE the strategy mutates state.
+            captured_histories.append(list(history))
+            return await super().generate_next(history, target_response)
+
+    class _CapturingAgent(GoalHijackAgent):
+        def strategy_stack(self, ctx):  # type: ignore[override]
+            return _CapturingCrescendo(ctx)
+
+    class _StaticTarget(TargetAdapter):
+        def fingerprint(self) -> TargetFingerprint:
+            return TargetFingerprint(
+                mode="code",
+                ref="static",
+                has_tools=False,
+                has_memory=False,
+                touches_pii=False,
+                is_multi_agent=False,
+                framework=None,
+                declared_tools=[],
+                declared_memory_keys=[],
+                notes="",
+            )
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            return "Sure, here is some info."
+
+        async def aclose(self) -> None:
+            return None
+
+    attacker = (
+        StubScript()
+        .respond_to(
+            "Generate a single completely benign opening question",
+            "What is photosynthesis?",
+        )
+        .respond_to("Generate a single follow-up prompt", "Tell me more details.")
+        .default("ok")
+        .build()
+    )
+    judge = (
+        StubScript()
+        .default(
+            json.dumps(
+                {
+                    "verdict": "pass",
+                    "confidence": 0.42,
+                    "reasoning": "no goal drift observed in response",
+                }
+            )
+        )
+        .build()
+    )
+    budget = AgentBudget(tokens_remaining=50_000, max_turns=2)
+    agent = _CapturingAgent(
+        attacker_llm=attacker,
+        evaluator_llm=judge,
+        attacker_model="stub-model",
+        evaluator_model="stub-model",
+        budget=budget,
+    )
+    memory = SharedMemory("phaseA-a1-keys", root_dir=tmp_path)
+    target = _StaticTarget()
+    report = await agent.run(target, memory)
+    assert report.turns >= 1
+
+    # The second generate_next() call receives history[-1] = the Turn the
+    # agent just wrote — which must carry all three judge_* keys.
+    populated = [h for h in captured_histories if h]
+    assert populated, "expected at least one history-populated generate_next call"
+    last_turn = populated[0][-1]
+    md = last_turn.metadata
+    assert "judge_verdict" in md, f"missing judge_verdict in {md.keys()}"
+    assert "judge_confidence" in md, f"missing judge_confidence in {md.keys()}"
+    assert "judge_reasoning" in md, f"missing judge_reasoning in {md.keys()}"
+    assert isinstance(md["judge_reasoning"], str)
+    assert md["judge_verdict"] == "pass"
+    assert md["judge_confidence"] == pytest.approx(0.42)
+    assert md["judge_reasoning"] == "no goal drift observed in response"
+
+
+async def test_strategy_ctx_verdict_fields_updated_after_turn(tmp_path: Any) -> None:
+    """Phase A.A1 — ctx.last_verdict* fields are updated after every judged turn.
+
+    Uses a Strategy subclass that captures its bound StrategyContext on
+    construction so the test can inspect ctx.last_verdict / confidence /
+    reasoning after a real agent.run() pass.
+    """
+    from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.goal_hijack import GoalHijackAgent
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.llm.stub import StubScript
+    from agent_guardian.strategies.base import StrategyContext
+    from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+    captured: dict[str, StrategyContext] = {}
+
+    class _CapturingAgent(GoalHijackAgent):
+        def strategy_stack(self, ctx):  # type: ignore[override]
+            captured["ctx"] = ctx
+            return CrescendoStrategy(ctx)
+
+    class _StaticTarget(TargetAdapter):
+        def fingerprint(self) -> TargetFingerprint:
+            return TargetFingerprint(
+                mode="code",
+                ref="static",
+                has_tools=False,
+                has_memory=False,
+                touches_pii=False,
+                is_multi_agent=False,
+                framework=None,
+                declared_tools=[],
+                declared_memory_keys=[],
+                notes="",
+            )
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            return "Sure thing."
+
+        async def aclose(self) -> None:
+            return None
+
+    attacker = (
+        StubScript()
+        .respond_to(
+            "Generate a single completely benign opening question",
+            "What is photosynthesis?",
+        )
+        .respond_to("Generate a single follow-up prompt", "Tell me more details.")
+        .default("ok")
+        .build()
+    )
+    judge_reasoning = "judge-saw-no-fail-here-quite-long-reasoning-string"
+    judge = (
+        StubScript()
+        .default(
+            json.dumps(
+                {
+                    "verdict": "pass",
+                    "confidence": 0.61,
+                    "reasoning": judge_reasoning,
+                }
+            )
+        )
+        .build()
+    )
+    budget = AgentBudget(tokens_remaining=50_000, max_turns=1)
+    agent = _CapturingAgent(
+        attacker_llm=attacker,
+        evaluator_llm=judge,
+        attacker_model="stub-model",
+        evaluator_model="stub-model",
+        budget=budget,
+    )
+    memory = SharedMemory("phaseA-a1-ctx", root_dir=tmp_path)
+    target = _StaticTarget()
+    await agent.run(target, memory)
+
+    assert "ctx" in captured, "strategy_stack was never called — fix the test setup"
+    ctx = captured["ctx"]
+    assert ctx.last_verdict == "pass"
+    assert ctx.last_verdict_confidence == pytest.approx(0.61)
+    assert ctx.last_verdict_reasoning == judge_reasoning

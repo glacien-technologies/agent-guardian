@@ -1020,6 +1020,14 @@ class AsiAgent(ABC):
             )
 
             turns += 1
+            # Phase A.A1 — write the full verdict triple into Turn.metadata so
+            # strategies on the NEXT turn can read prior judge_verdict /
+            # judge_confidence / judge_reasoning from history[-1].metadata,
+            # and ALSO update ctx.last_verdict* so the same surface is
+            # available without scanning history. Both writes are required:
+            # the metadata copy is the persistent audit record (it lands in
+            # SharedMemory), the ctx copy is the per-turn pivot surface.
+            judge_reasoning_str = verdict.reasoning or ""
             history.append(
                 Turn(
                     prompt=result.text,
@@ -1028,9 +1036,48 @@ class AsiAgent(ABC):
                         **dict(result.metadata),
                         "judge_verdict": verdict.verdict,
                         "judge_confidence": verdict.confidence,
+                        "judge_reasoning": judge_reasoning_str,
                     },
                 )
             )
+            _LOG.debug(
+                "PhaseA.A1 turn-metadata written: agent=%s turn=%d judge_verdict=%s "
+                "judge_confidence=%.2f judge_reasoning_len=%d ctx_updated=True",
+                agent_name,
+                turns,
+                verdict.verdict,
+                verdict.confidence,
+                len(judge_reasoning_str),
+            )
+            # Phase A.A1 — propagate the verdict triple onto the StrategyContext
+            # so the NEXT generate_next() call reads it directly from ctx
+            # (cheaper than walking history) and so a strategy without history
+            # access can still pivot on the prior verdict.
+            ctx.last_verdict = verdict.verdict
+            ctx.last_verdict_confidence = verdict.confidence
+            ctx.last_verdict_reasoning = judge_reasoning_str
+            _LOG.debug(
+                "PhaseA.A1 ctx fields updated: last_verdict=%r last_verdict_confidence=%.2f "
+                "last_verdict_reasoning=%r",
+                ctx.last_verdict,
+                ctx.last_verdict_confidence,
+                (ctx.last_verdict_reasoning or "")[:60],
+            )
+            # Phase A.A4 — when the seed metadata indicates this is a JDG-*
+            # judge-evaluation probe, log a tagged audit event so the
+            # forensic replay can confirm the JDG probe was dispatched to
+            # the target and a verdict was collected (not just loaded from
+            # YAML and silently dropped).
+            _seed_id_meta = result.metadata.get("seed_id", "") if result.metadata else ""
+            if isinstance(_seed_id_meta, str) and _seed_id_meta.startswith("JDG-"):
+                _LOG.debug(
+                    "PhaseA.A4 judge-probe verdict-collected: probe_id=%s verdict=%s "
+                    "confidence=%.2f turn=%d",
+                    _seed_id_meta,
+                    verdict.verdict,
+                    verdict.confidence,
+                    turns,
+                )
 
             # Persist every turn to SharedMemory as a structured reflection so
             # downstream tooling (coverage report, forensic replay) can see
@@ -1088,6 +1135,18 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
+            # Phase A.A4 — for judge-probe (JDG-*) dispatches, log a
+            # turn-persisted event so the full pipeline (load -> dispatch
+            # -> target call -> verdict collection -> memory persistence)
+            # is visible in the audit trail.
+            if seed_id and seed_id.startswith("JDG-"):
+                _LOG.debug(
+                    "PhaseA.A4 judge-probe turn-persisted: probe_id=%s turn=%d "
+                    "verdict=%s written_to_memory=True",
+                    seed_id,
+                    turns,
+                    verdict.verdict,
+                )
 
             # QA-005 — surface the just-persisted turn record to the
             # CLI's reflection sink (LiveBlockSink / NdjsonSink) and,
@@ -1301,6 +1360,14 @@ class AsiAgent(ABC):
         prompt_snippet = prompt[:80].replace("\n", " ")
         summary = f"{summary} | prompt: {prompt_snippet}"
         _ = response  # response is captured in transcripts elsewhere
+        # Phase A.A3 — log the MITRE ATLAS techniques stamped on the finding
+        # at construction time, so the audit trail shows the backfilled IDs
+        # made it from probe YAML -> ProbeSeed -> Finding.mitre_techniques.
+        _LOG.debug(
+            "PhaseA.A3 finding technique coverage: probe_id=%s mitre_atlas=%s",
+            seed_probe_id or finding_id,
+            list(mitre_techniques),
+        )
         return Finding(
             id=finding_id,
             probe_id=probe_id,

@@ -231,10 +231,21 @@ def test_tool_abuse_uses_tool_exfil_when_tools_present(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, declared_tools=["lookup_contact"])
     strat = agent.strategy_stack(ctx)
     assert isinstance(strat, MadMaxStrategy)
-    # MAD-MAX wraps a ToolExfilStrategy + a PAIRStrategy.
+    # Phase A.A2 — MAD-MAX now wraps each inner strategy in a
+    # ReflectiveStrategy, with sibling-swap between ToolExfil and PAIR.
+    # The audit grep gate is ``ReflectiveStrategy(`` in the agent file;
+    # the runtime gate is that ReflectiveStrategy instances populate the
+    # MAD-MAX children list and the inner primaries cover both ToolExfil
+    # and PAIR.
+    from agent_guardian.strategies.reflective import ReflectiveStrategy
+
     child_types = {type(c).__name__ for c in strat._active}
-    assert "ToolExfilStrategy" in child_types
-    assert "PAIRStrategy" in child_types
+    assert child_types == {"ReflectiveStrategy"}
+    inner_primaries = {
+        type(c._primary).__name__ for c in strat._active if isinstance(c, ReflectiveStrategy)
+    }
+    assert "ToolExfilStrategy" in inner_primaries
+    assert "PAIRStrategy" in inner_primaries
 
 
 def test_tool_abuse_falls_back_to_pair_when_no_tools(tmp_path: Path) -> None:
@@ -244,7 +255,14 @@ def test_tool_abuse_falls_back_to_pair_when_no_tools(tmp_path: Path) -> None:
     )
     ctx = _ctx(tmp_path, declared_tools=[])
     strat = agent.strategy_stack(ctx)
-    assert isinstance(strat, PAIRStrategy)
+    # Phase A.A2 — the no-tools fallback now wraps the base PAIR in a
+    # ReflectiveStrategy with no sibling so the THINK/ACT/OBSERVE/REFLECT
+    # cycle is still live for ASI02 in the no-tools branch.
+    from agent_guardian.strategies.reflective import ReflectiveStrategy
+
+    assert isinstance(strat, ReflectiveStrategy)
+    assert isinstance(strat._primary, PAIRStrategy)
+    assert strat._sibling is None
 
 
 # ---------------------------------------------------------------------------

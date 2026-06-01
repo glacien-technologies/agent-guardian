@@ -124,6 +124,27 @@ def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[P
             "probe corpus root %s missing or empty — scan will be NON-AUTHORITATIVE",
             root,
         )
+    # Phase A.A3 — emit a runtime visibility log so a probe-corpus replay
+    # can confirm the backfilled AML.T006x/T007x technique IDs landed and
+    # propagated through the loader rather than being silently dropped.
+    backfill_count = sum(
+        1
+        for p in probes
+        if any(t.startswith("AML.T006") or t.startswith("AML.T007") for t in p.mitre_atlas)
+    )
+    _LOG.debug(
+        "PhaseA.A3 probe corpus loaded: total=%d probes with AML.T006x/T007x techniques=%d",
+        len(probes),
+        backfill_count,
+    )
+    # Phase A.A4 — judge-probe count visible at load time so a forensic
+    # replay can confirm the judges/ subfolder is being discovered.
+    judge_probes = [p for p in probes if p.id.startswith("JDG-")]
+    _LOG.debug(
+        "PhaseA.A4 judge-probe-loader: judge_probes_loaded=%d ids=%s",
+        len(judge_probes),
+        [p.id for p in judge_probes],
+    )
     return probes
 
 
@@ -177,4 +198,20 @@ def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
                     csa_category=probe.csa_category.value,
                 )
             )
+    # Phase A.A3 — log the unique MITRE technique IDs threaded through
+    # ProbeSeed.mitre_atlas for this ASI so coverage tooling can confirm
+    # the backfill is propagating into the strategy layer.
+    _LOG.debug(
+        "PhaseA.A3 seeds_for_asi_with_provenance: asi=%s seeds=%d unique_techniques=%s",
+        asi.value,
+        len(out),
+        sorted({t for seed in out for t in seed.mitre_atlas}),
+    )
+    # Phase A.A4 — count JDG seeds going into the strategy layer.
+    judge_seed_count = sum(1 for s in out if s.probe_id.startswith("JDG-"))
+    _LOG.debug(
+        "PhaseA.A4 judge-probe seeds dispatched to strategy: asi=%s judge_seeds=%d",
+        asi.value,
+        judge_seed_count,
+    )
     return out

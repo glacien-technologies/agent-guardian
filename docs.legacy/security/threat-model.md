@@ -105,7 +105,7 @@ Things AgentGuardian deliberately does **not** try to be:
 - **A web application firewall.** AgentGuardian generates traffic to test a target; it does not sit in front of one in production to filter incoming traffic. If you want runtime defence of a deployed agent, look at a guardrail layer (Llama Guard, Prompt Guard, Lakera, etc.) and use AgentGuardian to test it.
 - **A model-extraction or model-theft defender.** The probes generate text that may, over time, reveal aspects of the target's system prompt or fine-tune. This is an intended *test capability* (PromptLeak ASI), not a vulnerability in AgentGuardian.
 - **A tamper-evident audit log over the entire scan lifecycle.** The signed report covers the report; the dashboard's SSE stream of in-flight events is not individually signed. If you need a fully append-only audit trail, ship `events.jsonl` to your SIEM and treat the SIEM as the authority.
-- **A compliance attestation.** AgentGuardian generates the evidence; the [compliance pack](../reference/roadmap.md) (SOC2 / ISO 27001 / NIST AI RMF mapping) ships in v2.0.
+- **A compliance attestation.** AgentGuardian generates the evidence; the [compliance pack](../reference/roadmap.md) (SOC2 / ISO 27001 / NIST AI RMF mapping (deferred — see roadmap)) ships in v2.0.
 
 ## See also
 

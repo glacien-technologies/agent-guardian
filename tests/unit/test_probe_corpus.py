@@ -68,7 +68,11 @@ def test_all_probes_have_owasp_scenario_after_phase_b() -> None:
 
 def test_corpus_size_is_ninety_six() -> None:
     """Phase B ships 50 original + 29 OWASP-aligned + 11 coverage-gap +
-    2 LLM02 output-handling probes + 1 ASI03 cross-tenant PII = 96.
+    2 LLM02 output-handling probes + 1 ASI03 cross-tenant PII = 96
+    ASI-attack probes, plus Phase A.A4 added 4 judge-evaluation probes
+    (JDG-* prefix) under ``probes/judges/``. The attack corpus count is
+    asserted by filtering out the JDG namespace; the total load
+    (attacks + judge probes) is asserted as 100.
 
     The 11 coverage-gap additions closed the CSA category gaps for
     ``checker-out-of-the-loop`` (4 probes under asi06) and
@@ -89,7 +93,12 @@ def test_corpus_size_is_ninety_six() -> None:
     gap surfaced by the testbench reconcile (finbot LLM02 +
     travel_concierge LLM02 both NOT_REACHED in baseline).
     """
-    assert len(load_all_probes()) == 96
+    all_probes = load_all_probes()
+    attack_probes = [p for p in all_probes if not p.id.startswith("JDG-")]
+    judge_probes = [p for p in all_probes if p.id.startswith("JDG-")]
+    assert len(attack_probes) == 96
+    assert len(judge_probes) == 4
+    assert len(all_probes) == 100
 
 
 def test_corpus_version_stamp() -> None:

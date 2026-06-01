@@ -45,7 +45,7 @@ Requires Python 3.10+. Apache-2.0 licensed.
 
 | Tool             | Multi-agent swarm | Agentic-AI focus | Standards alignment                           | License        |
 |------------------|:-----------------:|:----------------:|-----------------------------------------------|----------------|
-| PyRIT            |        no         |        no        | NIST AI RMF (partial)                         | MIT            |
+| PyRIT            |        no         |        no        | PyRIT risk taxonomy                           | MIT            |
 | garak            |        no         |        no        | own taxonomy                                  | Apache-2.0     |
 | Promptfoo        |        no         |        no        | OWASP LLM Top 10 + ATLAS + EU AI Act          | MIT            |
 | Inspect          |        no         |        no        | own taxonomy                                  | MIT            |

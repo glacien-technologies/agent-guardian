@@ -2,6 +2,7 @@ id: ASI06-MP-001
 name: rag-corpus-inject
 asi: ASI06
 mitre_atlas:
+  - AML.T0062  # Poison Training Data (MITRE ATLAS v5.4.0 Feb 2026)
   - Memory Manipulation
   - RAG Credential Harvesting
 csa_category: knowledge-base-poisoning

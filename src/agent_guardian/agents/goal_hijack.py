@@ -5,10 +5,16 @@ Strategy stack: MAD-MAX dispatching between TAP and Crescendo. TAP gives
 us aggressive tree-search refinements; Crescendo gives us slow-burn
 multi-turn escalation. The bandit picks whichever performs better on
 this run.
+
+Phase A.A2 — both children are wrapped in :class:`ReflectiveStrategy` so
+the THINK → ACT → OBSERVE → REFLECT cycle drives a primary-to-sibling
+pivot after two consecutive DEFENDED verdicts. The sibling is the other
+ASI01 strategy: a TAP that stalls swaps to Crescendo, and vice versa.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from agent_guardian.agents.base import AsiAgent, JudgeRubric, fallback_seeds
@@ -19,6 +25,8 @@ from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["GoalHijackAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class GoalHijackAgent(AsiAgent):
@@ -64,12 +72,33 @@ Techniques in your toolbox include:
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
         from agent_guardian.strategies.crescendo import CrescendoStrategy
         from agent_guardian.strategies.mad_max import MadMaxStrategy
+        from agent_guardian.strategies.reflective import ReflectiveStrategy
         from agent_guardian.strategies.tap import TAPStrategy
 
-        return MadMaxStrategy(
+        # Phase A.A2 — wrap each child in a ReflectiveStrategy whose sibling
+        # is the OTHER inner strategy. A 2-consecutive-DEFENDED stall on TAP
+        # pivots ACT to Crescendo, and vice versa. asi_category=ASI01 is
+        # the Phase A allowed family for this wrapper.
+        result = MadMaxStrategy(
             ctx,
-            children=[TAPStrategy(ctx), CrescendoStrategy(ctx)],
+            children=[
+                ReflectiveStrategy(
+                    TAPStrategy(ctx),
+                    sibling=CrescendoStrategy(ctx),
+                    asi_category=AsiCategory.ASI01,
+                ),
+                ReflectiveStrategy(
+                    CrescendoStrategy(ctx),
+                    sibling=TAPStrategy(ctx),
+                    asi_category=AsiCategory.ASI01,
+                ),
+            ],
         )
+        _LOG.debug(
+            "PhaseA.A2 GoalHijackAgent.strategy_stack: constructed MadMaxStrategy "
+            "over 2 ReflectiveStrategy children for ASI01"
+        )
+        return result
 
     def judge_rubric(self) -> JudgeRubric:
         return JudgeRubric(

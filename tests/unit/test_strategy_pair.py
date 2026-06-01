@@ -256,6 +256,69 @@ async def test_non_json_prose_does_not_reach_target(tmp_path: Path) -> None:
     assert second.text in {"CORPUS-PROBE-X", "CORPUS-PROBE-Y"}
 
 
+# ---------------------------------------------------------------------------
+# Phase A.A1 — PAIR reads judge verdict from BOTH ctx and history[-1].metadata
+# ---------------------------------------------------------------------------
+
+
+async def test_pair_reads_judge_verdict_from_both_ctx_and_history_metadata(
+    tmp_path: Path,
+) -> None:
+    """Phase A.A1 — PAIR uses ctx.last_verdict + history[-1].metadata to refine.
+
+    When ctx.last_verdict is non-empty, the refine prompt sent to the
+    attacker LLM must include the ``Judge feedback:`` block carrying the
+    verdict, confidence and reasoning. This proves both surfaces (ctx +
+    history) are read on every refinement turn.
+    """
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": "smarter-attack"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    ctx.last_verdict = "fail"
+    ctx.last_verdict_confidence = 0.85
+    ctx.last_verdict_reasoning = "leaked system prompt"
+
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [
+        Turn(
+            prompt=first.text,
+            response="refused",
+            metadata={
+                "judge_verdict": "fail",
+                "judge_confidence": 0.85,
+                "judge_reasoning": "leaked system prompt",
+            },
+        )
+    ]
+    await p.generate_next(history, "refused")
+
+    # Find the refine call's user-message content.
+    assert captured, "expected at least one captured request"
+    refine_user_msg = ""
+    for req in captured:
+        for msg in req.messages:
+            if msg.role == "user" and "rewrite it to be more effective" in msg.content:
+                refine_user_msg = msg.content
+    assert refine_user_msg, "expected a refine call to the attacker LLM"
+    # The Judge feedback block must be present, with verdict + reasoning.
+    assert "Judge feedback: fail" in refine_user_msg
+    assert "leaked system prompt" in refine_user_msg
+
+
 async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:
     """PAIR critique calls must include the red-team system message."""
     from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage

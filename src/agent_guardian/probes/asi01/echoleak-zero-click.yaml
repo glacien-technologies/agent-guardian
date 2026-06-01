@@ -3,6 +3,8 @@ name: echoleak-zero-click
 asi: ASI01
 mitre_atlas:
   - AML.T0051
+  - AML.T0067  # LLM Indirect Prompt Injection (MITRE ATLAS v5.4.0 Feb 2026)
+  - AML.T0070  # Model Inversion (MITRE ATLAS v5.4.0 Feb 2026)
   - AI Agent Context Poisoning
 csa_category: goal-instruction-manipulation
 severity: high

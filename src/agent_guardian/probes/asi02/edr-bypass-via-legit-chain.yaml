@@ -3,6 +3,7 @@ name: edr-bypass-via-legit-chain
 asi: ASI02
 mitre_atlas:
   - AML.T0053
+  - AML.T0068  # Adversarial Evasion (MITRE ATLAS v5.4.0 Feb 2026)
   - Exfiltration via AI Agent Tool Invocation
 csa_category: agent-critical-system-interaction
 severity: critical

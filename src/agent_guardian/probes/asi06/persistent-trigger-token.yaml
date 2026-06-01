@@ -2,6 +2,7 @@ id: ASI06-MP-002
 name: persistent-trigger-token
 asi: ASI06
 mitre_atlas:
+  - AML.T0062  # Poison Training Data (MITRE ATLAS v5.4.0 Feb 2026)
   - Memory Manipulation
   - Thread Injection
 csa_category: memory-context-manipulation
