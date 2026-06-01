@@ -23,6 +23,7 @@ __all__ = [
     "last_load_was_authoritative",
     "load_all_probes",
     "load_probes_for_asi",
+    "load_recon_probes",
     "seeds_for_asi_with_provenance",
 ]
 
@@ -68,11 +69,13 @@ def find_corpus_root() -> Path:
 def _iter_probe_files(root: Path) -> list[Path]:
     """Return every ``*.yaml`` and ``*.yml`` probe file under ``root`` (sorted).
 
-    Files inside any ``_meta/`` directory are filtered out — those hold corpus
-    metadata, not probes.
+    Files inside ``_meta/`` (corpus metadata) and ``recon/`` (Phase C, C5:
+    reconnaissance probes that run inside the ReconAgent, not the ASI swarm)
+    directories are filtered out — neither belongs in the standard ASI
+    attack-probe corpus.
     """
     candidates = [*root.rglob("*.yaml"), *root.rglob("*.yml")]
-    return sorted(p for p in candidates if "_meta" not in p.parts)
+    return sorted(p for p in candidates if "_meta" not in p.parts and "recon" not in p.parts)
 
 
 def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[Probe]:
@@ -171,6 +174,46 @@ def load_probes_for_asi(asi: AsiCategory) -> list[Probe]:
         )
         return []
     return load_all_probes(root=root)
+
+
+def load_recon_probes(*, strict: bool = False) -> list[Probe]:
+    """Load every probe under the bundled ``recon/`` subdirectory.
+
+    Recon probes are Phase C, C5: they describe reconnaissance attacks the
+    :class:`~agent_guardian.agents.recon.ReconAgent` (and its tool-name diff
+    re-entry hook) executes, NOT ASI attack probes the swarm fan-out runs.
+    Kept separate so the standard ASI corpus tests (counts, ASI coverage,
+    finding routing) are unaffected by recon-probe additions.
+
+    Each recon probe must still declare an ``asi`` category to satisfy the
+    triple-framework gate in :func:`load_probe`; pick whichever ASI category
+    the recon goal aligns with (e.g. inference-family fingerprinting maps
+    onto ASI09 / Trust Exploitation — discovering the model family is a
+    precursor to family-targeted prompt-injection).
+    """
+    root = find_corpus_root() / "recon"
+    if not root.exists():
+        _LOG.debug("recon probe root %s missing — returning empty list", root)
+        return []
+    candidates = sorted([*root.rglob("*.yaml"), *root.rglob("*.yml")])
+    if not candidates:
+        return []
+    probes: list[Probe] = []
+    for yml in candidates:
+        try:
+            probes.append(load_probe(yml))
+        except ProbeValidationError as exc:
+            if strict:
+                raise
+            _LOG.warning("skipping malformed recon probe %s: %s", yml, exc)
+            continue
+    probes.sort(key=lambda p: p.id)
+    _LOG.debug(
+        "PhaseC.C5 load_recon_probes: loaded=%d ids=%s",
+        len(probes),
+        [p.id for p in probes],
+    )
+    return probes
 
 
 def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:

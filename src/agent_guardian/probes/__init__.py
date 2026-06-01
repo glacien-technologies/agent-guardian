@@ -7,6 +7,7 @@ from agent_guardian.probes.loader import (
     find_corpus_root,
     load_all_probes,
     load_probes_for_asi,
+    load_recon_probes,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "find_corpus_root",
     "load_all_probes",
     "load_probes_for_asi",
+    "load_recon_probes",
 ]

@@ -650,6 +650,15 @@ class SwarmCommander:
                 "PhaseB.B6 winning_seed_store construction skipped: %s",
                 e,
             )
+        # PhaseC.C5 — recon-loop re-entry hook. Bound to a real fingerprint by
+        # ``_phase_recon``; until then ``on_reflection`` is a no-op. Constructed
+        # here (vs in _phase_recon) so the reflection sink the agents wire up
+        # in _phase_decompose closes over a stable object.
+        from agent_guardian.core.recon_reentry import ReconReentryHook
+
+        self._recon_reentry_hook: ReconReentryHook = ReconReentryHook(
+            refresh_fn=self._reentry_refresh,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -764,6 +773,11 @@ class SwarmCommander:
         # own static description if recon never wrote one.
         fingerprint = self.memory.target_fingerprint() or self._minimal_fingerprint()
         self._fingerprint = fingerprint
+
+        # PhaseC.C5 — bind the recon-reentry hook to the post-recon baseline.
+        # From here on, any reflection whose declared_tools diff this baseline
+        # will fire the (one-shot) refresh.
+        self._recon_reentry_hook.bind(self.memory, fingerprint)
 
         self._emit(
             SwarmEvent(
@@ -2652,10 +2666,17 @@ class SwarmCommander:
         keeps it future-proof). The closure swallows observer
         failures upstream of the agent — the agent's own catch is a
         second defensive layer.
+
+        PhaseC.C5 — the same payload is forwarded to the recon-reentry
+        hook so a mid-scan tool-name diff can kick off a non-blocking
+        recon refresh. The hook is bound to the post-recon fingerprint
+        baseline; until ``bind()`` runs (i.e. during recon itself) it is
+        a no-op so recon's own reflections cannot self-fire the loop.
         """
-        # Local alias so the closure doesn't capture ``self`` cycles
+        # Local aliases so the closure doesn't capture ``self`` cycles
         # any longer than the agent's lifetime.
         emit = self._emit
+        reentry = self._recon_reentry_hook
 
         def _sink(payload: Mapping[str, Any]) -> None:
             emit(
@@ -2666,8 +2687,53 @@ class SwarmCommander:
                     payload=dict(payload),
                 )
             )
+            try:
+                reentry.on_reflection(payload)
+            except Exception as exc:  # pragma: no cover -- defensive
+                _LOG.debug(
+                    "PhaseC.C5 recon_reentry sink dispatch raised %s — continuing",
+                    exc,
+                )
 
         return _sink
+
+    async def _reentry_refresh(self, new_tools: list[str]) -> TargetFingerprint | None:
+        """Recon-reentry refresh callback.
+
+        Merges ``new_tools`` into the existing fingerprint's
+        ``declared_tools`` set and writes the refined fingerprint back.
+        Keeps the rest of the fingerprint intact — the diff only ever
+        *adds* evidence, mirroring how :class:`ReconAgent` merges its
+        own LLM-extracted profile into the static base. Returns the
+        refined fingerprint, or ``None`` when there is nothing to merge
+        (current fingerprint already names every tool in ``new_tools``).
+        """
+        current = self.memory.target_fingerprint() or self._fingerprint
+        if current is None:  # pragma: no cover -- recon always writes one
+            return None
+        existing_lower = {n.lower() for n in current.declared_tools}
+        merged: list[str] = list(current.declared_tools)
+        added: list[str] = []
+        for name in new_tools:
+            if name.lower() not in existing_lower:
+                merged.append(name)
+                existing_lower.add(name.lower())
+                added.append(name)
+        if not added:
+            return None
+        note = f"PhaseC.C5 recon-reentry: +{len(added)} tools={added}"
+        new_notes = f"{current.notes} | {note}" if current.notes else note
+        refined = current.model_copy(
+            update={
+                "has_tools": True,
+                "declared_tools": merged,
+                "notes": new_notes,
+            }
+        )
+        # Mirror onto the in-memory cached attribute so downstream phase
+        # callers reading ``self._fingerprint`` see the refreshed view.
+        self._fingerprint = refined
+        return refined
 
 
 # ---------------------------------------------------------------------------
