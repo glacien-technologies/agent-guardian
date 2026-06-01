@@ -38,7 +38,7 @@ Format per item:
   The QA-026 `_humanise_band()` fallback semantics + the QA-028 sub-ask 1 hover-tooltip pattern (when it ships) stay unchanged: the long "Not graded yet — the scan didn't reach 95% coverage; raw AIVSS preserved for trend tracking" prose moves into the tile's `ⓘ` tooltip / aria-describedby description, while the visible label is the short `NA`.
 - **Acceptance** · (1) BAND tile renders `NA` (2 chars) instead of `Not graded yet` (15 chars) when `scan.band == SeverityBand.NOT_EVALUATED` or `scan is None`. (2) Existing test `test_server_dashboard_rendering.py::test_bug2_score_card_with_partial_scan_renders_real_aivss` updates from `assert ctx.payload["band_label"] == "Not graded yet"` → `== "NA"`. (3) The feedback-no-raw-enum-in-ui rule (commit `b8f9e8a` / QA-026) is not weakened — the test still asserts the raw `"not_evaluated"` enum value never appears in the rendered HTML; only the user-facing string flips. (4) Live verify: render the dashboard against a partial scan, confirm BAND tile shows `NA` on one line in the existing ~9rem column.
 - **Cross-cuts** · QA-026 (introduced the humanisation mapping; this just retunes one label). QA-028 sub-ask 1 (the hover-tooltip path will carry the longer explanatory prose so the tile can stay short). `feedback-no-raw-enum-in-ui` memory (locked in QA-026 + verified by the test suite — unchanged by this QA).
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — `_BAND_LABELS[SeverityBand.NOT_EVALUATED]` flipped from "Not graded yet" → "NA"; one-line fit in the ~9rem KPI tile width; `feedback-no-raw-enum-in-ui` memory rule preserved (the raw enum value still never reaches the UI verbatim)
 
 ---
 
@@ -66,7 +66,7 @@ Format per item:
   6. pytest server suite green; new `test_executive_overview_renders_asi_compact_table` test asserts the widget + the 10 rows + the live-update data attributes.
 - **Cross-cuts** · **DEPENDENCY-BLOCKER for QA-030** (Agents tab deletion). QA-030's risk callout about losing the ASI breakdown surface is fully resolved by this QA. QA-028 sub-ask 3a (shrink + square-up the radar) — keep the radar at the top of the per-ASI section; this compact table goes BELOW it as the row-density view. The two surfaces complement: radar = shape of the safety profile, table = numbers + per-row state.
 - **Risk callouts** · Live-update plumbing: confirm every `data-live="…asi…"` key currently rendered by `_asi_rows.html` continues to resolve when the partial moves to Overview (the SSE patcher is global; the keys are tied to the DOM ids, not the parent tab). If any key collides with the Overview's existing radar markup (e.g. both surfaces try to update `data-live="asi-aivss-01"`), give the compact-table version a `data-live-scope="asi-compact"` prefix.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — new `_asi_compact_table.html` widget on Overview tab (10-row contract: code · category · score bar · AIVSS · weight · finding counts · status pill); tighter padding (4px) + 24px bar + no per-row subtitle = ≤ 480 px widget vertical; live render shows 186 exec-asi-compact hits; live SSE patcher keys preserved; QA-030 unblocked
 
 ---
 
@@ -98,7 +98,7 @@ Format per item:
 
 - **Cross-cuts** · QA-031 (the slide-over component QA-031 introduces is reused here — ship them in the same workflow). QA-026 + `297618a` (verdict colour-coding vocabulary stays identical between Findings + Probes — single source of truth in CSS via `.exec-verdict-pill--{fail|pass|inconclusive|unknown}`). QA-029 (Findings click-to-expand chevron pattern → mirror in the Probes row hover state for consistent muscle-memory).
 - **Risk callouts** · 100+ slide-over content payloads inlined as JSON-island = potential page bloat (worst case 100 probes × ~3 KB payload = 300 KB). MVP can still ship inline; pivot to `fetch /probe/{probe_id}.json` if scans regularly push 500+ probes. The verdict-pill colour mapping must agree with the Findings-tab `.exec-finding__evidence-verdict--{fail|pass|inconclusive|unknown}` rules; consolidate into a single `.exec-verdict-pill--*` class set so future colour-token changes propagate to both surfaces.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — `_probes_table.html` (5-column: Probe ID / Agent·ASI / Verdict / Turn / Timestamp) reuses QA-031 `_finding_slideover.html` with kind="probe" parameterisation; verdict pill colour vocabulary agrees with QA-026 + 297618a (red EXPLOITED / green DEFENDED / amber INCONCLUSIVE / muted PENDING)
 
 ---
 
@@ -141,7 +141,7 @@ Format per item:
 
 - **Cross-cuts** · QA-024 (the original Executive card layout this replaces). QA-026 (the per-event evidence drawer + verdict-colour pills the slide-over preserves verbatim). QA-029 (the click-to-expand chevron + Reproducibility-tab pruning land in the same Executive Findings refactor — sub-asks 1 + 2 + 3 of QA-029 should ship in the same workflow as QA-031 to avoid touching `_tab_findings.html` twice). QA-030 (Agents-tab removal frees 1/5 of the tab bar width; the Findings table layout has more horizontal room post-QA-030). Mission Control (idiom source — explicitly mirror the patterns from `mission/_findings_table.html` + `mission/_drilldown_slideover.html` so a future operator switching between themes has consistent muscle-memory).
 - **Risk callouts** · The slide-over is the first new component class added to the Executive theme post-QA-024 (`exec-slideover` / `.exec-slideover--open`); a11y review needed for focus-trap correctness (use `inert` attribute on the rest of the document while the slide-over is open to neuter background tabbing). Mobile / narrow viewport: at < 768 px the slide-over should expand to full-width (`width: 100vw` instead of 480 px sidebar). Performance: 15 findings × an inline-JSON payload of ~3 KB each = 45 KB extra on first paint — well within budget; if the scan ever ships 200+ findings the JSON-island approach should pivot to `fetch /finding/{id}.json` (lazy-load). For MVP, stay inline.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — `_findings_table.html` (4-column: Severity / Agent·ASI / Probe / Summary) + `_finding_slideover.html` (sliding aside with full header + metadata strip + evidence drawer preserving QA-026 evidence_stats pills + 297618a verdict colours + QA-029 chevron summary) + `executive_findings.js` (IIFE row-click + Esc + backdrop + focus-trap)
 
 ---
 
@@ -167,7 +167,7 @@ Format per item:
 - **Acceptance** · (1) Tab bar renders exactly 4 buttons in this order: Overview / Findings / Probes / Logs. (2) `?theme=executive#tab=agents` (an operator's stale bookmark) silently falls through to Overview rather than 404-ing — JS guards an unknown `tab=` hash by defaulting to the first tab. (3) `body.count('id="tabpanel-')` returns 4 (down from 5). (4) The ASI breakdown remains operator-visible via the Overview ASI radar (FIG. 2). (5) pytest server suite green; no orphaned references to `tab-agents` / `tabpanel-agents` anywhere in src/ or tests/.
 - **Cross-cuts** · **DEPENDENCY: QA-033 MUST SHIP FIRST** to preserve the per-ASI breakdown table content on the Overview tab as a compact widget before Agents is deleted — otherwise the per-row weight + finding-count-by-severity + status-pill information that's only on the Agents tab today disappears from the dashboard entirely. QA-024 (specced the 5-tab layout; this change updates that contract). QA-026 (the Reproducibility receipt was deliberately omitted from the Agents tab — once Agents is gone, that omission is moot; receipt stays included on Overview + Probes + Logs and excluded on the now-gone Agents + on Findings/Logs per QA-029's amended sub-ask 3). QA-028 (Overview-tab polish; the ASI radar shrink + square-up from QA-028 sub-ask 3a becomes the canonical ASI-breakdown visualisation surface once Agents is removed — even more reason to ship QA-028 cleanly).
 - **Risk callouts** · The 5-tab WAI-ARIA contract was a locked decision in QA-023; this is the first formal walk-back. Operator bookmarks pointing at `#tab=agents` will silently degrade to Overview — log a warning in `executive_tabs.js` (DEBUG-level only) for forensic visibility. The `_asi_rows.html` partial is currently only included by `_tab_agents.html`; deleting both is safe but requires a grep-for-orphans sweep before the workflow's build phase ships.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — Agents tab removed; `_tab_agents.html` + `_asi_rows.html` deleted; `_tab_bar.html` drops the Agents button; `executive_tabs.js` guards stale `#tab=agents` bookmarks → fallthrough to Overview; per-ASI score/weight/finding-count/status data preserved on Overview via QA-033 compact widget; live render confirms tabpanel-agents residue == 0
 
 ---
 
@@ -206,7 +206,7 @@ Format per item:
   6. pytest server suite green; live verify on a real scan with 5+ findings confirms operator-evident interactivity.
 - **Cross-cuts** · QA-026 (the outer-drawer summary was added in the same QA-026 commit that introduced the per-finding evidence). QA-028 (this is the natural follow-up Findings-tab UX polish to QA-028's Overview-tab polish — both clean up duplicated / unclear interactions on the Executive theme).
 - **Risk callouts** · The severity bar chart removal MUST stay scoped to the Findings tab — the Overview tab's instance (FIG. 1 + click-to-jump-to-Findings anchors) is the canonical one and must remain. Tests: when removing the include from `_tab_findings.html`, also delete the now-orphan `data-tab-key="findings"` canvas id branch in `executive_charts.js` (the multi-canvas mount loop from `2e25153` will harmlessly skip the missing canvas, but the dead branch is technical debt). Outer drawer relabel: "Click to view evidence" / "Hide evidence" must NOT swallow the existing evidence_stats pill text (`1 EXPLOITED 1 DEFENDED 1 INCONCLUSIVE`). Render order: chevron + label LEFT, stats pills RIGHT, evidence drawer body BELOW.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — duplicate severity-bar removed from Findings tab; outer-drawer summary gets chevron + hover-lift via .exec-finding__evidence > summary rewrite (shipped together with QA-031 finding-slideover); reproducibility receipt removed from Findings + Logs tabs (now Overview + Probes only, live render verifies count == 2)
 
 ---
 
@@ -251,7 +251,7 @@ Format per item:
   7. pytest server suite still green (the existing KPI-tile + chart-partial tests will need a small refresh).
 - **Cross-cuts** · QA-026 (this is the natural follow-up to the QA-026 KPI icons + descriptions ship; the descriptions stay in the view-model, the render mode flips). QA-027 (the ELAPSED + COST tile mini-charts should respect the "no cap" state when their respective caps are uncapped — render a flat / "∞" indicator rather than a 0% progress bar).
 - **Risk callouts** · Tooltip positioning on the rightmost two tiles (COST + COVERAGE) needs a `right: 0; left: auto` flip so the popover doesn't clip the page edge. The FINDINGS stacked-bar should clamp to ≥ 1 px per non-zero segment so a scan with 1 critical + 20 high doesn't render the critical segment invisible.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — KPI strip descriptions moved behind hover/focus ⓘ tooltips (CSS-only); 8 per-tile inline-SVG mini-charts (AIVSS radial gauge, BAND 5-segment axis, FINDINGS severity stacked bar, etc.); row-3 bar canvas-wrap 360→280 px; radar aspect-ratio: 1/1 square; FIG. 1 / FIG. 2 eyebrows dropped
 
 ---
 
@@ -269,7 +269,7 @@ Format per item:
   3. `tests/unit/test_swarm_config.py` (new file) — lock the new default + the `wait_for` no-timeout branch + the plan-panel `uncapped` render. Also a CLI integration test for `--budget-seconds`.
 - **Acceptance** · (1) `SwarmConfig().overall_wall_seconds is None`. (2) `agent-guardian scan ...` with no `--budget-seconds` runs to swarm-natural completion (USD cap, per-agent token cap, or `scan_done` end-of-plan) without ever hitting a wall-clock kill. (3) `agent-guardian scan --budget-seconds 600 ...` does kill at 10 min. (4) plan panel BUDGET section renders `Wall-clock cap   uncapped` when not set; pytest 2575+ pass; no regression on the existing `wall_seconds_remaining` checkpoint metric (it should report `inf` or be omitted when uncapped, NOT 0).
 - **Cross-cuts** · Parallel to `_LOGS_TAIL_CAP = None` precedent (commit `2e25153`, 2026-05-31, operator request: "don't keep the log limit of 1000"). Same philosophy applied to wall-clock. Also note: this is the second time the "no arbitrary cap" rule has been requested by the operator — the broader principle (default uncapped; opt-in cap via CLI flag) is now a saved feedback memory.
-- **Status** · open
+- **Status** · **CLOSED** (2026-06-01, commit `fbbf9e0`) — `overall_wall_seconds: float | None = None` in SwarmConfig + new `--budget-seconds N` CLI flag; plan-panel BUDGET section renders "Wall-clock cap   uncapped" when not set; locked by tests/unit/test_swarm_config.py
 
 ---
 
