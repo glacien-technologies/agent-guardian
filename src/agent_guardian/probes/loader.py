@@ -69,13 +69,16 @@ def find_corpus_root() -> Path:
 def _iter_probe_files(root: Path) -> list[Path]:
     """Return every ``*.yaml`` and ``*.yml`` probe file under ``root`` (sorted).
 
-    Files inside ``_meta/`` (corpus metadata) and ``recon/`` (Phase C, C5:
+    Files inside ``_meta/`` (corpus metadata), ``recon/`` (Phase C, C5:
     reconnaissance probes that run inside the ReconAgent, not the ASI swarm)
-    directories are filtered out — neither belongs in the standard ASI
-    attack-probe corpus.
+    and ``multi_turn_plans/`` (Phase C, C1: declarative MultiTurnPlan YAML
+    consumed by :func:`agent_guardian.strategies.load_multi_turn_plan_from_yaml`,
+    not a Probe schema) directories are filtered out — none belong in the
+    standard ASI attack-probe corpus.
     """
     candidates = [*root.rglob("*.yaml"), *root.rglob("*.yml")]
-    return sorted(p for p in candidates if "_meta" not in p.parts and "recon" not in p.parts)
+    excluded = {"_meta", "recon", "multi_turn_plans"}
+    return sorted(p for p in candidates if not excluded.intersection(p.parts))
 
 
 def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[Probe]:
