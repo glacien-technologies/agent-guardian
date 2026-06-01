@@ -17,6 +17,49 @@ Format per item:
 
 ---
 
+## QA-031 — Port the Mission Control findings table + drilldown slide-over idiom to the Executive theme: replace the per-finding card list with a 4-column table (Severity / Agent · ASI / Probe / Summary), drop the ID and LAST SEEN columns, row-click opens a slide-over with the full finding header + collapsible evidence events
+
+- **Date filed** · 2026-06-01
+- **Severity** · medium-high / strategic UX — the Executive Findings tab is the operator's primary triage surface; the current card layout is verbose (each card ~280 px tall with metadata strip + summary + drawer) so 15 findings = ~4200 px of scroll. Mission Control already solved this exact problem with a tight 5-column table + a slide-over for the deep dive; the same idiom belongs in Executive. Operator screenshot of the Mission Control findings table flagged this directly: "this is how findings are shown in mission control. can we leverage this type in executive dashboard please."
+- **Found via** · 2026-06-01 operator review comparing the Mission Control findings table to the Executive Findings tab card list. Mission ships `_findings_table.html` (row-density triage) + `_drilldown_slideover.html` (slide-over for the deep-dive on the clicked row); Executive ships a card list with everything-always-visible. Operator wants Executive to read like Mission Control's row-density triage with a slide-over for detail.
+- **Symptom** · Executive Findings tab requires the operator to scroll a full viewport per ~2 findings, and the per-card evidence drawer (despite the QA-026 + QA-029 work to make it clickable) is still visually dense once expanded. There's no way to see 15 findings at a glance.
+- **Expected** · 4-column compact table at the top of `#tabpanel-findings`. Click any row → slide-over (Mission Control's idiom, ported and Executive-styled) with the full finding header (severity pill, summary headline, finding ID, ASI / CSA / Probe / ATLAS metadata strip) + the existing evidence-events drawer (preserving QA-026's per-event verdict badges, QA-029's chevron-styled click-to-expand pattern, and the EXPLOITED / DEFENDED / INCONCLUSIVE pill colour-coding from `297618a`).
+- **Scope** · Three coordinated changes:
+
+  1. **New `_findings_table.html` partial for the Executive theme.** Port the Mission Control table structure with Executive-theme typography + tokens. **4-column layout (no ID column, no LAST SEEN column):**
+     - **Severity** (~6rem) — same severity pill the existing finding card uses (`exec-sev-pill exec-sev-pill--{class}` with the coloured dot + uppercase label).
+     - **Agent · ASI** (~14rem) — the agent name (e.g. `agent-untraceability`) + the ASI code (e.g. `ASI10`) as a compound cell. Format: `<code>ASI10</code> agent-untraceability` (mono ASI code, sans agent name) so the eye can scan ASI codes vertically.
+     - **Probe** (~12rem) — the probe id (e.g. `ASI10-DR-003` or `goal-specific-38949afe`) in mono.
+     - **Summary** (`flex: 1 1 auto`) — the finding's one-line summary, truncated with `text-overflow: ellipsis` + `overflow: hidden` on overflow. Hover surfaces the full text as a native `title=` tooltip (or matches the QA-028 hover-tooltip pattern when that lands).
+     Each `<tr>` carries `data-finding-id="{{ f.id }}"` + `tabindex="0"` + a click + keyboard handler that opens the slide-over for that finding. ARIA: `<table role="table">` + `<tr role="button" aria-controls="exec-finding-slideover">`. Sortable headers (severity sort: Critical → High → Medium → Low; ASI sort: lexical) are a stretch goal — defer to a follow-up QA if the build phase runs over.
+
+  2. **New `_finding_slideover.html` partial.** Port the Mission Control `_drilldown_slideover.html` markup + behaviour. **Slide-over contract:**
+     - Hidden by default via `transform: translateX(100%)` on `<aside class="exec-slideover">`. JS toggles `.exec-slideover--open` (with `transform: translateX(0)` and a 200ms ease-out) when a finding row is clicked.
+     - **Header:** severity pill + finding ID + Copy-ID button + timestamp on the right.
+     - **Title:** the finding's summary text rendered in `--exec-font-serif` at headline scale (24-28 px).
+     - **Metadata strip:** the existing `<dl class="exec-finding__meta">` block from the current card (ASI / CSA / Probe / ATLAS), reused verbatim.
+     - **Evidence body:** the existing `<details class="exec-finding__evidence">` outer drawer is reused IN PLACE — including QA-026's evidence_stats breakdown pills (`N exploited · N defended · N inconclusive`), QA-029's chevron-styled click-to-expand outer summary, and the inner per-row `.exec-finding__evidence-summary` collapsibles with verdict colour-coding (red `EXPLOITED` / green `DEFENDED` / amber `INCONCLUSIVE` accent bars) from `297618a`.
+     - **Footer / close:** an X close button (top-right) + an "Esc closes" keyboard handler + a backdrop-click handler. Backdrop is a translucent overlay (`background: rgba(0,0,0,0.4); backdrop-filter: blur(2px)`).
+     - Only ONE slide-over instance per page; clicking a different row swaps its content (the JS handler reads `data-finding-id` and re-renders the inner blocks from a hidden JSON-island of finding payloads OR re-fetches `/scan/{id}/finding/{finding_id}.json` if we go server-side). MVP picks the hidden-JSON-island approach (data is already on the page; avoids a route + roundtrip).
+
+  3. **`_tab_findings.html` swap card list → table + slide-over.** The existing per-severity bucket structure (`<section class="exec-sev-bucket" id="exec-sev-{key}">` with click-to-jump anchors) stays — the table is laid out within each bucket so the Overview's bar-chart-click navigation still resolves. Inside each bucket, replace the `<ol class="exec-findings-list">` + per-finding `<li class="exec-finding">` cards with `<table class="exec-findings-table">` rows. Mount the `_finding_slideover.html` partial ONCE at the bottom of the tab (outside the buckets) — its content swaps via JS.
+
+- **Acceptance** ·
+  1. Findings tab default render shows a 4-column table per severity bucket: SEVERITY / AGENT · ASI / PROBE / SUMMARY. No ID column. No LAST SEEN column.
+  2. With 15 findings, the entire table fits in a single 1080p viewport scroll (was ~4200 px → target ≤ 1100 px).
+  3. Clicking any row opens a slide-over from the right edge of the viewport with 200ms ease-out.
+  4. The slide-over shows the finding's full header (severity pill + summary + ID + Copy button), the metadata strip (ASI / CSA / Probe / ATLAS), and the evidence-events drawer with all QA-026 + QA-029 + `297618a` polish (verdict badges, chevron summary, per-row collapsibles).
+  5. Esc / X-button / backdrop-click closes the slide-over.
+  6. Keyboard: Tab into a row → Enter opens slide-over; focus returns to the row on close (focus-trap inside the slide-over while open).
+  7. Click-to-jump from the Overview's `Findings by severity` bar still scrolls to the right bucket (the `#exec-sev-{key}` anchors are preserved on the bucket wrappers).
+  8. pytest server suite green. New tests: `test_executive_findings_renders_table_not_card_list`, `test_executive_findings_table_has_no_id_column`, `test_executive_findings_table_has_no_last_seen_column`, `test_executive_findings_slideover_renders_on_click` (via TestClient + parse the inline JS attaches the click handler — or a Playwright-style render test if we already have one), `test_executive_findings_slideover_preserves_evidence_drawer_polish`.
+
+- **Cross-cuts** · QA-024 (the original Executive card layout this replaces). QA-026 (the per-event evidence drawer + verdict-colour pills the slide-over preserves verbatim). QA-029 (the click-to-expand chevron + Reproducibility-tab pruning land in the same Executive Findings refactor — sub-asks 1 + 2 + 3 of QA-029 should ship in the same workflow as QA-031 to avoid touching `_tab_findings.html` twice). QA-030 (Agents-tab removal frees 1/5 of the tab bar width; the Findings table layout has more horizontal room post-QA-030). Mission Control (idiom source — explicitly mirror the patterns from `mission/_findings_table.html` + `mission/_drilldown_slideover.html` so a future operator switching between themes has consistent muscle-memory).
+- **Risk callouts** · The slide-over is the first new component class added to the Executive theme post-QA-024 (`exec-slideover` / `.exec-slideover--open`); a11y review needed for focus-trap correctness (use `inert` attribute on the rest of the document while the slide-over is open to neuter background tabbing). Mobile / narrow viewport: at < 768 px the slide-over should expand to full-width (`width: 100vw` instead of 480 px sidebar). Performance: 15 findings × an inline-JSON payload of ~3 KB each = 45 KB extra on first paint — well within budget; if the scan ever ships 200+ findings the JSON-island approach should pivot to `fetch /finding/{id}.json` (lazy-load). For MVP, stay inline.
+- **Status** · open
+
+---
+
 ## QA-030 — Delete the Agents tab from the Executive theme; consolidate the 5-tab layout down to 4 (Overview / Findings / Probes / Logs) since the per-ASI breakdown the Agents tab carries is already covered by the Overview ASI radar (FIG. 2)
 
 - **Date filed** · 2026-06-01
