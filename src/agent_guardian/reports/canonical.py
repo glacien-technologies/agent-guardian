@@ -22,6 +22,7 @@ inconsistency.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 from datetime import datetime, timezone
 from enum import Enum
@@ -45,6 +46,9 @@ def _default(obj: Any) -> Any:
         return obj.value
     if isinstance(obj, BaseModel):
         return obj.model_dump(mode="json")
+    # WHY: ProbeAttachment is a frozen dataclass that may ride through a Probe.
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
     if isinstance(obj, PurePath):
         return str(obj)
     if isinstance(obj, bytes | bytearray):

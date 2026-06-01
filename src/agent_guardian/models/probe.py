@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
+from agent_guardian.models.multimodal import ProbeAttachment
 from agent_guardian.models.severity import Severity
 from agent_guardian.models.tier import Tier
 
@@ -48,8 +49,12 @@ class Probe(BaseModel):
     # OWASP-2026 scenario citation (CC-4). Optional for backward compat with
     # legacy probes; Phase B probes are required to populate this.
     owasp_scenario: str | None = None
+    # Phase C.C4a — multimodal attachments riding alongside the seed text.
+    # Tuple default keeps the model frozen+hashable; empty default preserves
+    # existing canonical-JSON / signed-bundle hashes for all current probes.
+    attachments: tuple[ProbeAttachment, ...] = ()
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
 
 def _format_pydantic_errors(exc: ValidationError) -> str:
@@ -58,6 +63,43 @@ def _format_pydantic_errors(exc: ValidationError) -> str:
         loc = ".".join(str(item) for item in err["loc"]) or "<root>"
         parts.append(f"{loc}: {err['msg']}")
     return "; ".join(parts)
+
+
+def _coerce_attachments(raw: Any, *, source: str) -> tuple[ProbeAttachment, ...] | None:
+    """Convert dict-shaped attachments into ProbeAttachment instances.
+
+    Returns None when no attachments key is present (caller leaves the field
+    at its default empty tuple). YAML loads attachments as a list-of-mappings;
+    pydantic with arbitrary_types_allowed=True will NOT auto-build the
+    dataclass, so we do the conversion here before model_validate. Raises a
+    ProbeValidationError on malformed shapes — bubbles up through load_probe.
+    """
+    if "attachments" not in raw:
+        return None
+    items = raw["attachments"]
+    if items is None or items == []:
+        return ()
+    if not isinstance(items, list):
+        raise ProbeValidationError(
+            f"Probe in {source}: attachments must be a list, got {type(items).__name__}"
+        )
+    out: list[ProbeAttachment] = []
+    for idx, item in enumerate(items):
+        if isinstance(item, ProbeAttachment):
+            out.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] must be a mapping, "
+                f"got {type(item).__name__}"
+            )
+        try:
+            out.append(ProbeAttachment(**item))
+        except (TypeError, ValueError) as exc:
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] invalid: {exc}"
+            ) from exc
+    return tuple(out)
 
 
 def _coerce_probe(raw: Any, *, source: str) -> Probe:
@@ -73,6 +115,11 @@ def _coerce_probe(raw: Any, *, source: str) -> Probe:
     mitre_value = raw.get("mitre_atlas")
     if mitre_value is None or (isinstance(mitre_value, list) and len(mitre_value) == 0):
         raise ProbeValidationError(f"Probe in {source}: mitre_atlas must be a non-empty list")
+
+    # WHY: pydantic with arbitrary_types_allowed won't build the dataclass for us.
+    coerced = _coerce_attachments(raw, source=source)
+    if coerced is not None:
+        raw = {**raw, "attachments": coerced}
 
     try:
         return Probe.model_validate(raw)
