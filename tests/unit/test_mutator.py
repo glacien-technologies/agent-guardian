@@ -88,9 +88,13 @@ def test_bon_apply_is_deterministic_given_seed() -> None:
     assert a == b
 
 
-def test_bon_clamps_n() -> None:
-    assert BoN(n=10).n == 100
-    assert BoN(n=99999).n == 1000
+def test_bon_passes_n_through_uncapped() -> None:
+    # Per the AgentGuardian "no arbitrary hardcoded caps" rule, BoN.n is
+    # passed through verbatim (n=2 floor still enforced — n=1 wouldn't be
+    # "best of N" by definition). Operators who want a cap put it behind
+    # an opt-in CLI flag, not a buried default.
+    assert BoN(n=10).n == 10
+    assert BoN(n=99999).n == 99999
 
 
 # --------------------------------------------------------------------------- #

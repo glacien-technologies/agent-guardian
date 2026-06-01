@@ -20,7 +20,6 @@ feedback when the launch-readiness contract drifts.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -140,24 +139,16 @@ def test_readme_lint_guards_against_placeholders() -> None:
     assert "/discord/0" in steps_yaml
 
 
-def test_readme_currently_has_the_placeholders_we_guard_against() -> None:
-    """Sanity-check that the guards match the README we ship.
-
-    If somebody updates the README badges this test will start failing
-    — at which point the corresponding guard in ``readme-lint.yml``
-    can be removed too. Keeping the test catches the inverse drift
-    (guards removed before the placeholders).
-    """
-
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    has_openssf_placeholder = bool(re.search(r"/projects/0000([^0-9]|$)", readme))
-    has_discord_placeholder = bool(re.search(r"/discord/0+\b", readme))
-    # We only need *at least one* placeholder to still exist for the
-    # guard tests to be meaningful — both are present today.
-    assert has_openssf_placeholder or has_discord_placeholder, (
-        "README no longer carries either placeholder; remove the "
-        "matching guard from .github/workflows/readme-lint.yml."
-    )
+# NOTE: a `test_readme_currently_has_the_placeholders_we_guard_against`
+# inverse-drift guard previously lived here; its own docstring said it
+# would start failing once the README placeholders were replaced and the
+# matching guard in readme-lint.yml could then be removed. Phase C.C8
+# rewrote the README (real framework-coverage matrix, no badge stubs),
+# which retired both placeholders, so the inverse-drift assertion no
+# longer has a meaningful invariant to check and was removed here. The
+# workflow-side `test_readme_lint_guards_against_placeholders` stays —
+# the workflow guards still pattern-match against any *future*
+# placeholder-leakage drift, even if no current README line trips them.
 
 
 # ------------------------------------------------------------------- link-check
