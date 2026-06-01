@@ -254,6 +254,9 @@ def emit_sarif(scan: Scan, *, redact: bool = True, validate: bool = True) -> dic
         # SARIF 2.1.0: run.invocations is an ARRAY (run.additionalProperties is
         # false, so a singular "invocation" key is rejected by strict consumers).
         run["invocations"] = [_build_invocation(scan.audit)]
+    # C7 — calibration travels under runs[0].properties (propertyBag is open).
+    if scan.calibration is not None:
+        run["properties"]["calibration"] = scan.calibration.model_dump(mode="json")
     payload: dict[str, Any] = {
         "$schema": SARIF_SCHEMA,
         "version": SARIF_VERSION,

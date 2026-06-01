@@ -12,7 +12,21 @@ from agent_guardian.models.finding import Finding
 from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.models.tier import Tier
 
-__all__ = ["BudgetReport", "Scan", "ScanCompleteness"]
+__all__ = ["BudgetReport", "CalibrationSummary", "Scan", "ScanCompleteness"]
+
+
+class CalibrationSummary(BaseModel):
+    """Brier-score calibration result for the judge(s) that produced this scan."""
+
+    # WHY [0,1]: Brier is a mean-squared error of probabilities; outside [0,1] is malformed.
+    brier_score: float = Field(ge=0.0, le=1.0)
+    accuracy: float = Field(ge=0.0, le=1.0)
+    n_items: int = Field(ge=0)
+    judge_label: str = Field(min_length=1)
+    # WHY optional: older calibration runs predate the version pin; new runs set it.
+    calibration_set_version: str | None = None
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 class BudgetReport(BaseModel):
@@ -139,6 +153,8 @@ class Scan(BaseModel):
     # or worse. Defaults ``"A"`` so older Scan JSON on disk deserialises
     # unchanged.
     coverage_grade: Literal["A", "B", "C", "D", "F"] = "A"
+    # C7 — judge calibration summary (Brier + accuracy). Optional so back-compat.
+    calibration: CalibrationSummary | None = None
     created_at: datetime
 
     model_config = ConfigDict(frozen=True, extra="forbid")
