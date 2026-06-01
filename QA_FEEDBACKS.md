@@ -17,6 +17,91 @@ Format per item:
 
 ---
 
+## QA-034 — Replace the BAND tile humanised label `"Not graded yet"` with `"NA"` (shorter, scans better at KPI-tile width); keep the underlying `SeverityBand.NOT_EVALUATED` enum + the same fallback semantics
+
+- **Date filed** · 2026-06-01
+- **Severity** · low / UX polish — one-line change to the `_BAND_LABELS` mapping in `dashboard_view.py`. The QA-026 humanisation pass picked `"Not graded yet"` as the user-facing label for the `NOT_EVALUATED` band; the operator on 2026-06-01 reviewing the live KPI tile flagged that the long string wraps awkwardly in the BAND tile width (visible on the operator's `cli-6398b31ef7e0` Overview screenshot — `"Not graded yet"` wraps to 3 lines in the BAND tile while the other bands fit in one line). The shorter `"NA"` reads identically as "not authoritative / not available," matches the mono-uppercase convention of an enumerated tier short-code, and recovers the vertical space.
+- **Found via** · 2026-06-01 operator on Overview tab of `cli-6398b31ef7e0`: "instead of not graded yet for band. put it as NA. add this to the feedbacks."
+- **Symptom** · BAND tile renders `"Not graded yet"` wrapping over 3 lines in the KPI tile's ~9rem column width. The other bands (`Excellent` / `Good` / `Warning` / `Poor` / `Critical`) all fit on one line; the NOT_EVALUATED case stands out for the wrong reason.
+- **Expected** · BAND tile renders `"NA"` (uppercase, 2 letters) when the scan is non-authoritative. Single line. Same `--exec-text-muted` styling as the current `"Not graded yet"` rendering so the muted state still reads as "this is a fallback, not a real grade."
+- **Fix area** · One-line change in `src/agent_guardian/server/dashboard_view.py`:
+  ```python
+  _BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
+      SeverityBand.EXCELLENT: "Excellent",
+      SeverityBand.GOOD: "Good",
+      SeverityBand.WARNING: "Warning",
+      SeverityBand.POOR: "Poor",
+      SeverityBand.CRITICAL: "Critical",
+      SeverityBand.NOT_EVALUATED: "NA",   # was "Not graded yet"
+  }
+  ```
+  The QA-026 `_humanise_band()` fallback semantics + the QA-028 sub-ask 1 hover-tooltip pattern (when it ships) stay unchanged: the long "Not graded yet — the scan didn't reach 95% coverage; raw AIVSS preserved for trend tracking" prose moves into the tile's `ⓘ` tooltip / aria-describedby description, while the visible label is the short `NA`.
+- **Acceptance** · (1) BAND tile renders `NA` (2 chars) instead of `Not graded yet` (15 chars) when `scan.band == SeverityBand.NOT_EVALUATED` or `scan is None`. (2) Existing test `test_server_dashboard_rendering.py::test_bug2_score_card_with_partial_scan_renders_real_aivss` updates from `assert ctx.payload["band_label"] == "Not graded yet"` → `== "NA"`. (3) The feedback-no-raw-enum-in-ui rule (commit `b8f9e8a` / QA-026) is not weakened — the test still asserts the raw `"not_evaluated"` enum value never appears in the rendered HTML; only the user-facing string flips. (4) Live verify: render the dashboard against a partial scan, confirm BAND tile shows `NA` on one line in the existing ~9rem column.
+- **Cross-cuts** · QA-026 (introduced the humanisation mapping; this just retunes one label). QA-028 sub-ask 1 (the hover-tooltip path will carry the longer explanatory prose so the tile can stay short). `feedback-no-raw-enum-in-ui` memory (locked in QA-026 + verified by the test suite — unchanged by this QA).
+- **Status** · open
+
+---
+
+## QA-033 — Preserve the per-ASI breakdown content (currently on the Agents tab) by porting it to the Overview tab as a compact, live-updating progress widget BEFORE QA-030 deletes the Agents tab
+
+- **Date filed** · 2026-06-01
+- **Severity** · high / dependency-blocker for QA-030 — operator review of the Agents tab content flagged this directly: "this one is good actually to show case when the agent running it sees how is the progress and everything. see if there is a best way to put this in a compact form in overview itself please."
+- **Found via** · 2026-06-01 operator screenshot of the Agents tab's `_asi_rows.html` 10-row table (CODE / CATEGORY / SCORE bar / AIVSS / WEIGHT / FINDINGS / STATUS). The data itself — per-ASI score, weight, finding count, status — is genuinely useful for in-flight progress tracking. Operator wants it surfaced on Overview (where the eye lands first) instead of behind the Agents-tab click that QA-030 is removing. This QA is the **dependency for QA-030**: ship this first, then collapse the tab bar.
+- **Symptom** · The per-ASI score table only exists on the Agents tab. The Overview tab's ASI radar (FIG. 2) shows scores visually but doesn't carry the per-row metadata (weight, finding count, status pill, mid-flight `queued` / `running` / `complete` indicator). When QA-030 ships, that metadata vanishes.
+- **Expected** · A new compact ASI-breakdown widget on the Overview tab that:
+  - Renders the same 10-row contract (ASI01..ASI10) as the Agents tab's `_asi_rows.html`.
+  - Shows: CODE chip · CATEGORY name (one line, no descriptive subtitle — keep it compact) · SCORE bar (≤ 24px tall, brand-coloured) · AIVSS number · WEIGHT chip (× 2.0 / × 1.5 / × 1.0) · FINDINGS by severity (small inline pills) · STATUS pill (`queued` / `running` / `complete`).
+  - The whole thing fits in ≤ 480 px vertical space (10 rows × ~40 px + header), versus the current Agents-tab table at ~720 px.
+  - Updates live during in-flight scans via the existing SSE patcher in `layout.html` — the `data-live=*` keys already in `_asi_rows.html` should keep working when the partial is included on Overview instead of Agents.
+- **Scope** · Three coordinated changes (all on the Overview surface; Agents tab unchanged here — QA-030 deletes it separately, AFTER this lands):
+  1. **New `_asi_compact_table.html` partial** (copy + tighten `_asi_rows.html`). Same data contract, smaller padding (4px row padding vs current 12px), smaller bar height (24px vs 32px), no per-row subtitle line ("Direct · indirect · multi-turn" type tag-lists removed — keep the headline category name only). Reuse the existing `asi_rows` view-model field; no new payload keys.
+  2. **`_tab_overview.html` includes the new partial** somewhere in the Overview vertical flow. Recommended placement: BELOW the existing side-by-side `Findings by severity` + `Adversarial Surface Index per category` row, BEFORE the reproducibility footer. New section header: `<h2 class="exec-section-title">Adversarial Surface Index breakdown</h2>` + a one-line lede.
+  3. **`executive.css`** — new block `.exec-asi-compact` with the tight rules. Row hover lifts the background (`var(--exec-bg-sunken)`) so the row reads as visually associated with its data. Rows ARE NOT clickable — this is a read-only at-a-glance widget; the radar still lives in its own card above.
+- **Acceptance** ·
+  1. Overview tab renders a `data-component="asi-compact"` widget at the bottom (above repro footer) with exactly 10 rows.
+  2. Each row carries the same metadata fields as the Agents tab's current `_asi_rows.html` (code · category · score-bar · aivss · weight · finding-count-by-severity · status).
+  3. Widget vertical extent ≤ 480 px.
+  4. Mid-flight scan: status pill flips `queued` → `running` → `complete` live via SSE patcher (no full reload). AIVSS + score-bar update live.
+  5. After this ships, QA-030 can safely delete the Agents tab without information loss.
+  6. pytest server suite green; new `test_executive_overview_renders_asi_compact_table` test asserts the widget + the 10 rows + the live-update data attributes.
+- **Cross-cuts** · **DEPENDENCY-BLOCKER for QA-030** (Agents tab deletion). QA-030's risk callout about losing the ASI breakdown surface is fully resolved by this QA. QA-028 sub-ask 3a (shrink + square-up the radar) — keep the radar at the top of the per-ASI section; this compact table goes BELOW it as the row-density view. The two surfaces complement: radar = shape of the safety profile, table = numbers + per-row state.
+- **Risk callouts** · Live-update plumbing: confirm every `data-live="…asi…"` key currently rendered by `_asi_rows.html` continues to resolve when the partial moves to Overview (the SSE patcher is global; the keys are tied to the DOM ids, not the parent tab). If any key collides with the Overview's existing radar markup (e.g. both surfaces try to update `data-live="asi-aivss-01"`), give the compact-table version a `data-live-scope="asi-compact"` prefix.
+- **Status** · open
+
+---
+
+## QA-032 — Replace the Executive Probes tab card list with a compact 5-column table (Probe ID / Agent · ASI / Verdict / Turn / Timestamp), click row → reuses the QA-031 finding-slideover with probe-specific content (full prompt / target response / judge reasoning)
+
+- **Date filed** · 2026-06-01
+- **Severity** · medium / UX — Probes tab is the operator's forensic surface (every judged turn in the scan, 100+ rows for a full-mode scan). Current card layout is wasteful: each probe renders as a card with a single "See details" button and a timestamp + 2-line agent label; nothing else visible until clicked. With 100+ probes that's ~3000 px of mostly-empty scroll. Operator: "this one needs to be a clearer design please. probably a simple table and nice table."
+- **Found via** · 2026-06-01 operator screenshot of the Probes tab on scan `cli-ea162256679e`: 100 attempts × ~140 px per card = ~14,000 px of scroll. Each card shows only `recon-agent --` and a timestamp before the "See details" pill — the operator can't scan-eye 100 probes to find a specific verdict.
+- **Symptom** · The current `_tab_probes.html` renders each probe-attempt as a stacked `<li class="exec-probe">` block with `<header>` (probe id chip + agent name + ASI code + verdict pill + timestamp) + a collapsible `<details class="exec-probe__body">` with prompt / response / reasoning inside. Every row is the same height whether the operator wants to drill in or not, and the header row's information density is low (4 chips of mono text take a full row width).
+- **Expected** · A compact 5-column table at the top of `#tabpanel-probes`. Click any row → opens a slide-over (the same `_finding_slideover.html` component QA-031 introduces, parameterised for probe content) with the full prompt + target response + judge reasoning.
+- **Scope** · Two coordinated changes:
+  1. **New `_probes_table.html` partial.** 5-column layout:
+     - **Probe ID** (~10rem) — mono, truncated with ellipsis on overflow (the seed IDs like `goal-specific-38949afe` are long).
+     - **Agent · ASI** (~14rem) — compound cell: `<code>ASI03</code> identity-leak-agent`, same idiom as QA-031's findings table.
+     - **Verdict** (~6rem) — uppercase pill: red `EXPLOITED` (was `fail`), green `DEFENDED` (was `pass`), amber `INCONCLUSIVE`, muted `PENDING`. Mirrors QA-026 + `297618a` colour vocabulary verbatim.
+     - **Turn** (~3rem) — small mono "turn N" so the operator can see how deep the agent went on a given seed.
+     - **Timestamp** (~5rem) — `HH:MM:SS` mono.
+     Each `<tr>` carries `data-probe-id` + `tabindex="0"` + click/keyboard handler that opens the slide-over for that probe.
+
+  2. **Reuse the QA-031 `_finding_slideover.html` partial** with a probe-mode flag (or a separate `_probe_slideover.html` if the markup diverges too much from finding-slideover). Recommended: parameterise the existing slide-over with a `kind="probe"` Jinja variable that swaps the header content (probe ID + agent + verdict pill + turn timestamp instead of finding severity + summary + finding ID) and renders only the inner per-event block (prompt / response / reasoning — no metadata strip, no evidence-events drawer because a probe IS one event). MVP can ship as a separate `_probe_slideover.html` partial and dedupe later if both end up sharing > 80% of the markup.
+
+- **Acceptance** ·
+  1. Probes tab default render shows a 5-column table: PROBE ID / AGENT · ASI / VERDICT / TURN / TIMESTAMP. The verdict-stats outer summary from QA-026 / `297618a` colour vocabulary is preserved (badges colour-match the operator's mental model).
+  2. With 100 probes, table fits in ≤ 1600 px (was ~14,000 px → 88% scroll reduction).
+  3. Click any row → slide-over from the right edge of the viewport with 200ms ease-out. Body shows the probe's full prompt + target response + judge reasoning.
+  4. Esc / X / backdrop-click closes. Keyboard: Tab → Enter opens; focus-trap inside while open; focus returns to row on close.
+  5. The existing per-probe `clean_control` empty-state copy is preserved.
+  6. pytest server suite green; new tests `test_executive_probes_renders_table_not_card_list`, `test_executive_probes_table_has_5_columns`, `test_executive_probes_slideover_opens_on_row_click`.
+
+- **Cross-cuts** · QA-031 (the slide-over component QA-031 introduces is reused here — ship them in the same workflow). QA-026 + `297618a` (verdict colour-coding vocabulary stays identical between Findings + Probes — single source of truth in CSS via `.exec-verdict-pill--{fail|pass|inconclusive|unknown}`). QA-029 (Findings click-to-expand chevron pattern → mirror in the Probes row hover state for consistent muscle-memory).
+- **Risk callouts** · 100+ slide-over content payloads inlined as JSON-island = potential page bloat (worst case 100 probes × ~3 KB payload = 300 KB). MVP can still ship inline; pivot to `fetch /probe/{probe_id}.json` if scans regularly push 500+ probes. The verdict-pill colour mapping must agree with the Findings-tab `.exec-finding__evidence-verdict--{fail|pass|inconclusive|unknown}` rules; consolidate into a single `.exec-verdict-pill--*` class set so future colour-token changes propagate to both surfaces.
+- **Status** · open
+
+---
+
 ## QA-031 — Port the Mission Control findings table + drilldown slide-over idiom to the Executive theme: replace the per-finding card list with a 4-column table (Severity / Agent · ASI / Probe / Summary), drop the ID and LAST SEEN columns, row-click opens a slide-over with the full finding header + collapsible evidence events
 
 - **Date filed** · 2026-06-01
@@ -80,7 +165,7 @@ Format per item:
      - Add `test_executive_no_agents_tab_in_dom` that asserts the rendered HTML contains neither `id="tab-agents"` nor `id="tabpanel-agents"`.
 
 - **Acceptance** · (1) Tab bar renders exactly 4 buttons in this order: Overview / Findings / Probes / Logs. (2) `?theme=executive#tab=agents` (an operator's stale bookmark) silently falls through to Overview rather than 404-ing — JS guards an unknown `tab=` hash by defaulting to the first tab. (3) `body.count('id="tabpanel-')` returns 4 (down from 5). (4) The ASI breakdown remains operator-visible via the Overview ASI radar (FIG. 2). (5) pytest server suite green; no orphaned references to `tab-agents` / `tabpanel-agents` anywhere in src/ or tests/.
-- **Cross-cuts** · QA-024 (specced the 5-tab layout; this change updates that contract). QA-026 (the Reproducibility receipt was deliberately omitted from the Agents tab — once Agents is gone, that omission is moot; receipt stays included on Overview / Probes / Logs and excluded on the now-gone Agents + on Findings per QA-029). QA-028 (Overview-tab polish; the ASI radar shrink + square-up from QA-028 sub-ask 3a becomes the canonical ASI-breakdown surface once Agents is removed — even more reason to ship QA-028 cleanly).
+- **Cross-cuts** · **DEPENDENCY: QA-033 MUST SHIP FIRST** to preserve the per-ASI breakdown table content on the Overview tab as a compact widget before Agents is deleted — otherwise the per-row weight + finding-count-by-severity + status-pill information that's only on the Agents tab today disappears from the dashboard entirely. QA-024 (specced the 5-tab layout; this change updates that contract). QA-026 (the Reproducibility receipt was deliberately omitted from the Agents tab — once Agents is gone, that omission is moot; receipt stays included on Overview + Probes + Logs and excluded on the now-gone Agents + on Findings/Logs per QA-029's amended sub-ask 3). QA-028 (Overview-tab polish; the ASI radar shrink + square-up from QA-028 sub-ask 3a becomes the canonical ASI-breakdown visualisation surface once Agents is removed — even more reason to ship QA-028 cleanly).
 - **Risk callouts** · The 5-tab WAI-ARIA contract was a locked decision in QA-023; this is the first formal walk-back. Operator bookmarks pointing at `#tab=agents` will silently degrade to Overview — log a warning in `executive_tabs.js` (DEBUG-level only) for forensic visibility. The `_asi_rows.html` partial is currently only included by `_tab_agents.html`; deleting both is safe but requires a grep-for-orphans sweep before the workflow's build phase ships.
 - **Status** · open
 
