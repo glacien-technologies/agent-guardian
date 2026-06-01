@@ -154,26 +154,35 @@ def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[P
 def load_probes_for_asi(asi: AsiCategory) -> list[Probe]:
     """Load just the probes that belong to a single ASI category.
 
-    Returns an empty list when the corpus directory for ``asi`` is missing —
-    useful for editable-installs that don't yet have the bundled YAML files.
-    A WARNING is emitted in that case so the scan can be flagged as
+    Walks the per-ASI subdirectory (``probes/asiNN/``) AND the sibling
+    ``probes/judges/`` cross-corpus, filtering judge probes by their
+    declared ``asi:`` field so judge-injection (JDG-*) coverage is unioned
+    into each ASI dispatch instead of being orphaned in a directory no
+    agent ever scans.
+
+    Returns an empty list when neither source yields probes — useful for
+    editable-installs that don't yet have the bundled YAML files. A
+    WARNING is emitted in that case so the scan can be flagged as
     NON-AUTHORITATIVE upstream.
     """
-    root = find_corpus_root() / asi.value.lower()
-    if not root.exists():
+    corpus_root = find_corpus_root()
+    asi_root = corpus_root / asi.value.lower()
+    asi_probes: list[Probe] = []
+    if asi_root.exists() and _iter_probe_files(asi_root):
+        asi_probes = load_all_probes(root=asi_root)
+    else:
         _LOG.warning(
             "probe corpus root %s missing or empty — scan will be NON-AUTHORITATIVE",
-            root,
+            asi_root,
         )
-        return []
-    yaml_files = _iter_probe_files(root)
-    if not yaml_files:
-        _LOG.warning(
-            "probe corpus root %s missing or empty — scan will be NON-AUTHORITATIVE",
-            root,
-        )
-        return []
-    return load_all_probes(root=root)
+    # WHY: judges/ is a peer corpus; union its probes whose declared asi matches.
+    judges_root = corpus_root / "judges"
+    judge_probes: list[Probe] = []
+    if judges_root.exists() and _iter_probe_files(judges_root):
+        judge_probes = [p for p in load_all_probes(root=judges_root) if p.asi == asi]
+    combined = asi_probes + judge_probes
+    combined.sort(key=lambda p: p.id)
+    return combined
 
 
 def load_recon_probes(*, strict: bool = False) -> list[Probe]:
