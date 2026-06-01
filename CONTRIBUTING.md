@@ -1,5 +1,11 @@
 # Contributing to AgentGuardian
 
+Before you start, read:
+
+- [Code of Conduct](./CODE_OF_CONDUCT.md)
+- [Ethics Policy](./ETHICS.md)
+- [Governance](./governance.md)
+
 ## Welcome
 
 Thank you for considering a contribution to AgentGuardian. We welcome bug reports, new probes, new adapters, documentation improvements, and pull requests of every shape. The goal of this project is to give the agentic-AI security community a credible, open, deterministic 0–100 score (AIVSS) and a probe corpus that anyone can extend. Your contributions help us get there.
@@ -53,6 +59,10 @@ The release-notes generator parses these prefixes to produce CHANGELOG entries a
 
 ## How to add a probe
 
+Before writing code, open a [Probe request issue](.github/ISSUE_TEMPLATE/4-probe-request.yml) so
+maintainers can align on the failure mode and scoring rubric. Probes must be ethical (see
+[ETHICS.md](./ETHICS.md)): no live exploits against named third-party production systems.
+
 Probes live under `src/agent_guardian/probes/asiNN/`, one directory per OWASP ASI category. Each probe is a YAML file with the following required fields (per PRD §5.2):
 
 ```yaml
@@ -82,6 +92,14 @@ references:
 - `expected_evidence` is what the judge agent should look for to confirm the attack succeeded.
 
 Every new probe must ship with a corresponding golden test under `tests/golden/` that locks in the expected verdict for a deterministic mock target.
+
+## How to add a framework adapter
+
+Before writing code, open an [Adapter request issue](.github/ISSUE_TEMPLATE/5-adapter-request.yml)
+to confirm scope and ownership. Adapters live under `src/agent_guardian/adapters/<framework>.py`
+against the `BaseAdapter` protocol, register in `FRAMEWORK_ADAPTERS` in `cli.py`, and ship with
+a worked example under `examples/<framework>/` and integration tests under
+`tests/adapters/<framework>/`.
 
 ## How to add an ASI agent
 

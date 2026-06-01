@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- README rewritten for honesty: probe count corrected to 96, attacker count corrected to 11, scan modes corrected to `fast`/`smart`/`full`, framework adapter list corrected to LangGraph / CrewAI / OpenAI Agents SDK / AutoGen / ADK / Strands. Removed claim of `examples/vulnerable-agent/` (does not exist) and relabelled Sigstore evidence signing as Planned (config flag exists, implementation not shipped in 1.0.0).
+- Product name standardised to `AgentGuardian` (one word) throughout repo.
+
+### Added
+- `ETHICS.md`, `SUPPORT.md`.
+- Issue templates: probe request, adapter request, documentation.
+- Discussion templates: ideas, show-and-tell.
+- CodeQL workflow (`.github/workflows/codeql.yml`).
+- Operator-facing checklists under `gtm/repo-polish-checklist.md` and `scripts/capture-demo-assets.sh`.
+
+
 All notable changes to **agent-guardian** are documented in this file.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

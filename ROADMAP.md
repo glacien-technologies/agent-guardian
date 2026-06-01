@@ -1,5 +1,15 @@
 # Roadmap
 
+## Planned — not yet shipped
+
+- **Sigstore-signed evidence bundles.** The `sign_evidence` config flag is wired but the
+  Sigstore signing pipeline is not yet implemented. Target: 1.1. Until then, the SARIF / JSON /
+  PDF report artifacts are deterministic and hash-stable so they can be signed externally.
+- **First-party MCP and RAG adapters.** Today MCP and RAG are covered via the `http` adapter
+  and worked examples (`examples/mcp_server`, `examples/rag_app`). First-class `--framework mcp`
+  and `--framework rag` adapters are on the 1.2 roadmap.
+
+
 This file is the canonical, repo-root roadmap for AgentGuardian (OSS).
 It tracks the **current 90-day thematic cycle** only.
 

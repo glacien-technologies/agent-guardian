@@ -1,0 +1,38 @@
+title: "[idea] "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share an idea for AgentGuardian — a new attack family, a new adapter, a workflow improvement.
+        Roadmap-scale ideas get discussed here before becoming issues.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Who is the user? What are they trying to do today, and what is in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How would AgentGuardian behave if this idea shipped?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Rough scope
+      options:
+        - "Tiny (config / docs)"
+        - "Small (one probe / one CLI flag)"
+        - "Medium (new adapter / new report format)"
+        - "Large (new subsystem)"
+        - "Not sure"
+    validations:
+      required: true

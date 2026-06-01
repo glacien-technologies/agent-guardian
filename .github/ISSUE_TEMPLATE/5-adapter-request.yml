@@ -1,0 +1,46 @@
+name: Framework adapter request
+description: Propose a new framework adapter (or extension)
+title: "[adapter] "
+labels: ["adapter", "triage"]
+body:
+  - type: input
+    id: framework
+    attributes:
+      label: Framework name
+      placeholder: "Semantic Kernel"
+    validations:
+      required: true
+  - type: input
+    id: framework-url
+    attributes:
+      label: Framework homepage / repo URL
+    validations:
+      required: true
+  - type: textarea
+    id: agent-shape
+    attributes:
+      label: What does an agent in this framework look like?
+      description: Entrypoint, invocation API, tool registration, state shape.
+    validations:
+      required: true
+  - type: textarea
+    id: integration-surface
+    attributes:
+      label: Integration surface
+      description: What hooks does the framework expose for intercepting prompts, tool calls, and responses?
+    validations:
+      required: true
+  - type: dropdown
+    id: maintainer
+    attributes:
+      label: Are you willing to maintain this adapter?
+      options:
+        - "Yes — I will own it"
+        - "I can write the first version, need a co-maintainer long-term"
+        - "Request only"
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Reference apps / examples

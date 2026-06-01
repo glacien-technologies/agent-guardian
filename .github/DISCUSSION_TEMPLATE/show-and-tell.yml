@@ -1,0 +1,31 @@
+title: "[show] "
+labels: ["show-and-tell"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Show us what you built with AgentGuardian — a custom probe, an adapter, a CI integration,
+        a report you are proud of, a finding you fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you build / find / ship?
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How does it work? (links, code snippets, screenshots welcome)
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Link (repo, blog post, video — optional)
+  - type: checkboxes
+    id: ethics
+    attributes:
+      label: Confirmation
+      options:
+        - label: "Anything I'm showing was tested against systems I own or was authorised to test."
+          required: true
