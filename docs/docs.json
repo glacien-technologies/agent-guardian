@@ -18,13 +18,15 @@
     "library": "lucide"
   },
   "navigation": {
+    "pages": [
+      "index"
+    ],
     "groups": [
       {
         "group": "Start Here",
         "icon": "rocket",
         "boost": 2,
         "pages": [
-          "index",
           "quickstart",
           "installation",
           "start-here/try-the-demo-agent",
