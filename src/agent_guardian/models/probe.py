@@ -8,6 +8,7 @@ are mandatory; missing or empty values raise :class:`ProbeValidationError`.
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,80 @@ def _format_pydantic_errors(exc: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def _coerce_attachments(raw: Any, *, source: str) -> tuple[ProbeAttachment, ...] | None:
+def _build_attachment_from_dict(
+    item: dict[str, Any],
+    *,
+    base_dir: Path | None,
+    source: str,
+    idx: int,
+) -> ProbeAttachment:
+    """Construct a ProbeAttachment from a YAML mapping.
+
+    Accepts two payload modes:
+      - inline ``b64_payload`` + ``size_bytes`` (already-encoded bytes), OR
+      - ``path``: a relative path to a sibling binary asset, resolved
+        against ``base_dir`` (the probe YAML's parent). When ``path`` is
+        used the loader reads the file, base64-encodes it, and computes
+        ``size_bytes`` automatically.
+
+    ``mime_type`` and ``alt_text`` are required either way. Mixing ``path``
+    with ``b64_payload`` is rejected as ambiguous.
+    """
+    mime_type = item.get("mime_type")
+    alt_text = item.get("alt_text")
+    path_value = item.get("path")
+    b64_value = item.get("b64_payload")
+
+    if path_value is not None and b64_value is not None:
+        raise ProbeValidationError(
+            f"Probe in {source}: attachments[{idx}] cannot set both 'path' and "
+            "'b64_payload' — pick exactly one payload source"
+        )
+
+    if path_value is not None:
+        # Sibling-file mode: read + b64-encode at load time.
+        if base_dir is None:
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] uses 'path' but probe "
+                "has no on-disk parent (loaded inline?) — switch to 'b64_payload'"
+            )
+        asset_path = (base_dir / str(path_value)).resolve()
+        try:
+            base_resolved = base_dir.resolve()
+            asset_path.relative_to(base_resolved)
+        except ValueError as exc:
+            # WHY: refuse to walk outside the probe's directory.
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] path {path_value!r} "
+                "escapes the probe directory — refusing to load"
+            ) from exc
+        if not asset_path.is_file():
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] sibling asset not found: {asset_path}"
+            )
+        raw_bytes = asset_path.read_bytes()
+        try:
+            return ProbeAttachment(
+                mime_type=str(mime_type) if mime_type is not None else "",
+                b64_payload=base64.b64encode(raw_bytes).decode("ascii"),
+                alt_text=str(alt_text) if alt_text is not None else "",
+                size_bytes=len(raw_bytes),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ProbeValidationError(
+                f"Probe in {source}: attachments[{idx}] invalid: {exc}"
+            ) from exc
+
+    # Inline-b64 mode: pass through directly. size_bytes must be supplied.
+    try:
+        return ProbeAttachment(**item)
+    except (TypeError, ValueError) as exc:
+        raise ProbeValidationError(f"Probe in {source}: attachments[{idx}] invalid: {exc}") from exc
+
+
+def _coerce_attachments(
+    raw: Any, *, source: str, base_dir: Path | None
+) -> tuple[ProbeAttachment, ...] | None:
     """Convert dict-shaped attachments into ProbeAttachment instances.
 
     Returns None when no attachments key is present (caller leaves the field
@@ -73,6 +147,9 @@ def _coerce_attachments(raw: Any, *, source: str) -> tuple[ProbeAttachment, ...]
     pydantic with arbitrary_types_allowed=True will NOT auto-build the
     dataclass, so we do the conversion here before model_validate. Raises a
     ProbeValidationError on malformed shapes — bubbles up through load_probe.
+
+    ``base_dir`` resolves sibling-file ``path`` entries when present; pass
+    None when loading from an in-memory dict (no on-disk context).
     """
     if "attachments" not in raw:
         return None
@@ -93,16 +170,11 @@ def _coerce_attachments(raw: Any, *, source: str) -> tuple[ProbeAttachment, ...]
                 f"Probe in {source}: attachments[{idx}] must be a mapping, "
                 f"got {type(item).__name__}"
             )
-        try:
-            out.append(ProbeAttachment(**item))
-        except (TypeError, ValueError) as exc:
-            raise ProbeValidationError(
-                f"Probe in {source}: attachments[{idx}] invalid: {exc}"
-            ) from exc
+        out.append(_build_attachment_from_dict(item, base_dir=base_dir, source=source, idx=idx))
     return tuple(out)
 
 
-def _coerce_probe(raw: Any, *, source: str) -> Probe:
+def _coerce_probe(raw: Any, *, source: str, base_dir: Path | None = None) -> Probe:
     if not isinstance(raw, dict):
         raise ProbeValidationError(
             f"Probe in {source}: expected a YAML mapping at top level, got {type(raw).__name__}"
@@ -117,7 +189,7 @@ def _coerce_probe(raw: Any, *, source: str) -> Probe:
         raise ProbeValidationError(f"Probe in {source}: mitre_atlas must be a non-empty list")
 
     # WHY: pydantic with arbitrary_types_allowed won't build the dataclass for us.
-    coerced = _coerce_attachments(raw, source=source)
+    coerced = _coerce_attachments(raw, source=source, base_dir=base_dir)
     if coerced is not None:
         raw = {**raw, "attachments": coerced}
 
@@ -142,7 +214,7 @@ def load_probe(path: Path) -> Probe:
         raise ProbeValidationError(f"Probe in {path}: YAML parse error: {exc}") from exc
     if raw is None:
         raise ProbeValidationError(f"Probe in {path}: file is empty")
-    return _coerce_probe(raw, source=str(path))
+    return _coerce_probe(raw, source=str(path), base_dir=path.parent)
 
 
 def load_probes_from_dir(directory: Path) -> list[Probe]:
