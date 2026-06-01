@@ -32,7 +32,7 @@ _LOG = logging.getLogger(__name__)
 
 
 # Bumped whenever the corpus changes — kept in sync with ``_meta/version.yaml``.
-PROBE_CORPUS_VERSION = "2026.05"
+PROBE_CORPUS_VERSION = "2026.06"
 
 
 # Module-level flag set by the most recent ``load_all_probes`` call. ``True``

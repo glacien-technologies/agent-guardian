@@ -85,8 +85,18 @@ def test_corpus_size_is_ninety_six() -> None:
     2 LLM02 output-handling probes + 1 ASI03 cross-tenant PII + 3 ASI01
     H-CoT injection probes (B5) = 99 ASI-attack probes, plus Phase A.A4
     added 4 judge-evaluation probes (JDG-* prefix) under ``probes/judges/``.
-    The attack corpus count is asserted by filtering out the JDG namespace;
-    the total load (attacks + judge probes) is asserted as 103.
+
+    Phase C.C2 (2026-06-01) adds 21 agent-specific attack probes:
+    5 ReAct hijack (asi01/react-*), 5 MCP tool-description rug-pull
+    (asi04/mcp-tool-desc-rug-pull-*, asi04/openapi-spec-swap-mid-session,
+    asi04/plugin-manifest-rewrite), 4 MCP capability-spoof
+    (asi04/mcp-wellknown-forgery, asi04/mcp-capability-override,
+    asi04/mcp-oauth-discovery-spoof, asi04/mcp-resource-impersonation),
+    4 A2A signed-message replay (asi07/a2a-*), and 3 agent-card forgery
+    (asi07/agent-card-forgery-self, asi07/agent-card-forgery-peer,
+    asi07/agent-card-trust-delegation-abuse). The MCP time-channel-recon
+    probe ships under C5's recon corpus and is not counted here. Attack
+    corpus is now 99 + 21 = 120; total load (attacks + judge) is 124.
 
     The 11 coverage-gap additions closed the CSA category gaps for
     ``checker-out-of-the-loop`` (4 probes under asi06) and
@@ -110,9 +120,9 @@ def test_corpus_size_is_ninety_six() -> None:
     all_probes = load_all_probes()
     attack_probes = [p for p in all_probes if not p.id.startswith("JDG-")]
     judge_probes = [p for p in all_probes if p.id.startswith("JDG-")]
-    assert len(attack_probes) == 99
+    assert len(attack_probes) == 120
     assert len(judge_probes) == 4
-    assert len(all_probes) == 103
+    assert len(all_probes) == 124
 
 
 def test_corpus_version_stamp() -> None:
@@ -121,7 +131,7 @@ def test_corpus_version_stamp() -> None:
     assert meta_path.is_file(), f"missing version metadata file: {meta_path}"
     meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
     assert meta["version"] == PROBE_CORPUS_VERSION
-    assert PROBE_CORPUS_VERSION == "2026.05"
+    assert PROBE_CORPUS_VERSION == "2026.06"
 
 
 def test_load_probes_for_asi_returns_at_least_five_each() -> None:
