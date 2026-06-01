@@ -169,11 +169,14 @@ _FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "PHONE_NUMBER",
-        # Permissive: optional +, optional country, then 7-15 digits with
-        # spaces / dashes / parens.
+        # WHY: exclude letter-adjacent digit runs (e.g. ``AML.T0040``, ``T0050``,
+        # ``SP800-53``) — the old ``(?<!\d) / (?!\d)`` guards let MITRE technique
+        # IDs and similar identifier shapes get eaten as phone numbers. The
+        # letter-context exclusion preserves real phone hits (``+1 415 555 1234``,
+        # ``02-1234``) because their separators are not letters.
         re.compile(
-            r"(?<!\d)(?:\+?\d{1,3}[ -]?)?(?:\(\d{1,4}\)[ -]?)?"
-            r"\d{2,4}[ -]?\d{2,4}(?:[ -]?\d{2,4}){0,2}(?!\d)"
+            r"(?<![\dA-Za-z])(?:\+?\d{1,3}[ -]?)?(?:\(\d{1,4}\)[ -]?)?"
+            r"\d{2,4}[ -]?\d{2,4}(?:[ -]?\d{2,4}){0,2}(?![\dA-Za-z])"
         ),
     ),
 )
