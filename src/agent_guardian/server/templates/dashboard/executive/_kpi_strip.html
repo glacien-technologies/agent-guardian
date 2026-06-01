@@ -3,6 +3,14 @@
    Eight tiles in a responsive grid; locked left-to-right order:
      AIVSS / Band / Findings / Critical / High / Elapsed / Cost / Coverage
 
+   QA-028 sub-ask 1 + 2 (2026-06-01):
+     - Tile descriptions moved from always-on ``<span class="exec-kpi__desc">``
+       to a hover/focus popover behind a ``ⓘ`` button — DOM payload is the
+       same (``kpi_descriptions[key]``), only the render mode changed.
+     - Every tile now carries an inline-SVG mini-chart sized to ≤ 64 px tall.
+       Chart data lives in ``kpi_chart_data`` on the view-model so this
+       template stays declarative.
+
    Each tile reads from the existing shared payload — Executive does NOT
    introduce new KPI fields. Anywhere the value can be live-updated by the
    SSE patcher we mark it with ``data-live``.
@@ -10,78 +18,168 @@
    Icons are inline SVG (Lucide paths, MIT-licensed) so they render on first
    paint with no JS race window and add ~1.5 KB total vs ~50 KB for a CDN.
 #}
+{% macro kpi_info(key) -%}
+  <button type="button"
+          class="exec-kpi__info"
+          aria-describedby="kpi-{{ key }}-desc"
+          aria-label="About this metric">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+  </button>
+  <span class="exec-kpi__desc-popover"
+        id="kpi-{{ key }}-desc"
+        role="tooltip">{{ kpi_descriptions[key] }}</span>
+{%- endmacro %}
 <section class="exec-kpi-strip" aria-label="Scan key metrics">
 
   <div class="exec-kpi" data-kpi="aivss">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8z"/><path d="m9 12 2 2 4-4"/></svg>
       AIVSS
+      {{ kpi_info('aivss') }}
     </span>
     <span class="exec-kpi__value" data-live="aivss">{{ aivss_label }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.aivss }}</span>
+    {# Mini-chart: semi-circle radial gauge tinted by band_class. #}
+    {% set _pct = kpi_chart_data.aivss_pct | default(0) %}
+    {% set _circ = 88 %}
+    <span class="exec-kpi__chart exec-kpi__chart--aivss" data-component="kpi-chart-aivss" aria-hidden="true">
+      <svg viewBox="0 0 64 36" preserveAspectRatio="xMidYMid meet">
+        <path d="M6 32 A26 26 0 0 1 58 32" fill="none" stroke="var(--exec-border-subtle)" stroke-width="4"/>
+        <path d="M6 32 A26 26 0 0 1 58 32" fill="none"
+              stroke="currentColor" stroke-width="4" stroke-linecap="round"
+              stroke-dasharray="{{ _circ }}"
+              stroke-dashoffset="{{ _circ - (_circ * (_pct | float) / 100.0) }}"
+              class="exec-kpi__chart-fill exec-kpi__chart-fill--{{ band_class }}"/>
+      </svg>
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="band">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14 4 6"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
       Band
+      {{ kpi_info('band') }}
     </span>
     <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="band">{{ band_label }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.band }}</span>
+    {# Mini-chart: 5-segment horizontal bar (Critical · Poor · Warning · Good · Excellent). #}
+    {% set _seg = kpi_chart_data.band_index | default(-1) %}
+    {% set _seg_classes = ['critical', 'poor', 'warning', 'good', 'excellent'] %}
+    <span class="exec-kpi__chart exec-kpi__chart--band" data-component="kpi-chart-band" aria-hidden="true">
+      {% for cls in _seg_classes %}
+        <span class="exec-kpi__band-seg exec-kpi__band-seg--{{ cls }}{% if loop.index0 == _seg %} exec-kpi__band-seg--active{% endif %}"></span>
+      {% endfor %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="findings">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
       Findings
+      {{ kpi_info('findings') }}
     </span>
     <span class="exec-kpi__value" data-live="findings-total">{{ findings_total }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.findings }}</span>
+    {# Mini-chart: 4-segment stacked horizontal bar coloured by severity.
+       Risk callout: clamp non-zero segments to ≥ 1 px so a 1-critical-vs-20-high
+       scan still shows the critical sliver. #}
+    {% set _mix = kpi_chart_data.severity_mix %}
+    {% set _mix_total = (_mix.critical | int) + (_mix.high | int) + (_mix.medium | int) + (_mix.low | int) %}
+    <span class="exec-kpi__chart exec-kpi__chart--findings" data-component="kpi-chart-findings" aria-hidden="true">
+      {% for sev in ['critical', 'high', 'medium', 'low'] %}
+        {% set _n = _mix[sev] | int %}
+        {% if _mix_total > 0 and _n > 0 %}
+          <span class="exec-kpi__mix-seg exec-kpi__mix-seg--{{ sev }}"
+                style="flex: {{ _n }} 1 0; min-width: 2px;"></span>
+        {% endif %}
+      {% endfor %}
+      {% if _mix_total == 0 %}
+        <span class="exec-kpi__mix-empty"></span>
+      {% endif %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="critical">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       Critical
+      {{ kpi_info('critical') }}
     </span>
     <span class="exec-kpi__value exec-kpi__value--critical" data-live="critical">{{ counts.critical }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.critical }}</span>
+    {# Mini-chart: small red dot cluster (one dot per critical, capped at 6). #}
+    {% set _crit = counts.critical | int %}
+    {% set _shown = (_crit if _crit <= 6 else 6) %}
+    <span class="exec-kpi__chart exec-kpi__chart--dots exec-kpi__chart--dots-critical" data-component="kpi-chart-critical" aria-hidden="true">
+      {% for _ in range(_shown) %}<span class="exec-kpi__dot exec-kpi__dot--critical"></span>{% endfor %}
+      {% if _crit > 6 %}<span class="exec-kpi__dot-more">+{{ _crit - 6 }}</span>{% endif %}
+      {% if _crit == 0 %}<span class="exec-kpi__dot-empty">none</span>{% endif %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="high">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       High
+      {{ kpi_info('high') }}
     </span>
     <span class="exec-kpi__value exec-kpi__value--high" data-live="high">{{ counts.high }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.high }}</span>
+    {% set _high = counts.high | int %}
+    {% set _shown_h = (_high if _high <= 6 else 6) %}
+    <span class="exec-kpi__chart exec-kpi__chart--dots exec-kpi__chart--dots-high" data-component="kpi-chart-high" aria-hidden="true">
+      {% for _ in range(_shown_h) %}<span class="exec-kpi__dot exec-kpi__dot--high"></span>{% endfor %}
+      {% if _high > 6 %}<span class="exec-kpi__dot-more">+{{ _high - 6 }}</span>{% endif %}
+      {% if _high == 0 %}<span class="exec-kpi__dot-empty">none</span>{% endif %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="elapsed">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       Elapsed
+      {{ kpi_info('elapsed') }}
     </span>
     <span class="exec-kpi__value" data-live="elapsed">{{ elapsed_label }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.elapsed }}</span>
+    {# Mini-chart: progress bar OR "no cap" indicator. #}
+    <span class="exec-kpi__chart exec-kpi__chart--progress" data-component="kpi-chart-elapsed" aria-hidden="true">
+      {% if kpi_chart_data.elapsed_uncapped %}
+        <span class="exec-kpi__nocap">no cap</span>
+      {% else %}
+        <span class="exec-kpi__progress-track">
+          <span class="exec-kpi__progress-fill" style="width: {{ kpi_chart_data.elapsed_pct }}%;"></span>
+        </span>
+      {% endif %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="cost">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Cost
+      {{ kpi_info('cost') }}
     </span>
     <span class="exec-kpi__value" data-live="usd">{{ usd_label }}</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.cost }}</span>
+    <span class="exec-kpi__chart exec-kpi__chart--progress" data-component="kpi-chart-cost" aria-hidden="true">
+      {% if kpi_chart_data.cost_uncapped %}
+        <span class="exec-kpi__nocap">no cap</span>
+      {% else %}
+        <span class="exec-kpi__progress-track">
+          <span class="exec-kpi__progress-fill" style="width: {{ kpi_chart_data.cost_pct }}%;"></span>
+        </span>
+      {% endif %}
+    </span>
   </div>
 
   <div class="exec-kpi" data-kpi="coverage">
     <span class="exec-kpi__label">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
       Coverage
+      {{ kpi_info('coverage') }}
     </span>
     <span class="exec-kpi__value">{{ asi_covered }}/10</span>
-    <span class="exec-kpi__desc">{{ kpi_descriptions.coverage }}</span>
+    {# Mini-chart: 10-segment pip row, filled cells = covered ASI categories. #}
+    {% set _covered = kpi_chart_data.coverage_covered | int %}
+    <span class="exec-kpi__chart exec-kpi__chart--coverage" data-component="kpi-chart-coverage" aria-hidden="true">
+      {% for i in range(10) %}
+        <span class="exec-kpi__cov-cell{% if i < _covered %} exec-kpi__cov-cell--on{% endif %}"></span>
+      {% endfor %}
+    </span>
   </div>
 
 </section>

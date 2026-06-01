@@ -5,15 +5,17 @@ Covers:
 * Route returns 200 for ``?theme=executive``.
 * Sticky topbar + KPI strip + WAI-ARIA tab bar render with the locked
   positioning and DOM marker classes.
-* 5 tab panels render with the locked WAI-ARIA roles, ids, ``aria-selected``
-  / ``aria-controls`` / ``aria-labelledby`` / ``tabindex`` attributes.
+* 4 tab panels render with the locked WAI-ARIA roles, ids, ``aria-selected``
+  / ``aria-controls`` / ``aria-labelledby`` / ``tabindex`` attributes
+  (Overview / Findings / Probes / Logs — the Agents tab was deleted in
+  QA-030; its per-ASI breakdown lives on Overview via QA-033).
 * The locked literal heading ``All findings so far.`` appears inside the
   Findings tabpanel.
 * ``probes_list`` payload (from ``memory.jsonl``) is rendered into the
   Probes tab; ``logs_tail`` (from ``events.jsonl``) is rendered into the
   Logs tab.
 * The ``clean_control`` sentry is preserved: a scan with zero findings,
-  zero probes, and zero log events still renders all 5 panes with the
+  zero probes, and zero log events still renders all 4 panes with the
   locked empty-state copy.
 * The shared theme switcher dropdown carries the 5th option
   ``Executive Dashboard``.
@@ -266,10 +268,13 @@ def test_executive_tabs_js_loaded(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_executive_renders_5_tabs_with_aria_attributes(
+def test_executive_renders_4_tabs_with_aria_attributes(
     client: TestClient, store: ScanStore
 ) -> None:
-    """All 5 tab buttons are present with correct ARIA + tabindex roving."""
+    """All 4 tab buttons are present with correct ARIA + tabindex roving.
+
+    Note: the Agents tab was deleted in QA-030; this assertion was previously
+    keyed on 5 tabs (Overview / Findings / Probes / Agents / Logs)."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
@@ -279,16 +284,16 @@ def test_executive_renders_5_tabs_with_aria_attributes(
     assert 'role="tablist"' in body
     assert 'aria-labelledby="executive-tablist-label"' in body
     # Each tab id present with role + aria-controls
-    for slug in ("overview", "findings", "probes", "agents", "logs"):
+    for slug in ("overview", "findings", "probes", "logs"):
         assert f'id="tab-{slug}"' in body, f"missing tab button id tab-{slug}"
         assert f'aria-controls="tabpanel-{slug}"' in body
-    # Exactly one tab carries aria-selected="true" (Overview) and four carry
+    # Exactly one tab carries aria-selected="true" (Overview) and three carry
     # aria-selected="false". The tab buttons are multi-line so we check the
     # short window after each tab id rather than relying on a single-line
     # attribute order.
     selected_true = 0
     selected_false = 0
-    for slug in ("overview", "findings", "probes", "agents", "logs"):
+    for slug in ("overview", "findings", "probes", "logs"):
         idx = body.find(f'id="tab-{slug}"')
         # Slice only up to the closing > of THIS button (before next button).
         close_idx = body.find("</button>", idx)
@@ -298,30 +303,33 @@ def test_executive_renders_5_tabs_with_aria_attributes(
         if 'aria-selected="false"' in snippet:
             selected_false += 1
     assert selected_true == 1
-    assert selected_false == 4
+    assert selected_false == 3
 
 
-def test_executive_renders_5_tabpanels_with_aria_attributes(
+def test_executive_renders_4_tabpanels_with_aria_attributes(
     client: TestClient, store: ScanStore
 ) -> None:
-    """All 5 tabpanels are present; only Overview lacks the ``hidden`` attribute."""
+    """All 4 tabpanels are present; only Overview lacks the ``hidden`` attribute.
+
+    Note: the Agents tab was deleted in QA-030; this assertion was previously
+    keyed on 5 tabpanels."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    for slug in ("overview", "findings", "probes", "agents", "logs"):
+    for slug in ("overview", "findings", "probes", "logs"):
         assert f'id="tabpanel-{slug}"' in body, f"missing tabpanel id tabpanel-{slug}"
         assert f'aria-labelledby="tab-{slug}"' in body, (
             f"missing aria-labelledby on tabpanel-{slug}"
         )
     # Overview is the default visible tabpanel: no ``hidden`` attribute on it.
-    # The other four panels carry ``hidden``.
+    # The other three panels carry ``hidden``.
     assert (
         'id="tabpanel-overview"\n         role="tabpanel"' in body
         or '<section id="tabpanel-overview"' in body
     )
-    for slug in ("findings", "probes", "agents", "logs"):
+    for slug in ("findings", "probes", "logs"):
         # Each hidden tabpanel section ends with the ``hidden>`` attribute.
         anchor = f'id="tabpanel-{slug}"'
         idx = body.find(anchor)
@@ -388,7 +396,7 @@ def test_executive_probes_tab_renders_probes_list_entries(
     body = resp.text
     assert resp.status_code == 200
     idx = body.find('id="tabpanel-probes"')
-    next_panel_idx = body.find('id="tabpanel-agents"', idx)
+    next_panel_idx = body.find('id="tabpanel-logs"', idx)
     probes_pane = body[idx:next_panel_idx]
     for turn in turns:
         assert str(turn["seed_id"]) in probes_pane
@@ -463,15 +471,18 @@ def test_executive_theme_switcher_dropdown_includes_executive_option(
 # ---------------------------------------------------------------------------
 
 
-def test_executive_clean_control_renders_all_5_tabs(client: TestClient, store: ScanStore) -> None:
-    """Zero findings / probes / logs → all 5 panes render with empty-state copy."""
+def test_executive_clean_control_renders_all_4_tabs(client: TestClient, store: ScanStore) -> None:
+    """Zero findings / probes / logs → all 4 panes render with empty-state copy.
+
+    Note: the Agents tab was deleted in QA-030; this assertion was previously
+    keyed on 5 tabpanels."""
     scan = _make_scan(with_findings=False)
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # All 5 tabpanels present
-    for slug in ("overview", "findings", "probes", "agents", "logs"):
+    # All 4 tabpanels present
+    for slug in ("overview", "findings", "probes", "logs"):
         assert f'id="tabpanel-{slug}"' in body
     # Locked empty-state copy across the 3 data-driven panes.
     assert "Nothing flagged yet." in body
@@ -480,28 +491,42 @@ def test_executive_clean_control_renders_all_5_tabs(client: TestClient, store: S
 
 
 # ---------------------------------------------------------------------------
-# 9. Agents tab aggregates per-agent probe + flagged counts
+# 9. Agents tab DOM absence (QA-030 — tab deleted)
 # ---------------------------------------------------------------------------
 
 
-def test_executive_agents_tab_aggregates_probes_per_agent(
-    client: TestClient, store: ScanStore
-) -> None:
-    """The Agents pane lists every distinct probe.agent from probes_list."""
+def test_executive_no_agents_tab_in_dom(client: TestClient, store: ScanStore) -> None:
+    """The Agents tab was deleted in QA-030. No DOM artefact of it may remain.
+
+    Asserts:
+      * ``id="tab-agents"`` does not appear (tab button gone).
+      * ``id="tabpanel-agents"`` does not appear (tabpanel gone).
+      * Exactly 4 ``role="tab"`` buttons render in the tablist.
+      * Exactly 4 ``id="tabpanel-`` panes render in <main>.
+      * The four surviving tabs appear in the locked order:
+        Overview → Findings → Probes → Logs.
+    """
     scan = _make_scan()
-    scan_dir = _persist(store, scan)
-    turns = _seed_memory_jsonl(scan_dir, count=2)
+    _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    idx = body.find('id="tabpanel-agents"')
-    next_panel_idx = body.find('id="tabpanel-logs"', idx)
-    agents_pane = body[idx:next_panel_idx]
-    # Each seeded agent name appears in the agents table.
-    for turn in turns:
-        assert str(turn["agent"]) in agents_pane
-    assert "Probes" in agents_pane
-    assert "Flagged" in agents_pane
+    # No leftover agents button / pane.
+    assert 'id="tab-agents"' not in body, "stray tab-agents button in DOM"
+    assert 'id="tabpanel-agents"' not in body, "stray tabpanel-agents in DOM"
+    # The tablist carries exactly 4 role=tab buttons.
+    assert body.count('role="tab"') == 4
+    # And exactly 4 tabpanel ids.
+    assert body.count('id="tabpanel-') == 4
+    # Locked order: Overview before Findings before Probes before Logs.
+    idx_overview = body.find('id="tab-overview"')
+    idx_findings = body.find('id="tab-findings"')
+    idx_probes = body.find('id="tab-probes"')
+    idx_logs = body.find('id="tab-logs"')
+    assert idx_overview >= 0
+    assert idx_findings > idx_overview
+    assert idx_probes > idx_findings
+    assert idx_logs > idx_probes
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +580,7 @@ def test_executive_keyboard_nav_aria_attributes_correct(
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     # Locate each tab anchor and check its tabindex.
-    for slug in ("overview", "findings", "probes", "agents", "logs"):
+    for slug in ("overview", "findings", "probes", "logs"):
         idx = body.find(f'id="tab-{slug}"')
         assert idx >= 0
         snippet = body[idx : idx + 200]
@@ -681,56 +706,23 @@ def test_executive_overview_renders_asi_radar_partial(client: TestClient, store:
     assert "Adversarial Surface Index" in overview_pane
 
 
-def test_executive_agents_tab_renders_asi_rows_partial(
-    client: TestClient, store: ScanStore
-) -> None:
-    """The Agents tab renders the per-ASI breakdown rows (ASI01..ASI10 in
-    order). The 10 mono codes + the per-row .exec-asi-list__item class must
-    all be present."""
-    scan = _make_scan()
-    _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}?theme=executive")
-    body = resp.text
-    assert resp.status_code == 200
-    idx = body.find('id="tabpanel-agents"')
-    next_idx = body.find('id="tabpanel-logs"', idx)
-    agents_pane = body[idx:next_idx]
-    assert 'data-component="asi-rows"' in agents_pane
-    # All 10 ASI codes appear in order.
-    for code in (
-        "ASI01",
-        "ASI02",
-        "ASI03",
-        "ASI04",
-        "ASI05",
-        "ASI06",
-        "ASI07",
-        "ASI08",
-        "ASI09",
-        "ASI10",
-    ):
-        assert code in agents_pane, f"agents pane missing ASI code {code}"
-    # Exactly 10 list items rendered (one per ASI).
-    assert agents_pane.count('class="exec-asi-list__item') == 10
-
-
 def test_executive_reproducibility_renders_in_each_data_tab(
     client: TestClient, store: ScanStore
 ) -> None:
     """The reproducibility receipt renders once per data tab — Overview,
-    Findings, Probes, Logs — and is intentionally absent from Agents.
+    Findings, Probes, Logs.
 
     Per the 2026-05-31 UX punch-list, the receipt was moved off the layout
-    footer and into the per-tab partials so the Agents tab can hide it
-    (the per-ASI breakdown there is the focal point and the receipt below
-    it created visual noise). See ``test_executive_reproducibility_per_tab``
-    for the per-tab DOM placement asserts."""
+    footer and into the per-tab partials. After QA-030 deleted the Agents
+    tab, every surviving tab carries the receipt. See
+    ``test_executive_reproducibility_per_tab`` for the per-tab DOM placement
+    asserts."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Four data tabs include the receipt; Agents tab omits it.
+    # Each of the 4 surviving data tabs includes the receipt.
     assert body.count('data-component="reproducibility"') == 4
     # The 7 mono row labels appear at least once.
     for label in (
@@ -791,22 +783,27 @@ def test_executive_css_carries_narrative_palette_tokens(client: TestClient) -> N
     assert "--exec-sev-low" in body
 
 
-def test_executive_clean_control_renders_all_5_new_partials(
+def test_executive_clean_control_renders_all_new_partials(
     client: TestClient, store: ScanStore
 ) -> None:
     """The clean_control sentry survives the Narrative partial migration —
-    every new partial renders with the 0-findings fixture without error."""
+    every surviving partial renders with the 0-findings fixture without error.
+
+    Note: the ``asi-rows`` partial was removed in QA-030 along with the
+    Agents tab; its per-ASI breakdown is now on Overview via
+    ``_asi_compact_table.html`` (QA-033)."""
     scan = _make_scan(with_findings=False)
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # All 5 new partials present even when the scan flagged nothing.
+    # All surviving partials present even when the scan flagged nothing.
     assert 'data-component="aivss-hero"' in body
     assert 'data-component="severity-bars"' in body
     assert 'data-component="asi-radar"' in body
-    assert 'data-component="asi-rows"' in body
     assert 'data-component="reproducibility"' in body
+    # The deleted asi-rows partial must NOT render anywhere.
+    assert 'data-component="asi-rows"' not in body
     # The findings empty-state copy is still wired through.
     assert "Nothing flagged yet." in body
 
@@ -864,7 +861,7 @@ def test_executive_probes_tab_renders_judge_reasoning_fallback_when_empty(
     assert resp.status_code == 200
 
     idx = body.find('id="tabpanel-probes"')
-    next_panel_idx = body.find('id="tabpanel-agents"', idx)
+    next_panel_idx = body.find('id="tabpanel-logs"', idx)
     probes_pane = body[idx:next_panel_idx]
 
     # The hallmark of the bug is gone:
@@ -890,7 +887,7 @@ def test_executive_probes_tab_keeps_judge_reasoning_when_present(
     assert resp.status_code == 200
 
     idx = body.find('id="tabpanel-probes"')
-    next_panel_idx = body.find('id="tabpanel-agents"', idx)
+    next_panel_idx = body.find('id="tabpanel-logs"', idx)
     probes_pane = body[idx:next_panel_idx]
 
     # Real reasoning shows up — the fallback prose does NOT.

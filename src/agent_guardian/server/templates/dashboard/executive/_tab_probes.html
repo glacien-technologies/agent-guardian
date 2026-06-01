@@ -1,10 +1,17 @@
-{# Executive — Probes tab panel.
+{# Executive — Probes tab panel (QA-032).
 
-   Every reflection record the swarm produced — one row per judged turn. Data
-   is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
-   (``probes_list``). Each row is expandable: click the ``See details``
-   button to drill into the verbatim request prompt / target response /
-   judge reasoning. Empty-state copy preserves the ``clean_control`` sentry.
+   Every reflection record the swarm produced — one row per judged turn.
+   Data is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
+   (``probes_list``).
+
+   As of QA-032 the per-row card list (``exec-probes-list`` / ``exec-probe``)
+   is replaced with a compact 5-column table (``_probes_table.html``). Each
+   row opens a slide-over (``_finding_slideover.html`` with ``kind="probe"``)
+   that renders the full request prompt / target response / judge reasoning.
+   The shared ``executive_findings.js`` IIFE reads the JSON island
+   ``#exec-probes-payload`` to locate the matching probe by ``data-probe-id``.
+
+   Empty-state copy preserves the ``clean_control`` sentry.
 #}
 <section id="tabpanel-probes"
          role="tabpanel"
@@ -18,41 +25,17 @@
   {% if probes_list | length == 0 %}
     <p class="exec-empty">No probe attempts recorded yet.</p>
   {% else %}
-    <ol class="exec-probes-list">
-      {% for p in probes_list %}
-        <li class="exec-probe" data-verdict="{{ p.verdict }}" data-agent="{{ p.agent }}" data-asi="{{ p.asi_category }}">
-          <header class="exec-probe__head">
-            <code class="exec-probe__id">{{ p.probe_id or '—' }}</code>
-            <span class="exec-probe__agent">{{ p.agent or '—' }}</span>
-            <span class="exec-probe__asi">{{ p.asi_category or '—' }}</span>
-            <span class="exec-probe__verdict exec-probe__verdict--{{ p.verdict }}">{{ p.verdict | upper }}</span>
-            <time class="exec-probe__time">{{ p.timestamp_label }}</time>
-          </header>
-          <details class="exec-probe__body">
-            <summary class="exec-details-toggle">
-              <span class="exec-details-toggle__label">See details</span>
-              <span class="exec-details-toggle__chevron" aria-hidden="true"></span>
-            </summary>
-            <p class="exec-probe__label">Request prompt</p>
-            <pre class="exec-probe__prompt">{{ p.prompt }}</pre>
-            <p class="exec-probe__label">Target response</p>
-            <pre class="exec-probe__response">{{ p.target_response }}</pre>
-            {% if p.confidence and p.confidence > 0.0 %}
-              <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(p.confidence) }})</p>
-            {% else %}
-              <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
-            {% endif %}
-            {% if p.reasoning %}
-              <blockquote class="exec-probe__reason">{{ p.reasoning }}</blockquote>
-            {% else %}
-              <p class="exec-probe__reason exec-probe__reason--empty">
-                Not graded per-turn — see the Findings tab for the rolled-up judge verdict.
-              </p>
-            {% endif %}
-          </details>
-        </li>
-      {% endfor %}
-    </ol>
+    {% include "dashboard/executive/_probes_table.html" %}
+    {# JSON island — same pattern as the (planned) findings payload. The
+       ``| safe`` filter is acceptable here because the JSON is produced
+       server-side by ``json.dumps`` with ``ensure_ascii=False`` over the
+       trusted ``probes_list`` shape (all string fields are escaped by
+       json.dumps itself; the JSON is parsed by the JS, never injected
+       as HTML). #}
+    <script type="application/json" id="exec-probes-payload">{{ probes_payload_json | safe }}</script>
+    {% set kind = "probe" %}
+    {% include "dashboard/executive/_finding_slideover.html" %}
+    <script src="/static/executive_findings.js?v={{ package_version }}" defer></script>
   {% endif %}
   {% include "dashboard/executive/_reproducibility.html" %}
 </section>

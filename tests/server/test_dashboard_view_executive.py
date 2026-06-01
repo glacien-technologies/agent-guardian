@@ -440,7 +440,7 @@ def test_dashboard_view_module_caps_are_locked() -> None:
         (SeverityBand.WARNING, "Warning"),
         (SeverityBand.POOR, "Poor"),
         (SeverityBand.CRITICAL, "Critical"),
-        (SeverityBand.NOT_EVALUATED, "Not graded yet"),
+        (SeverityBand.NOT_EVALUATED, "NA"),
     ],
 )
 def test_humanise_band_maps_every_member(band: SeverityBand, expected: str) -> None:
@@ -492,7 +492,7 @@ def test_build_dashboard_context_band_label_never_raw_enum_for_not_evaluated() -
         base_url="http://127.0.0.1:8000",
         version_label="0.0.0",
     )
-    assert ctx.payload["band_label"] == "Not graded yet"
+    assert ctx.payload["band_label"] == "NA"
     assert "not_evaluated" not in ctx.payload["band_label"].lower()
 
 
@@ -532,9 +532,12 @@ def test_rendered_executive_dashboard_never_leaks_not_evaluated_token(
     html = resp.text
 
     # The humanised label is present, the raw enum token is not (as visible text).
-    assert "Not graded yet" in html
+    assert "NA" in html
     # The KPI tile must carry the humanised label, not the underscore token.
     # We allow ``not_evaluated`` only as a CSS class modifier (``--not_evaluated``)
     # — anywhere else (inside a ``>…<`` text node) is a regression.
     assert ">not_evaluated<" not in html
     assert ">NOT_EVALUATED<" not in html
+    # And the old verbose label must not linger anywhere in the rendered HTML —
+    # if it survived a partial regression we'd see it here.
+    assert "Not graded yet" not in html

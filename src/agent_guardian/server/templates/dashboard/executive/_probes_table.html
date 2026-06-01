@@ -1,0 +1,62 @@
+{# Executive — Probes tab compact table (QA-032).
+
+   Replaces the per-row card list (``exec-probes-list`` / ``exec-probe``)
+   with a 5-column scannable table:
+
+     PROBE ID  |  AGENT · ASI  |  VERDICT  |  TURN  |  TIMESTAMP
+
+   Each row carries ``data-probe-id`` + ``data-source="probe"`` so the
+   shared slide-over JS (``executive_findings.js``) can locate the matching
+   payload in the ``#exec-probes-payload`` JSON island and render its full
+   prompt / target response / judge reasoning into the slide-over body when
+   the row is clicked / Enter-keyed.
+
+   Verdict vocab — same single source of truth as the Findings tab evidence
+   pills (QA-031): ``fail`` → EXPLOITED (red), ``pass`` → DEFENDED (green),
+   ``inconclusive`` → INCONCLUSIVE (amber), empty/unset → PENDING (muted).
+
+   All ``p.*`` fields are operator-untrusted (sourced from
+   ``<scan_dir>/memory.jsonl`` via :func:`_assemble_probes_list`) — Jinja
+   autoescape applies. Never use ``|safe`` on these values.
+#}
+<table class="exec-probes-table" role="table" aria-label="Probe attempts">
+  <thead>
+    <tr>
+      <th scope="col" class="exec-probes-table__col--id">PROBE ID</th>
+      <th scope="col" class="exec-probes-table__col--agent">AGENT &middot; ASI</th>
+      <th scope="col" class="exec-probes-table__col--verdict">VERDICT</th>
+      <th scope="col" class="exec-probes-table__col--turn">TURN</th>
+      <th scope="col" class="exec-probes-table__col--time">TIMESTAMP</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in probes_list %}
+      {% set _verdict = p.verdict or 'unknown' %}
+      <tr class="exec-probes-table__row"
+          data-probe-id="{{ p.probe_id }}"
+          data-source="probe"
+          data-verdict="{{ _verdict }}"
+          tabindex="0"
+          role="button"
+          aria-controls="exec-finding-slideover"
+          aria-label="Open probe {{ p.probe_id or 'unknown' }}">
+        <td class="exec-probes-table__cell--id"><code>{{ p.probe_id or '—' }}</code></td>
+        <td class="exec-probes-table__cell--agent">
+          <code class="exec-probes-table__asi">{{ p.asi_category or '—' }}</code>
+          <span class="exec-probes-table__agent">{{ p.agent or '—' }}</span>
+        </td>
+        <td class="exec-probes-table__cell--verdict">
+          <span class="exec-verdict-pill exec-verdict-pill--{{ _verdict }}">
+            {%- if _verdict == 'fail' -%}EXPLOITED
+            {%- elif _verdict == 'pass' -%}DEFENDED
+            {%- elif _verdict == 'inconclusive' -%}INCONCLUSIVE
+            {%- else -%}PENDING
+            {%- endif -%}
+          </span>
+        </td>
+        <td class="exec-probes-table__cell--turn"><span class="exec-probes-table__turn">turn {{ p.turn }}</span></td>
+        <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ p.timestamp_label }}</time></td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>

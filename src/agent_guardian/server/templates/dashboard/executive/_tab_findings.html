@@ -23,12 +23,9 @@
          hidden>
   <h2 class="exec-section-title">All findings so far.</h2>
   <p class="exec-section-lede">
-    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality. Click any
-    bar to jump to that severity grouping below.
+    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality.
+    Click any row to inspect the full finding, metadata, and evidence drawer.
   </p>
-
-  {% set tab_key = 'findings' %}
-  {% include "dashboard/executive/_severity_bars.html" %}
 
   {% if findings_total == 0 %}
     <p class="exec-empty">Nothing flagged yet.</p>
@@ -48,146 +45,9 @@
               {{ _sev_items | length }} finding{% if _sev_items | length != 1 %}s{% endif %}
             </span>
           </h3>
-          <ol class="exec-findings-list" role="list">
-            {% for f in _sev_items %}
-              <li class="exec-finding"
-                  id="finding-{{ f.id }}"
-                  data-severity="{{ f.severity_class }}">
-                <header class="exec-finding__head">
-                  <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
-                        aria-label="{{ f.severity_label }} severity">
-                    <span class="exec-sev-pill__dot" aria-hidden="true"></span>
-                    {{ f.severity_label }}
-                  </span>
-                  <code class="exec-finding__id">{{ f.id }}</code>
-                  <h4 class="exec-finding__title">{{ f.summary }}</h4>
-                  <time class="exec-finding__time">{{ f.created_label }}</time>
-                </header>
-                <dl class="exec-finding__meta">
-                  <dt>ASI</dt><dd><code>{{ f.asi_code }}</code></dd>
-                  <dt>CSA</dt><dd><code>{{ f.csa_code }}</code></dd>
-                  <dt>Probe</dt><dd><code>{{ f.probe_id }}</code></dd>
-                  <dt>ATLAS</dt>
-                  <dd>
-                    {% if f.atlas %}
-                      {% for technique in f.atlas %}<code>{{ technique }}</code>{% if not loop.last %} &middot; {% endif %}{% endfor %}
-                    {% else %}
-                      <span class="exec-finding__none">&mdash;</span>
-                    {% endif %}
-                  </dd>
-                </dl>
-                {# Evidence expansion — verbatim probe attempts that
-                   correlate to this finding (matched by probe_id, with an
-                   agent+ASI fallback). Suppressed entirely when there are
-                   no matching turns: not every finding has captured probe
-                   evidence (e.g. static-analysis or recon-derived). All
-                   prompt / response / reasoning text is operator-untrusted
-                   and goes through Jinja autoescape — never use ``|safe``
-                   on these fields. #}
-                {% if f.evidence and f.evidence | length > 0 %}
-                  <details class="exec-finding__evidence">
-                    <summary>
-                      <span class="exec-finding__evidence-count">
-                        {{ f.evidence | length }} evidence event{% if f.evidence | length != 1 %}s{% endif %}
-                        {% if f.evidence_truncated %}
-                          &middot; showing {{ f.evidence | length }} of {{ f.evidence_total }}
-                        {% endif %}
-                      </span>
-                      {# Verdict breakdown — same enum keys + colour vocab as
-                         the per-row badges, so the operator can see at a glance
-                         how many turns went which way without expanding the
-                         drawer. Hidden when the count is zero so a 7/0/0 finding
-                         doesn't render three trailing pills. #}
-                      {% if f.evidence_stats %}
-                        <span class="exec-finding__evidence-breakdown">
-                          {% if f.evidence_stats.fail %}
-                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--fail">
-                              {{ f.evidence_stats.fail }} exploited
-                            </span>
-                          {% endif %}
-                          {% if f.evidence_stats.pass %}
-                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--pass">
-                              {{ f.evidence_stats.pass }} defended
-                            </span>
-                          {% endif %}
-                          {% if f.evidence_stats.inconclusive %}
-                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--inconclusive">
-                              {{ f.evidence_stats.inconclusive }} inconclusive
-                            </span>
-                          {% endif %}
-                          {% if f.evidence_stats.unknown %}
-                            <span class="exec-finding__evidence-breakdown-pill exec-finding__evidence-breakdown-pill--unknown">
-                              {{ f.evidence_stats.unknown }} pending
-                            </span>
-                          {% endif %}
-                        </span>
-                      {% endif %}
-                    </summary>
-                    <ol class="exec-finding__evidence-list" role="list">
-                      {% for ev in f.evidence %}
-                        {# Compact one-line row: clicking anywhere on the row
-                           toggles the inline details body. Strip + chevron
-                           live INSIDE the <summary> so the entire row is the
-                           hit-target. Single-event findings render with the
-                           details auto-open so the operator doesn't pay a
-                           second click for the common case. #}
-                        <li class="exec-finding__evidence-row"
-                            data-verdict="{{ ev.verdict }}"
-                            data-agent="{{ ev.agent }}">
-                          <details class="exec-finding__evidence-body"
-                                   {% if f.evidence | length == 1 %}open{% endif %}>
-                            <summary class="exec-finding__evidence-summary">
-                              <code class="exec-finding__evidence-id">{{ ev.probe_id or '—' }}</code>
-                              <span class="exec-finding__evidence-agent">{{ ev.agent or '—' }}</span>
-                              <span class="exec-finding__evidence-turn">turn {{ ev.turn }}</span>
-                              <time class="exec-finding__evidence-time">{{ ev.timestamp_label }}</time>
-                              {# Verdict badge — operator-aligned labels.
-                                 ``fail`` in the AgentGuardian model means the
-                                 TARGET was compromised (exploit succeeded), so
-                                 we render it as EXPLOITED in red. ``pass``
-                                 means the target refused / defended, so it
-                                 renders as DEFENDED in green. ``inconclusive``
-                                 → amber. Empty/unset → muted PENDING. #}
-                              <span class="exec-finding__evidence-verdict exec-finding__evidence-verdict--{{ ev.verdict or 'unknown' }}">
-                                {%- if ev.verdict == 'fail' -%}EXPLOITED
-                                {%- elif ev.verdict == 'pass' -%}DEFENDED
-                                {%- elif ev.verdict == 'inconclusive' -%}INCONCLUSIVE
-                                {%- else -%}PENDING
-                                {%- endif -%}
-                              </span>
-                              <span class="exec-finding__evidence-spacer"></span>
-                              <span class="exec-finding__evidence-toggle">
-                                <span class="exec-finding__evidence-toggle-label">See details</span>
-                                <span class="exec-details-toggle__chevron" aria-hidden="true"></span>
-                              </span>
-                            </summary>
-                            <div class="exec-finding__evidence-detail">
-                              <p class="exec-probe__label">Request prompt</p>
-                              <pre class="exec-probe__prompt">{{ ev.prompt }}</pre>
-                              <p class="exec-probe__label">Target response</p>
-                              <pre class="exec-probe__response">{{ ev.target_response }}</pre>
-                              {% if ev.confidence and ev.confidence > 0.0 %}
-                                <p class="exec-probe__label">Judge reasoning (confidence {{ '%.2f' | format(ev.confidence) }})</p>
-                              {% else %}
-                                <p class="exec-probe__label">Judge reasoning (no judge confidence)</p>
-                              {% endif %}
-                              {% if ev.reasoning %}
-                                <blockquote class="exec-probe__reason">{{ ev.reasoning }}</blockquote>
-                              {% else %}
-                                <p class="exec-probe__reason exec-probe__reason--empty">
-                                  Not graded per-turn — see the Probes tab for the verbatim judge trail.
-                                </p>
-                              {% endif %}
-                            </div>
-                          </details>
-                        </li>
-                      {% endfor %}
-                    </ol>
-                  </details>
-                {% endif %}
-              </li>
-            {% endfor %}
-          </ol>
+          {% with bucket_findings=_sev_items, bucket_key=_sev_key %}
+            {% include "dashboard/executive/_findings_table.html" %}
+          {% endwith %}
         </section>
       {% endif %}
     {% endfor %}
@@ -205,5 +65,15 @@
       </nav>
     {% endif %}
   {% endif %}
-  {% include "dashboard/executive/_reproducibility.html" %}
+
+  {# Hidden JSON island — finding payloads for the slide-over. The
+     slide-over JS reads ``data-finding-id`` off the clicked row and
+     looks up the matching payload here. Keeps the table markup tiny
+     (table = 4 columns) while preserving all evidence + metadata for
+     the deep-dive. #}
+  <script type="application/json" id="exec-findings-payload">
+    {{ findings_payload_json | safe }}
+  </script>
+
+  {% include "dashboard/executive/_finding_slideover.html" %}
 </section>

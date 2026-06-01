@@ -225,6 +225,9 @@ body.exec-body {
   background: var(--exec-bg-elev);
   border: 1px solid var(--exec-border-subtle);
   border-radius: var(--exec-radius);
+  /* QA-028 sub-ask 1 — host the absolute-positioned ⓘ popover so it
+     stays anchored to its tile. */
+  position: relative;
 }
 .exec-kpi__label {
   display: inline-flex;
@@ -243,13 +246,166 @@ body.exec-body {
   flex-shrink: 0;
   color: currentColor;
 }
-.exec-kpi__desc {
+/* QA-028 sub-ask 1 — info-icon button + hover/focus popover.
+   The always-on .exec-kpi__desc block is replaced by a 12 px ⓘ that surfaces
+   the description in a positioned tooltip on :hover / :focus-within. */
+.exec-kpi__info {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--exec-ink-subtle);
+  cursor: help;
+  border-radius: 50%;
+}
+.exec-kpi__info svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.75;
+}
+.exec-kpi__info:hover,
+.exec-kpi__info:focus-visible {
+  color: var(--exec-brand);
+  outline: none;
+}
+.exec-kpi__info:focus-visible {
+  box-shadow: 0 0 0 2px var(--exec-brand-tint);
+}
+.exec-kpi__desc-popover {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: 0.875rem;
+  right: 0.875rem;
+  z-index: 20;
+  background: var(--exec-ink);
+  color: var(--exec-bg-elev);
+  font-family: var(--exec-font-sans);
   font-size: 0.75rem;
   line-height: 1.35;
-  color: var(--exec-ink-subtle);
-  margin-top: 0.375rem;
-  font-family: var(--exec-font-sans);
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--exec-radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
+.exec-kpi:hover .exec-kpi__desc-popover,
+.exec-kpi:focus-within .exec-kpi__desc-popover {
+  opacity: 1;
+  transform: translateY(0);
+}
+/* Tooltip overflow flip for the rightmost two tiles (COST + COVERAGE) so the
+   popover never clips the viewport edge. */
+.exec-kpi[data-kpi="cost"] .exec-kpi__desc-popover,
+.exec-kpi[data-kpi="coverage"] .exec-kpi__desc-popover {
+  left: auto;
+  right: 0.875rem;
+}
+
+/* QA-028 sub-ask 2 — per-tile mini-chart slot, capped at 32 px tall so the
+   whole tile stays under the ~64 px target the QA locked. */
+.exec-kpi__chart {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  margin-top: 0.375rem;
+}
+.exec-kpi__chart--aivss { color: var(--exec-brand); }
+.exec-kpi__chart--aivss svg { width: 100%; height: 100%; }
+.exec-kpi__chart-fill--critical { color: var(--exec-sev-critical); stroke: var(--exec-sev-critical); }
+.exec-kpi__chart-fill--poor { color: var(--exec-sev-high); stroke: var(--exec-sev-high); }
+.exec-kpi__chart-fill--warning { color: var(--exec-sev-medium); stroke: var(--exec-sev-medium); }
+.exec-kpi__chart-fill--good { color: var(--exec-sev-low); stroke: var(--exec-sev-low); }
+.exec-kpi__chart-fill--excellent { color: var(--exec-sev-low); stroke: var(--exec-sev-low); }
+.exec-kpi__chart-fill--unknown,
+.exec-kpi__chart-fill--not_evaluated { color: var(--exec-ink-subtle); stroke: var(--exec-ink-subtle); }
+
+/* BAND tile — 5-segment band axis. */
+.exec-kpi__chart--band { gap: 2px; }
+.exec-kpi__band-seg {
+  flex: 1 1 0;
+  height: 8px;
+  background: var(--exec-bg-sunken);
+  border-radius: 2px;
+}
+.exec-kpi__band-seg--critical.exec-kpi__band-seg--active { background: var(--exec-sev-critical); }
+.exec-kpi__band-seg--poor.exec-kpi__band-seg--active { background: var(--exec-sev-high); }
+.exec-kpi__band-seg--warning.exec-kpi__band-seg--active { background: var(--exec-sev-medium); }
+.exec-kpi__band-seg--good.exec-kpi__band-seg--active { background: var(--exec-sev-low); }
+.exec-kpi__band-seg--excellent.exec-kpi__band-seg--active { background: var(--exec-sev-low); }
+
+/* FINDINGS tile — 4-segment stacked severity mix. */
+.exec-kpi__chart--findings { gap: 2px; }
+.exec-kpi__mix-seg { height: 8px; border-radius: 2px; }
+.exec-kpi__mix-seg--critical { background: var(--exec-sev-critical); }
+.exec-kpi__mix-seg--high { background: var(--exec-sev-high); }
+.exec-kpi__mix-seg--medium { background: var(--exec-sev-medium); }
+.exec-kpi__mix-seg--low { background: var(--exec-sev-low); }
+.exec-kpi__mix-empty {
+  flex: 1 1 0;
+  height: 8px;
+  background: var(--exec-bg-sunken);
+  border-radius: 2px;
+}
+
+/* CRITICAL + HIGH tiles — dot cluster. */
+.exec-kpi__chart--dots { gap: 4px; }
+.exec-kpi__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.exec-kpi__dot--critical { background: var(--exec-sev-critical); }
+.exec-kpi__dot--high { background: var(--exec-sev-high); }
+.exec-kpi__dot-more {
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  color: var(--exec-ink-muted);
+}
+.exec-kpi__dot-empty {
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  color: var(--exec-ink-subtle);
+}
+
+/* ELAPSED + COST tiles — horizontal progress bar / "no cap". */
+.exec-kpi__chart--progress { gap: 0; }
+.exec-kpi__progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--exec-bg-sunken);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exec-kpi__progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--exec-brand);
+}
+.exec-kpi__nocap {
+  font-family: var(--exec-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+
+/* COVERAGE tile — 10-cell pip row. */
+.exec-kpi__chart--coverage { gap: 3px; }
+.exec-kpi__cov-cell {
+  flex: 1 1 0;
+  height: 10px;
+  background: var(--exec-bg-sunken);
+  border-radius: 2px;
+}
+.exec-kpi__cov-cell--on { background: var(--exec-brand); }
 .exec-kpi__value {
   font-family: var(--exec-font-serif);
   font-size: 1.75rem;
@@ -266,10 +422,12 @@ body.exec-body {
 .exec-kpi__value--good { color: var(--exec-sev-low); }
 .exec-kpi__value--warning { color: var(--exec-sev-medium); }
 .exec-kpi__value--poor { color: var(--exec-sev-critical); }
-/* "Not graded yet" — fallback band when no real evaluator has scored the
+/* "NA" (QA-034) — fallback band when no real evaluator has scored the
    scan. Render in the muted ink so it reads as a soft placeholder rather
    than a confident verdict. Matches ``_band_class`` which lowercases the
-   enum value (``not_evaluated`` — with the underscore preserved). */
+   enum value (``not_evaluated`` — with the underscore preserved). The
+   visible label text was shortened from "Not graded yet" to "NA" so the
+   BAND tile fits one line in the ~9rem KPI column. */
 .exec-kpi__value--not_evaluated,
 .exec-kpi__value--unknown { color: var(--exec-ink-muted); }
 
@@ -587,19 +745,31 @@ body.exec-body {
   flex-direction: column;
 }
 .exec-overview-twocol .exec-chart__canvas-wrap {
+  /* QA-028 sub-ask 3a — drop row-3 vertical extent so both charts fit in a
+     single viewport scroll on 1080p. Was 360 → 280 px floor. */
   flex: 1 1 auto;
-  min-height: 360px;
+  min-height: 280px;
+  max-height: 360px;
   display: flex;
   align-items: stretch;
 }
 .exec-overview-twocol .exec-chart__canvas-wrap--bar {
-  min-height: 360px;
+  min-height: 280px;
+  max-height: 360px;
   height: auto;
+}
+/* Square-up the radar — QA-028 sub-ask 3a locks an aspect-ratio: 1
+   centred wrap so the radar reads as a square card. Chart.js keeps
+   maintainAspectRatio: false so it fills the CSS-locked box. */
+.exec-overview-twocol .exec-chart--radar .exec-chart__canvas-wrap {
+  aspect-ratio: 1 / 1;
+  max-width: 360px;
+  margin: 0 auto;
 }
 .exec-overview-twocol .exec-chart__canvas {
   width: 100% !important;
   height: 100% !important;
-  max-height: none;
+  max-height: 360px;
 }
 @media (max-width: 1024px) {
   .exec-overview-twocol { grid-template-columns: 1fr; }
@@ -786,6 +956,154 @@ body.exec-body {
   }
   .exec-asi-list__bar,
   .exec-asi-list__count {
+    display: none;
+  }
+}
+
+/* ============================================================
+ * 8b. Compact ASI breakdown (QA-033) — Overview-tab port of the
+ *     Agents-tab _asi_rows.html table, tightened to fit in ≤ 480 px.
+ *     Read-only at-a-glance; rows do NOT open a details drawer.
+ *
+ *     Row layout (left → right):
+ *       CODE (mono) · CATEGORY (sans) · SCORE BAR · AIVSS num ·
+ *       WEIGHT chip · FINDINGS pills (4) · STATUS pill
+ * ============================================================ */
+.exec-asi-compact-section {
+  margin: 2rem 0 1.5rem 0;
+}
+.exec-asi-compact {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--exec-border-subtle);
+}
+.exec-asi-compact__row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 120px 48px 60px 160px 88px;
+  gap: 12px;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  min-height: 36px;
+}
+.exec-asi-compact__row:hover {
+  background: var(--exec-bg-sunken);
+}
+.exec-asi-compact__code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+}
+.exec-asi-compact__name {
+  font-family: var(--exec-font-sans);
+  color: var(--exec-ink);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exec-asi-compact__bar {
+  position: relative;
+  height: 6px;
+  background: var(--exec-bg-sunken);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.exec-asi-compact__bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--exec-brand);
+  border-radius: 3px;
+}
+.exec-asi-compact__row--attention .exec-asi-compact__bar-fill {
+  background: var(--exec-sev-high);
+}
+.exec-asi-compact__row--critical .exec-asi-compact__bar-fill {
+  background: var(--exec-sev-critical);
+}
+.exec-asi-compact__score {
+  font-family: var(--exec-font-mono);
+  font-size: 13px;
+  color: var(--exec-ink);
+  text-align: right;
+}
+.exec-asi-compact__weight {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-muted);
+  background: var(--exec-bg-sunken);
+  border-radius: var(--exec-radius-sm);
+  width: max-content;
+}
+.exec-asi-compact__weight--high { color: var(--exec-brand-strong); }
+.exec-asi-compact__findings {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.exec-asi-compact__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  border-radius: 999px;
+  color: var(--exec-bg-elev);
+}
+.exec-asi-compact__pill--critical { background: var(--exec-sev-critical); }
+.exec-asi-compact__pill--high { background: var(--exec-sev-high); }
+.exec-asi-compact__pill--medium { background: var(--exec-sev-medium); }
+.exec-asi-compact__pill--low { background: var(--exec-sev-low); }
+.exec-asi-compact__pill--zero {
+  background: transparent;
+  color: var(--exec-ink-subtle);
+  border: 1px solid var(--exec-border-subtle);
+}
+.exec-asi-compact__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  width: max-content;
+}
+.exec-asi-compact__status--done {
+  background: color-mix(in srgb, var(--exec-sev-low) 16%, transparent);
+  color: var(--exec-sev-low);
+}
+.exec-asi-compact__status--running {
+  background: color-mix(in srgb, var(--exec-brand) 16%, transparent);
+  color: var(--exec-brand-strong);
+}
+.exec-asi-compact__status--queued {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+}
+@media (max-width: 1023px) {
+  .exec-asi-compact__row {
+    grid-template-columns: 56px minmax(0, 1fr) 60px 88px;
+  }
+  .exec-asi-compact__bar,
+  .exec-asi-compact__weight,
+  .exec-asi-compact__findings {
     display: none;
   }
 }
@@ -1723,3 +2041,274 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
 }
+
+/* ============================================================
+ * 14. Probes table (QA-032)
+ *
+ * Replaces the per-row card list with a compact 5-column table.
+ * Each row is a clickable button-row that opens the shared
+ * slide-over component. Column widths are locked so the table
+ * renders identically regardless of payload (long seed IDs are
+ * truncated with ellipsis, not allowed to break the layout).
+ * ============================================================ */
+.exec-probes-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  margin: 16px 0 24px 0;
+}
+.exec-probes-table thead th {
+  text-align: left;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  background: var(--exec-bg-sunken);
+}
+.exec-probes-table__col--id { width: 10rem; }
+.exec-probes-table__col--agent { width: 14rem; }
+.exec-probes-table__col--verdict { width: 6rem; }
+.exec-probes-table__col--turn { width: 3rem; }
+.exec-probes-table__col--time { width: 5rem; }
+
+.exec-probes-table__row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  transition: background 120ms ease-out, transform 120ms ease-out;
+}
+.exec-probes-table__row:hover {
+  background: var(--exec-brand-tint);
+}
+.exec-probes-table__row:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: -2px;
+  background: var(--exec-brand-tint);
+}
+.exec-probes-table__row > td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+.exec-probes-table__cell--id code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.exec-probes-table__asi {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+  margin-right: 6px;
+}
+.exec-probes-table__agent {
+  font-family: var(--exec-font-sans);
+  font-weight: 500;
+  color: var(--exec-ink);
+  font-size: 13px;
+}
+.exec-probes-table__turn,
+.exec-probes-table__time {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  white-space: nowrap;
+}
+
+/* Consolidated verdict-pill — single source of truth for the
+ * Findings (evidence rows) + Probes (table rows + slide-over) verdict
+ * colour vocab. The legacy ``.exec-finding__evidence-verdict--*`` and
+ * ``.exec-probe__verdict--*`` selectors alias to these classes via
+ * comma-grouped selectors below so existing markup keeps rendering
+ * the same colours. */
+.exec-verdict-pill,
+.exec-finding__evidence-verdict,
+.exec-probe__verdict {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+  border: 1px solid transparent;
+}
+.exec-verdict-pill--fail,
+.exec-finding__evidence-verdict--fail,
+.exec-probe__verdict--fail {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 20%, transparent);
+}
+.exec-verdict-pill--pass,
+.exec-finding__evidence-verdict--pass,
+.exec-probe__verdict--pass {
+  background: var(--exec-sev-low-bg);
+  color: var(--exec-sev-low);
+  border-color: color-mix(in srgb, var(--exec-sev-low) 25%, transparent);
+}
+.exec-verdict-pill--inconclusive,
+.exec-finding__evidence-verdict--inconclusive,
+.exec-probe__verdict--inconclusive {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 25%, transparent);
+}
+.exec-verdict-pill--unknown,
+.exec-finding__evidence-verdict--unknown,
+.exec-probe__verdict--unknown {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+}
+
+/* ============================================================
+ * 15. Slide-over component (QA-031 / QA-032)
+ *
+ * Right-edge drawer used by both Findings (planned) and Probes
+ * tabs to surface the verbatim prompt / target response / judge
+ * reasoning for a clicked row. ``hidden`` attribute toggles the
+ * whole component; backdrop + drawer ride a 200ms ease-out
+ * transition when the ``data-open`` attribute flips.
+ * ============================================================ */
+.exec-slideover-root[hidden] { display: none; }
+.exec-slideover-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+.exec-slideover__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  pointer-events: auto;
+}
+.exec-slideover-root[data-open="true"] .exec-slideover__backdrop {
+  opacity: 1;
+}
+.exec-slideover {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  background: var(--exec-bg-elev);
+  border-left: 1px solid var(--exec-border-subtle);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+  transform: translateX(100%);
+  transition: transform 200ms ease-out;
+  pointer-events: auto;
+  overflow-y: auto;
+}
+.exec-slideover-root[data-open="true"] .exec-slideover {
+  transform: translateX(0);
+}
+.exec-slideover__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.exec-slideover__chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+.exec-slideover__id {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-slideover__turn {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+}
+.exec-slideover__time {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  margin-left: auto;
+}
+.exec-slideover__close {
+  background: transparent;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  width: 32px;
+  height: 32px;
+  color: var(--exec-ink-muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+.exec-slideover__close:hover {
+  background: var(--exec-brand-tint);
+  color: var(--exec-brand-strong);
+}
+.exec-slideover__close:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+.exec-slideover__title {
+  font-family: var(--exec-font-serif);
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--exec-ink);
+  margin: 0 0 16px 0;
+  word-break: break-word;
+}
+.exec-slideover__body {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 768px) {
+  .exec-slideover {
+    width: 100vw;
+    border-left: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exec-slideover,
+  .exec-slideover__backdrop {
+    transition: none !important;
+  }
+}
+

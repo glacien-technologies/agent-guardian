@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import random
 import re
 import sys
@@ -235,7 +236,15 @@ class SwarmConfig:
     recon_wall_seconds: float = 300.0
     # Max adaptive deepening rounds in the black-box capability audit (recon).
     recon_audit_rounds: int = 10
-    overall_wall_seconds: float = 900.0
+    # QA-027: wall-clock cap defaults to None (uncapped). The old 900s
+    # default was a hidden 15-min ceiling that silently capped --mode full
+    # coverage on slow targets (Cloud Run cold starts, on-prem agents, big-
+    # tool RAG agents). Post-v1.0 the philosophy mirrors the _LOGS_TAIL_CAP
+    # removal (commit 2e25153, 2026-05-31): default uncapped; opt-in cap via
+    # --budget-seconds on the CLI or `cfg.swarm.budget.wall_seconds` in the
+    # contract YAML. None routes through _run_inner without wait_for; a
+    # positive float wraps wait_for(timeout=N) at the run() boundary.
+    overall_wall_seconds: float | None = None
     total_tokens: int = 2_000_000
     # Runtime USD budget cap. ``None`` (default) = uncapped: the scan runs to
     # completion. When set, a watchdog in the checkpoint loop meters *actual*
@@ -597,7 +606,13 @@ class SwarmCommander:
         self._start_time = time.monotonic()
         self._last_finding_seen_at = self._start_time
 
-        # Apply an overall wall-clock cap around the whole run.
+        # Apply an overall wall-clock cap around the whole run. QA-027:
+        # ``overall_wall_seconds is None`` means "no cap"; route past
+        # ``asyncio.wait_for`` entirely rather than passing ``timeout=None``
+        # so we side-step the legacy 0 → instant-fire footgun and keep the
+        # no-cap path observable in stack traces (no spurious wait_for frame).
+        if self.config.overall_wall_seconds is None:
+            return await self._run_inner()
         try:
             return await asyncio.wait_for(
                 self._run_inner(),
@@ -1062,9 +1077,20 @@ class SwarmCommander:
             # so the whole scan finishes quickly. SMART/FULL keep the
             # AgentBudget default (12 turns).
             mode_max_turns = self.config.max_turns_per_agent
+            # QA-027: AgentBudget.wall_seconds_remaining is a plain float
+            # (asi-agent stop rule is ``elapsed >= wall_seconds_remaining``).
+            # When the swarm-wide cap is None (uncapped), pass +inf so the
+            # per-agent rule never fires on wall time — the agent still
+            # terminates via tokens / max_turns / target_findings, which is
+            # the QA-027 acceptance (4) "report inf or be omitted, NOT 0".
+            per_agent_wall = (
+                math.inf
+                if self.config.overall_wall_seconds is None
+                else self.config.overall_wall_seconds
+            )
             agent_budget_kwargs: dict[str, Any] = {
                 "tokens_remaining": per_agent_tokens,
-                "wall_seconds_remaining": self.config.overall_wall_seconds,
+                "wall_seconds_remaining": per_agent_wall,
             }
             if mode_max_turns is not None:
                 agent_budget_kwargs["max_turns"] = mode_max_turns
@@ -1194,11 +1220,15 @@ class SwarmCommander:
         )
         _LOG.info(
             "phase parallel: starting %d agents (checkpoint every %.1fs, "
-            "taskgroup=%s, overall_wall_budget=%.1fs)",
+            "taskgroup=%s, overall_wall_budget=%s)",
             len(agents),
             self.config.checkpoint_interval_seconds,
             _supports_taskgroup(),
-            self.config.overall_wall_seconds,
+            (
+                "uncapped"
+                if self.config.overall_wall_seconds is None
+                else f"{self.config.overall_wall_seconds:.1f}s"
+            ),
         )
         # Stash the launched slate so the budget watchdog (and finalise
         # hard-ceiling) can sum live per-agent spend off these objects.

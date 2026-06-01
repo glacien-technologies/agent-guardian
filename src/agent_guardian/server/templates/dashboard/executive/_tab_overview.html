@@ -24,5 +24,17 @@
     {% include "dashboard/executive/_severity_bars.html" %}
     {% include "dashboard/executive/_asi_radar.html" %}
   </div>
+  {# QA-033 — compact ASI breakdown widget. Ports the Agents-tab per-ASI
+     content (code · category · score bar · AIVSS · weight · finding-counts
+     · status) onto the Overview surface so QA-030 can safely delete the
+     Agents tab in its own ship. Lives BELOW the row-3 charts + ABOVE the
+     reproducibility footer. #}
+  <section class="exec-asi-compact-section" aria-labelledby="exec-asi-compact-title">
+    <h2 class="exec-section-title" id="exec-asi-compact-title">Adversarial Surface Index breakdown</h2>
+    <p class="exec-section-lede">
+      Per-category live progress. Score updates as the swarm advances.
+    </p>
+    {% include "dashboard/executive/_asi_compact_table.html" %}
+  </section>
   {% include "dashboard/executive/_reproducibility.html" %}
 </section>

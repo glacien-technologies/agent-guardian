@@ -1,0 +1,53 @@
+{# Executive — Findings table partial (QA-031).
+
+   Per-severity bucket renders a 4-column table:
+     Severity / Agent · ASI / Probe / Summary
+   No ID column, no LAST SEEN column (QA-031 acceptance bullets).
+   Each <tr> carries data-finding-id, tabindex="0", and role="button"
+   so the slide-over JS can wire click + Enter/Space handlers.
+   ARIA: table role + per-row button role + aria-controls pointing at
+   the single mounted exec-slideover.
+#}
+<div class="exec-findings-table-wrap">
+  <table class="exec-findings-table"
+         role="table"
+         aria-label="Findings — {{ bucket_key | upper }} severity">
+    <thead>
+      <tr>
+        <th scope="col" class="exec-findings-table__col--sev">Severity</th>
+        <th scope="col" class="exec-findings-table__col--agent">Agent &middot; ASI</th>
+        <th scope="col" class="exec-findings-table__col--probe">Probe</th>
+        <th scope="col" class="exec-findings-table__col--summary">Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in bucket_findings %}
+        <tr class="exec-findings-table__row"
+            data-finding-id="{{ f.id }}"
+            data-severity="{{ f.severity_class }}"
+            tabindex="0"
+            role="button"
+            aria-controls="exec-finding-slideover"
+            aria-label="Open finding {{ f.id }}">
+          <td class="exec-findings-table__cell exec-findings-table__cell--sev">
+            <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
+                  aria-label="{{ f.severity_label }} severity">
+              <span class="exec-sev-pill__dot" aria-hidden="true"></span>
+              {{ f.severity_label }}
+            </span>
+          </td>
+          <td class="exec-findings-table__cell exec-findings-table__cell--agent">
+            <code>{{ f.asi_code }}</code><span class="exec-findings-table__agent-name">{{ f.csa_code }}</span>
+          </td>
+          <td class="exec-findings-table__cell exec-findings-table__cell--probe">
+            <code>{{ f.probe_id or '—' }}</code>
+          </td>
+          <td class="exec-findings-table__cell exec-findings-table__cell--summary"
+              title="{{ f.summary }}">
+            {{ f.summary }}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

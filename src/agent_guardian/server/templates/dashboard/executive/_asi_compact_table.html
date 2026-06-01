@@ -1,0 +1,64 @@
+{# QA-033 — Executive Overview compact ASI breakdown.
+
+   10-row at-a-glance table ported from the Agents-tab _asi_rows.html, with:
+     - tighter padding (4 px row vs 12 px)
+     - shorter score bar (6 px vs 32 px)
+     - no subtitle line ("Direct · indirect · multi-turn") — headline only
+     - read-only (no <details> drawer) — the radar above is the deep view
+
+   Same view-model contract — reads asi_rows[*] (.code, .name, .score_pct,
+   .score_label, .is_pending, .is_attention, .weight_label, .weight_high,
+   .findings.{critical,high,medium,low}, .status_label, .status_class).
+
+   Live updates: each <tr>-like row carries data-live="asi-compact-{code}-*"
+   keys so the SSE patcher can rewrite the score / AIVSS / status without
+   a full reload. The scope prefix `asi-compact-` keeps these distinct from
+   the Agents-tab `asi-{code}-score` keys so both surfaces can coexist in
+   the DOM today (QA-030 deletes the Agents copy in a later ship).
+#}
+<ol class="exec-asi-compact"
+    data-component="asi-compact"
+    data-live-scope="asi-compact"
+    role="list"
+    aria-label="Adversarial Surface Index per category — compact">
+  {% for row in asi_rows %}
+    {% set _f = row.findings %}
+    {% set _row_findings = (_f.critical | default(0))
+        + (_f.high | default(0))
+        + (_f.medium | default(0))
+        + (_f.low | default(0)) %}
+    {% set _score_pct = row.score_pct | default(0) %}
+    {% set _row_critical = (not row.is_pending) and (_score_pct | float < 40.0) %}
+    <li class="exec-asi-compact__row
+               {% if row.is_attention %}exec-asi-compact__row--attention{% endif %}
+               {% if _row_critical %}exec-asi-compact__row--critical{% endif %}"
+        data-asi-code="{{ row.code }}">
+      <span class="exec-asi-compact__code">{{ row.code }}</span>
+      <span class="exec-asi-compact__name">{{ row.name }}</span>
+      <span class="exec-asi-compact__bar" aria-hidden="true">
+        <span class="exec-asi-compact__bar-fill"
+              data-live="asi-compact-{{ row.code }}-bar"
+              style="width: {{ _score_pct }}%;"></span>
+      </span>
+      <span class="exec-asi-compact__score"
+            data-live="asi-compact-{{ row.code }}-score">
+        {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
+      </span>
+      <span class="exec-asi-compact__weight {% if row.weight_high %}exec-asi-compact__weight--high{% endif %}">
+        × {{ row.weight_label }}
+      </span>
+      <span class="exec-asi-compact__findings" aria-label="Findings by severity">
+        <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.critical %}critical{% else %}zero{% endif %}"
+              title="Critical findings">{{ _f.critical | default(0) }}</span>
+        <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.high %}high{% else %}zero{% endif %}"
+              title="High findings">{{ _f.high | default(0) }}</span>
+        <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.medium %}medium{% else %}zero{% endif %}"
+              title="Medium findings">{{ _f.medium | default(0) }}</span>
+        <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.low %}low{% else %}zero{% endif %}"
+              title="Low findings">{{ _f.low | default(0) }}</span>
+      </span>
+      <span class="exec-asi-compact__status exec-asi-compact__status--{{ row.status_class }}"
+            data-live="asi-compact-{{ row.code }}-status">{{ row.status_label }}</span>
+    </li>
+  {% endfor %}
+</ol>

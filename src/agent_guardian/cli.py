@@ -2538,6 +2538,19 @@ def scan(
             "Omit for no cap."
         ),
     ),
+    budget_seconds: float | None = typer.Option(
+        None,
+        "--budget-seconds",
+        help=(
+            "Overall wall-clock cap in seconds. Omit (default) for uncapped — "
+            "the scan runs to swarm-natural completion bounded only by the "
+            "USD cap, per-agent token cap, or scan_done. Pass an explicit "
+            "0 for the same uncapped behaviour. Pass N>0 (e.g. --budget-seconds "
+            "600) to hard-stop the scan after N seconds and finalise on what "
+            "was collected. Parallels --budget-usd; the QA-027 removal of the "
+            "old hardcoded 900s ceiling means this is now opt-in, not opt-out."
+        ),
+    ),
     recon_budget_seconds: float = typer.Option(
         300.0,
         "--recon-budget-seconds",
@@ -2810,6 +2823,7 @@ def scan(
                 evaluator_model=evaluator_model,
                 tier=tier,
                 budget_usd=budget_usd,
+                budget_seconds=budget_seconds,
                 recon_budget_seconds=recon_budget_seconds,
                 fail_under=fail_under,
                 output=output,
@@ -2857,6 +2871,7 @@ async def _run_scan(
     evaluator_model: str | None,
     tier: str | None,
     budget_usd: float | None,
+    budget_seconds: float | None,
     recon_budget_seconds: float,
     fail_under: int | None,
     output: str,
@@ -3106,6 +3121,16 @@ async def _run_scan(
     )
 
     json_mode = (debug_format or "").lower().strip() == "json"
+    # QA-027: wall_seconds_cap is None (uncapped) when --budget-seconds
+    # is not passed AND the operator did not override the legacy
+    # contract-file knob ``cfg.swarm.budget.wall_seconds``. Explicit
+    # 0 from --budget-seconds maps to None (uncapped) — same semantics
+    # as the omit-the-flag path. The plan panel already branches on
+    # None to render "Wall-clock cap   uncapped" (mirrors USD cap).
+    if budget_seconds is not None and budget_seconds > 0:
+        wall_seconds_cap_for_panel: int | None = int(budget_seconds)
+    else:
+        wall_seconds_cap_for_panel = None
     if not no_plan and not json_mode:
         from agent_guardian.ui.scan_plan import build_plan_panel
         from agent_guardian.ui.scan_plan_data import (
@@ -3122,7 +3147,7 @@ async def _run_scan(
             multi_agent=plan_multi_agent,
             model_results=model_results,
             budget_mode=mode,
-            wall_seconds_cap=int(cfg.swarm.budget.wall_seconds),
+            wall_seconds_cap=wall_seconds_cap_for_panel,
             usd_cap=budget_usd,
             requested_outputs=[(output, engine_checks[0], str(output_path or ""))],
             auto_serve_result=auto_serve_result,
@@ -3170,7 +3195,7 @@ async def _run_scan(
                     for role, spec, result in model_results
                 ],
                 "budget_mode": mode,
-                "wall_seconds_cap": int(cfg.swarm.budget.wall_seconds),
+                "wall_seconds_cap": wall_seconds_cap_for_panel,
                 "usd_cap": budget_usd,
                 "requested_output": output,
                 "auto_serve_spawned": bool(getattr(auto_serve_result, "spawned", False)),
@@ -3236,6 +3261,7 @@ async def _run_scan(
             contract=contract,
             otel_endpoint=otel_endpoint,
             budget_usd=budget_usd,
+            budget_seconds=budget_seconds,
             recon_budget_seconds=recon_budget_seconds,
             debug_level=debug_level,
             debug_format=debug_format,
@@ -3288,6 +3314,7 @@ async def _run_scan_inner(
     contract: Path | None,
     otel_endpoint: str | None,
     budget_usd: float | None,
+    budget_seconds: float | None,
     recon_budget_seconds: float,
     debug_level: int,
     debug_format: str,
@@ -3368,12 +3395,24 @@ async def _run_scan_inner(
             err=True,
         )
         return EXIT_CONFIG
+    # QA-027: --budget-seconds is the source of truth for the overall
+    # wall-clock cap. Omit (None) or explicit 0 → uncapped (let SwarmConfig
+    # default to None). Positive value → cap at that many seconds. The
+    # legacy ``cfg.swarm.budget.wall_seconds`` contract-file knob is now
+    # ignored on the non-contract scan path — operators who want a cap
+    # pass --budget-seconds explicitly (parallel to --budget-usd). The
+    # --contract path's RoE ``max_wallclock_minutes`` still wins via the
+    # ``swarm_overrides`` splat further below (see roe.py:444).
+    if budget_seconds is not None and budget_seconds > 0:
+        overall_wall_seconds_value: float | None = float(budget_seconds)
+    else:
+        overall_wall_seconds_value = None
     swarm_config = SwarmConfig(
         scan_id=scan_id,
         commander_model=_normalise_model_name(eff_commander),
         attacker_model=_normalise_model_name(eff_attacker),
         evaluator_model=_normalise_model_name(eff_evaluator),
-        overall_wall_seconds=float(cfg.swarm.budget.wall_seconds),
+        overall_wall_seconds=overall_wall_seconds_value,
         total_tokens=cfg.swarm.budget.max_total_tokens,
         # OWASP-LLM specialists default ON post-launch hardening: transport-level
         # secret-leak and DoW are required default surface for agentic security.

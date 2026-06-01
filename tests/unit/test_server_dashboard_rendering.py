@@ -872,7 +872,7 @@ def test_bug2_score_card_with_partial_scan_renders_real_aivss() -> None:
     assert ctx.payload["band_class"] == "not_evaluated"
     # band_label is humanised for user-facing surfaces (feedback-no-raw-enum-in-ui).
     # band_class stays as the raw enum value because it's a CSS modifier hook.
-    assert ctx.payload["band_label"] == "Not graded yet"
+    assert ctx.payload["band_label"] == "NA"
     # The needle resolves to the AIVSS percentage (not the broken-wire None).
     assert ctx.payload["needle_pct"] == 42.0
     # is_terminal must be False mid-flight so the SSE auto-refresh keeps

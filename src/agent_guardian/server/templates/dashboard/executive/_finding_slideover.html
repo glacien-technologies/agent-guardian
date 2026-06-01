@@ -1,0 +1,64 @@
+{# Executive — Shared slide-over component (QA-031 / QA-032).
+
+   A right-edge drawer mounted once per tabpanel. Lives hidden in the DOM
+   from the initial render; ``executive_findings.js`` toggles visibility
+   when a row in the Findings or Probes tab is clicked / Enter-keyed.
+
+   Parameterised by the Jinja-set ``kind`` variable ("finding" | "probe").
+   The visual frame is identical; only the header chip set differs:
+     * finding-mode → severity pill + finding id + ATLAS chips
+     * probe-mode   → verdict pill + probe id + turn chip
+
+   The body is empty on render — JS injects the prompt / target response /
+   judge reasoning structure via ``renderFindingBody()`` /
+   ``renderProbeBody()`` keyed by the row's ``data-source`` attribute.
+
+   Accessibility:
+     * ``role="dialog"`` + ``aria-modal="true"`` + ``aria-labelledby`` so
+       a screen reader announces the focused title on open.
+     * Hidden via ``hidden`` attribute (not ``display: none``) so JS can
+       toggle without recomputing layout each time.
+     * Focus trap entry point is the close button (first focusable);
+       backdrop click + Esc + close-button click all dismiss.
+#}
+{% set _kind = kind | default('probe') %}
+<div class="exec-slideover-root"
+     id="exec-finding-slideover-root"
+     data-slideover-kind="{{ _kind }}"
+     hidden>
+  <div class="exec-slideover__backdrop" data-slideover-backdrop></div>
+  <aside class="exec-slideover"
+         id="exec-finding-slideover"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="exec-slideover-title"
+         tabindex="-1">
+    <header class="exec-slideover__head">
+      <div class="exec-slideover__chips">
+        {# Header chip slot — JS rewrites this when a row is opened. The
+           default markup here is a probe-mode skeleton (the most common
+           open-state for QA-032); a finding-mode open() call replaces the
+           verdict pill with a severity pill and the turn chip with ATLAS
+           techniques. Default ``—`` placeholders keep the layout stable
+           pre-open. #}
+        <span class="exec-verdict-pill exec-verdict-pill--unknown"
+              data-slideover-verdict-pill>PENDING</span>
+        <code class="exec-slideover__id" data-slideover-id>—</code>
+        <span class="exec-slideover__turn" data-slideover-turn>turn —</span>
+        <time class="exec-slideover__time" data-slideover-time>—</time>
+      </div>
+      <button type="button"
+              class="exec-slideover__close"
+              data-slideover-close
+              aria-label="Close details">
+        <span aria-hidden="true">&times;</span>
+      </button>
+    </header>
+    <h2 class="exec-slideover__title"
+        id="exec-slideover-title"
+        data-slideover-summary>—</h2>
+    <div class="exec-slideover__body" data-slideover-body>
+      {# JS-rendered: request prompt, target response, judge reasoning. #}
+    </div>
+  </aside>
+</div>

@@ -7,11 +7,11 @@
 
    Sticky stack (from top to bottom, ordered for sticky-offset math):
      1. Topbar       — brand + theme switcher dropdown (sticky layer 1)
-     2. Tab bar      — WAI-ARIA tablist, 5 buttons (sticky layer 2)
-     3. Main content — 5 ``<section role="tabpanel">`` panes. The KPI
+     2. Tab bar      — WAI-ARIA tablist, 4 buttons (sticky layer 2)
+     3. Main content — 4 ``<section role="tabpanel">`` panes. The KPI
         strip now lives INSIDE the Overview tabpanel (not the layout shell),
         so it scrolls with the tab content and is not visible on the
-        Findings / Probes / Agents / Logs tabs.
+        Findings / Probes / Logs tabs.
 
    Same shared view-model contract as every other theme; the only Executive-
    specific payload fields are ``probes_list`` and ``logs_tail`` (additive in
@@ -51,11 +51,11 @@
     {% include "dashboard/executive/_tab_overview.html" %}
     {% include "dashboard/executive/_tab_findings.html" %}
     {% include "dashboard/executive/_tab_probes.html" %}
-    {% include "dashboard/executive/_tab_agents.html" %}
     {% include "dashboard/executive/_tab_logs.html" %}
-    {# Reproducibility receipt — now included per-tab (see _tab_overview /
-       _tab_findings / _tab_probes / _tab_logs). Intentionally omitted on
-       the Agents tab. #}
+    {# Reproducibility receipt — included per-tab (see _tab_overview /
+       _tab_findings / _tab_probes / _tab_logs). The Agents tab was
+       removed in QA-030; its per-ASI breakdown lives on Overview via
+       _asi_compact_table.html (QA-033). #}
   </main>
 
   {# Live SSE patcher — mirrors the other themes so the same /scans/<id>/live

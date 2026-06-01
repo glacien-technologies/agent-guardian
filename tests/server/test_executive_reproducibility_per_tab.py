@@ -1,11 +1,12 @@
-"""Slice: reproducibility-off-agents.
+"""Slice: reproducibility-per-tab.
 
 Verify that the reproducibility receipt has been moved out of the layout-level
-footer into per-tab includes, and is explicitly NOT rendered inside the Agents
-tabpanel.
+footer into per-tab includes.
 
-The receipt must appear in the Overview / Findings / Probes / Logs tabpanel
-markup, and must NOT appear inside ``id="tabpanel-agents"``.
+The receipt must appear inside each of the Overview / Findings / Probes / Logs
+tabpanels. (The Agents tab — historically the only tab that omitted the
+receipt — was itself deleted in QA-030; the per-tab include now reaches every
+surviving tab.)
 """
 
 from __future__ import annotations
@@ -157,24 +158,6 @@ def test_reproducibility_renders_inside_overview_findings_probes_logs(
     for tab in ("overview", "findings", "probes", "logs"):
         pane = _slice_tabpanel(body, tab)
         assert REPRO_MARKER in pane, f"reproducibility receipt missing from tabpanel-{tab}"
-
-
-def test_reproducibility_absent_inside_agents_tabpanel(
-    client: TestClient, store: ScanStore
-) -> None:
-    """The reproducibility receipt MUST NOT appear inside the Agents tabpanel."""
-    scan = _make_scan()
-    _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}?theme=executive")
-    body = resp.text
-    assert resp.status_code == 200
-
-    agents_pane = _slice_tabpanel(body, "agents")
-    assert REPRO_MARKER not in agents_pane, (
-        "reproducibility receipt must not render inside the Agents tab"
-    )
-    # The unique receipt id must also be absent from the Agents pane.
-    assert 'id="exec-repro-command"' not in agents_pane
 
 
 def test_reproducibility_no_longer_a_layout_level_footer(

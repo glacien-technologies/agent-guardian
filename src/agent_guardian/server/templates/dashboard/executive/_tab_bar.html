@@ -1,8 +1,8 @@
 {# Executive — sticky tab bar (layer 3).
 
-   WAI-ARIA tablist (manual activation, roving tabindex). Five tabs in locked
+   WAI-ARIA tablist (manual activation, roving tabindex). Four tabs in locked
    order:
-     overview (default) / findings / probes / agents / logs
+     overview (default) / findings / probes / logs
 
    Activation rule: exactly ONE tab carries ``aria-selected="true"`` AND
    ``tabindex="0"``; all others ``aria-selected="false"`` AND
@@ -31,12 +31,6 @@
           aria-selected="false"
           aria-controls="tabpanel-probes"
           tabindex="-1">Probes</button>
-  <button id="tab-agents"
-          type="button"
-          role="tab"
-          aria-selected="false"
-          aria-controls="tabpanel-agents"
-          tabindex="-1">Agents</button>
   <button id="tab-logs"
           type="button"
           role="tab"

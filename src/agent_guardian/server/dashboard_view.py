@@ -64,14 +64,18 @@ _LOG = logging.getLogger(__name__)
 # ``EXCELLENT``, …) is an internal token — feedback-no-raw-enum-in-ui requires
 # we never leak it verbatim to the operator. The mapping is intentionally
 # verbose enough to stand on its own without an accompanying score number
-# (the AIVSS hero already carries the number).
+# (the AIVSS hero already carries the number). The NOT_EVALUATED fallback
+# uses the short ``NA`` short-code (QA-034) so the BAND tile fits one line
+# in the ~9rem KPI column; the longer "didn't reach 95% coverage; raw AIVSS
+# preserved for trend tracking" prose belongs in the tile's ⓘ tooltip
+# (QA-028 sub-ask 1) — never in the label itself.
 _BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
     SeverityBand.EXCELLENT: "Excellent",
     SeverityBand.GOOD: "Good",
     SeverityBand.WARNING: "Warning",
     SeverityBand.POOR: "Poor",
     SeverityBand.CRITICAL: "Critical",
-    SeverityBand.NOT_EVALUATED: "Not graded yet",
+    SeverityBand.NOT_EVALUATED: "NA",
 }
 
 
@@ -279,6 +283,27 @@ def _band_class(band: SeverityBand | None) -> str:
     if band is None:
         return "unknown"
     return band.value.lower()
+
+
+def _band_segment_index(band: SeverityBand | None) -> int:
+    """Return the 0-4 segment index for the BAND tile mini-chart.
+
+    QA-028 sub-ask 2: the BAND tile renders a 5-segment horizontal bar
+    (Critical · Poor · Warning · Good · Excellent, left → right). The
+    highlighted segment matches the current band. ``-1`` for an
+    unknown / not-evaluated band so the partial renders an all-muted
+    bar with no active segment.
+    """
+    mapping = {
+        SeverityBand.CRITICAL: 0,
+        SeverityBand.POOR: 1,
+        SeverityBand.WARNING: 2,
+        SeverityBand.GOOD: 3,
+        SeverityBand.EXCELLENT: 4,
+    }
+    if band is None:
+        return -1
+    return mapping.get(band, -1)
 
 
 def _humanise_seconds(seconds: float) -> str:
@@ -730,6 +755,11 @@ def build_dashboard_context(
         # KPI tile descriptions — one-line subtitles for the eight tiles in
         # ``_kpi_strip.html``. Kept here (not in the template) so they can be
         # unit-tested and overridden by callers without forking Jinja.
+        #
+        # QA-028 sub-ask 1: descriptions now render inside a hover-only
+        # ``ⓘ`` popover (``.exec-kpi__desc-popover``) instead of an always-on
+        # ``.exec-kpi__desc`` block — payload key is unchanged, only the
+        # template render mode flipped.
         "kpi_descriptions": {
             "aivss": "Composite agent safety score from adversarial testing",
             "band": "Risk tier mapped from the AIVSS composite score",
@@ -739,6 +769,30 @@ def build_dashboard_context(
             "elapsed": "Wall-clock duration of the scan from start to finish",
             "cost": "Total model API spend in USD for this scan",
             "coverage": "Probe categories exercised out of 10 OWASP ASI dimensions",
+        },
+        # QA-028 sub-ask 2 — per-tile inline-SVG mini-charts. The KPI strip
+        # template reads this dict to draw a 64px-tall visualisation inside
+        # each tile (radial gauge / band axis segment / stacked severity bar
+        # / progress bar / pie segments). Fields are derived from existing
+        # payload values; no new sources of truth.
+        "kpi_chart_data": {
+            "aivss_pct": _fmt_pct(float(scan.aivss)) if scan is not None else 0.0,
+            "band_index": _band_segment_index(scan.band if scan is not None else None),
+            "severity_mix": {
+                "critical": counts["critical"],
+                "high": counts["high"],
+                "medium": counts["medium"],
+                "low": counts["low"],
+            },
+            # QA-027: ``elapsed`` + ``cost`` may be uncapped — render a flat
+            # "no cap" indicator when the cap is None / 0. We pre-compute the
+            # boolean so the template stays declarative.
+            "elapsed_uncapped": True,
+            "cost_uncapped": False,
+            "elapsed_pct": _fmt_pct((elapsed / 900.0) * 100.0 if elapsed else 0.0),
+            "cost_pct": _fmt_pct(((scan.cost_usd / 5.0) * 100.0) if scan is not None else 0.0),
+            "coverage_covered": asi_covered,
+            "coverage_total": 10,
         },
         "needle_pct": needle_pct,
         "aggregate_label": f"{aggregate:.1f}",
@@ -786,6 +840,16 @@ def build_dashboard_context(
         # above for the Findings tab evidence join) so we don't read
         # memory.jsonl twice per render.
         "probes_list": _probes_list_for_evidence,
+        # QA-032 — Probes tab JSON island. The compact table renders one
+        # row per probe; the slide-over JS pulls the full prompt / target
+        # response / judge reasoning from this serialised payload keyed
+        # by ``data-probe-id``. ``ensure_ascii=False`` keeps unicode in
+        # operator-supplied prompt text readable in the wire transcript;
+        # ``default=str`` lets the dumper survive the (rare) datetime
+        # leakage if a future probe shape ever carries one.
+        "probes_payload_json": json.dumps(
+            _probes_list_for_evidence, ensure_ascii=False, default=str
+        ),
         "logs_tail": _assemble_logs_tail(scan_dir),
     }
     return DashboardContext(payload=payload)

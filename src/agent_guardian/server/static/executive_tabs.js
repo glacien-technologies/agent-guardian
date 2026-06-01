@@ -19,12 +19,11 @@
 (function () {
   "use strict";
 
-  var TAB_IDS = ["overview", "findings", "probes", "agents", "logs"];
+  var TAB_IDS = ["overview", "findings", "probes", "logs"];
   var TAB_LABELS = {
     overview: "Overview",
     findings: "Findings",
     probes: "Probes",
-    agents: "Agents",
     logs: "Logs",
   };
   var STORAGE_KEY = "ag.dashboard.executive.tab";
@@ -51,7 +50,16 @@
     if (!raw) { return null; }
     var params = new URLSearchParams(raw);
     var tab = params.get("tab");
-    return tab && TAB_IDS.indexOf(tab) >= 0 ? tab : null;
+    if (tab && TAB_IDS.indexOf(tab) >= 0) { return tab; }
+    if (tab) {
+      // Forensic visibility for stale bookmarks (e.g. the deleted #tab=agents)
+      // — silently falls through to the locked "overview" default at the
+      // pickInitialTab() / hashchange call site (QA-030).
+      try {
+        console.debug("[executive] unknown tab hash, defaulting to overview:", raw);
+      } catch (err) { /* console disabled */ }
+    }
+    return null;
   }
 
   function writeFragment(tabId) {
