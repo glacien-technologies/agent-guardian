@@ -15,7 +15,7 @@ These tests pin the post-fix behaviour for IMPORTANT #5 and #6 in the
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -47,7 +47,7 @@ def _stub_scan(scan_id: str) -> Scan:
         cost_usd=0.0,
         # #4 — ``mode`` is required on Scan.
         mode="full",
-        created_at=datetime(2026, 5, 27, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, tzinfo=UTC),
     )
 
 
@@ -96,13 +96,13 @@ def test_coverage_skipped_records_dedupe_by_agent_name(tmp_path: Path) -> None:
     rec1 = MemoryRecord(
         record_type="agent_skipped",
         scan_id="cov-dedupe",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         payload={"agent": "a2a-agent", "asi": "ASI07", "reason": "first"},
     )
     rec2 = MemoryRecord(
         record_type="agent_skipped",
         scan_id="cov-dedupe",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         payload={"agent": "a2a-agent", "asi": "ASI07", "reason": "second"},
     )
     jsonl.write_text(

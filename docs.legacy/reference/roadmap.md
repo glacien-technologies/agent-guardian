@@ -117,7 +117,7 @@ LangGraph / OpenAI Agents trios:
 - **Multi-target campaigns** — scan a portfolio of agents under a
   single report.
 - **AIVSS v1.0 alignment** — track the final ratified formula.
-- **Compliance pack** — SOC2 / ISO 27001 / NIST AI RMF mapping out of
+- **Compliance pack** — SOC2 / ISO 27001 / NIST AI RMF mapping (pending ratification of SP 800-218A) out of
   the box.
 
 ## Beyond v2.0

@@ -258,10 +258,19 @@ class ScanTUI:
         elif kind == "agent_progress" and agent:
             # Idempotent — agent_progress lets the swarm forward turn
             # counters (when available). Treat missing keys as no-op.
-            turn = event.payload.get("turn") if isinstance(event.payload, dict) else None
-            max_turns = event.payload.get("max_turns") if isinstance(event.payload, dict) else None
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            turn = payload.get("turn")
+            max_turns = payload.get("max_turns")
             if isinstance(turn, int) and isinstance(max_turns, int):
                 self._state.agent_turns[agent] = (turn, max_turns)
+            # PhaseC — multi-turn plan label + per-turn attachment count.
+            # Both keys are optional; absent payload keys leave state alone.
+            plan_name = payload.get("plan_name")
+            if isinstance(plan_name, str) and plan_name.strip():
+                self._state.agent_plan_label[agent] = plan_name.strip()
+            attachments_count = payload.get("attachments_count")
+            if isinstance(attachments_count, int) and attachments_count >= 0:
+                self._state.agent_attachment_counts[agent] = attachments_count
         elif kind == "agent_done" and agent:
             self._state.agent_status[agent] = "done"
             findings = event.payload.get("findings_count") if event.payload else None

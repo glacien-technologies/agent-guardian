@@ -17,7 +17,7 @@ tests assert:
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -107,7 +107,7 @@ def test_renderer_attach_to_preserves_prior_observer() -> None:
     # Emit a reflection event through the wrapped observer.
     reflection_event = SwarmEvent(
         kind="reflection",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         agent="secret-extraction-agent",
         payload=_turn_record(verdict="fail"),
     )
@@ -135,7 +135,7 @@ def test_renderer_skips_non_reflection_events() -> None:
     swarm.observer(
         SwarmEvent(
             kind="agent_start",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             agent="x",
         )
     )
@@ -163,7 +163,7 @@ def test_compose_with_scan_tui_both_observers_fire() -> None:
     # forwards to the TUI's wrapper (which ignores it but doesn't crash).
     reflection_event = SwarmEvent(
         kind="reflection",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         agent="secret-extraction-agent",
         payload=_turn_record(),
     )
@@ -174,7 +174,7 @@ def test_compose_with_scan_tui_both_observers_fire() -> None:
     # the renderer ignores it.
     chk_event = SwarmEvent(
         kind="checkpoint",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         provisional_aivss=42,
     )
     swarm.observer(chk_event)
@@ -231,7 +231,7 @@ def test_renderer_failure_in_one_sink_does_not_kill_others() -> None:
 
     reflection_event = SwarmEvent(
         kind="reflection",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
         agent="x",
         payload=_turn_record(),
     )

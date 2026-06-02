@@ -448,6 +448,18 @@ class StrategyContext:
     # a2a message) rather than a direct user ask (indirect prompt injection).
     # Orthogonal to pretext; both may be on. Default off.
     enable_indirect: bool = False
+    # Phase A.A1 — cross-turn judge-verdict carryover. After every judged turn
+    # the agent layer writes the previous turn's verdict triple into these
+    # fields so the NEXT generate_next() call can pivot on the judge's
+    # assessment without re-reading history[-1].metadata. We expose all three
+    # surfaces (verdict, confidence, reasoning) so refinement strategies can
+    # decide HOW to adapt (e.g. high-confidence fail -> escalate; low-conf
+    # pass -> keep probing) instead of treating every turn identically.
+    # Strategies SHOULD also keep reading history[-1].metadata so the audit
+    # surface covers both paths.
+    last_verdict: str = ""
+    last_verdict_confidence: float = 0.0
+    last_verdict_reasoning: str = ""
 
 
 class Strategy(ABC):

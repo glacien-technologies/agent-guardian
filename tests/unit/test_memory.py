@@ -11,7 +11,7 @@ deterministic.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,7 @@ def _make_finding(
         success=success,
         confidence=0.9,
         summary=summary,
-        created_at=datetime(2026, 5, 26, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 26, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -323,7 +323,7 @@ async def test_restore_skips_unparseable_finding_payload(tmp_path: Path) -> None
                 {
                     "record_type": "finding",
                     "scan_id": "scan-A",
-                    "timestamp": datetime(2026, 5, 26, tzinfo=timezone.utc).isoformat(),
+                    "timestamp": datetime(2026, 5, 26, tzinfo=UTC).isoformat(),
                     "payload": {"not": "a finding"},
                 }
             )
@@ -342,7 +342,7 @@ async def test_restore_skips_invalid_fingerprint(tmp_path: Path) -> None:
                 {
                     "record_type": "fingerprint",
                     "scan_id": "scan-A",
-                    "timestamp": datetime(2026, 5, 26, tzinfo=timezone.utc).isoformat(),
+                    "timestamp": datetime(2026, 5, 26, tzinfo=UTC).isoformat(),
                     "payload": {"mode": "INVALID_MODE"},
                 }
             )
@@ -361,7 +361,7 @@ async def test_restore_skips_invalid_attempted_seed_asi(tmp_path: Path) -> None:
                 {
                     "record_type": "attempted_seed",
                     "scan_id": "scan-A",
-                    "timestamp": datetime(2026, 5, 26, tzinfo=timezone.utc).isoformat(),
+                    "timestamp": datetime(2026, 5, 26, tzinfo=UTC).isoformat(),
                     "payload": {"asi": "ASI99", "seed_id": "bad"},
                 }
             )
@@ -381,7 +381,7 @@ async def test_restore_skips_reflection_missing_fields(tmp_path: Path) -> None:
                 {
                     "record_type": "reflection",
                     "scan_id": "scan-A",
-                    "timestamp": datetime(2026, 5, 26, tzinfo=timezone.utc).isoformat(),
+                    "timestamp": datetime(2026, 5, 26, tzinfo=UTC).isoformat(),
                     "payload": {"agent": "", "content": ""},
                 }
             )
@@ -634,7 +634,7 @@ def test_memory_record_round_trips_json() -> None:
     rec = MemoryRecord(
         record_type="reflection",
         scan_id="s1",
-        timestamp=datetime(2026, 5, 26, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 26, tzinfo=UTC),
         payload={"agent": "recon", "content": "hi"},
     )
     raw = rec.model_dump_json()
@@ -649,7 +649,7 @@ def test_memory_record_rejects_unknown_record_type() -> None:
         MemoryRecord(
             record_type="garbage",  # type: ignore[arg-type]
             scan_id="s1",
-            timestamp=datetime(2026, 5, 26, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 26, tzinfo=UTC),
             payload={},
         )
 
@@ -660,7 +660,7 @@ def test_memory_record_is_frozen() -> None:
     rec = MemoryRecord(
         record_type="finding",
         scan_id="s1",
-        timestamp=datetime(2026, 5, 26, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 26, tzinfo=UTC),
         payload={},
     )
     with pytest.raises(ValidationError):

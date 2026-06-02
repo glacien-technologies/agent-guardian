@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 
 from agent_guardian.agents.base import (
@@ -268,5 +268,5 @@ def build_canary_reflection_finding(
         ),
         transcript_ref=None,
         trigger_prompt=prompt[:512] if prompt else None,
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )

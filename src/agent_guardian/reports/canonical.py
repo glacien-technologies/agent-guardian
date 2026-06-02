@@ -22,8 +22,9 @@ inconsistency.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import PurePath
 from typing import Any
@@ -36,15 +37,15 @@ __all__ = ["from_canonical_json", "to_canonical_json"]
 def _default(obj: Any) -> Any:
     if isinstance(obj, datetime):
         # Always render as UTC; if naive, assume UTC.
-        if obj.tzinfo is None:
-            dt = obj.replace(tzinfo=timezone.utc)
-        else:
-            dt = obj.astimezone(timezone.utc)
+        dt = obj.replace(tzinfo=UTC) if obj.tzinfo is None else obj.astimezone(UTC)
         return dt.isoformat().replace("+00:00", "Z")
     if isinstance(obj, Enum):
         return obj.value
     if isinstance(obj, BaseModel):
         return obj.model_dump(mode="json")
+    # WHY: ProbeAttachment is a frozen dataclass that may ride through a Probe.
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
     if isinstance(obj, PurePath):
         return str(obj)
     if isinstance(obj, bytes | bytearray):

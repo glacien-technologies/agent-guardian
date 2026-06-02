@@ -21,7 +21,7 @@ and assert:
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -68,7 +68,7 @@ def _make_finding(
         success=True,
         confidence=0.91,
         summary=f"Narrative-fixture finding {fid}: the agent leaked sensitive context.",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -105,7 +105,7 @@ def _make_scan(scan_id: str = "cli-narrative-fixture") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -355,7 +355,7 @@ def test_narrative_clean_scan_renders_empty_state_and_charts(
         duration_seconds=120.0,
         cost_usd=0.01,
         mode="full",
-        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC),
     )
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=narrative")

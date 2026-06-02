@@ -1,0 +1,41 @@
+# Pre-existing benign findings — intentional test fixtures for the redaction /
+# logging / SARIF / report-writer test suites, plus one TypedDict field name
+# (``private_key:`` on ``Ed25519Keypair``) that the generic-api-key rule
+# false-matches against. Fingerprints are pinned to the originating commit so a
+# future legitimate leak at the same file:line cannot silently inherit the
+# allowlist; if any of these files is rewritten the fingerprint shifts and the
+# scanner re-surfaces the line for review.
+#
+# Categories:
+#   * tests/unit/test_redact*.py / test_logging_redaction.py / test_logging_setup.py
+#     — synthetic credentials used to assert the redactor masks them.
+#   * tests/unit/test_heuristic_judge.py, test_obs_otel.py, test_report_json.py
+#     — synthetic JWTs / GitHub PATs / API keys used as fixture payloads.
+#   * src/agent_guardian/crypto/ed25519_sig.py:62 — the ``Ed25519Keypair``
+#     TypedDict declares a ``private_key: bytes`` field; the rule fires on the
+#     literal token ``private_key`` regardless of value.
+989fab11340db1a058ce41dff23bde8ae4888f84:tests/unit/test_redact.py:jwt:170
+989fab11340db1a058ce41dff23bde8ae4888f84:tests/unit/test_report_json.py:github-pat:303
+989fab11340db1a058ce41dff23bde8ae4888f84:tests/unit/test_report_json.py:github-pat:309
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_heuristic_judge.py:jwt:52
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_logging_setup.py:generic-api-key:266
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:generic-api-key:101
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:generic-api-key:127
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:generic-api-key:134
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:generic-api-key:70
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:gitlab-pat:42
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:gitlab-pat:43
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:stripe-access-token:49
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:stripe-access-token:50
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:twilio-api-key:63
+a8c8ee6318e0ff0348c18ce74f110f5075485071:tests/unit/test_redact_extended.py:twilio-api-key:64
+c7c0c201182838be2415cc340cbe3b8395ea6b42:tests/unit/test_logging_redaction.py:generic-api-key:24
+c7c0c201182838be2415cc340cbe3b8395ea6b42:tests/unit/test_logging_redaction.py:generic-api-key:37
+c7c0c201182838be2415cc340cbe3b8395ea6b42:tests/unit/test_logging_redaction.py:generic-api-key:55
+c7c0c201182838be2415cc340cbe3b8395ea6b42:tests/unit/test_logging_redaction.py:generic-api-key:68
+c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:generic-api-key:24
+c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:generic-api-key:37
+c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:generic-api-key:55
+c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:generic-api-key:68
+cfad796936d788cdd7b58a3cc08a0c55a5605daa:src/agent_guardian/crypto/ed25519_sig.py:generic-api-key:62
+f16714a4663fdebd37705d1b68b7ea8c64e03b8f:tests/unit/test_obs_otel.py:generic-api-key:728

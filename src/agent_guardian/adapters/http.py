@@ -44,6 +44,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+from agent_guardian.models.multimodal import ProbeAttachment
 
 __all__ = ["HttpAdapter", "HttpAdapterLastResponse", "HttpAdapterToolCall"]
 
@@ -225,6 +226,9 @@ class HttpAdapter(TargetAdapter):
         max_concurrency: int = 5,
         client: httpx.AsyncClient | None = None,
         verify: bool | str = True,
+        attachments_field: str = "attachments",
+        attachments_key_map: dict[str, str] | None = None,
+        supports_vision: bool = False,
     ) -> None:
         super().__init__()
         if not endpoint:
@@ -245,6 +249,20 @@ class HttpAdapter(TargetAdapter):
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
         self._shape: HttpShape = get_shape(shape)
+        # Multimodal: the body key under which attachments are added when a
+        # probe carries any, and the per-field rename map for the per-
+        # attachment dict (defaults below match the testbench shape:
+        # ``{"input": str, "attachments": [{"mime_type", "b64", "alt"}]}``).
+        self._attachments_field = attachments_field
+        self._attachments_key_map: dict[str, str] = {
+            "mime_type": "mime_type",
+            "b64_payload": "b64",
+            "alt_text": "alt",
+            "size_bytes": "size_bytes",
+        }
+        if attachments_key_map:
+            self._attachments_key_map.update(attachments_key_map)
+        self._supports_vision = supports_vision
 
         self._owns_client = client is None
         # ``verify`` is honoured only for a client we build ourselves; an
@@ -285,6 +303,20 @@ class HttpAdapter(TargetAdapter):
     def shape_name(self) -> str:
         return self._shape_name
 
+    @property
+    def supports_vision(self) -> bool:
+        """Whether the operator has declared the target accepts image attachments."""
+        return self._supports_vision
+
+    def _serialise_attachment(self, att: ProbeAttachment) -> dict[str, Any]:
+        """Render one ProbeAttachment using the configured key map."""
+        return {
+            self._attachments_key_map["mime_type"]: att.mime_type,
+            self._attachments_key_map["b64_payload"]: att.b64_payload,
+            self._attachments_key_map["alt_text"]: att.alt_text,
+            self._attachments_key_map["size_bytes"]: att.size_bytes,
+        }
+
     def _build_headers(self) -> dict[str, str]:
         """Compose request headers from defaults + caller-supplied auth."""
         headers: dict[str, str] = {
@@ -294,17 +326,27 @@ class HttpAdapter(TargetAdapter):
         headers.update(self._auth_headers)
         return headers
 
-    def _build_body(self, prompt: str, *, session: str | None) -> dict[str, Any]:
-        """Build the per-shape request body."""
+    def _build_body(
+        self,
+        prompt: str,
+        *,
+        session: str | None,
+        attachments: tuple[ProbeAttachment, ...] = (),
+    ) -> dict[str, Any]:
+        """Build the per-shape request body, optionally merging attachments."""
         if self._shape_name == "generic" and self._request_template is not None:
             # Operator supplied a JSON template; substitute ``{prompt}`` /
             # ``{session}`` placeholders and use that as the body verbatim.
-            return _render_request_template(self._request_template, prompt=prompt, session=session)
-        return self._shape.build_request(
-            prompt,
-            model=self._model,
-            session=session,
-        )
+            body = _render_request_template(self._request_template, prompt=prompt, session=session)
+        else:
+            body = self._shape.build_request(
+                prompt,
+                model=self._model,
+                session=session,
+            )
+        if attachments:
+            body[self._attachments_field] = [self._serialise_attachment(a) for a in attachments]
+        return body
 
     def _extract_text(self, response_json: dict[str, Any]) -> str:
         """Extract the assistant text from a parsed response body."""
@@ -319,7 +361,13 @@ class HttpAdapter(TargetAdapter):
             # "produced no value" → format error with "no value" phrase.
             raise LLMResponseFormatError(msg) from exc
 
-    async def _send_once(self, prompt: str, *, session: str | None) -> str:
+    async def _send_once(
+        self,
+        prompt: str,
+        *,
+        session: str | None,
+        attachments: tuple[ProbeAttachment, ...] = (),
+    ) -> str:
         """One attempt: build, POST, parse, extract. Raises mapped LLM errors.
 
         On success the parsed body is also fed through the shape-specific
@@ -328,7 +376,7 @@ class HttpAdapter(TargetAdapter):
         the real structured invocations the target performed, not a
         substring-matched guess against the assistant text.
         """
-        body = self._build_body(prompt, session=session)
+        body = self._build_body(prompt, session=session, attachments=attachments)
         headers = self._build_headers()
         try:
             resp = await self._client.post(self._endpoint, json=body, headers=headers)
@@ -356,12 +404,22 @@ class HttpAdapter(TargetAdapter):
         )
         return text
 
-    async def call(self, prompt: str, *, session: str | None = None) -> str:
-        """Send a prompt and return the assistant text.
+    async def call(
+        self,
+        prompt: str,
+        *,
+        session: str | None = None,
+        attachments: tuple[ProbeAttachment, ...] = (),
+    ) -> str:
+        """Send a prompt (with optional attachments) and return assistant text.
 
         Wires the shape's request builder + extractor through an httpx POST
-        with retry/backoff. Raises an :class:`LLMError` subclass on failure
-        (auth, rate limit, timeout, transient, permanent, format).
+        with retry/backoff. When ``attachments`` is non-empty the body grows
+        an attachments array under the configured ``attachments_field``
+        (default ``"attachments"``) using the configured key map (default
+        ``{mime_type, b64, alt, size_bytes}``). Raises an :class:`LLMError`
+        subclass on failure (auth, rate limit, timeout, transient,
+        permanent, format).
         """
         if self._closed:
             raise RuntimeError("HttpAdapter.call() after aclose()")
@@ -373,10 +431,16 @@ class HttpAdapter(TargetAdapter):
                 "tests; production transport for AWS / GCP signed requests is "
                 "an M-future milestone."
             )
+        # WHY: refuse to silently strip attachments against a text-only target.
+        if attachments and not self._supports_vision:
+            raise LLMPermanentError(
+                "HttpAdapter.call() received attachments but supports_vision=False — "
+                "construct the adapter with supports_vision=True to dispatch vision probes"
+            )
 
         async with self._semaphore:
             return await with_backoff(
-                lambda: self._send_once(prompt, session=session),
+                lambda: self._send_once(prompt, session=session, attachments=attachments),
                 max_retries=self._max_retries,
             )
 

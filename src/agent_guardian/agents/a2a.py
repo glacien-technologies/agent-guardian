@@ -7,6 +7,7 @@ exposes an internal agent surface.
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from agent_guardian.adapters.base import TargetFingerprint
@@ -15,9 +16,11 @@ from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
-from agent_guardian.strategies.base import ProbeSeed
+from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["A2AAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class A2AAgent(AsiAgent):
@@ -63,6 +66,30 @@ Specific techniques:
     def is_applicable(self, fingerprint: TargetFingerprint) -> bool:
         # Only meaningful when there's an internal agent surface to attack.
         return fingerprint.mode == "framework" or fingerprint.is_multi_agent
+
+    def strategy_stack(self, ctx: StrategyContext) -> Strategy:
+        # Phase B.B2 — siblings drawn from SIBLING_MAP[ASI07].
+        from agent_guardian.strategies.pair import PAIRStrategy
+        from agent_guardian.strategies.reflective import ReflectiveStrategy
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+        )
+
+        primary = PAIRStrategy(ctx)
+        siblings = build_sibling_strategy(AsiCategory.ASI07, ctx, primary)
+        first_sibling = siblings[0] if siblings else None
+        _LOG.debug(
+            "PhaseB.B2 A2AAgent.strategy_stack: asi=ASI07 operators=%s n_siblings=%d primary=%s",
+            SIBLING_MAP[AsiCategory.ASI07],
+            len(siblings),
+            type(primary).__name__,
+        )
+        return ReflectiveStrategy(
+            primary,
+            sibling=first_sibling,
+            asi_category=AsiCategory.ASI07,
+        )
 
     def judge_rubric(self) -> JudgeRubric:
         return JudgeRubric(

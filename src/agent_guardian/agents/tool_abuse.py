@@ -2,10 +2,18 @@
 
 Targets agents that expose tools / function-calling. If the recon-agent
 detected no tools, this agent short-circuits via :meth:`is_applicable`.
+
+Phase A.A2 — both branches of :meth:`strategy_stack` wrap their inner
+strategies in :class:`ReflectiveStrategy` so the THINK → ACT → OBSERVE →
+REFLECT cycle drives a primary-to-sibling pivot after two consecutive
+DEFENDED verdicts. The sibling on the declared-tools branch swaps
+ToolExfil and PAIR; the no-tools branch wraps the base PAIR fallback
+with no sibling.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from agent_guardian.adapters.base import TargetFingerprint
@@ -17,6 +25,8 @@ from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["ToolAbuseAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class ToolAbuseAgent(AsiAgent):
@@ -58,16 +68,62 @@ Specifically:
         (this agent's :meth:`is_applicable` already gates on ``has_tools``, so
         the no-tools branch is mostly defensive / for direct construction).
         """
+        from agent_guardian.strategies.reflective import ReflectiveStrategy
+
         if not ctx.declared_tools:
-            return super().strategy_stack(ctx)
+            # Phase A.A2 — even the fallback PAIR path is wrapped so the
+            # reflective loop is live for ASI02 in the no-tools branch.
+            inner = super().strategy_stack(ctx)
+            wrapped = ReflectiveStrategy(inner, sibling=None, asi_category=AsiCategory.ASI02)
+            _LOG.debug(
+                "PhaseA.A2 ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
+                "over 2 ReflectiveStrategy children for ASI02 (has_tools=%s)",
+                bool(ctx.declared_tools),
+            )
+            return wrapped
         from agent_guardian.strategies.mad_max import MadMaxStrategy
         from agent_guardian.strategies.pair import PAIRStrategy
+
+        # Phase A.A2 — sibling-swap: a stalling ToolExfil pivots to PAIR
+        # and vice versa. asi_category=ASI02 is the Phase A allowed family.
+        # Phase B.B2 — additionally consult SIBLING_MAP[ASI02] and add one
+        # operator-seeded ReflectiveStrategy per mapped operator (capped at
+        # max_siblings=2 in the helper).
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+        )
         from agent_guardian.strategies.tool_exfil import ToolExfilStrategy
 
-        return MadMaxStrategy(
-            ctx,
-            children=[ToolExfilStrategy(ctx), PAIRStrategy(ctx)],
+        bw_siblings = build_sibling_strategy(AsiCategory.ASI02, ctx, PAIRStrategy(ctx))
+        children: list[Strategy] = [
+            ReflectiveStrategy(
+                ToolExfilStrategy(ctx),
+                sibling=PAIRStrategy(ctx),
+                asi_category=AsiCategory.ASI02,
+            ),
+            ReflectiveStrategy(
+                PAIRStrategy(ctx),
+                sibling=ToolExfilStrategy(ctx),
+                asi_category=AsiCategory.ASI02,
+            ),
+        ]
+        for sib in bw_siblings:
+            children.append(ReflectiveStrategy(sib, sibling=None, asi_category=AsiCategory.ASI02))
+        result = MadMaxStrategy(ctx, children=children)
+        _LOG.debug(
+            "PhaseB.B2 ToolAbuseAgent.strategy_stack: asi=ASI02 "
+            "operators=%s n_siblings_added=%d total_children=%d",
+            SIBLING_MAP[AsiCategory.ASI02],
+            len(bw_siblings),
+            len(children),
         )
+        _LOG.debug(
+            "PhaseA.A2 ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
+            "over 2 ReflectiveStrategy children for ASI02 (has_tools=%s)",
+            bool(ctx.declared_tools),
+        )
+        return result
 
     def seeds_for_category(self) -> list[ProbeSeed]:
         from agent_guardian.probes.loader import seeds_for_asi_with_provenance

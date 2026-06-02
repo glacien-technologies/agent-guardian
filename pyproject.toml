@@ -7,7 +7,7 @@ name = "agent-guardian"
 dynamic = ["version"]
 description = "Open-source red teaming toolkit for AI agents, RAG systems, MCP servers, and tool-using LLM applications."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Glacien Pte. Ltd.", email = "opensource@glacien.ai" }]
 keywords = [
@@ -41,7 +41,6 @@ classifiers = [
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -182,6 +181,14 @@ grpc = [
 browser = [
   "playwright>=1.40",
 ]
+# ``agentdojo`` carries the upstream Debenedetti et al. 2024 benchmark package
+# used by the AgentDojo adapter (Phase C, C3). Strictly opt-in: the adapter
+# falls back to a tiny vendored smoke corpus when this extra is absent so the
+# default install stays lean. Install for full leaderboard-comparable runs:
+# ``pip install 'agent-guardian[agentdojo]'``.
+agentdojo = [
+  "agentdojo>=0.1",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
@@ -209,6 +216,12 @@ dev = [
   # the legacy PEP 735 ``[dependency-groups].dev`` table that used to also
   # declare this was deleted to remove the dual-source-of-truth.
   "types-pyyaml>=6.0.12.20260518",
+  # tomllib backport for Python 3.10 — used by ``tests/test_packaging.py``
+  # to parse ``pyproject.toml`` (stdlib ``tomllib`` is 3.11+ only). The
+  # test gates the import on ``sys.version_info`` so this dep is a no-op
+  # on 3.11+. Pinned here so the contract is explicit; without it the
+  # py3.10 CI matrix leg fails collection with ``ModuleNotFoundError``.
+  "tomli>=2.0; python_version<'3.11'",
 ]
 
 # Until the ``agentguardian.ai`` apex DNS lands we point every PyPI URL slot at
@@ -260,31 +273,42 @@ include = ["src/", "tests/", "README.md", "LICENSE", "NOTICE", "CITATION.cff"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E501"]
+# E501: line-length is enforced by formatter rather than the linter.
+# UP042: ``class X(str, Enum)`` is the public-API serialisation shape used
+# across the codebase (Pydantic v2 round-trip + JSON dump rely on ``str``
+# subclass identity and ``__str__`` returning ``self.value``). Migrating
+# to ``enum.StrEnum`` changes ``str()`` and hashing semantics in subtle
+# ways that ripple through telemetry envelopes, SARIF emission, and the
+# YAML loader. Tracked as v1.1 portability sweep (Guardian backlog QA-039)
+# — needs a coordinated migration + regression sweep of the 3311 tests
+# before flipping. Ignoring here keeps rc3 shippable on Linux + macOS.
+ignore = ["E501", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 # Typer requires function-call defaults — they are the public API.
 "src/agent_guardian/cli.py" = ["B008"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = ["tests/"]
 
-# botocore is an optional dependency (``[aws]`` extra) used only by
-# ``agent_guardian.llm.bedrock`` for SigV4 signing + credential
-# resolution. It ships no PEP-561 stubs, and the pre-commit mypy hook
-# runs in an isolated venv where botocore is not installed at all —
-# both cases produce noise we silence here once for the whole project.
+# boto3 + botocore are optional dependencies (``[aws]`` extra) used by
+# ``agent_guardian.llm.bedrock`` (SigV4 signing + credential resolution)
+# and by ``agent_guardian.llm.validation`` (boto3 client construction,
+# guarded by a try/except ImportError). Neither ships PEP-561 stubs, and
+# the pre-commit mypy hook runs in an isolated venv where they are not
+# installed at all — both cases produce noise we silence here once for
+# the whole project.
 [[tool.mypy.overrides]]
-module = ["botocore.*"]
+module = ["boto3", "botocore.*"]
 ignore_missing_imports = true
 
 # sentence_transformers + numpy are optional via the ``[full]`` extra
@@ -334,6 +358,16 @@ follow_imports = "skip"
 module = ["websockets.*", "grpc", "playwright.*"]
 ignore_missing_imports = true
 
+# agentdojo is an optional dependency (the ``[agentdojo]`` extra) used only by
+# the AgentDojo benchmark adapter (Phase C, C3). The import sits inside a
+# try/except so the adapter falls back to its vendored smoke corpus when the
+# extra is absent. Silence the missing-import noise once for the whole project
+# so mypy behaves identically whether or not the extra is installed
+# (precedent: ``botocore.*`` / ``google.*`` / ``opentelemetry.*``).
+[[tool.mypy.overrides]]
+module = ["agentdojo.*"]
+ignore_missing_imports = true
+
 # jsonschema has incomplete first-party stubs and ships none of its own. We
 # call only a tiny stable surface (Draft7Validator + ValidationError) from
 # :mod:`agent_guardian.reports.sarif`, so the missing-import + Any-return
@@ -367,6 +401,10 @@ norecursedirs = [
   ".venv",
 ]
 addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "phaseA: Phase A audit-tagged tests (sibling-strategy carryover, etc.)",
+  "phaseB: Phase B audit-tagged tests (mutators, judges, seed store, sibling map, H-CoT, ATLAS enum)",
+]
 
 [tool.coverage.run]
 source = ["src/agent_guardian"]

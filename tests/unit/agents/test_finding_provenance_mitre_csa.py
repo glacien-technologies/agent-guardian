@@ -22,7 +22,7 @@ reached the SARIF / dashboard / coverage. This test pins:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agent_guardian.agents.base import AsiAgent
 from agent_guardian.agents.memory_poison import MemoryPoisonAgent
@@ -195,4 +195,4 @@ def test_finding_created_at_is_utc() -> None:
     assert seeds
     finding = _build_finding(agent, seeds[0])
     assert isinstance(finding.created_at, datetime)  # type: ignore[attr-defined]
-    assert finding.created_at.tzinfo == timezone.utc  # type: ignore[attr-defined]
+    assert finding.created_at.tzinfo == UTC  # type: ignore[attr-defined]

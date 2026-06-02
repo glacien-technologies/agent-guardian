@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -211,7 +212,6 @@ def test_metrics_reflects_running_scan_lifecycle(client: TestClient, store: Scan
     # onto the fake instance, and that closure decrements the gauge and
     # bumps the histogram.
     from datetime import datetime as _dt
-    from datetime import timezone as _tz
 
     from agent_guardian.core.swarm import SwarmEvent
 
@@ -219,7 +219,7 @@ def test_metrics_reflects_running_scan_lifecycle(client: TestClient, store: Scan
     fake.observer(
         SwarmEvent(
             kind="scan_done",  # type: ignore[arg-type]
-            timestamp=_dt(2026, 5, 30, 12, 0, 0, tzinfo=_tz.utc),
+            timestamp=_dt(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
         )
     )
     body = client.get("/metrics").text

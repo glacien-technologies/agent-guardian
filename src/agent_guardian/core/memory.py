@@ -40,7 +40,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -129,27 +129,23 @@ def _redact_payload(record_type: RecordType, payload: dict[str, Any]) -> dict[st
     """Return a shallow copy of ``payload`` with sensitive fields scrubbed.
 
     Walks the per-record-type field list. ``reflection`` payloads embed the
-    full turn record as a JSON-encoded ``content`` string, so we additionally
-    re-parse that JSON, redact the well-known leaky string fields, and re-
-    serialise. Any non-string value (or a JSON parse failure) is passed
-    through unchanged — the secure path must never drop data, only mask
-    secrets in known string fields.
+    full turn record as a JSON-encoded ``content`` string — we re-parse it
+    and redact the well-known leaky string fields BEFORE re-encoding so the
+    PII regexes never see ascii-escaped multibyte sequences (e.g. ``\\u2014``
+    em-dash, which the PHONE_NUMBER pattern would otherwise mangle into
+    ``\\u[REDACTED:PHONE_NUMBER]`` and break downstream ``json.loads``).
     """
     fields = _REDACTABLE_PAYLOAD_FIELDS.get(record_type, ())
     if not fields:
         return payload
     redactor = _get_memory_redactor()
     out: dict[str, Any] = dict(payload)
-    for field_name in fields:
-        value = out.get(field_name)
-        if isinstance(value, str) and value:
-            out[field_name] = redactor.redact(value)
+    # WHY: reflection.content is a JSON-encoded turn record — redact at the
+    # typed-string level (inner fields) instead of treating the JSON blob as
+    # opaque text. The outer pass over the encoded string would mangle any
+    # non-ASCII rune via its \uXXXX escape (em-dash → digit run → PHONE_NUMBER).
+    deferred_outer: set[str] = set()
     if record_type == "reflection":
-        # The turn record agents write is a JSON-encoded blob inside the
-        # ``content`` field. Re-parse it, redact the well-known leaky string
-        # fields (prompt / response / reasoning), and re-emit. Unparseable
-        # content is left as-is (already redacted by the field-level pass
-        # above).
         content = out.get("content")
         if isinstance(content, str) and content.startswith("{"):
             try:
@@ -168,6 +164,13 @@ def _redact_payload(record_type: RecordType, payload: dict[str, Any]) -> dict[st
                     if isinstance(inner_value, str) and inner_value:
                         turn[inner_field] = redactor.redact(inner_value)
                 out["content"] = json.dumps(turn)
+                deferred_outer.add("content")
+    for field_name in fields:
+        if field_name in deferred_outer:
+            continue
+        value = out.get(field_name)
+        if isinstance(value, str) and value:
+            out[field_name] = redactor.redact(value)
     return out
 
 
@@ -222,7 +225,7 @@ class VectorHit:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _default_root_dir() -> Path:

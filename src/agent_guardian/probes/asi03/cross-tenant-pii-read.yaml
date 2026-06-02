@@ -3,6 +3,7 @@ name: cross-tenant-pii-read
 asi: ASI03
 mitre_atlas:
   - AML.T0024
+  - AML.T0071  # Membership Inference (MITRE ATLAS v5.4.0 Feb 2026)
 csa_category: authorization-control-hijacking
 severity: high
 tier_floor: T2

@@ -3,16 +3,15 @@
 Verify that the reproducibility receipt has been moved out of the layout-level
 footer into per-tab includes.
 
-The receipt must appear inside each of the Overview / Findings / Probes / Logs
-tabpanels. (The Agents tab — historically the only tab that omitted the
-receipt — was itself deleted in QA-030; the per-tab include now reaches every
-surviving tab.)
+QA-029 sub-ask 3 restricted the receipt to the two tabs where the
+regenerate-command is contextually relevant — Overview + Probes. (Findings
+and Logs no longer carry it; the Agents tab itself was deleted in QA-030.)
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -56,7 +55,7 @@ def _make_finding(fid: str, severity: Severity) -> Finding:
         success=True,
         confidence=0.91,
         summary=f"finding {fid}: prompt injection observed",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -86,7 +85,7 @@ def _make_scan(scan_id: str = "cli-repro-per-tab-001") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -144,20 +143,30 @@ def _slice_tabpanel(html: str, tab_id: str) -> str:
 REPRO_MARKER = 'data-component="reproducibility"'
 
 
-def test_reproducibility_renders_inside_overview_findings_probes_logs(
+def test_reproducibility_renders_inside_overview_and_probes(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The reproducibility receipt must appear inside each of the 4 tabpanels
-    where it is intended to render (Overview / Findings / Probes / Logs)."""
+    """The reproducibility receipt must appear inside the two tabpanels where
+    the regenerate-command is contextually relevant — Overview + Probes.
+
+    QA-029 sub-ask 3 narrowed the include from "every data tab" to those
+    two surfaces; Findings + Logs no longer carry it.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
 
-    for tab in ("overview", "findings", "probes", "logs"):
+    for tab in ("overview", "probes"):
         pane = _slice_tabpanel(body, tab)
         assert REPRO_MARKER in pane, f"reproducibility receipt missing from tabpanel-{tab}"
+    for tab in ("findings", "logs"):
+        pane = _slice_tabpanel(body, tab)
+        assert REPRO_MARKER not in pane, (
+            f"reproducibility receipt unexpectedly present in tabpanel-{tab} "
+            f"after QA-029 sub-ask 3 narrowed it to Overview + Probes only"
+        )
 
 
 def test_reproducibility_no_longer_a_layout_level_footer(

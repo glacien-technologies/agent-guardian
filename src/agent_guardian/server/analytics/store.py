@@ -27,7 +27,7 @@ import logging
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent_guardian.telemetry.events import EventEnvelope, ScanCompletedEvent
@@ -161,7 +161,7 @@ class EventStore:
                     event.started_at.isoformat(),
                     event.completed_at.isoformat(),
                     envelope.client_sent_at.isoformat(),
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                 ),
             )
         return True
@@ -231,7 +231,7 @@ class EventStore:
                 0,
                 findings_total - findings_critical - findings_high - findings_medium,
             )
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             # Realistic-ish operational counts: 9-11 agents per scan,
             # ~7 turns/agent on average → ~70 attempts, plus the per-
             # attempt success/failure split derived from findings_total.
@@ -282,7 +282,7 @@ def _passes_clock_skew(client_sent_at: datetime, *, now: datetime | None = None)
     Per analytics PRD §4 -- drops obviously-wrong events at the boundary
     rather than letting them poison the rollups.
     """
-    reference = now if now is not None else datetime.now(timezone.utc)
+    reference = now if now is not None else datetime.now(UTC)
     delta = (reference - client_sent_at).total_seconds()
     # Past -- must be within 30 days
     if delta > 30 * 86400:

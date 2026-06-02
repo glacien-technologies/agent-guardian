@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from agent_guardian.core.redact import PiiRedactor, _has_presidio, redact_finding
@@ -198,7 +200,7 @@ def test_redacts_generic_api_key_assignment() -> None:
 
 
 def _finding_with(**overrides: object) -> object:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.models.asi import AsiCategory
     from agent_guardian.models.csa import CsaCategory
@@ -218,7 +220,7 @@ def _finding_with(**overrides: object) -> object:
         "summary": "leaked AKIAIOSFODNN7EXAMPLE",
         "transcript_ref": "see user@example.com",
         "trigger_prompt": "print token bearer abc123def456ghi",
-        "created_at": datetime(2026, 5, 26, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 5, 26, tzinfo=UTC),
     }
     defaults.update(overrides)
     return Finding(**defaults)  # type: ignore[arg-type]

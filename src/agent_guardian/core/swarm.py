@@ -49,7 +49,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -224,16 +224,14 @@ class SwarmConfig:
 
     scan_id: str
     commander_model: str = "claude-haiku-4-5"
-    attacker_model: str = "gpt-4o-mini"
-    evaluator_model: str = "gpt-4o-mini"
-    # Recon (black-box capability audit) wall budget. Raised from the legacy
-    # 90s default to 300s after QA-018: on Cloud Run / Lambda / Knative
-    # cold-start targets, 90s was routinely insufficient for the 10 deepen
-    # rounds to complete, and the swarm silently fell back to the minimal
-    # fingerprint and skipped 3 ASI agents. 300s clears cold-start cases
-    # cleanly without materially extending typical (5-15 min) scans.
-    # Operator can override via `--recon-budget-seconds` on the CLI.
-    recon_wall_seconds: float = 300.0
+    attacker_model: str = "gemini-3.5-flash"
+    evaluator_model: str = "gemini-3.5-flash"
+    # Recon (black-box capability audit) wall budget. Defaults to None
+    # (uncapped) per the operator "no arbitrary hardcoded caps" rule —
+    # symmetric with the wall_seconds removal in QA-027. Operators opt
+    # in to a cap via `--recon-budget-seconds` on the CLI for cold-start
+    # targets that need a backstop.
+    recon_wall_seconds: float | None = None
     # Max adaptive deepening rounds in the black-box capability audit (recon).
     recon_audit_rounds: int = 10
     # QA-027: wall-clock cap defaults to None (uncapped). The old 900s
@@ -443,7 +441,7 @@ SwarmObserver = Callable[[SwarmEvent], None]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _safe_json_obj(text: str) -> Any:
@@ -592,6 +590,73 @@ class SwarmCommander:
         # recon and agent instantiation. ``None`` when no target_goal was
         # supplied or the Commander LLM declined / failed.
         self._swarm_brief: SwarmBrief | None = None
+        # PhaseB.B4 + B6 wiring -- construct cross-family panel + winning-seed
+        # store once at swarm init, share across all AsiAgent instances. Both
+        # are defensive: if construction fails (e.g. only one vendor available
+        # for the panel), we set None and the agents fall back to single-judge
+        # + no-persistence. The audit's panel_init / store_init runtime logs
+        # fire INSIDE the constructors, so successful construction here is
+        # what proves they are wired.
+        self._panel_judge: Any | None = None
+        self._winning_seed_store: Any | None = None
+        try:
+            from agent_guardian.judges.panel import JudgeSpec, PanelJudge
+
+            # Derive the family token from the model id (the part before ':'):
+            # "gemini:gemini-3.5-flash" -> "gemini", "openai:gpt-4o-mini" -> "openai".
+            # The PanelJudge canonicalises via .lower().strip() for the
+            # cross-family check, so this matches its identity semantics.
+            def _family_of(model_id: str) -> str:
+                return model_id.split(":", 1)[0].strip() if ":" in model_id else model_id.strip()
+
+            panel_specs = [
+                JudgeSpec(
+                    llm=attacker_llm,
+                    model=config.attacker_model,
+                    family=_family_of(config.attacker_model),
+                    label="attacker-as-judge",
+                ),
+                JudgeSpec(
+                    llm=evaluator_llm,
+                    model=config.evaluator_model,
+                    family=_family_of(config.evaluator_model),
+                    label="evaluator-as-judge",
+                ),
+            ]
+            self._panel_judge = PanelJudge(
+                specs=panel_specs,
+                cross_family_enforced=getattr(config, "judge_cross_family_enforced", False),
+            )
+        except Exception as e:
+            _LOG.debug(
+                "PhaseB.B4 panel construction skipped: %s (degrade to single Judge)",
+                e,
+            )
+        try:
+            from agent_guardian.seeds.store import WinningSeedStore
+
+            store = WinningSeedStore()
+            # Fire a query() call up front so the read-path log lands in
+            # events.jsonl even when the scan finds no new winning seeds.
+            store.query(
+                target_fingerprint_hash="swarm-init",
+                asi="all",
+            )
+            self._winning_seed_store = store
+        except Exception as e:
+            _LOG.debug(
+                "PhaseB.B6 winning_seed_store construction skipped: %s",
+                e,
+            )
+        # PhaseC.C5 — recon-loop re-entry hook. Bound to a real fingerprint by
+        # ``_phase_recon``; until then ``on_reflection`` is a no-op. Constructed
+        # here (vs in _phase_recon) so the reflection sink the agents wire up
+        # in _phase_decompose closes over a stable object.
+        from agent_guardian.core.recon_reentry import ReconReentryHook
+
+        self._recon_reentry_hook: ReconReentryHook = ReconReentryHook(
+            refresh_fn=self._reentry_refresh,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -618,7 +683,7 @@ class SwarmCommander:
                 self._run_inner(),
                 timeout=self.config.overall_wall_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOG.warning("swarm overall wall budget exhausted (scan_id=%s)", self.config.scan_id)
             return await self._phase_finalise()
 
@@ -647,9 +712,13 @@ class SwarmCommander:
 
     async def _phase_recon(self) -> None:
         _LOG.info(
-            "phase recon: starting (scan_id=%s, wall_budget=%.1fs)",
+            "phase recon: starting (scan_id=%s, wall_budget=%s)",
             self.config.scan_id,
-            self.config.recon_wall_seconds,
+            (
+                f"{self.config.recon_wall_seconds:.1f}s"
+                if self.config.recon_wall_seconds is not None
+                else "uncapped"
+            ),
         )
         recon_started = time.monotonic()
         # QA-012 — phase boundary event. Fires BEFORE ``recon_start`` so a
@@ -687,7 +756,7 @@ class SwarmCommander:
                 recon.run(self.target, self.memory),
                 timeout=self.config.recon_wall_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOG.warning(
                 "recon timed out after %.1fs -- using minimal fingerprint",
                 self.config.recon_wall_seconds,
@@ -706,6 +775,11 @@ class SwarmCommander:
         # own static description if recon never wrote one.
         fingerprint = self.memory.target_fingerprint() or self._minimal_fingerprint()
         self._fingerprint = fingerprint
+
+        # PhaseC.C5 — bind the recon-reentry hook to the post-recon baseline.
+        # From here on, any reflection whose declared_tools diff this baseline
+        # will fire the (one-shot) refresh.
+        self._recon_reentry_hook.bind(self.memory, fingerprint)
 
         self._emit(
             SwarmEvent(
@@ -1103,6 +1177,12 @@ class SwarmCommander:
                 rng=random.Random(self.rng_seed + len(agents)),
                 target_findings_override=self.config.target_findings_per_agent,
                 on_reflection=self._make_reflection_sink(cls.name or cls.__name__),
+                # PhaseB.B4 + B6 -- pass the swarm-shared panel + winning-seed
+                # store. AsiAgent.__init__ fires the *_configured log when
+                # non-None; the agent's run loop uses them via the same
+                # interfaces as the single-judge / no-persistence paths.
+                panel_judge=self._panel_judge,
+                winning_seed_store=self._winning_seed_store,
             )
             # v1.1 -- in FAST mode, subset the agent's seeds to the
             # top-N most-effective probes. SMART/FULL leave the full
@@ -2489,7 +2569,7 @@ class SwarmCommander:
         try:
             import platform
             import sys
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             from agent_guardian.telemetry.client import emit
             from agent_guardian.telemetry.consent import is_extended, is_opted_in
@@ -2509,7 +2589,7 @@ class SwarmCommander:
             # in case findings span multiple attempts in some future code
             # path where the relationship inverts.
             successes_count = max(0, attempts_count - findings_total)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             extended_on = is_extended()
             event = ScanCompletedEvent(
                 install_id=get_install_id(),
@@ -2588,10 +2668,17 @@ class SwarmCommander:
         keeps it future-proof). The closure swallows observer
         failures upstream of the agent — the agent's own catch is a
         second defensive layer.
+
+        PhaseC.C5 — the same payload is forwarded to the recon-reentry
+        hook so a mid-scan tool-name diff can kick off a non-blocking
+        recon refresh. The hook is bound to the post-recon fingerprint
+        baseline; until ``bind()`` runs (i.e. during recon itself) it is
+        a no-op so recon's own reflections cannot self-fire the loop.
         """
-        # Local alias so the closure doesn't capture ``self`` cycles
+        # Local aliases so the closure doesn't capture ``self`` cycles
         # any longer than the agent's lifetime.
         emit = self._emit
+        reentry = self._recon_reentry_hook
 
         def _sink(payload: Mapping[str, Any]) -> None:
             emit(
@@ -2602,8 +2689,53 @@ class SwarmCommander:
                     payload=dict(payload),
                 )
             )
+            try:
+                reentry.on_reflection(payload)
+            except Exception as exc:  # pragma: no cover -- defensive
+                _LOG.debug(
+                    "PhaseC.C5 recon_reentry sink dispatch raised %s — continuing",
+                    exc,
+                )
 
         return _sink
+
+    async def _reentry_refresh(self, new_tools: list[str]) -> TargetFingerprint | None:
+        """Recon-reentry refresh callback.
+
+        Merges ``new_tools`` into the existing fingerprint's
+        ``declared_tools`` set and writes the refined fingerprint back.
+        Keeps the rest of the fingerprint intact — the diff only ever
+        *adds* evidence, mirroring how :class:`ReconAgent` merges its
+        own LLM-extracted profile into the static base. Returns the
+        refined fingerprint, or ``None`` when there is nothing to merge
+        (current fingerprint already names every tool in ``new_tools``).
+        """
+        current = self.memory.target_fingerprint() or self._fingerprint
+        if current is None:  # pragma: no cover -- recon always writes one
+            return None
+        existing_lower = {n.lower() for n in current.declared_tools}
+        merged: list[str] = list(current.declared_tools)
+        added: list[str] = []
+        for name in new_tools:
+            if name.lower() not in existing_lower:
+                merged.append(name)
+                existing_lower.add(name.lower())
+                added.append(name)
+        if not added:
+            return None
+        note = f"PhaseC.C5 recon-reentry: +{len(added)} tools={added}"
+        new_notes = f"{current.notes} | {note}" if current.notes else note
+        refined = current.model_copy(
+            update={
+                "has_tools": True,
+                "declared_tools": merged,
+                "notes": new_notes,
+            }
+        )
+        # Mirror onto the in-memory cached attribute so downstream phase
+        # callers reading ``self._fingerprint`` see the refreshed view.
+        self._fingerprint = refined
+        return refined
 
 
 # ---------------------------------------------------------------------------

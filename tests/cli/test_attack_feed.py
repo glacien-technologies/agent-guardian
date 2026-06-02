@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -34,6 +34,7 @@ from agent_guardian.ui.attack_feed import (
     build_curl_one_liner,
     render_reflection_block,
 )
+from tests._ansi import normalise_help
 
 
 @pytest.fixture(autouse=True)
@@ -176,7 +177,7 @@ def test_ndjson_sink_emits_one_parseable_line_per_call() -> None:
     for verdict in ("pass", "fail", "inconclusive"):
         renderer.emit(
             _turn_record(verdict=verdict),
-            timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
         )
     lines = [ln for ln in stream.getvalue().splitlines() if ln]
     assert len(lines) == 3
@@ -304,3 +305,111 @@ def test_strategy_section_includes_rationale_when_present() -> None:
     console.print(render_reflection_block(_turn_record()))
     text = console.export_text()
     assert "rationale: pair-initial" in text
+
+
+# ---------------------------------------------------------------------------
+# PhaseC — multi-turn plan label + probe attachment surface in the reflection
+# panel. Renderer-side; payload contract is documented in the cli_tui
+# observer wiring.
+# ---------------------------------------------------------------------------
+
+
+def test_title_appends_plan_label_when_plan_name_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``turn N/M (plan: <name>)`` lands when turn_record carries plan_name."""
+    turn = _turn_record()
+    turn["plan_name"] = "asi06-iterative-fact-reinforcement"
+    # Pin a wide Console so Rich's Panel title-rendering never has to
+    # truncate. CRITICAL: the autouse conftest sets ``TERM=dumb`` and
+    # ``force_terminal=True`` combine to make Rich's ``is_dumb_terminal``
+    # return True, which then clamps Console size to (80, 25) regardless
+    # of the explicit ``width=`` we pass. Override TERM here so Rich
+    # honours our width pin. Belt-and-braces: also normalise_help the
+    # captured text so any residual ANSI/wrap-break doesn't bite.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console = _record_console(width=400)
+    console.print(render_reflection_block(turn))
+    text = normalise_help(console.export_text())
+    assert "turn 2/4 (plan: asi06-iterative-fact-reinforcement)" in text
+
+
+def test_title_reads_plan_from_strategy_metadata_when_top_level_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Legacy turn_records stamp the plan name on strategy_metadata only."""
+    turn = _turn_record(strategy="multi_turn_plan")
+    turn["strategy_metadata"] = {
+        "rationale": "pair-initial",
+        "phase_c_c1_plan_name": "asi06-iterative-fact-reinforcement",
+    }
+    # See sibling test above — undo conftest's ``TERM=dumb`` so Rich
+    # actually honours our wide ``width=`` and doesn't clamp to 80 cols.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console = _record_console(width=400)
+    console.print(render_reflection_block(turn))
+    text = normalise_help(console.export_text())
+    assert "plan: asi06-iterative-fact-reinforcement" in text
+
+
+def test_strategy_section_prefixes_multi_turn_badge() -> None:
+    """A MultiTurnPlanStrategy emit shows ``[multi-turn]`` ahead of the name."""
+    turn = _turn_record(strategy="multi_turn_plan")
+    turn["strategy_metadata"] = {
+        "rationale": "pair-initial",
+        "phase_c_c1_plan_name": "demo-plan",
+    }
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "[multi-turn]" in text
+
+
+def test_attachments_section_renders_summary_when_present() -> None:
+    """ATTACHMENTS section lists mime/size/alt and is hidden when empty."""
+    turn = _turn_record()
+    turn["attachments"] = [
+        {
+            "mime_type": "image/png",
+            "size_bytes": 1024,
+            "alt_text": "login-screen",
+        },
+        {
+            "mime_type": "image/jpeg",
+            "size_bytes": 2048,
+            "alt_text": "screenshot-2",
+        },
+    ]
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "ATTACHMENTS" in text
+    assert "image/png" in text
+    assert "login-screen" in text
+    assert "image/jpeg" in text
+
+
+def test_attachments_section_omitted_when_no_attachments() -> None:
+    """No attachments → no ATTACHMENTS section in the rendered panel."""
+    console = _record_console(width=200)
+    console.print(render_reflection_block(_turn_record()))
+    text = console.export_text()
+    assert "ATTACHMENTS" not in text
+
+
+def test_attachments_section_omits_b64_payload_field() -> None:
+    """Defence-in-depth: even if a stale path leaks the b64 blob, we don't
+    print it. The renderer only reads mime_type / size_bytes / alt_text."""
+    turn = _turn_record()
+    turn["attachments"] = [
+        {
+            "mime_type": "image/png",
+            "size_bytes": 9,
+            "alt_text": "tiny",
+            "b64_payload": "iVBORw0KGgo=",
+        },
+    ]
+    console = _record_console(width=200)
+    console.print(render_reflection_block(turn))
+    text = console.export_text()
+    assert "iVBORw0KGgo=" not in text

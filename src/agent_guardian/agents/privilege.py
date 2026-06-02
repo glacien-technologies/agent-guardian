@@ -2,10 +2,16 @@
 
 Targets authorization / scope / role boundaries. Strategy: TAP (privilege
 exploits tend to need deep, branched refinement of the same core request).
+
+Phase B.B2 — strategy_stack consults
+:data:`agent_guardian.strategies.sibling_map.SIBLING_MAP[ASI03]` and
+wraps the primary TAP in a :class:`ReflectiveStrategy` whose sibling
+candidates are seeded with operator-mutated copies of the corpus seeds.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from agent_guardian.agents.base import AsiAgent, JudgeRubric, fallback_seeds
@@ -16,6 +22,8 @@ from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import ProbeSeed, Strategy, StrategyContext
 
 __all__ = ["PrivilegeAgent"]
+
+_LOG = logging.getLogger(__name__)
 
 
 class PrivilegeAgent(AsiAgent):
@@ -60,9 +68,28 @@ Specific techniques:
         )
 
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
+        from agent_guardian.strategies.reflective import ReflectiveStrategy
+        from agent_guardian.strategies.sibling_map import (
+            SIBLING_MAP,
+            build_sibling_strategy,
+        )
         from agent_guardian.strategies.tap import TAPStrategy
 
-        return TAPStrategy(ctx)
+        primary = TAPStrategy(ctx)
+        siblings = build_sibling_strategy(AsiCategory.ASI03, ctx, primary)
+        first_sibling = siblings[0] if siblings else None
+        _LOG.debug(
+            "PhaseB.B2 PrivilegeAgent.strategy_stack: asi=ASI03 "
+            "operators=%s n_siblings=%d primary=%s",
+            SIBLING_MAP[AsiCategory.ASI03],
+            len(siblings),
+            type(primary).__name__,
+        )
+        return ReflectiveStrategy(
+            primary,
+            sibling=first_sibling,
+            asi_category=AsiCategory.ASI03,
+        )
 
     def judge_rubric(self) -> JudgeRubric:
         return JudgeRubric(

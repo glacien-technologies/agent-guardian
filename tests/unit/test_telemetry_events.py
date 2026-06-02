@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -15,7 +15,7 @@ from agent_guardian.telemetry.events import (
     ScanCompletedEvent,
 )
 
-_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
 _VALID_INSTALL_ID = "00000000-0000-4000-8000-000000000001"
 
 

@@ -23,7 +23,7 @@ The tests are deliberately layered:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -74,7 +74,7 @@ def _make_finding(fid: str, severity: Severity, asi: AsiCategory = AsiCategory.A
         success=True,
         confidence=0.91,
         summary=f"finding {fid}",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -107,7 +107,7 @@ def _make_scan(scan_id: str = "cli-theme-switcher") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -268,10 +268,12 @@ def test_route_query_param_executive_picks_executive_template(
     assert resp.status_code == 200, resp.text[:500]
     # Distinguishing marker — Executive's <html> carries data-theme="executive".
     assert 'data-theme="executive"' in resp.text
-    # Locked tab list (5 tabs in locked order).
+    # Locked tab list — QA-030 deleted the Agents tab; 4 tabs remain in
+    # locked order.
     body = resp.text
-    for tab_id in ("tab-overview", "tab-findings", "tab-probes", "tab-agents", "tab-logs"):
+    for tab_id in ("tab-overview", "tab-findings", "tab-probes", "tab-logs"):
         assert f'id="{tab_id}"' in body
+    assert 'id="tab-agents"' not in body
     # The locked findings heading must appear in the Executive theme too.
     assert "All findings so far." in body
 

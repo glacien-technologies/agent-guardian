@@ -12,7 +12,7 @@ Covers the dashboard-logo slice of the Executive UX fix bundle:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -56,7 +56,7 @@ def _persist_scan(store: ScanStore, scan_id: str = "cli-logo-001") -> Scan:
         tokens_total=1000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
     scan_dir = store.scan_dir(scan.id)
     scan_dir.mkdir(parents=True, exist_ok=True)

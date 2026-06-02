@@ -1,0 +1,20 @@
+# Mintlify docs apex subroutes not yet published. The docs site is live at
+# docs.agentguardian.io; the apex `agentguardian.io` README links are
+# aspirational. Remove these entries once the Mintlify IA ships these routes.
+^https://agentguardian\.io/(quickstart|attacks/overview|adapters|cli|standards|attackers)$
+
+# OpenSSF Scorecard project page 404s until the first Scorecard scan runs on
+# the repo. The badge image (with /badge suffix) responds 302 and renders
+# correctly — this entry only suppresses the bare project link in the README.
+^https://api\.securityscorecards\.dev/projects/github\.com/glacien-technologies/agent-guardian$
+
+# Mintlify docs subdomain subroutes — the site is live at docs.agentguardian.dev
+# but specific routes (e.g. /reference/cli) are not yet published. Remove this
+# entry once the Mintlify IA ships these routes.
+^https://docs\.agentguardian\.dev/reference/.*$
+
+# docs/reference/roadmap.md links to a sibling .mdx file (roadmap.mdx) which
+# ships in the Mintlify docs site build but is intentionally absent from the
+# git tree per the .md stub's own preamble. CI runners therefore cannot resolve
+# the file:// reference to roadmap.mdx, so we suppress it here.
+roadmap\.mdx$

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -26,8 +26,6 @@ from agent_guardian.models.finding import Finding
 from agent_guardian.models.probe import Probe
 from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.models.tier import Tier
-
-UTC = timezone.utc
 
 
 def _finding(

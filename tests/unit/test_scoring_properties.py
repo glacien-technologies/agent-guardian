@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -19,7 +19,6 @@ from agent_guardian.models.probe import Probe
 from agent_guardian.models.severity import Severity
 from agent_guardian.models.tier import Tier
 
-UTC = timezone.utc
 _FIXED_TS = datetime(2026, 5, 26, 12, 0, tzinfo=UTC)
 
 

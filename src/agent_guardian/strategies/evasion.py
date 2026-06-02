@@ -1,5 +1,8 @@
 """Active detection-evasion variant generation (M3 §5.3).
 
+DEPRECATED (Phase C): use ``agent_guardian.strategies.mutator`` for new code;
+this module ships one more release for migration.
+
 **Authorization:** this generates detection-evasion variants ONLY for an
 authorized red-team of the operator's OWN monitoring stack, to surface gaps in
 their detection coverage (e.g. "your Lakera Guard / Llama Guard deployment
@@ -18,14 +21,24 @@ modifier.
 
 from __future__ import annotations
 
-import logging
-import random
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+import warnings
 
-from agent_guardian.core.detector_replay import Detector
-from agent_guardian.llm.base import BaseLLM
-from agent_guardian.strategies.base import attacker_complete
+warnings.warn(
+    "agent_guardian.strategies.evasion is deprecated as of Phase C; new code "
+    "should use agent_guardian.strategies.mutator (Phase B). The evasion module "
+    "remains importable for one release window; it will be removed in v2.0.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+import logging  # noqa: E402  -- imports after warnings.warn so import-time deprecation fires before sub-imports
+import random  # noqa: E402
+from collections.abc import Awaitable, Callable  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+
+from agent_guardian.core.detector_replay import Detector  # noqa: E402
+from agent_guardian.llm.base import BaseLLM  # noqa: E402
+from agent_guardian.strategies.base import attacker_complete  # noqa: E402
 
 __all__ = ["EVASION_TECHNIQUES", "EvasionGenerator", "EvasionResult"]
 

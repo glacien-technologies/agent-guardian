@@ -40,7 +40,11 @@ async def test_a2a_finds_findings_in_multi_agent_mode(
     findings = memory.findings_by_asi(AsiCategory.ASI07)
     assert findings
     assert findings[0].csa_category == CsaCategory.MULTI_AGENT_EXPLOITATION
-    assert "Modify AI Agent Configuration" in findings[0].mitre_atlas
+    # MITRE ATLAS v5.4.0 (2026.06 corpus) maps A2A peer-trust forgery probes
+    # (e.g. ASI07-A2A-014 agent-card-forgery-peer) to AML.T0043 (Stage
+    # Capabilities), not the human-readable "Modify AI Agent Configuration"
+    # description. Assert on the canonical ATLAS technique ID.
+    assert "AML.T0043" in findings[0].mitre_atlas
 
 
 async def test_a2a_skips_for_prompt_mode_target(

@@ -69,9 +69,14 @@ def _patch_uvicorn_run(
 
 def test_serve_help_lists_new_options(runner: CliRunner) -> None:
     """``serve --help`` must surface the new ``--token`` + ``--insecure-no-auth``."""
+    from tests._ansi import normalise_help
+
     result = runner.invoke(app, ["serve", "--help"])
     assert result.exit_code == EXIT_OK
-    output = _combined_output(result)
+    # Normalise ANSI + soft-wrap so substring asserts on flag names are
+    # robust against Rich/Click terminal-width and colour rendering quirks
+    # on CI. See tests/_ansi.py + conftest._force_wide_terminal_for_click.
+    output = normalise_help(_combined_output(result))
     assert "--token" in output
     assert "--insecure-no-auth" in output
 

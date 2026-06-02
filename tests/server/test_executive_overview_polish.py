@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -55,7 +55,7 @@ def _make_finding(
         success=True,
         confidence=0.91,
         summary=f"finding {fid}: prompt injection observed",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -90,7 +90,7 @@ def _make_scan(scan_id: str = "cli-executive-polish-001") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -158,9 +158,7 @@ def test_executive_kpi_tile_renders_mini_chart(
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    assert f'data-component="kpi-chart-{key}"' in body, (
-        f"KPI tile {key!r} missing mini-chart"
-    )
+    assert f'data-component="kpi-chart-{key}"' in body, f"KPI tile {key!r} missing mini-chart"
 
 
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
@@ -232,9 +230,7 @@ def test_executive_overview_no_longer_renders_fig_eyebrows(
 # ---------------------------------------------------------------------------
 
 
-def test_executive_overview_renders_asi_compact_table(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_executive_overview_renders_asi_compact_table(client: TestClient, store: ScanStore) -> None:
     """The Overview tab includes the new ``data-component="asi-compact"``
     widget with all 10 ASI rows and the locked metadata fields."""
     scan = _make_scan()
@@ -346,17 +342,21 @@ def test_executive_overview_asi_compact_widget_present_before_reproducibility(
     assert twocol_idx < compact_idx < repro_idx
 
 
-def test_executive_overview_asi_compact_preserves_agents_tab(
+def test_executive_overview_asi_compact_widget_present(
     client: TestClient, store: ScanStore
 ) -> None:
-    """QA-033 is a dependency-preserver for QA-030: the Agents-tab content is
-    intentionally left in place by THIS ship. Confirm both surfaces coexist
-    today; QA-030 will delete the Agents tab in its own ship.
+    """QA-033 introduced the Overview ASI compact widget; QA-030 has since
+    deleted the legacy Agents tab and its ``data-component="asi-rows"``
+    partial. Confirm the compact widget still ships on Overview — the rows
+    partial assertion is covered (in the negative) by
+    ``test_executive_clean_control_renders_all_new_partials`` in
+    ``tests/server/test_theme_executive_rendering.py``.
     """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
     # Overview now has the compact widget.
     assert 'data-component="asi-compact"' in body
-    # Agents-tab original rows partial still rendered — untouched here.
-    assert 'data-component="asi-rows"' in body
+    # Agents tab + asi-rows partial were removed by QA-030; the negative
+    # assertion lives in test_theme_executive_rendering.py to avoid
+    # duplicating the lock.

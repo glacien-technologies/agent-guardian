@@ -30,7 +30,7 @@ import logging
 import os
 import platform
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal, cast
 
 import typer
@@ -267,7 +267,7 @@ def _emit_install_event() -> None:
             python_version=(f"{sys.version_info.major}.{sys.version_info.minor}" if ext else "3.0"),
             os_family=_os_family() if ext else "Linux",
             arch=_arch() if ext else "x86_64",
-            opted_in_at=datetime.now(timezone.utc),
+            opted_in_at=datetime.now(UTC),
         )
         emit(evt)
     except Exception as exc:  # pragma: no cover -- defensive

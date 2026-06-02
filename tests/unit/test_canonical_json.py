@@ -9,7 +9,7 @@ reproducibility of signed reports across machines, so we exercise every
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
@@ -40,7 +40,7 @@ def test_basic_round_trip_is_stable() -> None:
 
 
 def test_aware_datetime_normalised_to_utc_zulu() -> None:
-    dt = datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc)
+    dt = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
     encoded = to_canonical_json({"ts": dt})
     assert b'"ts":"2026-05-27T12:00:00Z"' in encoded
 

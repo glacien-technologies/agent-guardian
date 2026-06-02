@@ -9,7 +9,7 @@ mode-blind and over-estimated by ~46x). The cap is now metered against
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -40,7 +40,7 @@ def _finding(fid: str, *, trigger: str | None = "do the forbidden thing") -> Fin
         confidence=0.9,
         summary=f"summary {fid}",
         trigger_prompt=trigger,
-        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -238,7 +238,7 @@ def test_build_completeness_counts_agents_and_turns() -> None:
 def test_scan_model_defaults_are_backcompat() -> None:
     # A Scan built without the new fields still constructs (frozen fixtures
     # predating the budget work must keep deserialising).
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian._version import __version__ as _v
     from agent_guardian.models.scan import Scan
@@ -261,7 +261,7 @@ def test_scan_model_defaults_are_backcompat() -> None:
         duration_seconds=1.0,
         cost_usd=0.0,
         mode="full",
-        created_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, tzinfo=UTC),
     )
     assert scan.stopped_reason == "completed"
     assert scan.budget is None
@@ -301,7 +301,7 @@ def test_emit_json_includes_budget_and_completeness_blocks() -> None:
             turns_planned=120,
             pct=70.0,
         ),
-        created_at=datetime(2026, 5, 28, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, tzinfo=UTC),
     )
     payload = emit_json(scan, sign=False, redact_pii=False)
     assert payload["stopped_reason"] == "budget"

@@ -174,6 +174,15 @@ from agent_guardian.strategies.base import (
 )
 from agent_guardian.strategies.crescendo import CrescendoStrategy
 from agent_guardian.strategies.mad_max import MadMaxStrategy
+from agent_guardian.strategies.multi_turn_plan import (
+    MultiTurnPlan,
+    MultiTurnPlanStrategy,
+    TurnRecord,
+    TurnSpec,
+)
+from agent_guardian.strategies.multi_turn_plan_loader import (
+    load_multi_turn_plan_from_yaml,
+)
 from agent_guardian.strategies.pair import PAIRStrategy
 from agent_guardian.strategies.tap import TAPStrategy
 
@@ -242,6 +251,8 @@ __all__ = [
     "MemoryPoisonAgent",
     "MemoryRecord",
     "MemoryStats",
+    "MultiTurnPlan",
+    "MultiTurnPlanStrategy",
     "NextPrompt",
     "ObservedSurface",
     "OllamaClient",
@@ -289,6 +300,8 @@ __all__ = [
     "ToolAbuseAgent",
     "TrustExploitAgent",
     "Turn",
+    "TurnRecord",
+    "TurnSpec",
     "VectorHit",
     "VerifyResult",
     "VertexClient",
@@ -308,6 +321,7 @@ __all__ = [
     "get_shape",
     "list_shapes",
     "load_all_probes",
+    "load_multi_turn_plan_from_yaml",
     "load_or_create_keypair",
     "load_probe",
     "load_probes_for_asi",

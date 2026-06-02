@@ -168,6 +168,10 @@ def emit_json(
     # scan and how many turns were suppressed / refused.
     if scan.audit is not None:
         payload["audit"] = dict(scan.audit)
+    # C7 — judge calibration (Brier + accuracy). Folded into the signed payload
+    # so a downstream consumer can refuse a verdict whose judge is uncalibrated.
+    if scan.calibration is not None:
+        payload["calibration"] = scan.calibration.model_dump(mode="json")
     if sign:
         payload["signatures"] = sign_payload(payload, secret=secret, keys_dir=keys_dir)
     return payload

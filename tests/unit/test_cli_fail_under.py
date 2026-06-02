@@ -13,7 +13,7 @@ exit code (that is the cli-server cluster's edit per the task brief).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -27,8 +27,6 @@ from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import SeverityBand
 from agent_guardian.models.tier import Tier
 from agent_guardian.reports.json_report import emit_json
-
-UTC = timezone.utc
 
 
 class _FakeRealLLM(BaseLLM):

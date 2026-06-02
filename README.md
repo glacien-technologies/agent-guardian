@@ -4,7 +4,7 @@
 
 **Open-source red-team testing toolkit for agentic AI systems.**
 
-96 attack probes · 11 attacker agents · OWASP ASI 2026, MITRE ATLAS v5.4.0, and CSA Agentic-RT mappings · SARIF + PDF reports · runs offline.
+96 attack probes · 11 attacker agents · OWASP ASI 2026 (all 10), 11+ MITRE ATLAS v5.4.0 techniques (see [coverage matrix](./docs/reference/framework-coverage-matrix.md) for the exact set; ~85% of techniques are out of scope for a black-box agent scanner) and CSA Agentic-RT (all 12) mappings · SARIF + PDF reports · runs offline.
 
 [![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
@@ -23,9 +23,9 @@ AgentGuardian is a testing toolkit that runs adversarial probes against your age
 
 It ships **96 attack probes** organised against three public taxonomies:
 
-- [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/) (ASI01–ASI10)
-- [MITRE ATLAS v5.4.0](https://atlas.mitre.org/) (February 2026 release)
-- [CSA Agentic AI Red Teaming Guide](https://cloudsecurityalliance.org/) (Huang et al., 2025-05-28, 12 categories)
+- [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/) (ASI01–ASI10, all 10 categories covered)
+- [MITRE ATLAS v5.4.0](https://atlas.mitre.org/) (February 2026 release) — **11+ techniques covered** at the agent's I/O surface; the remaining ~85% of the v5.4.0 catalogue (training-pipeline / ML-platform-internal attacks) is out of scope for a black-box agent scanner. See the [framework-coverage matrix](./docs/reference/framework-coverage-matrix.md) for the exact set.
+- [CSA Agentic AI Red Teaming Guide](https://cloudsecurityalliance.org/) (Huang et al., 2025-05-28, all 12 categories)
 
 It is deterministic in `stub` mode (no LLM key required), reproducible by seed, and emits SARIF + PDF + HTML + JSON.
 
@@ -45,7 +45,7 @@ Requires Python 3.10+. Apache-2.0 licensed.
 
 | Tool             | Multi-agent swarm | Agentic-AI focus | Standards alignment                           | License        |
 |------------------|:-----------------:|:----------------:|-----------------------------------------------|----------------|
-| PyRIT            |        no         |        no        | NIST AI RMF (partial)                         | MIT            |
+| PyRIT            |        no         |        no        | PyRIT risk taxonomy                           | MIT            |
 | garak            |        no         |        no        | own taxonomy                                  | Apache-2.0     |
 | Promptfoo        |        no         |        no        | OWASP LLM Top 10 + ATLAS + EU AI Act          | MIT            |
 | Inspect          |        no         |        no        | own taxonomy                                  | MIT            |
@@ -222,7 +222,7 @@ agent-guardian list-probes --by-standard mitre-atlas
 agent-guardian list-probes --by-standard csa-agentic-rt
 ```
 
-Full mapping tables: [`agentguardian.io/standards`](https://agentguardian.io/standards).
+The honest, auto-generated coverage table lives at [`docs/reference/framework-coverage-matrix.md`](./docs/reference/framework-coverage-matrix.md) — it lists every ATLAS technique the shipped corpus actually cites, and marks zero-coverage CSA categories explicitly rather than hiding them. Full mapping tables also at [`agentguardian.io/standards`](https://agentguardian.io/standards).
 
 ---
 

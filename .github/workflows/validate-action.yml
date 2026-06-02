@@ -122,7 +122,10 @@ jobs:
               tree = html5lib.parse(fh, treebuilder="etree", namespaceHTMLElements=False)
           # Confirm core structural anchors are present.
           html = open("docs/_assets/sample-report.html").read()
-          for needle in ("AgentGuardian scan report", "AIVSS", "ASI01", "schema agentguardian-scan-v1"):
+          # NOTE: ``schema`` and the schema id are split by an inline ``</b>``
+          # close-tag in the meta-row markup, so the raw HTML string never
+          # contains them contiguously. Anchor on the canonical schema id only.
+          for needle in ("AgentGuardian scan report", "AIVSS", "ASI01", "agentguardian-scan-v1"):
               assert needle in html, needle
           print("sample-report.html parsed; expected anchors present")
           PY

@@ -40,19 +40,31 @@ __all__ = [
 class SwarmBudgetConfig(BaseModel):
     """Wall-clock and token caps for one scan."""
 
-    wall_seconds: int = Field(default=900, ge=1)
+    # wall_seconds defaults to None (uncapped) per the operator
+    # "no arbitrary hardcoded caps" rule. Operators opt in to a wall-
+    # clock cap via the CLI flag (--budget-seconds) or by setting this
+    # field explicitly in the contract file.
+    wall_seconds: int | None = Field(default=None, ge=1)
     max_total_tokens: int = Field(default=2_000_000, ge=1)
     model_config = ConfigDict(extra="forbid")
 
 
 class SwarmConfig(BaseModel):
-    """Swarm-level knobs — model identifiers and budget."""
+    """Swarm-level knobs — model identifiers and budget.
+
+    Defaults to a single-family (Gemini) attacker + evaluator. Cross-
+    family judge panel is opt-in via ``judge_cross_family_enforced``
+    so a scan does not silently require a second provider's API key.
+    Operators who want the cross-family panel set the toggle to True
+    AND configure a second-family ``evaluator_model``.
+    """
 
     commander_model: str = "claude-haiku-4-5"
-    attacker_model: str = "gpt-4o-mini"
-    evaluator_model: str = "gpt-4o-mini"
+    attacker_model: str = "gemini-3.5-flash"
+    evaluator_model: str = "gemini-3.5-flash"
     max_parallel_agents: int = Field(default=11, ge=1, le=11)
     budget: SwarmBudgetConfig = Field(default_factory=SwarmBudgetConfig)
+    judge_cross_family_enforced: bool = False
     model_config = ConfigDict(extra="forbid")
 
 

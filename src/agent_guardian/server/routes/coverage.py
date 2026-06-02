@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -674,7 +674,7 @@ async def coverage_view(
     all_findings = scan.findings if scan is not None else []
     filtered = _filter_findings(all_findings, severity=severity, asi=asi, q=q)
     sorted_findings = _sort_findings(filtered, sort)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows_displayed, page, total_pages, total_filtered = _paginate_findings(
         sorted_findings, page=page, per_page=per_page, now=now
     )

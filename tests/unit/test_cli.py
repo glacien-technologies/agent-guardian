@@ -101,9 +101,16 @@ def test_list_probes_prints_full_corpus(runner: CliRunner) -> None:
     # bypass, denial-of-wallet, recursion / fan-out abuse, etc.); the
     # M2 LLM02 specialist pass added 2 output-handling canary probes;
     # GAP-3 (2026-05-30) added 1 ASI03 cross-tenant PII probe for a
-    # current total of 96. The corpus-version stamp is also printed.
+    # subtotal of 96 attack probes. Phase A.A4 added 4 JDG-* judge-
+    # evaluation probes (separate namespace, not part of the AIVSS
+    # attack score) for a current total of 100. The corpus-version
+    # stamp is also printed. Phase C.C2 (2026-06-01) added 21 agent-
+    # specific attack probes (5 ReAct hijack + 5 MCP tool-desc rug-
+    # pull + 4 MCP capability-spoof + 4 A2A signed-message replay +
+    # 3 agent-card forgery) for a current total of 124 (120 attack
+    # + 4 judge).
     assert "Probe corpus version" in result.stdout
-    assert "Found 96 probes" in result.stdout
+    assert "Found 124 probes" in result.stdout
     # At least one ID from each category should appear.
     for asi in ("ASI01", "ASI02", "ASI05", "ASI10"):
         assert asi in result.stdout
@@ -113,8 +120,13 @@ def test_list_probes_with_asi_filter(runner: CliRunner) -> None:
     result = runner.invoke(app, ["list-probes", "--asi", "ASI01"])
     assert result.exit_code == 0
     # ASI01 has 5 original + 3 Phase-B probes + 1 persona-break probe added in
-    # the scoring-trust belt-and-suspenders pass = 9.
-    assert "Found 9 probes (filtered by ASI01)" in result.stdout
+    # the scoring-trust belt-and-suspenders pass = 9 attack probes. Phase
+    # A.A4 added 3 JDG-* judge-evaluation probes tagged with asi=ASI01
+    # (defended-marker-injection + paraphrase-consistency + calibration-set)
+    # for a subtotal of 12. Phase B.B5 added 3 ASI01 H-CoT injection probes
+    # for a subtotal of 15. Phase C.C2 (2026-06-01) added 5 ReAct-hijack
+    # probes (asi01/react-*) for a current total of 20.
+    assert "Found 20 probes (filtered by ASI01)" in result.stdout
     assert "ASI02" not in result.stdout
 
 

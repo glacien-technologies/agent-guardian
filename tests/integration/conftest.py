@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import UTC
 from pathlib import Path
 from random import Random
 
@@ -140,7 +141,7 @@ def make_memory(tmp_path: Path) -> Callable[..., SharedMemory]:
         mem = SharedMemory(sid, root_dir=tmp_path)
         if fingerprint is not None:
             # Seed the fingerprint synchronously by re-using the JSONL apply path.
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             from agent_guardian.core.memory import MemoryRecord
 
@@ -148,7 +149,7 @@ def make_memory(tmp_path: Path) -> Callable[..., SharedMemory]:
                 MemoryRecord(
                     record_type="fingerprint",
                     scan_id=sid,
-                    timestamp=datetime.now(tz=timezone.utc),
+                    timestamp=datetime.now(tz=UTC),
                     payload=fingerprint.model_dump(mode="json"),
                 )
             )

@@ -35,17 +35,32 @@ def test_config_defaults() -> None:
 
 
 def test_swarm_budget_defaults() -> None:
+    # Per the operator "no arbitrary hardcoded caps" rule, wall_seconds
+    # defaults to None (uncapped). Operators opt in to a cap via
+    # --budget-seconds or by setting the field in their contract file.
     b = SwarmBudgetConfig()
-    assert b.wall_seconds == 900
+    assert b.wall_seconds is None
     assert b.max_total_tokens == 2_000_000
 
 
 def test_swarm_config_defaults() -> None:
     s = SwarmConfig()
     assert s.commander_model == "claude-haiku-4-5"
-    assert s.attacker_model == "gpt-4o-mini"
-    assert s.evaluator_model == "gpt-4o-mini"
+    assert s.attacker_model == "gemini-3.5-flash"
+    assert s.evaluator_model == "gemini-3.5-flash"
     assert s.max_parallel_agents == 11
+    # Cross-family judge panel is opt-in: default same-family panel keeps
+    # scans buildable with one API key. Operators opt in by setting
+    # judge_cross_family_enforced=True + a second-family evaluator_model.
+    assert s.judge_cross_family_enforced is False
+
+
+def test_swarm_budget_wall_seconds_default_is_uncapped() -> None:
+    # The "no arbitrary hardcoded caps" rule: wall_seconds defaults to None.
+    # Operators opt in to a cap via --budget-seconds on the CLI or by setting
+    # cfg.swarm.budget.wall_seconds explicitly.
+    b = SwarmBudgetConfig()
+    assert b.wall_seconds is None
 
 
 def test_target_config_defaults_to_prompt_mode() -> None:

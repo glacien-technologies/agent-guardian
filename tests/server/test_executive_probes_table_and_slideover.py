@@ -24,7 +24,7 @@ Covers:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -79,7 +79,7 @@ def _make_scan(scan_id: str = "cli-probes-032") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -135,10 +135,14 @@ def _seed_memory_jsonl(
 
 
 def _probes_pane(body: str) -> str:
-    """Slice the body to just the ``#tabpanel-probes`` section."""
+    """Slice the body to just the ``#tabpanel-probes`` section.
+
+    QA-030 deleted the Agents tab; the Probes tab is now followed by the
+    Logs tab. Use ``tabpanel-logs`` as the end marker.
+    """
     start = body.find('id="tabpanel-probes"')
     assert start >= 0
-    end = body.find('id="tabpanel-agents"', start)
+    end = body.find('id="tabpanel-logs"', start)
     assert end >= 0
     return body[start:end]
 

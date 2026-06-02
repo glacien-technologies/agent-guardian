@@ -25,7 +25,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -72,7 +72,7 @@ def _resolve_base_url(request: Request) -> str:
 def _started_at_label(scan_dir_mtime: float | None) -> str:
     if scan_dir_mtime is None:
         return ""
-    dt = datetime.fromtimestamp(scan_dir_mtime, tz=timezone.utc)
+    dt = datetime.fromtimestamp(scan_dir_mtime, tz=UTC)
     return dt.strftime("%d %b %Y · %H:%M UTC")
 
 

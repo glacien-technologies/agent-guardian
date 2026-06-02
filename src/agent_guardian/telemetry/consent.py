@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -150,7 +150,7 @@ def set_consent(state: ConsentState, *, consent_dir: Path | None = None) -> None
     payload: dict[str, Any] = {
         "state": state.value,
         "decided_at": (
-            datetime.now(tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            datetime.now(tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
             if state is not ConsentState.NOT_PROMPTED
             else None
         ),

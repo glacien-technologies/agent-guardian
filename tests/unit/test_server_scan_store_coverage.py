@@ -14,7 +14,7 @@ import contextlib
 import json
 import logging
 from collections import OrderedDict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -46,7 +46,7 @@ def _event(
 ) -> SwarmEvent:
     return SwarmEvent(
         kind=kind,  # type: ignore[arg-type]
-        timestamp=datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC),
         agent=agent,
         payload=payload or {},
     )
@@ -129,7 +129,7 @@ def test_resolve_max_buffered_events_falls_back_on_negative(
 
 
 def test_scan_summary_to_dict_roundtrips_all_fields() -> None:
-    created = datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc)
+    created = datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC)
     s = ScanSummary(
         scan_id="abc",
         aivss=87,
@@ -516,7 +516,7 @@ def test_list_scans_page_running_with_partial_scan_uses_partial_fields(
         asi_scores={cat: 0.0 for cat in AsiCategory},
         duration_seconds=0.0,
         cost_usd=0.0,
-        created_at=datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC),
         scoring_valid=False,
     )
     write_partial_scan(store.scan_dir("live2"), partial)
@@ -582,7 +582,7 @@ def test_list_scans_page_cold_path_when_no_index(tmp_path: Path) -> None:
         asi_scores={cat: 80.0 for cat in AsiCategory},
         duration_seconds=1.0,
         cost_usd=0.0,
-        created_at=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
     )
     store.scan_dir("cold").mkdir(parents=True, exist_ok=True)
     (store.scan_dir("cold") / "scan.json").write_text(scan.model_dump_json(), encoding="utf-8")
@@ -788,7 +788,7 @@ def test_load_completed_back_compat_adds_default_mode_field(tmp_path: Path) -> N
         asi_scores={cat: 70.0 for cat in AsiCategory},
         duration_seconds=0.5,
         cost_usd=0.0,
-        created_at=datetime(2026, 5, 27, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC),
     )
     payload = json.loads(seed.model_dump_json())
     payload.pop("mode", None)
@@ -831,7 +831,7 @@ def test_list_report_paths_prefers_explicit_report_json_over_scan_json(
 def test_event_to_payload_renders_full_event() -> None:
     ev = SwarmEvent(
         kind="agent_done",  # type: ignore[arg-type]
-        timestamp=datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC),
         agent="tool-abuse-agent",
         asi=AsiCategory.ASI02,
         provisional_aivss=42,
@@ -862,12 +862,12 @@ def test_json_safe_handles_primitives_and_none() -> None:
 
 
 def test_json_safe_handles_datetime() -> None:
-    dt = datetime(2026, 5, 31, 12, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2026, 5, 31, 12, 0, 0, tzinfo=UTC)
     assert _json_safe(dt) == dt.isoformat()
 
 
 def test_json_safe_recurses_through_lists_tuples_dicts() -> None:
-    nested = {"a": [1, (2, 3)], "b": {"c": datetime(2026, 1, 1, tzinfo=timezone.utc)}}
+    nested = {"a": [1, (2, 3)], "b": {"c": datetime(2026, 1, 1, tzinfo=UTC)}}
     out = _json_safe(nested)
     assert out["a"] == [1, [2, 3]]
     assert out["b"]["c"].startswith("2026-01-01")

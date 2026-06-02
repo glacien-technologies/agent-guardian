@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -73,7 +73,7 @@ def _make_finding(
         success=True,
         confidence=0.91,
         summary=f"finding {fid}: prompt injection observed",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -110,7 +110,7 @@ def _make_scan(scan_id: str = "cli-executive-001", *, with_findings: bool = True
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -657,17 +657,23 @@ def test_executive_overview_renders_severity_bars_partial(
     # Canvas id is tab-scoped (overview vs findings) to avoid duplicate-id
     # collisions when the partial is included in both tabs.
     assert 'id="exec-severity-bar-overview"' in overview_pane
-    # The mono FIG. 1 eyebrow + serif headline. Findings now sits on the
-    # LEFT of the side-by-side Overview grid, so FIG numbering puts it first.
-    assert "FIG. 1" in overview_pane
+    # QA-028 sub-ask 3b dropped the FIG. 1 / FIG. 2 academic eyebrows from
+    # _severity_bars.html + _asi_radar.html — the locked headline is now
+    # the only above-the-chart label.
     assert "Findings by severity" in overview_pane
 
 
-def test_executive_findings_tab_includes_severity_bars_and_jump_anchors(
+def test_executive_findings_tab_keeps_severity_jump_anchors(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The Findings tab renders the severity bar chart AND the per-severity
-    jump anchors (#exec-sev-{key}) that the chart's onClick handler targets."""
+    """The Findings tab carries the per-severity jump anchors
+    (#exec-sev-{key}) the bucket-grouped table relies on.
+
+    QA-029 sub-ask 1 deleted the duplicate severity bar chart from the
+    Findings tab (kept only in Overview). The negative assertion lives in
+    ``tests/server/test_executive_findings_table_and_slideover.py``; this
+    test asserts the surviving anchor invariant only.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
@@ -676,10 +682,6 @@ def test_executive_findings_tab_includes_severity_bars_and_jump_anchors(
     idx = body.find('id="tabpanel-findings"')
     next_idx = body.find('id="tabpanel-probes"', idx)
     findings_pane = body[idx:next_idx]
-    assert 'data-component="severity-bars"' in findings_pane
-    # Findings tab has its own canvas with a distinct id (prevents Chart.js
-    # double-init when the partial is included in both Overview + Findings).
-    assert 'id="exec-severity-bar-findings"' in findings_pane
     # The fixture seeds critical / high / medium → at least these anchors must
     # be present (low has no findings → no bucket → no anchor).
     assert 'id="exec-sev-critical"' in findings_pane
@@ -700,21 +702,21 @@ def test_executive_overview_renders_asi_radar_partial(client: TestClient, store:
     overview_pane = body[idx:next_idx]
     assert 'data-component="asi-radar"' in overview_pane
     assert 'id="exec-asi-radar"' in overview_pane
-    # Radar now sits on the RIGHT of the side-by-side Overview grid, so it
-    # carries the FIG. 2 eyebrow (was FIG. 1 in the pre-side-by-side layout).
-    assert "FIG. 2" in overview_pane
+    # QA-028 sub-ask 3b dropped the FIG. 1 / FIG. 2 academic eyebrows from
+    # the chart partials. The locked headline is the only above-chart label.
     assert "Adversarial Surface Index" in overview_pane
 
 
 def test_executive_reproducibility_renders_in_each_data_tab(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The reproducibility receipt renders once per data tab — Overview,
-    Findings, Probes, Logs.
+    """The reproducibility receipt renders once per data tab — Overview +
+    Probes only after QA-029 sub-ask 3 restricted the receipt to the two
+    surfaces where the regenerate-command is contextually relevant.
 
     Per the 2026-05-31 UX punch-list, the receipt was moved off the layout
-    footer and into the per-tab partials. After QA-030 deleted the Agents
-    tab, every surviving tab carries the receipt. See
+    footer and into the per-tab partials. QA-029 then narrowed it to
+    Overview + Probes (Findings + Logs no longer carry it). See
     ``test_executive_reproducibility_per_tab`` for the per-tab DOM placement
     asserts."""
     scan = _make_scan()
@@ -722,8 +724,8 @@ def test_executive_reproducibility_renders_in_each_data_tab(
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Each of the 4 surviving data tabs includes the receipt.
-    assert body.count('data-component="reproducibility"') == 4
+    # Overview + Probes only after QA-029 — 2 includes total.
+    assert body.count('data-component="reproducibility"') == 2
     # The 7 mono row labels appear at least once.
     for label in (
         "SCAN_ID",
@@ -736,10 +738,10 @@ def test_executive_reproducibility_renders_in_each_data_tab(
     ):
         assert label in body, f"reproducibility missing label {label}"
     # The REPRODUCIBILITY mono eyebrow appears once per included tab.
-    assert body.count("REPRODUCIBILITY") >= 4
-    # The Copy button hook is the same across all 4 includes (Copy logic
+    assert body.count("REPRODUCIBILITY") >= 2
+    # The Copy button hook is the same across all includes (Copy logic
     # iterates [data-copy-target] via querySelectorAll).
-    assert body.count('data-copy-target="#exec-repro-command"') == 4
+    assert body.count('data-copy-target="#exec-repro-command"') == 2
 
 
 def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> None:
@@ -845,13 +847,16 @@ def _seed_memory_jsonl_without_judge(scan_dir: Path) -> dict[str, object]:
     return turn
 
 
-def test_executive_probes_tab_renders_judge_reasoning_fallback_when_empty(
+def test_executive_probes_tab_carries_empty_reasoning_through_slideover_payload(
     client: TestClient, store: ScanStore
 ) -> None:
     """When a probe carries no judge reasoning (empty string) and confidence
-    is 0.0, the Probes tab must render the fallback prose AND a humanised
-    eyebrow — never an empty styled blockquote and never the literal
-    'confidence 0.00'.
+    is 0.0, the probe row still ships through the slide-over JSON island
+    so the client-side renderer can fall back to the humanised eyebrow.
+
+    QA-032 replaced the per-card blockquote layout with a 5-col table +
+    slide-over driven by ``#exec-probes-payload``; this test now asserts
+    the data path (not the per-row DOM blockquote that no longer exists).
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
@@ -864,20 +869,32 @@ def test_executive_probes_tab_renders_judge_reasoning_fallback_when_empty(
     next_panel_idx = body.find('id="tabpanel-logs"', idx)
     probes_pane = body[idx:next_panel_idx]
 
-    # The hallmark of the bug is gone:
-    assert "confidence 0.00" not in probes_pane
-    # And we render a humanised eyebrow instead.
-    assert "no judge confidence" in probes_pane
-    # The empty styled blockquote is replaced by the fallback prose.
-    assert "Not graded per-turn" in probes_pane
-    assert "Findings tab for the rolled-up judge verdict" in probes_pane
+    # The JSON island is the new source of truth for slide-over content.
+    island_marker = '<script type="application/json" id="exec-probes-payload">'
+    assert island_marker in probes_pane
+    start = probes_pane.find(island_marker) + len(island_marker)
+    end = probes_pane.find("</script>", start)
+    payload = json.loads(probes_pane[start:end])
+    assert isinstance(payload, list) and payload, "probes payload must be non-empty"
+    # Every row carries reasoning + confidence keys even when empty/zero.
+    for row in payload:
+        assert "reasoning" in row
+        assert "confidence" in row
+    # The fallback path triggers when reasoning is empty AND confidence == 0.
+    assert any(row["reasoning"] == "" and row["confidence"] == 0 for row in payload), (
+        "expected at least one probe row with empty reasoning + zero confidence "
+        "so the slide-over fallback renderer is exercised"
+    )
 
 
-def test_executive_probes_tab_keeps_judge_reasoning_when_present(
+def test_executive_probes_tab_carries_real_reasoning_through_slideover_payload(
     client: TestClient, store: ScanStore
 ) -> None:
     """When a probe DOES carry judge reasoning + non-zero confidence,
-    the original eyebrow + blockquote render unchanged (no fallback)."""
+    that data flows through the slide-over JSON island verbatim.
+
+    QA-032 moved the per-row blockquote into the slide-over JSON payload.
+    """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     # Use the existing helper that emits real reasoning + 0.85 confidence.
@@ -890,12 +907,15 @@ def test_executive_probes_tab_keeps_judge_reasoning_when_present(
     next_panel_idx = body.find('id="tabpanel-logs"', idx)
     probes_pane = body[idx:next_panel_idx]
 
-    # Real reasoning shows up — the fallback prose does NOT.
-    assert str(turns[0]["reasoning"]) in probes_pane
-    assert "Not graded per-turn" not in probes_pane
-    assert "no judge confidence" not in probes_pane
-    # And the standard confidence eyebrow renders.
-    assert "confidence 0.85" in probes_pane
+    island_marker = '<script type="application/json" id="exec-probes-payload">'
+    assert island_marker in probes_pane
+    start = probes_pane.find(island_marker) + len(island_marker)
+    end = probes_pane.find("</script>", start)
+    payload = json.loads(probes_pane[start:end])
+    assert isinstance(payload, list) and payload
+    row = payload[0]
+    assert row["reasoning"] == turns[0]["reasoning"]
+    assert row["confidence"] == 0.85
 
 
 # ---------------------------------------------------------------------------
@@ -944,12 +964,22 @@ def _seed_memory_jsonl_for_finding(
     return turns
 
 
-def test_executive_findings_tab_evidence_expandable_per_finding(
+def test_executive_findings_tab_finding_row_exposes_slideover_hooks(
     client: TestClient, store: ScanStore
 ) -> None:
-    """A finding with 2 matching probe attempts renders a
-    ``<details class="exec-finding__evidence">`` containing 2 evidence rows,
-    each surfacing the verbatim prompt + target response + judge reasoning."""
+    """A finding row renders the slide-over hookup attributes
+    (``data-finding-id``, ``aria-controls="exec-finding-slideover"``,
+    ``tabindex="0"``, ``role="button"``) so the QA-031 shared slide-over
+    JS can mount click + keyboard handlers.
+
+    QA-031 replaced the per-card ``<details class="exec-finding__evidence">``
+    inline DOM with a 4-col findings table + shared slide-over. The actual
+    evidence payload is served client-side via the
+    ``#exec-findings-payload`` JSON island (wired in dashboard_view); the
+    deep verification of that payload's contents lives in the
+    ``test_executive_findings_table_and_slideover`` suite (see
+    ``test_executive_findings_json_island_carries_payload``).
+    """
     # Build a scan with exactly one CRITICAL finding whose probe_id we control.
     finding = _make_finding("f-crit-1", Severity.CRITICAL, AsiCategory.ASI01)
     # _make_finding sets probe_id="probe-<fid>" → "probe-f-crit-1".
@@ -979,10 +1009,10 @@ def test_executive_findings_tab_evidence_expandable_per_finding(
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
     scan_dir = _persist(store, scan)
-    turns = _seed_memory_jsonl_for_finding(scan_dir, seed_id=seed_id, count=2)
+    _seed_memory_jsonl_for_finding(scan_dir, seed_id=seed_id, count=2)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
@@ -990,15 +1020,16 @@ def test_executive_findings_tab_evidence_expandable_per_finding(
     idx = body.find('id="tabpanel-findings"')
     next_panel_idx = body.find('id="tabpanel-probes"', idx)
     findings_pane = body[idx:next_panel_idx]
-    # The per-finding evidence <details> wrapper is present.
-    assert 'class="exec-finding__evidence"' in findings_pane
-    # Exactly 2 evidence rows (one <li> per turn).
-    assert findings_pane.count('class="exec-finding__evidence-row"') == 2
-    # Each row carries the verbatim prompt + target response + reasoning.
-    for turn in turns:
-        assert str(turn["prompt"]) in findings_pane
-        assert str(turn["target_response"]) in findings_pane
-        assert str(turn["reasoning"]) in findings_pane
+    # Row-level slide-over wiring is locked.
+    assert 'data-finding-id="f-crit-1"' in findings_pane
+    assert 'aria-controls="exec-finding-slideover"' in findings_pane
+    assert 'role="button"' in findings_pane
+    assert 'tabindex="0"' in findings_pane
+    # The shared slide-over component is mounted exactly once.
+    assert findings_pane.count('id="exec-finding-slideover"') == 1
+    # The JSON-island host element exists (the payload contents are verified
+    # in test_executive_findings_table_and_slideover.py).
+    assert 'id="exec-findings-payload"' in findings_pane
 
 
 def test_executive_findings_tab_omits_evidence_when_none(

@@ -23,7 +23,7 @@ QA-022 closure.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,14 +82,14 @@ def _make_scan(scan_id: str = "cli-qa022-known") -> Scan:
                 success=True,
                 confidence=0.9,
                 summary="seed",
-                created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+                created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
             )
         ],
         asi_scores={cat: 70.0 for cat in AsiCategory},
         duration_seconds=10.0,
         cost_usd=0.0,
         mode="full",
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 

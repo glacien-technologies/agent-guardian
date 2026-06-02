@@ -38,7 +38,12 @@ async def test_supply_chain_finds_findings(
     findings = memory.findings_by_asi(AsiCategory.ASI04)
     assert findings
     assert findings[0].csa_category == CsaCategory.SUPPLY_CHAIN_DEPENDENCY
-    assert "Publish Poisoned AI Agent Tool" in findings[0].mitre_atlas
+    # MITRE ATLAS v5.4.0 (2026.06 corpus) supply-chain probes carry
+    # technique IDs like AML.T0048 (Erode AI Model Integrity) and
+    # AML.T0067 (Publish Poisoned AI Agent Tool — encoded as the ID, not
+    # the human description). Assert at least one canonical ATLAS
+    # supply-chain technique is threaded through the finding.
+    assert any(t in findings[0].mitre_atlas for t in ("AML.T0048", "AML.T0067"))
 
 
 async def test_supply_chain_refused_target(

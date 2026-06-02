@@ -32,7 +32,12 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
+          # Query selection (security-extended + security-and-quality) and the
+          # two quality-suite query-filters that misfire on idiomatic Python
+          # (StrEnum iteration, intentional adjacent-string concatenation) live
+          # in the config file so additions are tracked in a reviewable yaml
+          # rather than an inline action input.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3

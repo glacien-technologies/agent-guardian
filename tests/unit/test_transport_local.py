@@ -239,6 +239,13 @@ async def test_subprocess_json_mode_missing_path_yields_parse_error() -> None:
     assert resp.error.category is TransportErrorCategory.PARSE
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason=(
+        "Python 3.10 asyncio subprocess teardown leaks "
+        "BaseSubprocessTransport.__del__ after loop close; fixed in 3.11"
+    ),
+)
 async def test_subprocess_timeout_yields_timeout_error() -> None:
     transport = SubprocessTransport(
         [sys.executable, "-c", "import time; time.sleep(5)"],

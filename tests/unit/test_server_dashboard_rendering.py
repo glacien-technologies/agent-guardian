@@ -15,7 +15,7 @@ tree and asserts:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -59,7 +59,7 @@ def _make_finding(fid: str, severity: Severity, asi: AsiCategory = AsiCategory.A
         success=True,
         confidence=0.91,
         summary=f"finding {fid}",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -96,7 +96,7 @@ def _make_scan(scan_id: str = "cli-3a4c1d9c2840") -> Scan:
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -570,7 +570,7 @@ def test_dashboard_clean_control_zero_high_findings(client: TestClient, store: S
         duration_seconds=120.0,
         cost_usd=0.01,
         mode="full",
-        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC),
     )
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}")
@@ -759,7 +759,7 @@ def _make_partial_scan(scan_id: str, *, findings: list[Finding]) -> Scan:
         mode_authoritative=False,
         scoring_valid=False,
         engine={"commander": "gemini-2.5-flash", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -1038,7 +1038,7 @@ def test_clean_control_zero_findings_still_renders_correctly(
         duration_seconds=120.0,
         cost_usd=0.01,
         mode="full",
-        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 28, 12, 0, 0, tzinfo=UTC),
     )
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}")
@@ -1283,7 +1283,7 @@ def test_make_partial_writer_writes_on_agent_done_and_cleans_on_scan_done(
     tmp_path: Path,
 ) -> None:
     """The observer writes on agent_done and unlinks the partial on scan_done."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.core.swarm import SwarmEvent
     from agent_guardian.server.partial_scan import (
@@ -1297,7 +1297,7 @@ def test_make_partial_writer_writes_on_agent_done_and_cleans_on_scan_done(
     observer(
         SwarmEvent(
             kind="agent_done",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             agent="goal-hijack-agent",
             asi=AsiCategory.ASI01,
             payload={"findings_count": 0, "turns": 1, "duration_seconds": 1.0},
@@ -1309,7 +1309,7 @@ def test_make_partial_writer_writes_on_agent_done_and_cleans_on_scan_done(
     observer(
         SwarmEvent(
             kind="scan_done",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
         )
     )
     assert not partial_scan_path(tmp_path).is_file()
@@ -1317,7 +1317,7 @@ def test_make_partial_writer_writes_on_agent_done_and_cleans_on_scan_done(
 
 def test_make_partial_writer_chains_prior_observer(tmp_path: Path) -> None:
     """The observer forwards events to the pre-existing observer first."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.core.swarm import SwarmEvent
     from agent_guardian.server.partial_scan import make_partial_writer
@@ -1328,7 +1328,7 @@ def test_make_partial_writer_chains_prior_observer(tmp_path: Path) -> None:
     make_partial_writer(swarm, tmp_path)  # type: ignore[arg-type]
     evt = SwarmEvent(
         kind="checkpoint",
-        timestamp=datetime.now(tz=timezone.utc),
+        timestamp=datetime.now(tz=UTC),
     )
     swarm.observer(evt)  # type: ignore[attr-defined]
     assert received == [evt]
@@ -1336,7 +1336,7 @@ def test_make_partial_writer_chains_prior_observer(tmp_path: Path) -> None:
 
 def test_make_partial_writer_ignores_unrelated_events(tmp_path: Path) -> None:
     """Events other than agent_done / checkpoint / scan_done are skipped."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.core.swarm import SwarmEvent
     from agent_guardian.server.partial_scan import (
@@ -1349,7 +1349,7 @@ def test_make_partial_writer_ignores_unrelated_events(tmp_path: Path) -> None:
     observer(
         SwarmEvent(
             kind="recon_start",
-            timestamp=datetime.now(tz=timezone.utc),
+            timestamp=datetime.now(tz=UTC),
             agent="recon-agent",
         )
     )

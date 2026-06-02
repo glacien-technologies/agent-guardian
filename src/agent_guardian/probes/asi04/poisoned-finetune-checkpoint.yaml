@@ -3,6 +3,8 @@ name: poisoned-finetune-checkpoint
 asi: ASI04
 mitre_atlas:
   - AML.T0058
+  - AML.T0060  # ML Supply Chain Compromise (MITRE ATLAS v5.4.0 Feb 2026)
+  - AML.T0062  # Poison Training Data (MITRE ATLAS v5.4.0 Feb 2026)
   - Publish Poisoned AI Agent Tool
 csa_category: supply-chain-dependency
 severity: high

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent_guardian import __version__
@@ -33,7 +33,7 @@ def _make_scan(scan_id: str) -> Scan:
             success=False,
             confidence=0.5,
             summary="finding 1",
-            created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
         )
     ]
     return Scan(
@@ -59,7 +59,7 @@ def _make_scan(scan_id: str) -> Scan:
         asi_scores={cat: 90.0 for cat in AsiCategory},
         duration_seconds=4.2,
         cost_usd=0.0,
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -134,12 +134,8 @@ def test_list_scans_orders_completed_by_recency(tmp_path: Path) -> None:
         newer.__pydantic_fields_set__,
     )
     # Re-make with explicit created_at differences.
-    older = older.model_copy(
-        update={"created_at": datetime(2026, 5, 26, 0, 0, 0, tzinfo=timezone.utc)}
-    )
-    newer = newer.model_copy(
-        update={"created_at": datetime(2026, 5, 27, 0, 0, 0, tzinfo=timezone.utc)}
-    )
+    older = older.model_copy(update={"created_at": datetime(2026, 5, 26, 0, 0, 0, tzinfo=UTC)})
+    newer = newer.model_copy(update={"created_at": datetime(2026, 5, 27, 0, 0, 0, tzinfo=UTC)})
     _persist(store, older)
     _persist(store, newer)
     summaries = store.list_scans()
@@ -155,7 +151,7 @@ def test_list_scans_orders_completed_by_recency(tmp_path: Path) -> None:
 def _event(kind: str, agent: str | None = None) -> SwarmEvent:
     return SwarmEvent(
         kind=kind,  # type: ignore[arg-type]
-        timestamp=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
         agent=agent,
     )
 

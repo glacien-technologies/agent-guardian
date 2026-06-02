@@ -39,7 +39,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import ValidationError
@@ -132,7 +132,10 @@ class AgentBudget:
     """
 
     tokens_remaining: int = 150_000
-    wall_seconds_remaining: float = 600.0
+    # None = uncapped wall-clock per the operator "no arbitrary hardcoded
+    # caps" rule. The recon/red-team loops short-circuit the wall-clock
+    # check when this is None.
+    wall_seconds_remaining: float | None = None
     max_turns: int = 12
 
     def deduct_tokens(self, n: int) -> bool:
@@ -335,7 +338,7 @@ def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class AsiAgent(ABC):
@@ -376,12 +379,14 @@ class AsiAgent(ABC):
         *,
         attacker_llm: BaseLLM,
         evaluator_llm: BaseLLM,
-        attacker_model: str = "gpt-4o-mini",
-        evaluator_model: str = "gpt-4o-mini",
+        attacker_model: str = "gemini-3.5-flash",
+        evaluator_model: str = "gemini-3.5-flash",
         budget: AgentBudget | None = None,
         rng: random.Random | None = None,
         target_findings_override: int | None = None,
         on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
+        panel_judge: Any | None = None,
+        winning_seed_store: Any | None = None,
     ) -> None:
         # Wrap both LLM clients in usage-tracking decorators so every
         # ``.complete(...)`` call folds its returned :class:`LLMUsage` into
@@ -415,6 +420,26 @@ class AsiAgent(ABC):
             model=evaluator_model,
             rubric=self.judge_rubric(),
         )
+        # Phase B.B4 — optional panel-of-judges ensemble. When provided we
+        # use it in place of the single Judge for verdict() calls. A
+        # misconfigured panel (cross-family enforcement failure raised at
+        # construction time) is caught by the caller; if a non-None panel
+        # is wired here the agent loop uses it.
+        self.panel_judge = panel_judge
+        if panel_judge is not None:
+            _LOG.debug(
+                "PhaseB.B4 AsiAgent.__init__: panel_judge configured — "
+                "single Judge will be bypassed for verdict calls",
+            )
+        # Phase B.B6 — optional cross-scan winning-seed persistence. When
+        # provided AND enabled, every verdict='fail' turn writes a record
+        # into the store after PII scrubbing.
+        self.winning_seed_store = winning_seed_store
+        if winning_seed_store is not None:
+            _LOG.debug(
+                "PhaseB.B6 AsiAgent.__init__: winning_seed_store configured (enabled=%s)",
+                getattr(winning_seed_store, "enabled", "unknown"),
+            )
         # Spec §6 — optional per-agent brief attached by SwarmCommander
         # after Commander goal-decomposition. None means the standard
         # seed pass runs without a goal-specific overlay. See
@@ -529,7 +554,10 @@ class AsiAgent(ABC):
             return True, "exhausted"
         if self.budget.tokens_remaining <= 0:
             return True, "budget"
-        if elapsed_seconds >= self.budget.wall_seconds_remaining:
+        if (
+            self.budget.wall_seconds_remaining is not None
+            and elapsed_seconds >= self.budget.wall_seconds_remaining
+        ):
             return True, "budget"
         return False, "exhausted"
 
@@ -998,7 +1026,18 @@ class AsiAgent(ABC):
             self.budget.deduct_tokens(min(response_tokens, self.budget.tokens_remaining))
 
             try:
-                verdict = await self.judge.verdict(result.text, target_response)
+                # Phase B.B4 — prefer the optional PanelJudge over the
+                # single Judge when configured. Both expose the same
+                # async verdict(prompt, target_response) -> JudgeVerdict.
+                if self.panel_judge is not None:
+                    _LOG.debug(
+                        "PhaseB.B4 verdict path: agent=%s turn=%d using PanelJudge",
+                        agent_name,
+                        turns + 1,
+                    )
+                    verdict = await self.panel_judge.verdict(result.text, target_response)
+                else:
+                    verdict = await self.judge.verdict(result.text, target_response)
             except Exception as exc:  # pragma: no cover — defensive: judge should not raise
                 terminated_by = "error"
                 error = f"judge.verdict raised {type(exc).__name__}: {exc}"
@@ -1020,6 +1059,14 @@ class AsiAgent(ABC):
             )
 
             turns += 1
+            # Phase A.A1 — write the full verdict triple into Turn.metadata so
+            # strategies on the NEXT turn can read prior judge_verdict /
+            # judge_confidence / judge_reasoning from history[-1].metadata,
+            # and ALSO update ctx.last_verdict* so the same surface is
+            # available without scanning history. Both writes are required:
+            # the metadata copy is the persistent audit record (it lands in
+            # SharedMemory), the ctx copy is the per-turn pivot surface.
+            judge_reasoning_str = verdict.reasoning or ""
             history.append(
                 Turn(
                     prompt=result.text,
@@ -1028,9 +1075,48 @@ class AsiAgent(ABC):
                         **dict(result.metadata),
                         "judge_verdict": verdict.verdict,
                         "judge_confidence": verdict.confidence,
+                        "judge_reasoning": judge_reasoning_str,
                     },
                 )
             )
+            _LOG.debug(
+                "PhaseA.A1 turn-metadata written: agent=%s turn=%d judge_verdict=%s "
+                "judge_confidence=%.2f judge_reasoning_len=%d ctx_updated=True",
+                agent_name,
+                turns,
+                verdict.verdict,
+                verdict.confidence,
+                len(judge_reasoning_str),
+            )
+            # Phase A.A1 — propagate the verdict triple onto the StrategyContext
+            # so the NEXT generate_next() call reads it directly from ctx
+            # (cheaper than walking history) and so a strategy without history
+            # access can still pivot on the prior verdict.
+            ctx.last_verdict = verdict.verdict
+            ctx.last_verdict_confidence = verdict.confidence
+            ctx.last_verdict_reasoning = judge_reasoning_str
+            _LOG.debug(
+                "PhaseA.A1 ctx fields updated: last_verdict=%r last_verdict_confidence=%.2f "
+                "last_verdict_reasoning=%r",
+                ctx.last_verdict,
+                ctx.last_verdict_confidence,
+                (ctx.last_verdict_reasoning or "")[:60],
+            )
+            # Phase A.A4 — when the seed metadata indicates this is a JDG-*
+            # judge-evaluation probe, log a tagged audit event so the
+            # forensic replay can confirm the JDG probe was dispatched to
+            # the target and a verdict was collected (not just loaded from
+            # YAML and silently dropped).
+            _seed_id_meta = result.metadata.get("seed_id", "") if result.metadata else ""
+            if isinstance(_seed_id_meta, str) and _seed_id_meta.startswith("JDG-"):
+                _LOG.debug(
+                    "PhaseA.A4 judge-probe verdict-collected: probe_id=%s verdict=%s "
+                    "confidence=%.2f turn=%d",
+                    _seed_id_meta,
+                    verdict.verdict,
+                    verdict.confidence,
+                    turns,
+                )
 
             # Persist every turn to SharedMemory as a structured reflection so
             # downstream tooling (coverage report, forensic replay) can see
@@ -1059,6 +1145,7 @@ class AsiAgent(ABC):
                 "mitre_techniques": [str(t) for t in self.default_mitre_techniques],
                 "csa_category": self.default_csa_category.value,
                 "turn": turns,
+                "max_turns": self.budget.max_turns,
                 "strategy": strategy_name,
                 "prompt": result.text,
                 "rationale": getattr(result, "rationale", ""),
@@ -1071,6 +1158,25 @@ class AsiAgent(ABC):
                 "attacker_refused": attacker_refused_val,
                 "attacker_refusal_text": attacker_refusal_text_val,
             }
+            # PhaseC — lift multi-turn plan + attachment summary onto the
+            # top-level record so the TUI / SSE consumers don't have to
+            # peek into strategy_metadata. Absent keys leave the record
+            # unchanged so single-turn strategies stay byte-equivalent.
+            plan_name_val = strat_meta.get("plan_name") or strat_meta.get("phase_c_c1_plan_name")
+            if isinstance(plan_name_val, str) and plan_name_val:
+                turn_record["plan_name"] = plan_name_val
+            plan_turn_idx = strat_meta.get("plan_turn_index")
+            if isinstance(plan_turn_idx, int):
+                turn_record["plan_turn_index"] = plan_turn_idx
+            plan_total = strat_meta.get("plan_total_turns")
+            if isinstance(plan_total, int):
+                turn_record["plan_total_turns"] = plan_total
+            attachments_meta = strat_meta.get("attachments")
+            if isinstance(attachments_meta, list) and attachments_meta:
+                # Pass through the strategy's redacted summary list verbatim
+                # (mime_type / size_bytes / alt_text) — never raw bytes.
+                turn_record["attachments"] = attachments_meta
+                turn_record["attachments_count"] = len(attachments_meta)
             try:
                 await memory.write_reflection(
                     agent_name,
@@ -1088,6 +1194,18 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
+            # Phase A.A4 — for judge-probe (JDG-*) dispatches, log a
+            # turn-persisted event so the full pipeline (load -> dispatch
+            # -> target call -> verdict collection -> memory persistence)
+            # is visible in the audit trail.
+            if seed_id and seed_id.startswith("JDG-"):
+                _LOG.debug(
+                    "PhaseA.A4 judge-probe turn-persisted: probe_id=%s turn=%d "
+                    "verdict=%s written_to_memory=True",
+                    seed_id,
+                    turns,
+                    verdict.verdict,
+                )
 
             # QA-005 — surface the just-persisted turn record to the
             # CLI's reflection sink (LiveBlockSink / NdjsonSink) and,
@@ -1161,6 +1279,43 @@ class AsiAgent(ABC):
                     verdict.confidence,
                     turns,
                 )
+                # Phase B.B6 — persist this winning seed (the prompt that
+                # tripped a verdict=='fail') into the cross-scan store so
+                # future scans against the same fingerprint can warm-start
+                # from it. The store handles PII scrubbing and retention
+                # internally. ``mutant_operator`` is stamped by
+                # mutator-aware strategies via NextPrompt.metadata; absent
+                # otherwise.
+                if self.winning_seed_store is not None:
+                    try:
+                        target_hash = getattr(fingerprint, "hash", None) or getattr(
+                            fingerprint, "fingerprint_hash", "unknown"
+                        )
+                        mutant_operator = ""
+                        if isinstance(strat_meta, dict):
+                            mo = strat_meta.get("mutant_operator") or strat_meta.get("mutant")
+                            mutant_operator = str(mo) if mo else ""
+                        ok = self.winning_seed_store.insert_seed(
+                            target_fingerprint_hash=str(target_hash),
+                            asi=self.asi_category.value,
+                            seed_text=result.text,
+                            verdict=verdict.verdict,
+                            confidence=float(verdict.confidence),
+                            mutant=mutant_operator,
+                        )
+                        _LOG.debug(
+                            "PhaseB.B6 winning_seed_store.persist: agent=%s asi=%s "
+                            "mutant=%s persisted=%s",
+                            agent_name,
+                            self.asi_category.value,
+                            mutant_operator,
+                            ok,
+                        )
+                    except Exception as exc:  # pragma: no cover — defensive
+                        _LOG.warning(
+                            "PhaseB.B6 winning_seed_store.persist failed (%s) — continuing",
+                            exc,
+                        )
 
         duration = time.monotonic() - start
         tokens = self._snapshot_tokens()
@@ -1250,6 +1405,21 @@ class AsiAgent(ABC):
         seed_id_val = meta.get("seed_id")
         seed_probe_id = str(seed_id_val) if seed_id_val else ""
         seed = self._seed_index.get(seed_probe_id) if seed_probe_id else None
+        # Phase B.B2 — mutator-seeded reflective siblings stamp probe ids of
+        # the form ``<parent>-mutant-<operator>``. The _seed_index does not
+        # hold the mutant id; resolve to the parent so the finding still
+        # inherits the parent's severity / mitre_atlas / csa_category. The
+        # mutant operator name is recoverable from the suffix for audit.
+        if seed is None and "-mutant-" in seed_probe_id:
+            parent_probe_id = seed_probe_id.split("-mutant-", 1)[0]
+            seed = self._seed_index.get(parent_probe_id)
+            if seed is not None:
+                _LOG.debug(
+                    "PhaseB.B2 _build_finding: resolved mutant probe_id=%s -> "
+                    "parent=%s for severity/mitre/csa inheritance",
+                    seed_probe_id,
+                    parent_probe_id,
+                )
         # #22 — use the real probe id from the seed pool when available, only
         # fall back to the synthetic ``<agent>-<asi>`` id when this is a
         # strategy-internal turn that wasn't seeded by any corpus probe (e.g.
@@ -1301,6 +1471,14 @@ class AsiAgent(ABC):
         prompt_snippet = prompt[:80].replace("\n", " ")
         summary = f"{summary} | prompt: {prompt_snippet}"
         _ = response  # response is captured in transcripts elsewhere
+        # Phase A.A3 — log the MITRE ATLAS techniques stamped on the finding
+        # at construction time, so the audit trail shows the backfilled IDs
+        # made it from probe YAML -> ProbeSeed -> Finding.mitre_techniques.
+        _LOG.debug(
+            "PhaseA.A3 finding technique coverage: probe_id=%s mitre_atlas=%s",
+            seed_probe_id or finding_id,
+            list(mitre_techniques),
+        )
         return Finding(
             id=finding_id,
             probe_id=probe_id,

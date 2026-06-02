@@ -22,7 +22,7 @@ shape.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from typer.testing import CliRunner
@@ -242,7 +242,7 @@ def _make_scan(mode: str) -> Scan:
         cost_usd=0.01,
         tokens_total=1000,
         mode=mode,  # type: ignore[arg-type]
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -279,7 +279,7 @@ def test_telemetry_event_carries_mode(mode: str) -> None:
     Mode is ESSENTIAL-tier metadata (operational, non-identifying) so
     it must be settable without any extended-tier toggle.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     event = ScanCompletedEvent(
         install_id="12345678-1234-1234-1234-123456789abc",
         scan_id="scan-test",
@@ -315,7 +315,7 @@ def test_telemetry_event_defaults_mode_to_smart() -> None:
     Scan model: do not silently shift historical aggregates by
     re-bucketing legacy data as FULL.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base = {
         "install_id": "12345678-1234-1234-1234-123456789abc",
         "scan_id": "scan-test",
@@ -364,7 +364,7 @@ def _scan_with_mode(mode: str, *, mode_authoritative: bool = True) -> Scan:
         tokens_total=1000,
         mode=mode,  # type: ignore[arg-type]
         mode_authoritative=mode_authoritative,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

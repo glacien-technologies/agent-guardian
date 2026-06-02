@@ -33,7 +33,7 @@ class PromptAdapter(TargetAdapter):
         prompt: str,
         *,
         llm: BaseLLM,
-        model: str = "gpt-4o-mini",
+        model: str = "gemini-3.5-flash",
         ref: str = "<inline-prompt>",
     ) -> None:
         super().__init__()

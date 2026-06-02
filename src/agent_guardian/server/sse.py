@@ -110,7 +110,7 @@ async def stream_scan_events(
             event: SwarmEvent = await asyncio.wait_for(
                 queue.get(), timeout=_QUEUE_POLL_INTERVAL_SECONDS
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             seconds_since_event += _QUEUE_POLL_INTERVAL_SECONDS
             if seconds_since_event >= _KEEPALIVE_INTERVAL_SECONDS:
                 # SSE comment-only keepalive (line starting with ``:``).
