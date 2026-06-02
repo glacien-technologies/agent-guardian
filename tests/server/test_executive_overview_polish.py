@@ -120,9 +120,7 @@ def test_executive_kpi_tile_renders_info_button_and_popover(
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
     for key in ("aivss", "band", "findings", "elapsed", "cost", "coverage"):
-        assert f'aria-controls="kpi-{key}-info"' in body, (
-            f"missing aria-controls for KPI {key!r}"
-        )
+        assert f'aria-controls="kpi-{key}-info"' in body, f"missing aria-controls for KPI {key!r}"
         assert f'id="kpi-{key}-info"' in body, f"missing popover id for KPI {key!r}"
     # New marker classes the QA validation greps for.
     assert "kpi-info-icon" in body

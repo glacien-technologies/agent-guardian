@@ -34,19 +34,20 @@
     <h2 class="exec-section-title exec-recon__title" id="exec-recon-title">
       Recon findings about this agent
     </h2>
-    <p class="exec-section-lede exec-recon__lede">
-      {% if recon_summary.has_data %}
-        What the recon agent learned before the swarm dispatched.
-        Profile source
-        <span class="exec-recon__chip exec-recon__chip--source">{{ recon_summary.profile_source }}</span>
-        · confidence
-        <span class="exec-recon__chip exec-recon__chip--num">{{ "%.2f"|format(recon_summary.profile_confidence) }}</span>
-      {% else %}
+    {# QA-049 (2026-06-02) — the verbose subtitle (`What the recon agent
+       learned… profile source X · confidence Y`) was dropped: the same
+       provenance data is already surfaced in the panel rows (and the
+       `View raw` drawer below the recon-context field), so the subtitle
+       was duplicating information without adding signal. The pending-state
+       prose stays — the operator otherwise stares at an empty panel for
+       the first few seconds of a scan. #}
+    {% if not recon_summary.has_data %}
+      <p class="exec-section-lede exec-recon__lede">
         Recon agent has not finished its sweep yet. Capability
         fingerprint, declared tools, and skipped-agent reasons will
         populate here as soon as the recon record is written.
-      {% endif %}
-    </p>
+      </p>
+    {% endif %}
   </header>
 
   {% if recon_summary.has_data %}
@@ -63,12 +64,21 @@
 
       {# Target — mode + adapter ref. Mode is the transport
          (prompt / code / http / framework); ref is the resolvable
-         pointer (URL / module path / prompt id). #}
+         pointer (URL / module path / prompt id).
+
+         QA-049 (2026-06-02) — the transport badge (`HTTP` / `PROMPT` /
+         `CODE` / `FRAMEWORK`) and the ref are wrapped in a single
+         inline `exec-recon__target-cell` so they cling together as
+         one logical value rather than reading as two unrelated chips.
+         Row shape now matches FRAMEWORK FAMILY / INFERRED GOAL —
+         label + single value cell. #}
       <div class="exec-recon__row">
         <dt class="exec-recon__dt">Target</dt>
         <dd class="exec-recon__dd">
-          <span class="exec-recon__chip exec-recon__chip--mode">{{ recon_summary.target_mode }}</span>
-          <span class="exec-mono-inline exec-recon__target-ref">{{ recon_summary.target_ref }}</span>
+          <span class="exec-recon__target-cell">
+            <span class="exec-recon__chip exec-recon__chip--mode">{{ recon_summary.target_mode }}</span>
+            <span class="exec-mono-inline exec-recon__target-ref">{{ recon_summary.target_ref }}</span>
+          </span>
         </dd>
       </div>
 
@@ -187,12 +197,25 @@
         </div>
       {% endif %}
 
-      {# System-prompt / recon-notes clues. Truncated inline; the full
-         text expands behind a <details> so the operator can audit what
-         the recon agent actually wrote without bloating the panel. #}
+      {# Recon-context clues. QA-049 (2026-06-02) — relabelled from the
+         legacy "System-prompt clues" wording: the field surfaces what
+         the recon agent observed (scan mode, transport, declared shape
+         from `TargetFingerprint.notes`), not the agent's actual system
+         prompt. The old label routinely tripped operators who expected
+         a leaked prompt and instead saw scan metadata.
+
+         The truncated string renders inline; the full raw text lives
+         behind a <details> so the operator can audit what the recon
+         agent actually wrote without bloating the panel. #}
       {% if recon_summary.system_prompt_clues_full %}
         <div class="exec-recon__row exec-recon__row--wide">
-          <dt class="exec-recon__dt">System-prompt clues</dt>
+          <dt class="exec-recon__dt">
+            Recon context
+            <span class="exec-recon__hint">
+              Scan mode, transport, and shape detected during recon —
+              not the agent's actual prompt.
+            </span>
+          </dt>
           <dd class="exec-recon__dd">
             <span class="exec-recon__clues">{{ recon_summary.system_prompt_clues }}</span>
             {% if recon_summary.system_prompt_clues_full != recon_summary.system_prompt_clues %}

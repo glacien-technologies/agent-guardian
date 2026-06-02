@@ -53,7 +53,7 @@ from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
 from agent_guardian.contract.preflight import PreflightReport
 from agent_guardian.core.sandbox import SandboxViolation
-from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+from agent_guardian.core.swarm import SwarmCommander, SwarmConfig, SwarmEvent
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
@@ -2540,6 +2540,75 @@ def _stdout_is_tty() -> bool:
     return bool(isatty and isatty())
 
 
+def print_dashboard_banner(
+    scan_id: str,
+    *,
+    dashboard_url: str,
+    auto_serve_spawned: bool,
+    accent_style: str = "brand",
+    debug_format: str = "text",
+    use_stderr: bool = False,
+) -> None:
+    """Print a prominent 3-line dashboard URL banner (QA-049).
+
+    The banner is the most-visible line in the scan-end summary so an
+    operator stops hunting for the dashboard link. Rendered via Rich
+    so it picks up the same brand/cyan accent the Phase panels use; on
+    a non-TTY pipe Rich falls back to plain ASCII rules. The banner is
+    a no-op in JSON debug-format runs — NDJSON consumers should pick
+    the URL out of the ``scan_url`` banner record instead.
+
+    Args:
+        scan_id: The scan id under which the swarm ran.
+        dashboard_url: The full ``http://host:port/scans/<scan_id>``
+            link to surface. The caller computes this from
+            ``auto_serve_base_url`` / ``_resolve_dashboard_base_url``
+            so both the in-process auto-serve and the external-serve
+            cases stay consistent.
+        auto_serve_spawned: When ``False`` no serve process is running
+            in-band; we switch the banner copy to instruct the operator
+            to start ``agent-guardian serve`` themselves before opening
+            the link.
+        accent_style: Rich style name for the rule colour. Default
+            ``"brand"`` matches the Phase-3 / scan-plan-panel accent.
+            Callers that fire the banner mid-scan (after Phase 2) can
+            pass ``"status.running"`` to colour-code it as in-flight.
+        debug_format: Mirrors ``print_scan_urls`` — ``"json"`` short-
+            circuits to a no-op because the URL is already in the
+            ``scan_url`` NDJSON banner record. Keeps the stdout stream
+            pure NDJSON.
+    """
+    if (debug_format or "").lower().strip() == "json":
+        return
+    from rich.console import Console
+    from rich.rule import Rule
+    from rich.text import Text
+
+    # ``stderr=True`` routes the banner to stderr — useful when the TUI's
+    # Live region still owns stdout (mid-scan Phase-2-done emission). The
+    # scan-end banner uses stdout because the Live region has already
+    # been torn down by the time it fires.
+    console = Console(stderr=use_stderr)
+    if auto_serve_spawned:
+        body = Text.assemble(
+            ("Dashboard  ", "bold"),
+            ("→  ", f"bold {accent_style}"),
+            (dashboard_url, "bold underline"),
+        )
+    else:
+        body = Text.assemble(
+            ("Dashboard  ", "bold"),
+            ("→  ", f"bold {accent_style}"),
+            ("run ", "default"),
+            ("`agent-guardian serve`", "bold"),
+            (" then open ", "default"),
+            (dashboard_url, "bold underline"),
+        )
+    console.print(Rule(style=accent_style))
+    console.print(body)
+    console.print(Rule(style=accent_style))
+
+
 def print_scan_urls(
     scan_id: str,
     *,
@@ -3573,6 +3642,11 @@ async def _run_scan(
             debug_level=debug_level,
             debug_format=debug_format,
             legacy_board=legacy_board,
+            dashboard_url=plan_dashboard_url,
+            auto_serve_spawned=bool(
+                getattr(auto_serve_result, "spawned", False)
+                or getattr(auto_serve_result, "reused", False)
+            ),
         )
     finally:
         # Grace period: keep the dashboard alive so the operator can click
@@ -3626,10 +3700,19 @@ async def _run_scan_inner(
     debug_level: int,
     debug_format: str,
     legacy_board: bool = False,
+    dashboard_url: str | None = None,
+    auto_serve_spawned: bool = False,
 ) -> int:
     """Run the scan body. Extracted from ``_run_scan`` so the auto-serve
     context manager (QA-009) cleanly wraps every ``return EXIT_X`` exit
-    path via a single ``try/finally`` in the caller."""
+    path via a single ``try/finally`` in the caller.
+
+    ``dashboard_url`` + ``auto_serve_spawned`` are wired through so this
+    function can fire the prominent post-scan dashboard-URL banner
+    (QA-049) without re-resolving the base URL — the caller already
+    computed it for the plan panel and we want the two surfaces to
+    agree byte-for-byte.
+    """
 
     # Stage 1B -- a --contract run replaces the four legacy target modes with a
     # contract-built adapter + RoE controller + OTel observer. The non-contract
@@ -3836,6 +3919,57 @@ async def _run_scan_inner(
         )
         feed_renderer.attach_to(swarm)
 
+    # QA-049 — mid-scan Phase-2-done dashboard banner. A long red-team
+    # phase keeps the operator staring at the TUI for minutes; surfacing
+    # the dashboard URL the moment Phase 2 (Red Teaming) completes lets
+    # them pop the dashboard in another tab while finalise/findings are
+    # still computing. Routed to stderr so the TUI's Live region on
+    # stdout isn't disturbed. The observer is idempotent — it fires at
+    # most once per scan (gated by a sentinel set).
+    _phase2_banner_fired: set[str] = set()
+
+    def _phase2_done_banner(event: SwarmEvent) -> None:
+        if not dashboard_url:
+            return
+        if event.kind != "phase_done":
+            return
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        # The swarm tags the red-team phase with phase_label="Red Teaming"
+        # (see swarm.py:1296). Either match the label or the phase token.
+        is_red_team = (
+            payload.get("phase_label") == "Red Teaming" or payload.get("phase") == "parallel"
+        )
+        if not is_red_team:
+            return
+        if "fired" in _phase2_banner_fired:
+            return
+        _phase2_banner_fired.add("fired")
+        try:
+            print_dashboard_banner(
+                scan_id,
+                dashboard_url=dashboard_url,
+                auto_serve_spawned=auto_serve_spawned,
+                # Cyan accent matches the Phase-2 panel border colour
+                # ("status.running" — the in-flight phase style).
+                accent_style="status.running",
+                debug_format=debug_format,
+                use_stderr=True,
+            )
+        except Exception as _exc:  # pragma: no cover -- never crash the swarm
+            _LOG.debug("phase-2 dashboard banner suppressed (%s)", _exc)
+
+    # Wrap the observer using the same chain-the-prior-observer pattern
+    # used by ScanTUI.attach_to / AttackFeedRenderer.attach_to.
+    _prior_phase_observer = swarm.observer
+
+    def _phase2_observer(event: SwarmEvent) -> None:
+        _phase2_done_banner(event)
+        if _prior_phase_observer is not None:
+            with contextlib.suppress(Exception):
+                _prior_phase_observer(event)
+
+    swarm.observer = _phase2_observer
+
     # 8. Run -- optionally with TUI.
     #    QA-002 — the Live region is the single stdout owner during a
     #    scan. Auto-fall-back to the no-Live path when stdout is not a
@@ -3994,6 +4128,23 @@ async def _run_scan_inner(
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )
+
+    # QA-049 — prominent dashboard URL banner at scan-end. The plain
+    # `▸ Scan … track live at <url>` line that print_scan_urls emits
+    # earlier scrolls up by the time the swarm finishes; operators kept
+    # asking "where do I click?" because they missed it. This banner is
+    # the most-visible line of the scan-end summary by design.
+    if dashboard_url:
+        try:
+            print_dashboard_banner(
+                scan_id,
+                dashboard_url=dashboard_url,
+                auto_serve_spawned=auto_serve_spawned,
+                accent_style="brand",
+                debug_format=debug_format,
+            )
+        except Exception as _exc:  # pragma: no cover -- never block scan exit
+            _LOG.debug("dashboard banner suppressed (%s)", _exc)
 
     # Coverage warning: when a scan launched less than the authoritative-mode
     # floor, surface it on stderr so a CI gate downstream knows the scan was

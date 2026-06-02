@@ -273,10 +273,23 @@ class ScanTUI:
                 self._state.agent_attachment_counts[agent] = attachments_count
         elif kind == "agent_done" and agent:
             self._state.agent_status[agent] = "done"
-            findings = event.payload.get("findings_count") if event.payload else None
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            findings = payload.get("findings_count")
             if isinstance(findings, int):
                 self._state.agent_findings[agent] = findings
                 self._project_findings(agent, findings)
+            # QA-049 — plumb the per-agent turn counter from the
+            # ``agent_done`` payload (``report.turns``) so the Turns
+            # column shows real values for fast agents whose
+            # ``agent_progress`` event never fired. Without this fall-
+            # back the column rendered as "—" and operators couldn't
+            # tell whether the agent ran zero turns or simply hadn't
+            # reported progress yet. We synthesise (turns, turns) — the
+            # display is `n/m`, and at agent_done the agent's reached
+            # its terminal turn count so the two are equal.
+            turns_value = payload.get("turns")
+            if isinstance(turns_value, int) and agent not in self._state.agent_turns:
+                self._state.agent_turns[agent] = (turns_value, turns_value)
             new_status = "done"
         elif kind == "agent_skipped" and agent:
             self._state.agent_status[agent] = "skipped"

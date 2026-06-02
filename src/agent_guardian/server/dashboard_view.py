@@ -95,7 +95,7 @@ _PROBES_LIST_CAP: Final[int] = 500
 # Executive Logs tab now renders every line from ``events.jsonl``. Browser
 # memory is the only limit; the client-side filter toolbar (level chips +
 # search) is the operator's primary tool for navigating large logs.
-_LOGS_TAIL_CAP: Final[int | None] = None
+_LOGS_TAIL_CAP: Final[int | None] = None  # pyright: ignore[reportUnusedVariable]  # Consumed by test_dashboard_view_module_caps_are_locked — see DESIGN_LOCK §3.3
 
 __all__ = [
     "DASHBOARD_TEMPLATE",
@@ -296,15 +296,9 @@ def _build_kpi_hover_tables(
         # (commander dispatch vs attacker probes vs evaluator grading);
         # used here as a presentation default — replace once the runner
         # surfaces real per-phase durations.
-        elapsed_rows.append(
-            {"label": "Commander", "value": _humanise_seconds(elapsed * 0.15)}
-        )
-        elapsed_rows.append(
-            {"label": "Attacker", "value": _humanise_seconds(elapsed * 0.55)}
-        )
-        elapsed_rows.append(
-            {"label": "Evaluator", "value": _humanise_seconds(elapsed * 0.30)}
-        )
+        elapsed_rows.append({"label": "Commander", "value": _humanise_seconds(elapsed * 0.15)})
+        elapsed_rows.append({"label": "Attacker", "value": _humanise_seconds(elapsed * 0.55)})
+        elapsed_rows.append({"label": "Evaluator", "value": _humanise_seconds(elapsed * 0.30)})
 
     # COST — token-spend by phase (same caveat as elapsed).
     cost_rows: list[dict[str, str]] = [
@@ -312,15 +306,9 @@ def _build_kpi_hover_tables(
         {"label": "Tokens", "value": _humanise_int(tokens_total)},
     ]
     if cost_total > 0:
-        cost_rows.append(
-            {"label": "Commander", "value": f"$ {cost_total * 0.15:.2f}"}
-        )
-        cost_rows.append(
-            {"label": "Attacker", "value": f"$ {cost_total * 0.55:.2f}"}
-        )
-        cost_rows.append(
-            {"label": "Evaluator", "value": f"$ {cost_total * 0.30:.2f}"}
-        )
+        cost_rows.append({"label": "Commander", "value": f"$ {cost_total * 0.15:.2f}"})
+        cost_rows.append({"label": "Attacker", "value": f"$ {cost_total * 0.55:.2f}"})
+        cost_rows.append({"label": "Evaluator", "value": f"$ {cost_total * 0.30:.2f}"})
 
     # COVERAGE — per-ASI status (the 10 OWASP categories).
     coverage_rows: list[dict[str, str]] = []
@@ -328,16 +316,10 @@ def _build_kpi_hover_tables(
         coverage_rows.append(
             {
                 "label": str(row.get("code", "—")),
-                "value": (
-                    "covered"
-                    if sum((row.get("findings") or {}).values()) > 0
-                    else "—"
-                ),
+                "value": ("covered" if sum((row.get("findings") or {}).values()) > 0 else "—"),
             }
         )
-    coverage_rows.append(
-        {"label": "Covered", "value": f"{asi_covered}/10"}
-    )
+    coverage_rows.append({"label": "Covered", "value": f"{asi_covered}/10"})
 
     return {
         "aivss": aivss_rows,
@@ -1085,9 +1067,7 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
     return {
         "has_data": True,
         "framework_family": (
-            str(latest_fp.get("framework"))
-            if latest_fp.get("framework")
-            else "Unknown"
+            str(latest_fp.get("framework")) if latest_fp.get("framework") else "Unknown"
         ),
         # No model name in the fingerprint payload today — we surface the
         # target_ref (URL / module path / prompt id) and let the operator
