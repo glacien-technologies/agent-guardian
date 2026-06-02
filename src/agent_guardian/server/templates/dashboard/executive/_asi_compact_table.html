@@ -25,18 +25,20 @@
      eyebrow styling (.exec-asi-compact__head*) so it reads as a quiet
      all-caps strip above the body rows; spans line up 1:1 with the same
      grid template as .exec-asi-compact__row. role="row"/scope="col" gives
-     the assistive-tech tree the same column semantics a real <thead> would. #}
+     the assistive-tech tree the same column semantics a real <thead> would.
+     QA-064 + QA-065 (2026-06-03) — dropped the PROGRESS bar, WEIGHT chip,
+     and STATUS pill columns. SCORE + C/H/M/L pills already carry the per-
+     category signal; every row is COMPLETE post-scan so STATUS was dead
+     pixels; and the weight multiplier belongs in the AIVSS receipt, not
+     a per-row chip. Final column order: ASI · CATEGORY · SCORE · C/H/M/L. #}
   <li class="exec-asi-compact__row exec-asi-compact__row--head"
       role="row"
       aria-label="Column headers">
     <span class="exec-asi-compact__head" role="columnheader" scope="col">ASI</span>
     <span class="exec-asi-compact__head" role="columnheader" scope="col">Category</span>
-    <span class="exec-asi-compact__head" role="columnheader" scope="col">Progress</span>
     <span class="exec-asi-compact__head exec-asi-compact__head--num"
           role="columnheader" scope="col">Score</span>
-    <span class="exec-asi-compact__head" role="columnheader" scope="col">Weight</span>
     <span class="exec-asi-compact__head" role="columnheader" scope="col">C / H / M / L</span>
-    <span class="exec-asi-compact__head" role="columnheader" scope="col">Status</span>
   </li>
   {% for row in asi_rows %}
     {% set _f = row.findings %}
@@ -52,17 +54,9 @@
         data-asi-code="{{ row.code }}">
       <span class="exec-asi-compact__code">{{ row.code }}</span>
       <span class="exec-asi-compact__name">{{ row.name }}</span>
-      <span class="exec-asi-compact__bar" aria-hidden="true">
-        <span class="exec-asi-compact__bar-fill"
-              data-live="asi-compact-{{ row.code }}-bar"
-              style="width: {{ _score_pct }}%;"></span>
-      </span>
       <span class="exec-asi-compact__score"
             data-live="asi-compact-{{ row.code }}-score">
         {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
-      </span>
-      <span class="exec-asi-compact__weight {% if row.weight_high %}exec-asi-compact__weight--high{% endif %}">
-        × {{ row.weight_label }}
       </span>
       <span class="exec-asi-compact__findings" aria-label="Findings by severity">
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.critical %}critical{% else %}zero{% endif %}"
@@ -74,8 +68,6 @@
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.low %}low{% else %}zero{% endif %}"
               title="Low findings">{{ _f.low | default(0) }}</span>
       </span>
-      <span class="exec-asi-compact__status exec-asi-compact__status--{{ row.status_class }}"
-            data-live="asi-compact-{{ row.code }}-status">{{ row.status_label }}</span>
     </li>
   {% endfor %}
 </ol>

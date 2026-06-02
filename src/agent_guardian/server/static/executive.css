@@ -1024,8 +1024,18 @@ body.exec-body {
  *     Read-only at-a-glance; rows do NOT open a details drawer.
  *
  *     Row layout (left → right):
- *       CODE (mono) · CATEGORY (sans) · SCORE BAR · AIVSS num ·
- *       WEIGHT chip · FINDINGS pills (4) · STATUS pill
+ *       CODE (mono) · CATEGORY (sans) · AIVSS num · FINDINGS pills (4)
+ *
+ *     QA-064 + QA-065 (2026-06-03) — dropped the PROGRESS bar, WEIGHT
+ *     chip, and STATUS pill columns. SCORE + C/H/M/L pills already
+ *     carry the per-row signal; STATUS was always COMPLETE post-scan
+ *     so the column was dead pixels; the weight multiplier belongs on
+ *     the AIVSS receipt, not as a per-row chip. Grid template trimmed
+ *     from 7 → 4 columns. The orphaned `.exec-asi-compact__bar`,
+ *     `__weight`, and `__status` selectors below are intentionally
+ *     kept so any straggling consumer (legacy snapshot, vendored DOM
+ *     copy, recovered scan tarball with the old markup) still renders
+ *     without surprises.
  * ============================================================ */
 .exec-asi-compact-section {
   margin: 2rem 0 1.5rem 0;
@@ -1038,7 +1048,7 @@ body.exec-body {
 }
 .exec-asi-compact__row {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 120px 48px 60px 160px 88px;
+  grid-template-columns: 56px minmax(0, 1fr) 48px 160px;
   gap: 12px;
   align-items: center;
   padding: 4px 8px;
@@ -1180,18 +1190,12 @@ body.exec-body {
   color: var(--exec-ink-subtle);
 }
 @media (max-width: 1023px) {
+  /* QA-064 + QA-065 (2026-06-03) — narrow layout. The desktop grid is
+     already 4 columns (ASI · CATEGORY · SCORE · C/H/M/L), so the only
+     thing to tighten on narrow is the findings pill column — collapse
+     it to a tighter slot so the row still fits on a tablet. */
   .exec-asi-compact__row {
-    grid-template-columns: 56px minmax(0, 1fr) 60px 88px;
-  }
-  .exec-asi-compact__bar,
-  .exec-asi-compact__weight,
-  .exec-asi-compact__findings,
-  /* QA-046 — drop the header cells for the columns we hide above so the
-     remaining heads keep 1:1 alignment with the visible body cells. */
-  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(3),
-  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(5),
-  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(6) {
-    display: none;
+    grid-template-columns: 56px minmax(0, 1fr) 48px 120px;
   }
 }
 
