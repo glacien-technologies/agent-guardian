@@ -1,19 +1,33 @@
-{# Executive — Findings tab panel (QA-048).
+{# Executive — Findings tab panel (QA-048 / QA-051 / QA-052 / QA-053).
 
-   Rebuilt 2026-06-02 from div-soup-grouped-by-severity into ONE proper
-   semantic ``<table class="exec-findings-table">`` with a single
-   ``<thead>`` row: Severity · Agent · ASI · Probe · Summary · Turn ·
-   Timestamp.
+   QA-048 (semantic table) — single ``<table class="exec-findings-table">``
+   with ONE ``<thead>`` and per-severity ``<tbody>`` buckets. Rows are
+   pre-sorted server-side (severity DESC then ASI ASC; see
+   ``_findings_page``). Severity is its OWN column (a pill badge), not
+   a per-bucket section divider — operators can scan top-down instead of
+   context-switching between four sub-tables. Summary uses a hard pixel
+   ``max-width`` + ``text-overflow: ellipsis`` and carries
+   ``title="..."`` so the operator gets the full text on hover.
 
-   Rows are sorted server-side (severity DESC then ASI ASC; see
-   ``_findings_page``). Severity is its OWN column (a pill badge), not a
-   per-bucket section divider — operators can sort/filter top-down
-   instead of context-switching between four sub-tables. Agent (mono
-   ``ASI01`` code) and ASI (sans-serif ``goal-instruction-manipulation``
-   label) ship in SEPARATE ``<td>`` cells so the two never concatenate
-   visually. Summary uses a hard pixel ``max-width`` + ``text-overflow:
-   ellipsis`` and carries ``title="..."`` so the operator gets the full
-   text on hover.
+   QA-051 (column rename + real AGENT) — the three identity columns are
+   now distinct: ASI (mono ``ASI01`` code) · CATEGORY (sans-serif
+   ``goal-instruction-manipulation`` label) · AGENT (real runtime agent
+   name, e.g. ``goal-hijack-agent``, sourced from the matched probe's
+   ``agent`` field via ``_attach_evidence_to_findings``). Findings with
+   no correlated probe render an em-dash in the AGENT column.
+
+   QA-052 (drop TIMESTAMP) — the Timestamp column was redundant against
+   the Turn column (both derive from the same first-correlated evidence
+   row) and against the row-click slide-over which surfaces the exact
+   timestamp inline. Removed.
+
+   QA-053 (sticky filter chip toolbar) — a multi-select chip row sits
+   above the table. Chips group by Severity / Agent / ASI / Probe and
+   compose with AND. Filters operate purely client-side on rendered
+   ``<tr>`` rows (no server round-trip; pagination is preserved). A
+   counter ``Showing N of M findings`` updates as chips toggle. Wired
+   by ``executive_findings.js`` (BOOT step 7 — search marker
+   ``ag.dashboard.executive.findings.filters``).
 
    Row click opens the existing finding slide-over drawer (QA-031). Each
    ``<tr>`` carries ``data-source="finding"``, ``data-finding-id``,
@@ -34,6 +48,107 @@
   {% if findings_total == 0 %}
     <p class="exec-empty">Nothing flagged yet.</p>
   {% else %}
+    {# QA-053 — Filter chip toolbar.
+
+       The chip rows are derived in Jinja from the current page's findings
+       (so a filter chip only appears when at least one visible row would
+       match it — no dead chips). Each ``<button>`` carries:
+
+         * ``data-filter-group`` — one of ``severity`` / ``agent`` /
+           ``asi`` / ``probe``. The JS reads this to decide which row
+           attribute to test the chip's value against.
+         * ``data-filter-value`` — the literal value to match against
+           ``<tr>``'s ``data-{group}`` attribute (e.g. ``data-severity``
+           or ``data-asi``).
+         * ``aria-pressed`` — ``"false"`` on render; toggled by JS on
+           click. Multiple chips inside a group OR together; groups AND
+           together.
+
+       The "Showing N of M findings" counter is updated by the same JS
+       module on every toggle. The base counts come from ``findings_total``
+       (M) and the count of rendered rows in this page (N defaults to M
+       because no filters are active on initial render).
+    #}
+    {% set _agent_values = [] %}
+    {% set _asi_values = [] %}
+    {% set _probe_values = [] %}
+    {% set _sev_values = [] %}
+    {% for f in findings_page %}
+      {% if f.severity_class and f.severity_class not in _sev_values %}{% set _ = _sev_values.append(f.severity_class) %}{% endif %}
+      {% if f.agent_name and f.agent_name not in _agent_values %}{% set _ = _agent_values.append(f.agent_name) %}{% endif %}
+      {% if f.asi_code and f.asi_code not in _asi_values %}{% set _ = _asi_values.append(f.asi_code) %}{% endif %}
+      {% if f.probe_id and f.probe_id not in _probe_values %}{% set _ = _probe_values.append(f.probe_id) %}{% endif %}
+    {% endfor %}
+    <div class="exec-findings-filter"
+         id="exec-findings-filter"
+         role="toolbar"
+         aria-label="Findings filters"
+         data-component="findings-filters">
+      {% if _sev_values %}
+        <div class="exec-findings-filter__group" data-filter-group-label="severity">
+          <span class="exec-findings-filter__group-label">Severity</span>
+          <div class="exec-findings-filter__chips">
+            {% for _sev in ['critical', 'high', 'medium', 'low'] %}
+              {% if _sev in _sev_values %}
+                <button type="button"
+                        class="exec-findings-filter__chip exec-findings-filter__chip--sev-{{ _sev }}"
+                        data-filter-group="severity"
+                        data-filter-value="{{ _sev }}"
+                        aria-pressed="false">{{ _sev | upper }}</button>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+      {% if _agent_values %}
+        <div class="exec-findings-filter__group" data-filter-group-label="agent">
+          <span class="exec-findings-filter__group-label">Agent</span>
+          <div class="exec-findings-filter__chips">
+            {% for _agent in _agent_values | sort %}
+              <button type="button"
+                      class="exec-findings-filter__chip exec-findings-filter__chip--agent"
+                      data-filter-group="agent"
+                      data-filter-value="{{ _agent }}"
+                      aria-pressed="false">{{ _agent }}</button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+      {% if _asi_values %}
+        <div class="exec-findings-filter__group" data-filter-group-label="asi">
+          <span class="exec-findings-filter__group-label">ASI</span>
+          <div class="exec-findings-filter__chips">
+            {% for _asi in _asi_values | sort %}
+              <button type="button"
+                      class="exec-findings-filter__chip exec-findings-filter__chip--asi"
+                      data-filter-group="asi"
+                      data-filter-value="{{ _asi }}"
+                      aria-pressed="false">{{ _asi }}</button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+      {% if _probe_values %}
+        <div class="exec-findings-filter__group" data-filter-group-label="probe">
+          <span class="exec-findings-filter__group-label">Probe</span>
+          <div class="exec-findings-filter__chips">
+            {% for _probe in _probe_values | sort %}
+              <button type="button"
+                      class="exec-findings-filter__chip exec-findings-filter__chip--probe"
+                      data-filter-group="probe"
+                      data-filter-value="{{ _probe }}"
+                      aria-pressed="false">{{ _probe }}</button>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+      <div class="exec-findings-filter__counter" id="exec-findings-filter-counter"
+           data-counter-total="{{ findings_page | length }}"
+           aria-live="polite">
+        Showing <span data-counter-visible>{{ findings_page | length }}</span>
+        of <span data-counter-total>{{ findings_page | length }}</span> findings
+      </div>
+    </div>
     <div class="exec-findings-table-wrap">
       <table class="exec-findings-table"
              id="exec-findings-table"
@@ -42,12 +157,12 @@
         <thead class="exec-findings-table__head">
           <tr>
             <th scope="col" class="exec-findings-table__col--sev">Severity</th>
-            <th scope="col" class="exec-findings-table__col--agent">Agent</th>
             <th scope="col" class="exec-findings-table__col--asi">ASI</th>
+            <th scope="col" class="exec-findings-table__col--category">Category</th>
+            <th scope="col" class="exec-findings-table__col--agent">Agent</th>
             <th scope="col" class="exec-findings-table__col--probe">Probe</th>
             <th scope="col" class="exec-findings-table__col--summary">Summary</th>
             <th scope="col" class="exec-findings-table__col--turn">Turn</th>
-            <th scope="col" class="exec-findings-table__col--ts">Timestamp</th>
           </tr>
         </thead>
         {# Rows are pre-sorted by (severity DESC, ASI ASC) in
@@ -69,19 +184,22 @@
           {% if _sev_items %}
             <tbody id="exec-sev-{{ _sev_key }}" class="exec-findings-table__group" data-severity="{{ _sev_key }}">
               {% for f in _sev_items %}
-                {# Turn + timestamp derive from the first correlated
-                   evidence row attached in ``_attach_evidence_to_findings``
-                   so the operator sees the canonical (earliest) attempt.
+                {# Turn derives from the first correlated evidence row
+                   attached in ``_attach_evidence_to_findings`` so the
+                   operator sees the canonical (earliest) attempt.
                    Fall back to em-dash when no probe correlation exists
-                   (e.g. static findings). #}
+                   (e.g. static findings). QA-052 dropped the Timestamp
+                   column — the slide-over surfaces the exact time
+                   inline when an operator clicks through. #}
                 {% set _ev_first = (f.evidence | first) if f.evidence else None %}
                 {% set _turn_label = (_ev_first.turn if _ev_first and _ev_first.turn else None) %}
-                {% set _ts_label = (_ev_first.timestamp_label if _ev_first and _ev_first.timestamp_label else f.created_label) %}
                 <tr class="exec-findings-table__row"
                     data-source="finding"
                     data-finding-id="{{ f.id }}"
                     data-severity="{{ f.severity_class }}"
                     data-asi="{{ f.asi_code }}"
+                    data-agent="{{ f.agent_name or '' }}"
+                    data-probe="{{ f.probe_id or '' }}"
                     tabindex="0"
                     role="button"
                     aria-controls="exec-finding-slideover"
@@ -93,11 +211,18 @@
                       {{ f.severity_label }}
                     </span>
                   </td>
-                  <td class="exec-findings-table__cell exec-findings-table__cell--agent">
-                    <code class="exec-findings-table__agent-code">{{ f.asi_code }}</code>
-                  </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--asi">
-                    <span class="exec-findings-table__asi-name">{{ f.csa_code }}</span>
+                    <code class="exec-findings-table__asi-code">{{ f.asi_code }}</code>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--category">
+                    <span class="exec-findings-table__category-name">{{ f.csa_code }}</span>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--agent">
+                    {% if f.agent_name %}
+                      <code class="exec-findings-table__agent-name">{{ f.agent_name }}</code>
+                    {% else %}
+                      <span class="exec-findings-table__muted">&mdash;</span>
+                    {% endif %}
                   </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--probe">
                     <code>{{ f.probe_id or '—' }}</code>
@@ -108,9 +233,6 @@
                   </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--turn">
                     {% if _turn_label %}<code>{{ _turn_label }}</code>{% else %}<span class="exec-findings-table__muted">&mdash;</span>{% endif %}
-                  </td>
-                  <td class="exec-findings-table__cell exec-findings-table__cell--ts">
-                    <code>{{ _ts_label }}</code>
                   </td>
                 </tr>
               {% endfor %}

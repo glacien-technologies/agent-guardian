@@ -396,7 +396,96 @@
     });
   }
 
-  // ---- 6. Boot ---------------------------------------------------------
+  // ---- 6. Findings filter chips (QA-053) -------------------------------
+  /**
+   * Wire the sticky multi-select chip toolbar above the findings table.
+   *
+   * Operators click chips to compose an AND-of-OR filter:
+   *   * Multiple chips in the SAME group (e.g. two severities) OR
+   *     together — a row matches the group if it matches ANY selected
+   *     chip in that group.
+   *   * Different groups (severity / agent / asi / probe) AND together
+   *     — a row must match every group that has at least one chip
+   *     selected.
+   *   * A group with NO chips selected is a "no-op" (all rows pass for
+   *     that group).
+   *
+   * Pure client-side: walks the rendered ``<tr>`` rows, reads their
+   * ``data-severity`` / ``data-agent`` / ``data-asi`` / ``data-probe``
+   * attributes, and toggles ``.is-filtered-out``. The Showing-N-of-M
+   * counter is updated on every toggle and announced via ``aria-live``.
+   *
+   * Marker symbol: ``ag.dashboard.executive.findings.filters``.
+   */
+  function bootFindingsFilters() {
+    var toolbar = document.getElementById("exec-findings-filter");
+    var table = document.getElementById("exec-findings-table");
+    if (!toolbar || !table) { return; }
+    var chips = toolbar.querySelectorAll(".exec-findings-filter__chip");
+    var rows = table.querySelectorAll(".exec-findings-table__row");
+    var counter = document.getElementById("exec-findings-filter-counter");
+    var visibleSlot = counter
+      ? counter.querySelector("[data-counter-visible]")
+      : null;
+    var totalSlot = counter
+      ? counter.querySelector("[data-counter-total]")
+      : null;
+    var groupKeys = ["severity", "agent", "asi", "probe"];
+
+    function activeByGroup() {
+      var out = { severity: [], agent: [], asi: [], probe: [] };
+      for (var i = 0; i < chips.length; i++) {
+        var chip = chips[i];
+        if (chip.getAttribute("aria-pressed") !== "true") { continue; }
+        var g = chip.getAttribute("data-filter-group");
+        var v = chip.getAttribute("data-filter-value");
+        if (g && v && out[g]) { out[g].push(v); }
+      }
+      return out;
+    }
+
+    function applyFilters() {
+      var active = activeByGroup();
+      var visible = 0;
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var pass = true;
+        for (var gi = 0; gi < groupKeys.length; gi++) {
+          var key = groupKeys[gi];
+          var picks = active[key];
+          if (!picks.length) { continue; }
+          var rowVal = row.getAttribute("data-" + key) || "";
+          if (picks.indexOf(rowVal) === -1) { pass = false; break; }
+        }
+        if (pass) {
+          row.classList.remove("is-filtered-out");
+          visible += 1;
+        } else {
+          row.classList.add("is-filtered-out");
+        }
+      }
+      if (visibleSlot) { visibleSlot.textContent = String(visible); }
+      if (totalSlot) { totalSlot.textContent = String(rows.length); }
+    }
+
+    for (var i = 0; i < chips.length; i++) {
+      (function (chip) {
+        chip.addEventListener("click", function () {
+          var pressed = chip.getAttribute("aria-pressed") === "true";
+          chip.setAttribute("aria-pressed", pressed ? "false" : "true");
+          applyFilters();
+        });
+      })(chips[i]);
+    }
+    // Initial render — render Showing-N-of-M as N == M (no chips active).
+    applyFilters();
+
+    if (typeof window !== "undefined") {
+      window.__ag_executive_findings_filters = "ag.dashboard.executive.findings.filters";
+    }
+  }
+
+  // ---- 7. Boot ---------------------------------------------------------
   function boot() {
     var payloads = {
       finding: indexBy(loadPayload("exec-findings-payload"), "id"),
@@ -407,6 +496,7 @@
     for (var i = 0; i < roots.length; i++) {
       attach(roots[i], payloads);
     }
+    bootFindingsFilters();
   }
 
   if (document.readyState === "loading") {

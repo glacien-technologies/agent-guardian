@@ -1591,13 +1591,19 @@ body.exec-body {
   top: 0;
   z-index: 1;
 }
+/* QA-051 / QA-052 — new column grid:
+ *   Severity · ASI · Category · Agent · Probe · Summary · Turn
+ * The legacy ``ts`` column (QA-052 dropped TIMESTAMP) and the legacy
+ * ``agent`` column slot (was the ASI code, now renamed to ``asi``) are
+ * gone; the new ``category`` column carries the CSA category label
+ * and the new ``agent`` column carries the runtime agent name. */
 .exec-findings-table__col--sev { width: 7rem; }
-.exec-findings-table__col--agent { width: 5.5rem; }
-.exec-findings-table__col--asi { width: 13rem; }
+.exec-findings-table__col--asi { width: 5.5rem; }
+.exec-findings-table__col--category { width: 13rem; }
+.exec-findings-table__col--agent { width: 11rem; }
 .exec-findings-table__col--probe { width: 11rem; }
-.exec-findings-table__col--summary { width: auto; min-width: 18rem; }
+.exec-findings-table__col--summary { width: auto; min-width: 16rem; }
 .exec-findings-table__col--turn { width: 4rem; }
-.exec-findings-table__col--ts { width: 6rem; }
 
 .exec-findings-table__row {
   cursor: pointer;
@@ -1616,15 +1622,15 @@ body.exec-body {
   padding: 10px 12px;
   vertical-align: middle;
 }
-/* Agent (mono ASI code) — sits in its OWN cell so the next column
- * (ASI category, sans-serif) cannot visually concatenate against it.
+/* QA-051 — ASI (mono ``ASI01`` code) sits in its OWN cell so the next
+ * column (Category, sans-serif) cannot visually concatenate against it.
  * Tested against the QA-048 sentinel ``ASI01goal-instruction-
  * manipulation`` — the cell boundary plus the 12px column gap
  * guarantee a hard visual break. */
-.exec-findings-table__cell--agent {
+.exec-findings-table__cell--asi {
   font-family: var(--exec-font-mono);
 }
-.exec-findings-table__agent-code {
+.exec-findings-table__asi-code {
   font-family: var(--exec-font-mono);
   font-size: 12px;
   color: var(--exec-ink-muted);
@@ -1634,14 +1640,38 @@ body.exec-body {
   display: inline-block;
   white-space: nowrap;
 }
-.exec-findings-table__cell--asi {
+/* QA-051 — CATEGORY cell carries the CSA category label (sans-serif),
+ * what the legacy column called ``ASI`` (a misnomer — the value is the
+ * CSA-CTPV category, not the ASI). */
+.exec-findings-table__cell--category {
   font-family: var(--exec-font-sans);
 }
-.exec-findings-table__asi-name {
+.exec-findings-table__category-name {
   font-family: var(--exec-font-sans);
   font-size: 13px;
   color: var(--exec-ink);
   font-weight: 500;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+/* QA-051 — AGENT cell carries the runtime agent name (e.g.
+ * ``goal-hijack-agent``). Mono code chip so it visually pairs with
+ * the ASI code and the probe id but stays distinct from the sans
+ * Category label. */
+.exec-findings-table__cell--agent {
+  font-family: var(--exec-font-mono);
+}
+.exec-findings-table__agent-name {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
@@ -1674,8 +1704,7 @@ body.exec-body {
   color: var(--exec-ink);
   font-size: 13px;
 }
-.exec-findings-table__cell--turn code,
-.exec-findings-table__cell--ts code {
+.exec-findings-table__cell--turn code {
   font-family: var(--exec-font-mono);
   font-size: 11px;
   color: var(--exec-ink-subtle);
@@ -1685,6 +1714,132 @@ body.exec-body {
   color: var(--exec-ink-subtle);
   font-family: var(--exec-font-mono);
   font-size: 11px;
+}
+
+/* ============================================================
+ * QA-053 — Findings tab filter chip toolbar.
+ *
+ * Sits above the findings table. Operators click chips to compose
+ * an AND-of-OR filter: chips in the same group OR together, groups
+ * AND together. The toolbar is sticky on scroll so the chip set
+ * stays in reach while the operator scans rows. Wiring lives in
+ * ``executive_findings.js`` (marker:
+ * ``ag.dashboard.executive.findings.filters``).
+ *
+ * The pressed-state palette borrows from the Logs filter toolbar
+ * (severity chips use the same colour vocabulary as the per-row
+ * pills) so the two filter UIs feel like siblings.
+ * ============================================================ */
+.exec-findings-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: center;
+  margin: 0 0 0.75rem 0;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  background: var(--exec-bg-elev);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.exec-findings-filter__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.exec-findings-filter__group-label {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+.exec-findings-filter__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.exec-findings-filter__chip {
+  appearance: none;
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--exec-ink-subtle);
+  border: 1px solid var(--exec-border-subtle);
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+  white-space: nowrap;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exec-findings-filter__chip:hover {
+  background: var(--exec-brand-tint);
+  border-color: var(--exec-brand);
+  color: var(--exec-brand-strong);
+}
+.exec-findings-filter__chip:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+/* Pressed-state by chip family — the severity chips inherit the
+ * per-pill colours; agent / asi / probe chips fall back to the
+ * neutral brand-tint posture. */
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-critical {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 30%, transparent);
+}
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-high {
+  background: var(--exec-sev-high-bg);
+  color: var(--exec-sev-high);
+  border-color: color-mix(in srgb, var(--exec-sev-high) 30%, transparent);
+}
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-medium {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 30%, transparent);
+}
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-low {
+  background: var(--exec-sev-low-bg);
+  color: var(--exec-sev-low);
+  border-color: color-mix(in srgb, var(--exec-sev-low) 30%, transparent);
+}
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--agent,
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--asi,
+.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--probe {
+  background: var(--exec-brand-tint);
+  color: var(--exec-brand-strong);
+  border-color: var(--exec-brand);
+}
+.exec-findings-filter__chip[aria-pressed="false"] {
+  opacity: 0.7;
+}
+.exec-findings-filter__counter {
+  margin-left: auto;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-subtle);
+}
+.exec-findings-filter__counter [data-counter-visible],
+.exec-findings-filter__counter [data-counter-total] {
+  font-weight: 600;
+  color: var(--exec-ink);
+}
+/* Row hidden by the client-side chip filter. JS toggles this class
+ * on the <tr>; we use ``display: none`` instead of ``visibility``
+ * so adjacent-row borders collapse cleanly. */
+.exec-findings-table__row.is-filtered-out {
+  display: none;
 }
 
 /* ============================================================

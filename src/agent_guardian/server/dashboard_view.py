@@ -389,6 +389,12 @@ def _findings_page(
                 "severity_label": f.severity.value.upper(),
                 "severity_class": f.severity.value.lower(),
                 "created_label": f.created_at.strftime("%H:%M:%S"),
+                # QA-051 — runtime agent name (e.g. ``goal-hijack-agent``)
+                # populated in-place by ``_attach_evidence_to_findings`` from
+                # the matched probe's ``agent`` field. Defaults to ``""`` so
+                # the Findings table can render an em-dash when no probe
+                # correlation exists (static / recon-derived findings).
+                "agent_name": "",
             }
         )
     pagination: dict[str, Any] = {
@@ -447,6 +453,10 @@ def _attach_evidence_to_findings(
                 "evidence_stats",
                 {"fail": 0, "pass": 0, "inconclusive": 0, "unknown": 0},
             )
+            # QA-051 — keep ``agent_name`` present (empty default from
+            # ``_findings_page``) so callers / templates can rely on the
+            # key existing even when no probes correlate.
+            item.setdefault("agent_name", "")
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -491,6 +501,18 @@ def _attach_evidence_to_findings(
         item["evidence_total"] = total
         item["evidence_truncated"] = total > _FINDING_EVIDENCE_CAP
         item["evidence_stats"] = stats
+        # QA-051 — surface the runtime agent name (e.g. ``goal-hijack-agent``)
+        # on the finding row. The reflection records written by
+        # ``agents/base.py`` carry an ``agent`` field that names the actual
+        # specialist agent that produced the probe attempt; we pick the
+        # first matched record's name so the Findings table's AGENT column
+        # shows the agent the operator can grep for in logs. Findings with
+        # no correlated probes keep the default empty string from
+        # ``_findings_page`` (template renders an em-dash).
+        if capped and not item.get("agent_name"):
+            first_agent = str(capped[0].get("agent") or "").strip()
+            if first_agent:
+                item["agent_name"] = first_agent
 
 
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:
