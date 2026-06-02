@@ -2844,16 +2844,16 @@ def scan(
             "old hardcoded 900s ceiling means this is now opt-in, not opt-out."
         ),
     ),
-    recon_budget_seconds: float = typer.Option(
-        300.0,
+    recon_budget_seconds: float | None = typer.Option(
+        None,
         "--recon-budget-seconds",
         help=(
             "Wall-clock budget for the recon (capability audit) phase. "
-            "Default 300s = 5min, raised from 90s in QA-018 because Cloud Run "
-            "/ Lambda / Knative cold-start targets routinely timed out and the "
-            "swarm silently fell back to a minimal fingerprint that skipped "
-            "tool-abuse / memory-poison / a2a agents. Raise further for very "
-            "slow targets; lower for fast in-process scans."
+            "Omit (default) for uncapped — recon runs to swarm-natural "
+            "completion. Opt-in to a cap (e.g. --recon-budget-seconds 300) "
+            "when targeting Cloud Run / Lambda / Knative cold-start agents "
+            "that benefit from a hard ceiling. Symmetric with --budget-seconds: "
+            "the QA-027 removal of the legacy 900s wall-cap applies here too."
         ),
     ),
     fail_under: int | None = typer.Option(
@@ -3165,7 +3165,7 @@ async def _run_scan(
     tier: str | None,
     budget_usd: float | None,
     budget_seconds: float | None,
-    recon_budget_seconds: float,
+    recon_budget_seconds: float | None,
     fail_under: int | None,
     output: str,
     output_path: Path | None,
@@ -3608,7 +3608,7 @@ async def _run_scan_inner(
     otel_endpoint: str | None,
     budget_usd: float | None,
     budget_seconds: float | None,
-    recon_budget_seconds: float,
+    recon_budget_seconds: float | None,
     debug_level: int,
     debug_format: str,
     legacy_board: bool = False,

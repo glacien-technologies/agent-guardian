@@ -224,16 +224,14 @@ class SwarmConfig:
 
     scan_id: str
     commander_model: str = "claude-haiku-4-5"
-    attacker_model: str = "gpt-4o-mini"
-    evaluator_model: str = "gpt-4o-mini"
-    # Recon (black-box capability audit) wall budget. Raised from the legacy
-    # 90s default to 300s after QA-018: on Cloud Run / Lambda / Knative
-    # cold-start targets, 90s was routinely insufficient for the 10 deepen
-    # rounds to complete, and the swarm silently fell back to the minimal
-    # fingerprint and skipped 3 ASI agents. 300s clears cold-start cases
-    # cleanly without materially extending typical (5-15 min) scans.
-    # Operator can override via `--recon-budget-seconds` on the CLI.
-    recon_wall_seconds: float = 300.0
+    attacker_model: str = "gemini-3.5-flash"
+    evaluator_model: str = "gemini-3.5-flash"
+    # Recon (black-box capability audit) wall budget. Defaults to None
+    # (uncapped) per the operator "no arbitrary hardcoded caps" rule —
+    # symmetric with the wall_seconds removal in QA-027. Operators opt
+    # in to a cap via `--recon-budget-seconds` on the CLI for cold-start
+    # targets that need a backstop.
+    recon_wall_seconds: float | None = None
     # Max adaptive deepening rounds in the black-box capability audit (recon).
     recon_audit_rounds: int = 10
     # QA-027: wall-clock cap defaults to None (uncapped). The old 900s
@@ -627,7 +625,7 @@ class SwarmCommander:
             ]
             self._panel_judge = PanelJudge(
                 specs=panel_specs,
-                cross_family_enforced=True,
+                cross_family_enforced=getattr(config, "judge_cross_family_enforced", False),
             )
         except Exception as e:
             _LOG.debug(
@@ -714,9 +712,13 @@ class SwarmCommander:
 
     async def _phase_recon(self) -> None:
         _LOG.info(
-            "phase recon: starting (scan_id=%s, wall_budget=%.1fs)",
+            "phase recon: starting (scan_id=%s, wall_budget=%s)",
             self.config.scan_id,
-            self.config.recon_wall_seconds,
+            (
+                f"{self.config.recon_wall_seconds:.1f}s"
+                if self.config.recon_wall_seconds is not None
+                else "uncapped"
+            ),
         )
         recon_started = time.monotonic()
         # QA-012 — phase boundary event. Fires BEFORE ``recon_start`` so a

@@ -132,7 +132,10 @@ class AgentBudget:
     """
 
     tokens_remaining: int = 150_000
-    wall_seconds_remaining: float = 600.0
+    # None = uncapped wall-clock per the operator "no arbitrary hardcoded
+    # caps" rule. The recon/red-team loops short-circuit the wall-clock
+    # check when this is None.
+    wall_seconds_remaining: float | None = None
     max_turns: int = 12
 
     def deduct_tokens(self, n: int) -> bool:
@@ -376,8 +379,8 @@ class AsiAgent(ABC):
         *,
         attacker_llm: BaseLLM,
         evaluator_llm: BaseLLM,
-        attacker_model: str = "gpt-4o-mini",
-        evaluator_model: str = "gpt-4o-mini",
+        attacker_model: str = "gemini-3.5-flash",
+        evaluator_model: str = "gemini-3.5-flash",
         budget: AgentBudget | None = None,
         rng: random.Random | None = None,
         target_findings_override: int | None = None,
@@ -551,7 +554,10 @@ class AsiAgent(ABC):
             return True, "exhausted"
         if self.budget.tokens_remaining <= 0:
             return True, "budget"
-        if elapsed_seconds >= self.budget.wall_seconds_remaining:
+        if (
+            self.budget.wall_seconds_remaining is not None
+            and elapsed_seconds >= self.budget.wall_seconds_remaining
+        ):
             return True, "budget"
         return False, "exhausted"
 

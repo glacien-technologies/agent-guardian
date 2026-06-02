@@ -1,11 +1,13 @@
-"""QA-018: --recon-budget-seconds CLI flag wires into SwarmConfig.recon_wall_seconds.
+"""--recon-budget-seconds CLI flag — opt-in cap on the recon-phase wall budget.
 
-Two unit-level invariants:
-  1. The SwarmConfig default ``recon_wall_seconds`` is 300.0 (raised from the
-     legacy 90.0 because Cloud Run / Lambda / Knative cold-start targets
-     routinely timed out and the swarm silently fell back to a minimal
-     fingerprint, skipping 3 ASI agents).
-  2. ``agent-guardian scan --recon-budget-seconds N`` shows up in the help
+Three unit-level invariants:
+  1. The SwarmConfig default ``recon_wall_seconds`` is None (uncapped) per
+     the operator "no arbitrary hardcoded caps" rule. Symmetric with the
+     QA-027 removal of the legacy 900s wall-cap. Operators opt in to a cap
+     via --recon-budget-seconds N for cold-start targets that benefit from
+     a hard ceiling (Cloud Run / Lambda / Knative).
+  2. The config accepts an explicit float when opt-in.
+  3. ``agent-guardian scan --recon-budget-seconds N`` shows up in the help
      text and accepts a numeric value (typer-side validation; the actual
      wiring into the swarm engine is integration-tested elsewhere).
 """
@@ -18,10 +20,10 @@ from agent_guardian.cli import app
 from agent_guardian.core.swarm import SwarmConfig
 
 
-def test_swarm_config_default_recon_wall_seconds_is_300() -> None:
-    """Default raised from 90s to 300s per QA-018."""
+def test_swarm_config_default_recon_wall_seconds_is_uncapped() -> None:
+    """Default is None (uncapped) — opt-in cap only."""
     cfg = SwarmConfig(scan_id="t")
-    assert cfg.recon_wall_seconds == 300.0
+    assert cfg.recon_wall_seconds is None
 
 
 def test_swarm_config_accepts_custom_recon_wall_seconds() -> None:
@@ -36,6 +38,6 @@ def test_scan_help_advertises_recon_budget_seconds_flag() -> None:
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
     assert "--recon-budget-seconds" in result.stdout
-    # The help blurb mentions QA-018's root cause so an operator who hits the
-    # silent-skip surface from QA-018 can grep for "cold-start" and find the flag.
+    # Help blurb mentions "cold-start" so operators hitting the silent-skip
+    # surface from cold-start targets can grep for the flag.
     assert "cold-start" in result.stdout.lower() or "cold start" in result.stdout.lower()

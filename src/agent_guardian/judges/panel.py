@@ -88,7 +88,7 @@ class JudgePanelConfig(BaseModel):
     """
 
     judges: list[Any] = Field(default_factory=list)
-    cross_family_enforced: bool = True
+    cross_family_enforced: bool = False
     min_judges: int = Field(default=3, ge=1)
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -134,7 +134,7 @@ class PanelJudge:
         self,
         specs: Sequence[JudgeSpec],
         *,
-        cross_family_enforced: bool = True,
+        cross_family_enforced: bool = False,
     ) -> None:
         if not specs:
             raise ValueError("PanelJudge requires at least one JudgeSpec")

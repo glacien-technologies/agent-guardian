@@ -374,7 +374,7 @@ class ReconAgent:
         self,
         *,
         attacker_llm: BaseLLM,
-        model: str = "gpt-4o-mini",
+        model: str = "gemini-3.5-flash",
         budget: AgentBudget | None = None,
         audit_rounds: int = 10,
         on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
@@ -442,11 +442,15 @@ class ReconAgent:
 
         _LOG.info(
             "recon_start: black-box capability audit against %s (mode=%s, "
-            "deepen_rounds<=%d, wall_budget=%.1fs)",
+            "deepen_rounds<=%d, wall_budget=%s)",
             base.ref,
             base.mode,
             self._audit_rounds,
-            self.budget.wall_seconds_remaining,
+            (
+                f"{self.budget.wall_seconds_remaining:.1f}s"
+                if self.budget.wall_seconds_remaining is not None
+                else "uncapped"
+            ),
         )
 
         has_tools_observed = base.has_tools

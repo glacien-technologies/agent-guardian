@@ -91,9 +91,12 @@ def test_cross_family_disabled_allows_single_family() -> None:
     assert panel.cross_family_enforced is False
 
 
-def test_cross_family_default_is_true() -> None:
+def test_cross_family_default_is_opt_in() -> None:
+    # Default is False so a fresh install runs with one API key.
+    # Operators opt in by passing cross_family_enforced=True AND
+    # configuring a second-family evaluator_model.
     config = JudgePanelConfig()
-    assert config.cross_family_enforced is True
+    assert config.cross_family_enforced is False
 
 
 def test_cross_family_canonicalises_family_strings() -> None:

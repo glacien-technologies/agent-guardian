@@ -40,7 +40,11 @@ __all__ = [
 class SwarmBudgetConfig(BaseModel):
     """Wall-clock and token caps for one scan."""
 
-    wall_seconds: int = Field(default=900, ge=1)
+    # wall_seconds defaults to None (uncapped) per the operator
+    # "no arbitrary hardcoded caps" rule. Operators opt in to a wall-
+    # clock cap via the CLI flag (--budget-seconds) or by setting this
+    # field explicitly in the contract file.
+    wall_seconds: int | None = Field(default=None, ge=1)
     max_total_tokens: int = Field(default=2_000_000, ge=1)
     model_config = ConfigDict(extra="forbid")
 
@@ -48,27 +52,19 @@ class SwarmBudgetConfig(BaseModel):
 class SwarmConfig(BaseModel):
     """Swarm-level knobs — model identifiers and budget.
 
-    Phase B.B4 adds the ``judge_cross_family_enforced`` toggle. Per the
-    DECISIONS block ('Cross-family judges enforced by default in scan
-    config'), the default is ``True``: the swarm refuses any judge panel
-    that does not span at least two distinct LLM families (openai /
-    anthropic / google / meta). When the operator picks a same-family
-    attacker + judge (e.g. both gemini), construction of the PanelJudge
-    raises ``ValueError`` and the agent layer falls back to a single
-    judge with a WARNING log — the scan does NOT silently proceed.
-
-    Enabling a 3-judge panel multiplies evaluator-LLM spend by ~3x
-    relative to a single-judge baseline. The existing AgentBudget token
-    accounting tracks evaluator calls, so no new cost ceiling is
-    required.
+    Defaults to a single-family (Gemini) attacker + evaluator. Cross-
+    family judge panel is opt-in via ``judge_cross_family_enforced``
+    so a scan does not silently require a second provider's API key.
+    Operators who want the cross-family panel set the toggle to True
+    AND configure a second-family ``evaluator_model``.
     """
 
     commander_model: str = "claude-haiku-4-5"
-    attacker_model: str = "gpt-4o-mini"
-    evaluator_model: str = "gpt-4o-mini"
+    attacker_model: str = "gemini-3.5-flash"
+    evaluator_model: str = "gemini-3.5-flash"
     max_parallel_agents: int = Field(default=11, ge=1, le=11)
     budget: SwarmBudgetConfig = Field(default_factory=SwarmBudgetConfig)
-    judge_cross_family_enforced: bool = True
+    judge_cross_family_enforced: bool = False
     model_config = ConfigDict(extra="forbid")
 
 
