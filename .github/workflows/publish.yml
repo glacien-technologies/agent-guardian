@@ -26,11 +26,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           fetch-depth: 0  # full history for SOURCE_DATE_EPOCH derivation
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
         with:
           enable-cache: true
 
@@ -58,7 +58,7 @@ jobs:
             --output-file dist/agent-guardian.cdx.json
           ls -la dist/
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: dist
           path: dist/
@@ -71,7 +71,7 @@ jobs:
       contents: read
       id-token: write  # OIDC token for keyless Sigstore signing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: dist
           path: dist/
@@ -80,14 +80,14 @@ jobs:
         # Standard §4.3 — keyless signing via Sigstore (Fulcio short-lived
         # certs + Rekor transparency log). Anyone can verify with
         # ``sigstore verify`` against the published workflow identity.
-        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        uses: sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46  # v3.0.0
         with:
           inputs: |
             dist/*.whl
             dist/*.tar.gz
             dist/*.cdx.json
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: signed-dist
           path: dist/
@@ -99,7 +99,7 @@ jobs:
     permissions:
       contents: write  # required to create / update Releases
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: signed-dist
           path: dist/
@@ -107,7 +107,7 @@ jobs:
       - name: Create or update GitHub Release with signed artifacts
         # Attach every file (wheel, sdist, SBOM, .sigstore signatures)
         # to the Release for the tag that triggered this run.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: |
             dist/*.whl
@@ -128,7 +128,7 @@ jobs:
     permissions:
       id-token: write  # OIDC for Trusted Publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: signed-dist
           path: dist/
@@ -144,7 +144,7 @@ jobs:
 
       - name: Publish via Trusted Publishing
         # Standard §4.4 — OIDC, no PYPI_API_TOKEN secret involved.
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1
         with:
           packages-dir: dist-upload/
           attestations: true  # PEP 740 attestations attached to PyPI

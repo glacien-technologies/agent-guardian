@@ -339,8 +339,15 @@ def test_dockerfile_uses_supported_python() -> None:
     body = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
     # Only inspect the active (uncommented) instructions.
     active = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
-    assert re.search(r"^FROM\s+python:3\.(11|12|13)-slim", active, re.MULTILINE), (
-        "Dockerfile must base on a supported python:3.11+ slim image"
+    # Accept either the legacy `python:3.x-slim` tag form or a SHA-256 digest pin
+    # with a trailing `# 3.x-slim` comment recording the supported version. The
+    # digest form is the OpenSSF Scorecard §2.4 (Pinned-Dependencies) preferred shape.
+    assert re.search(
+        r"^FROM\s+python(?::3\.(?:11|12|13)-slim|@sha256:[0-9a-f]{64}\s+#\s*3\.(?:11|12|13)-slim)",
+        active,
+        re.MULTILINE,
+    ), (
+        "Dockerfile must base on a supported python:3.11+ slim image (tag or pinned digest with `# 3.x-slim` comment)"
     )
     assert "EXPOSE 7474" in active, "Dockerfile must expose dashboard port 7474"
     assert "ENTRYPOINT" in active and "agent-guardian" in active

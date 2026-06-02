@@ -110,7 +110,13 @@ def test_dockerfile_exists_and_has_correct_base_image() -> None:
     body = dockerfile.read_text(encoding="utf-8")
     # Strip comment lines so we only inspect the active FROM instruction.
     active = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
-    assert re.search(r"^FROM\s+python:3\.11-slim", active, re.MULTILINE)
+    # Accept either the legacy `python:3.11-slim` tag or a SHA-256 digest pin with a
+    # trailing `# 3.11-slim` comment (OpenSSF Scorecard §2.4 pinned-dependencies form).
+    assert re.search(
+        r"^FROM\s+python(?::3\.11-slim|@sha256:[0-9a-f]{64}\s+#\s*3\.11-slim)",
+        active,
+        re.MULTILINE,
+    )
     assert "libpango-1.0-0" in body
     assert "ENTRYPOINT" in body
     assert "agent-guardian" in body
