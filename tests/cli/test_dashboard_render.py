@@ -30,6 +30,7 @@ from agent_guardian.cli_tui import ScanTUI
 from agent_guardian.core.swarm import CheckpointDecision, SwarmEvent
 from agent_guardian.logging_setup import _AG_THEME, _reset_console_for_tests
 from agent_guardian.ui.dashboard import AGENT_ROWS, DashboardState, make_dashboard
+from tests._ansi import normalise_help
 
 
 @pytest.fixture(autouse=True)
@@ -49,10 +50,16 @@ def _record_console(width: int = 120) -> Console:
     )
 
 
-def _render_to_text(state: DashboardState, *, no_color: bool = False, legacy: bool = False) -> str:
+def _render_to_text(
+    state: DashboardState,
+    *,
+    no_color: bool = False,
+    legacy: bool = False,
+    width: int = 120,
+) -> str:
     console = Console(
         record=True,
-        width=120,
+        width=width,
         force_terminal=not no_color,
         color_system=None if no_color else "truecolor",
         no_color=no_color,
@@ -287,13 +294,23 @@ def test_live_region_includes_final_aivss_after_scan_done(
     assert "77" in console.export_text()
 
 
-def test_agent_table_renders_plan_label_and_attachment_count_legacy() -> None:
+def test_agent_table_renders_plan_label_and_attachment_count_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """PhaseC — the Turns cell widens with a (plan: X) suffix and [+K att] glyph."""
     state = DashboardState(scan_id="abc", target_ref="t", tier="auto")
     state.agent_turns["tool-abuse-agent"] = (2, 4)
     state.agent_plan_label["tool-abuse-agent"] = "demo-plan"
     state.agent_attachment_counts["tool-abuse-agent"] = 3
-    text = _render_to_text(state, legacy=True)
+    # Pin a wide Console so the Turns column does not get squeezed and
+    # truncated to "+3 at…". CRITICAL: the autouse conftest sets
+    # ``TERM=dumb`` and the helper passes ``force_terminal=True``;
+    # together that flips Rich's ``is_dumb_terminal`` ON, which then
+    # clamps Console size to (80, 25) regardless of the explicit
+    # ``width=`` we pass. Override TERM here so Rich honours width=400.
+    # Belt-and-braces: normalise_help collapses any wrap-breaks too.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    text = normalise_help(_render_to_text(state, legacy=True, width=400))
     assert "2/4" in text
     assert "plan: demo-plan" in text
     assert "+3 att" in text

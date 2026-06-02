@@ -34,6 +34,7 @@ from agent_guardian.ui.attack_feed import (
     build_curl_one_liner,
     render_reflection_block,
 )
+from tests._ansi import normalise_help
 
 
 @pytest.fixture(autouse=True)
@@ -313,26 +314,41 @@ def test_strategy_section_includes_rationale_when_present() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_title_appends_plan_label_when_plan_name_present() -> None:
+def test_title_appends_plan_label_when_plan_name_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``turn N/M (plan: <name>)`` lands when turn_record carries plan_name."""
     turn = _turn_record()
     turn["plan_name"] = "asi06-iterative-fact-reinforcement"
-    console = _record_console(width=200)
+    # Pin a wide Console so Rich's Panel title-rendering never has to
+    # truncate. CRITICAL: the autouse conftest sets ``TERM=dumb`` and
+    # ``force_terminal=True`` combine to make Rich's ``is_dumb_terminal``
+    # return True, which then clamps Console size to (80, 25) regardless
+    # of the explicit ``width=`` we pass. Override TERM here so Rich
+    # honours our width pin. Belt-and-braces: also normalise_help the
+    # captured text so any residual ANSI/wrap-break doesn't bite.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console = _record_console(width=400)
     console.print(render_reflection_block(turn))
-    text = console.export_text()
+    text = normalise_help(console.export_text())
     assert "turn 2/4 (plan: asi06-iterative-fact-reinforcement)" in text
 
 
-def test_title_reads_plan_from_strategy_metadata_when_top_level_absent() -> None:
+def test_title_reads_plan_from_strategy_metadata_when_top_level_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Legacy turn_records stamp the plan name on strategy_metadata only."""
     turn = _turn_record(strategy="multi_turn_plan")
     turn["strategy_metadata"] = {
         "rationale": "pair-initial",
         "phase_c_c1_plan_name": "asi06-iterative-fact-reinforcement",
     }
-    console = _record_console(width=200)
+    # See sibling test above — undo conftest's ``TERM=dumb`` so Rich
+    # actually honours our wide ``width=`` and doesn't clamp to 80 cols.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console = _record_console(width=400)
     console.print(render_reflection_block(turn))
-    text = console.export_text()
+    text = normalise_help(console.export_text())
     assert "plan: asi06-iterative-fact-reinforcement" in text
 
 
