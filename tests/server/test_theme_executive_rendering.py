@@ -653,8 +653,12 @@ def test_executive_overview_no_longer_renders_aivss_hero_partial(
     assert 'data-component="aivss-hero"' not in overview_pane
     assert "exec-hero__number" not in overview_pane
     assert "exec-bandaxis" not in overview_pane
-    # But the AIVSS gauge MUST be present in its place.
-    assert 'data-component="aivss-gauge"' in overview_pane
+    # QA-061 (2026-06-03) — the horseshoe gauge that briefly replaced the
+    # hero card was itself dropped; the AIVSS tile is now the same
+    # plain-text treatment as BAND. The tile MUST keep the ``data-live=
+    # "aivss"`` hook the SSE patcher writes to.
+    assert 'data-component="aivss-gauge"' not in overview_pane
+    assert 'data-live="aivss"' in overview_pane
 
 
 def test_executive_overview_renders_severity_bars_partial(
@@ -795,8 +799,11 @@ def test_executive_css_carries_narrative_palette_tokens(client: TestClient) -> N
     assert "#fafaf7" in body  # cream parchment background
     assert "#d97706" in body  # high amber
     assert "#b91c1c" in body  # critical red
-    # The hero number ports the Narrative big-numeric serif treatment.
-    assert ".exec-hero__number" in body
+    # The KPI tiles port the Narrative big-numeric serif treatment.
+    # (QA-042 / QA-061 — the AIVSS hero card + its ``.exec-hero__number``
+    # selector were dropped; the same serif treatment now lives on
+    # ``.exec-kpi__value``.)
+    assert ".exec-kpi__value" in body
     assert "var(--exec-font-serif)" in body
     # Severity tokens are key for executive_charts.js readToken().
     assert "--exec-sev-critical" in body
@@ -820,14 +827,19 @@ def test_executive_clean_control_renders_all_new_partials(
     body = resp.text
     assert resp.status_code == 200
     # All surviving partials present even when the scan flagged nothing.
-    # QA-042 (2026-06-02) — the AIVSS hero card was removed from Overview;
-    # its information moved into the AIVSS KPI tile horseshoe gauge (QA-040).
-    assert 'data-component="aivss-gauge"' in body
+    # QA-042 (2026-06-02) — the AIVSS hero card was removed from Overview.
+    # QA-061 (2026-06-03) — the horseshoe gauge that briefly replaced it
+    # was itself dropped; the AIVSS KPI tile is now plain-text. The
+    # ``data-live="aivss"`` hook is the surviving SSE patcher contract.
+    assert 'data-live="aivss"' in body
     assert 'data-component="severity-bars"' in body
     assert 'data-component="asi-radar"' in body
     assert 'data-component="reproducibility"' in body
+    # QA-066 (2026-06-03) — Scan identity block sits above the KPI strip.
+    assert 'data-component="scan-identity"' in body
     # The deleted partials must NOT render anywhere.
     assert 'data-component="aivss-hero"' not in body
+    assert 'data-component="aivss-gauge"' not in body
     assert 'data-component="asi-rows"' not in body
     # The findings empty-state copy is still wired through.
     assert "Nothing flagged yet." in body

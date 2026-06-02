@@ -50,6 +50,21 @@ __all__ = [
 
 _LOG = logging.getLogger("agent_guardian.judges.panel")
 
+# QA-050 — distilled headline length for the Finding summary column. The
+# panel verdict's ``reasoning`` text flows straight into ``Finding.summary``
+# (see ``Agent._build_finding`` in ``agents/base.py``), so a tight cap keeps
+# the Findings tab from showing the same boilerplate on every row.
+_HEADLINE_MAX_CHARS = 80
+
+# Reasoning strings the LLM judges fall back to when their output is
+# unparseable. Treat them as "no real reasoning" so the headline distiller
+# does not surface stub text as if it were judge analysis.
+_HEADLINE_STUB_PREFIXES: tuple[str, ...] = (
+    "heuristic:",
+    "no reasoning provided",
+    "judge raised:",
+)
+
 
 # --------------------------------------------------------------------------- #
 # Specs / config models
@@ -102,6 +117,44 @@ JudgePanel = JudgePanelConfig
 # --------------------------------------------------------------------------- #
 
 
+def _distill_headline(reasonings: Sequence[str], max_chars: int = _HEADLINE_MAX_CHARS) -> str:
+    """Return the first meaningful sentence from a list of judge reasonings.
+
+    QA-050 — the panel's verdict ``reasoning`` text flows into the
+    ``Finding.summary`` field rendered in the executive Findings tab. The
+    pre-QA-050 boilerplate ("panel unanimous: fail") was identical on every
+    row; this helper picks the first non-stub reasoning string, takes its
+    leading sentence, and truncates with an ellipsis so the Summary column
+    actually says something about why the judges decided as they did.
+
+    The function never raises: an empty / all-stub input yields ``""`` and
+    the caller falls back to the structural blurb.
+    """
+    for raw in reasonings:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(lowered.startswith(stub) for stub in _HEADLINE_STUB_PREFIXES):
+            continue
+        # First sentence — split on the earliest of ``. `` / ``; `` / newline.
+        # ``str.split`` with maxsplit=1 keeps the rest intact so we don't lose
+        # data if the reasoning carries trailing detail we later want to log.
+        for sep in (". ", "; ", "\n"):
+            if sep in text:
+                text = text.split(sep, 1)[0]
+                break
+        text = text.strip().rstrip(".;,")
+        if not text:
+            continue
+        if len(text) > max_chars:
+            # Reserve one char for the ellipsis so the visible length stays
+            # within ``max_chars``.
+            text = text[: max_chars - 1].rstrip() + "…"
+        return text
+    return ""
+
+
 def _build_judge(spec: JudgeSpec) -> Any:
     """Construct a single-judge wrapper that exposes ``verdict()``.
 
@@ -143,11 +196,15 @@ class PanelJudge:
 
         families = {s.canonical_family for s in self._specs}
         validation_passed = (not cross_family_enforced) or len(families) >= 2
+        # QA-068 — structured one-line init narration. Stays at DEBUG (init is
+        # an internal lifecycle event, not a per-turn milestone the operator
+        # needs to see in the swarm-board scroll).
         _LOG.debug(
-            "PhaseB.B4 panel_init: families=%s cross_family_enforced=%s validation_passed=%s",
+            "panel init: seats=%d families=%s cross_family=%s validation=%s",
+            len(self._specs),
             sorted(families),
             cross_family_enforced,
-            validation_passed,
+            "pass" if validation_passed else "fail",
         )
         if cross_family_enforced and len(families) < 2:
             raise ValueError(
@@ -170,12 +227,24 @@ class PanelJudge:
         """Fire all judges concurrently, majority-vote, return one verdict."""
         n = len(self._judges)
         families = [s.canonical_family for _, s in self._judges]
+        # QA-068 — replace the ``<Judge object at 0x…>`` repr dump with a
+        # structured one-line INFO so the operator sees one human-readable
+        # dispatch event per panel call. Model labels are family-prefixed and
+        # built from spec labels (or model name) — never raw __repr__.
+        seat_labels = [
+            f"{spec.canonical_family}:{spec.label or spec.model}" for _, spec in self._judges
+        ]
+        _LOG.info(
+            "judge panel dispatched: %d seats, %s",
+            n,
+            ", ".join(seat_labels) if seat_labels else "(no seats)",
+        )
         _LOG.debug(
-            "PhaseB.B4 panel_verdict launched: n_judges=%d cross_family_enforced=%s families=%s judges_consulted=%s",
+            "panel verdict launched: n_judges=%d cross_family=%s families=%s seats=%s",
             n,
             self._cross_family_enforced,
             families,
-            [str(j) for j in self._judges],
+            seat_labels,
         )
 
         # Concurrent gather, swallow exceptions per seat. ``asyncio.CancelledError``,
@@ -198,10 +267,12 @@ class PanelJudge:
         verdicts: list[JudgeVerdict] = []
         for raw, (_, spec) in zip(results, self._judges, strict=False):
             if isinstance(raw, Exception):
+                # QA-068 — structured WARNING shape: short, scan-friendly.
                 _LOG.warning(
-                    "PhaseB.B4 panel_seat_exception: family=%s model=%s exc=%s",
+                    "panel seat raised: family=%s model=%s exc=%s: %s",
                     spec.canonical_family,
                     spec.model,
+                    type(raw).__name__,
                     raw,
                 )
                 verdicts.append(
@@ -216,8 +287,9 @@ class PanelJudge:
 
         individual_verdicts = [v.verdict for v in verdicts]
         individual_confidences = [round(v.confidence, 3) for v in verdicts]
+        # QA-068 — structured one-line collected event for DEBUG scroll.
         _LOG.debug(
-            "PhaseB.B4 panel_verdicts_collected: individual_verdicts=%s individual_confidences=%s",
+            "panel verdicts collected: verdicts=%s confidences=%s",
             individual_verdicts,
             individual_confidences,
         )
@@ -239,16 +311,26 @@ class PanelJudge:
         # Stay within [0,1] just in case of accumulated float drift.
         final_confidence = max(0.0, min(1.0, final_confidence))
 
-        if disagreement:
-            reasoning_blurb = (
-                f"panel split: {dict(counts)} — final via majority+uncertainty mapping"
-            )
-        else:
-            reasoning_blurb = f"panel unanimous: {majority}"
+        # QA-050 — distil a one-sentence headline from the majority judges'
+        # reasoning so the Findings tab Summary column reads as analysis,
+        # not "panel unanimous: fail" on every row. Iterate in seat order so
+        # the choice is deterministic across runs with the same inputs.
+        majority_reasonings = [v.reasoning for v in verdicts if v.verdict == majority]
+        headline = _distill_headline(majority_reasonings)
 
+        if disagreement:
+            split_blurb = f"panel split: {dict(counts)} — final via majority+uncertainty mapping"
+            reasoning_blurb = f"{split_blurb} | {headline}" if headline else split_blurb
+        else:
+            reasoning_blurb = (
+                f"panel unanimous {majority}: {headline}"
+                if headline
+                else f"panel unanimous: {majority}"
+            )
+
+        # QA-068 — structured one-line majority shape.
         _LOG.debug(
-            "PhaseB.B4 panel_majority: majority_verdict=%s agreement_fraction=%.2f "
-            "disagreement=%s final_confidence=%.2f",
+            "panel majority: verdict=%s agreement=%.2f disagreement=%s confidence=%.2f",
             majority,
             agreement_fraction,
             disagreement,

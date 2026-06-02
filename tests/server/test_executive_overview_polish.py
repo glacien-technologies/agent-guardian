@@ -155,8 +155,11 @@ def test_executive_kpi_info_popover_css_drops_uppercase(client: TestClient) -> N
 @pytest.mark.parametrize(
     "key,component",
     [
-        # QA-040 — AIVSS tile mini-chart is now the horseshoe gauge.
-        ("aivss", "aivss-gauge"),
+        # QA-061 (2026-06-03) — AIVSS tile no longer renders a mini-chart;
+        # it uses the same plain-text big-numeric + band-label treatment
+        # as the BAND tile and is exercised by
+        # ``test_executive_aivss_tile_renders_plain_text_after_qa_061``
+        # below instead of this parametrisation.
         ("band", "kpi-chart-band"),
         ("findings", "kpi-chart-findings"),
         ("elapsed", "kpi-chart-elapsed"),
@@ -174,6 +177,25 @@ def test_executive_kpi_tile_renders_mini_chart(
     assert f'data-component="{component}"' in body, (
         f"KPI tile {key!r} missing mini-chart component {component!r}"
     )
+
+
+def test_executive_aivss_tile_renders_plain_text_after_qa_061(
+    client: TestClient, store: ScanStore
+) -> None:
+    """QA-061 (2026-06-03) — AIVSS tile is plain-text (big numeric + band
+    label) and the horseshoe gauge is gone. The tile MUST NOT carry the
+    ``aivss-gauge`` data-component anymore, but it MUST still carry the
+    ``data-live="aivss"`` hook the SSE patcher uses to update the score.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    # Gauge is gone.
+    assert 'data-component="aivss-gauge"' not in body
+    assert "gauge-arc--critical" not in body
+    assert "gauge-needle" not in body
+    # Plain-text treatment is present.
+    assert 'data-live="aivss"' in body
 
 
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
@@ -283,7 +305,12 @@ def test_executive_overview_renders_asi_compact_table(client: TestClient, store:
 def test_executive_overview_asi_compact_has_live_update_keys(
     client: TestClient, store: ScanStore
 ) -> None:
-    """SSE patcher targets ``data-live="asi-compact-ASInn-{score,bar,status}"``."""
+    """SSE patcher targets ``data-live="asi-compact-ASInn-score"``.
+
+    QA-064 + QA-065 (2026-06-03) — the PROGRESS bar, WEIGHT chip, and
+    STATUS pill columns were removed. SCORE is now the only per-row
+    data-live key the SSE patcher needs to maintain.
+    """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
@@ -291,26 +318,12 @@ def test_executive_overview_asi_compact_has_live_update_keys(
     next_idx = body.find('id="tabpanel-findings"', idx)
     overview_pane = body[idx:next_idx]
     assert 'data-live="asi-compact-ASI01-score"' in overview_pane
-    assert 'data-live="asi-compact-ASI01-bar"' in overview_pane
-    assert 'data-live="asi-compact-ASI01-status"' in overview_pane
+    # QA-065 — bar + status data-live keys removed along with their columns.
+    assert 'data-live="asi-compact-ASI01-bar"' not in overview_pane
+    assert 'data-live="asi-compact-ASI01-status"' not in overview_pane
     # Scope prefix marker so it can coexist with the Agents-tab partial
     # until QA-030 deletes the latter.
     assert 'data-live-scope="asi-compact"' in overview_pane
-
-
-def test_executive_overview_asi_compact_renders_status_pills(
-    client: TestClient, store: ScanStore
-) -> None:
-    """Status pills (``done`` / ``running`` / ``queued``) render with the
-    correct CSS classes for live progress."""
-    scan = _make_scan()
-    _persist(store, scan)
-    body = client.get(f"/scan/{scan.id}?theme=executive").text
-    idx = body.find('id="tabpanel-overview"')
-    next_idx = body.find('id="tabpanel-findings"', idx)
-    overview_pane = body[idx:next_idx]
-    # Completed scan ⇒ rows render as "done"
-    assert "exec-asi-compact__status--done" in overview_pane
 
 
 def test_executive_overview_asi_compact_renders_findings_pills(
@@ -330,19 +343,34 @@ def test_executive_overview_asi_compact_renders_findings_pills(
         )
 
 
-def test_executive_overview_asi_compact_renders_weight_chips(
+def test_executive_overview_asi_compact_dropped_weight_progress_status(
     client: TestClient, store: ScanStore
 ) -> None:
-    """Each row carries the × N.N weight chip from the view-model."""  # noqa: RUF002
+    """QA-064 + QA-065 (2026-06-03) — the WEIGHT chip, PROGRESS bar, and
+    STATUS pill columns were dropped from the breakdown table; final
+    column order is ASI · CATEGORY · SCORE · C / H / M / L.
+    """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
     idx = body.find('id="tabpanel-overview"')
     next_idx = body.find('id="tabpanel-findings"', idx)
     overview_pane = body[idx:next_idx]
-    assert "exec-asi-compact__weight" in overview_pane
-    # ASI01 + ASI06 carry weight 2.0 in the locked _ASI_ROW_META mapping.
-    assert "× 2.0" in overview_pane  # noqa: RUF001
+    # QA-064 — weight chip span + its multiplier text gone from each row.
+    assert 'class="exec-asi-compact__weight' not in overview_pane
+    assert "× 2.0" not in overview_pane  # noqa: RUF001
+    # QA-065 — progress bar + status pill spans gone from each row.
+    assert 'class="exec-asi-compact__bar"' not in overview_pane
+    assert 'class="exec-asi-compact__status' not in overview_pane
+    # Header row trimmed to four <span role="columnheader"> cells
+    # (ASI · Category · Score · C/H/M/L). The Score cell carries the
+    # numeric modifier class so the count of `__head"` (with the trailing
+    # quote) maps to the three non-modifier cells; the modifier hit on
+    # Score brings the total to 4.
+    assert overview_pane.count('role="columnheader"') == 4
+    assert ">Weight<" not in overview_pane
+    assert ">Progress<" not in overview_pane
+    assert ">Status<" not in overview_pane
 
 
 def test_executive_overview_asi_compact_widget_present_before_reproducibility(

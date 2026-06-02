@@ -23,9 +23,16 @@ def _reset_logging() -> None:
     writing into a stale buffer the next test never sees.
     """
     logging_setup._reset_for_tests()
-    # Reset the noisy-dep loggers — configure_logging pins them on INFO+
-    # runs which would otherwise leak across tests in this file.
-    for noisy in ("httpx", "httpcore", "urllib3", "google_genai.models"):
+    # Reset the noisy-dep loggers — configure_logging pins them on every
+    # run (QA-068) which would otherwise leak across tests in this file.
+    for noisy in (
+        "httpx",
+        "httpcore",
+        "httpcore.http11",
+        "httpcore.connection",
+        "urllib3",
+        "google_genai.models",
+    ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     # Also drop any handlers that a prior test installed so we don't double-print.
     root = logging.getLogger()
@@ -39,7 +46,14 @@ def _reset_logging() -> None:
         pass
     yield
     logging_setup._reset_for_tests()
-    for noisy in ("httpx", "httpcore", "urllib3", "google_genai.models"):
+    for noisy in (
+        "httpx",
+        "httpcore",
+        "httpcore.http11",
+        "httpcore.connection",
+        "urllib3",
+        "google_genai.models",
+    ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     try:
         import structlog as _structlog
@@ -112,20 +126,31 @@ def test_noisy_dependencies_pinned_at_warning_when_caller_runs_info(
     logging_setup.configure_logging(level="INFO", force=True)
     assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("httpcore").getEffectiveLevel() == logging.WARNING
+    # QA-068 — defensive child pins (parent already cascades, but state
+    # the http11 + connection loggers explicitly so a future grandchild
+    # cannot inherit DEBUG from root through a renamed parent).
+    assert logging.getLogger("httpcore.http11").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
 
 
-def test_noisy_dependencies_not_pinned_when_caller_runs_debug(
+def test_noisy_dependencies_pinned_at_warning_even_at_debug_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # QA-068: even at root=DEBUG the noisy deps must stay at WARNING so
+    # ``send_request_headers`` / ``receive_response_body`` wire events from
+    # httpcore.http11 don't drown the operator's swarm-board narration. The
+    # only way back in is the explicit per-logger override documented in
+    # ``test_operator_can_opt_back_in_to_httpx_info_after_configure`` —
+    # which uses ``setLevel`` AFTER configure_logging returns.
     logging_setup.configure_logging(level="DEBUG", force=True)
-    # At DEBUG the operator opted in to the noise — leave the chatty deps alone.
-    # We assert they are NOT explicitly pinned to INFO+.
-    httpx_logger = logging.getLogger("httpx")
-    # Effective level inherits from root (DEBUG) when no explicit level is set.
-    # If we pinned them, this assertion would fail.
-    assert httpx_logger.getEffectiveLevel() == logging.DEBUG
+    assert logging.getLogger("httpx").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpcore.http11").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_escalate_above_warning_when_caller_runs_error(

@@ -125,14 +125,27 @@ class GeminiClient(BaseLLM):
         params: dict[str, str] = {}
         if self.api_key:
             params["key"] = self.api_key
-        _LOG.debug(
-            "gemini call: model=%s n_messages=%d max_tokens=%s temperature=%s seed=%s",
+        # QA-068 — structured INFO one-liner for the operator's swarm-board
+        # narration. Full kwargs (temperature / seed / system / tool defs)
+        # stay at DEBUG, and only render when the operator opted into the
+        # JSON log format — keeps structured-text DEBUG scannable.
+        _LOG.info(
+            "model call: gemini-%s (msgs=%d, max_tok=%s)",
             request.model,
             len(request.messages),
             request.max_tokens,
-            request.temperature,
-            request.seed,
         )
+        from agent_guardian.logging_setup import _json_logging_enabled
+
+        if _json_logging_enabled():
+            _LOG.debug(
+                "gemini call detail: model=%s n_messages=%d max_tokens=%s temperature=%s seed=%s",
+                request.model,
+                len(request.messages),
+                request.max_tokens,
+                request.temperature,
+                request.seed,
+            )
         req = self._client.build_request(
             "POST",
             url,

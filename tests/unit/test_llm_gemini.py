@@ -275,3 +275,33 @@ async def test_gemini_seed_omitted_when_none() -> None:
     body = json.loads(route.calls.last.request.content)
     assert "seed" not in body["generationConfig"]
     await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_emits_structured_info_call_line(caplog: pytest.LogCaptureFixture) -> None:
+    """QA-068 — the model-call narration is one structured INFO line.
+
+    The pre-QA-068 code emitted a DEBUG dump of every kwarg (temperature /
+    seed / system / tool defs). We now emit one INFO one-liner with the
+    just-the-essentials shape ``model call: gemini-<model> (msgs=N, max_tok=M)``
+    so the operator's swarm-board narrates each LLM call without drowning
+    in DEBUG noise.
+    """
+    import logging
+
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=_happy_body()))
+    llm = GeminiClient(api_key="k")
+    with caplog.at_level(logging.INFO, logger="agent_guardian.llm.gemini"):
+        await llm.complete(_req())
+    matching = [r for r in caplog.records if r.message.startswith("model call: gemini-")]
+    assert matching, (
+        f"expected one INFO 'model call:' line, got {[r.message for r in caplog.records]}"
+    )
+    last = matching[-1]
+    # The structured shape includes msgs= and max_tok= tokens.
+    assert "msgs=" in last.message
+    assert "max_tok=" in last.message
+    # Raw kwargs (temperature / seed / system / tool defs) must NOT leak into INFO.
+    assert "temperature=" not in last.message
+    assert "seed=" not in last.message
+    await llm.aclose()

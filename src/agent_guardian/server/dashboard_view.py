@@ -126,6 +126,28 @@ _ASI_ROW_META: dict[str, tuple[str, str, float, bool]] = {
 }
 
 
+# QA-060 (2026-06-03) — friendly skip-reason strings keyed off the agent
+# class name (matches :attr:`AsiAgent.name`). The swarm currently writes
+# the generic ``"not applicable for fingerprint"`` for every gating
+# predicate that fires in :meth:`AsiAgent.is_applicable`; operators reading
+# the Recon panel's "Skipped agents" table need to know WHICH capability
+# gap rejected the agent so they can either add the capability declaration
+# (for a real target) or accept the skip as intentional. The map below
+# encodes the predicate each known agent applies, in plain language. Any
+# agent absent from the map (e.g. a future specialist) falls back to the
+# original generic reason — no silent rewriting of unknown predicates.
+_SKIP_REASON_BY_AGENT: dict[str, str] = {
+    "memory-poison-agent": "target does not declare memory capability",
+    "a2a-agent": "target is single-agent (no orchestrator surface)",
+    "code-exec-agent": "target does not declare code-execution tools",
+    "tool-abuse-agent": "target does not declare any tools",
+}
+# The placeholder we override when present. Reasons that don't match this
+# token pass through unchanged — preserves any future custom reason a
+# specialist agent might write.
+_GENERIC_SKIP_REASON: Final[str] = "not applicable for fingerprint"
+
+
 @dataclass(frozen=True)
 class DashboardContext:
     """Resolved template context for ``dashboard/scan_detail.html``.
@@ -235,46 +257,25 @@ def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
 
 def _build_kpi_hover_tables(
     *,
-    scan: Scan | None,
     counts: dict[str, int],
     findings_total: int,
-    asi_rows: list[dict[str, Any]],
-    elapsed: float,
-    elapsed_label: str,
-    asi_covered: int,
 ) -> dict[str, list[dict[str, str]]]:
-    """Build the per-tile hover data-table payload.
+    """Build the FINDINGS-tile hover data-table payload.
 
-    QA-044 (2026-06-02) — every KPI tile now reveals a small data table
-    on hover. Rather than build the strings in Jinja, we assemble them
-    here so the row order is deterministic and unit-testable.
+    QA-044 (2026-06-02) introduced a per-tile hover data table on every
+    KPI tile.
 
-    Each value is a plain dict ``{"label": str, "value": str}`` (no
+    QA-062 (2026-06-03) dropped the hover popover for every tile EXCEPT
+    FINDINGS: the other tiles either restated the value already on the
+    tile (AIVSS / BAND) or showed a fabricated 15/55/30 phase split
+    (ELAPSED / COST) we never had real data for. Keeping only FINDINGS
+    leaves the one tile where the breakdown is the actual signal — the
+    per-severity count operators are reading to triage.
+
+    Each row is a plain dict ``{"label": str, "value": str}`` (no
     ``class`` is needed today; the field is reserved for future
     severity-tinted rows).
     """
-    score_val = float(scan.aivss) if scan is not None else 0.0
-    cost_total = float(scan.cost_usd) if scan is not None else 0.0
-    tokens_total = int(scan.tokens_total) if scan is not None else 0
-
-    # AIVSS — top 5 ASI sub-scores so the hover table fits the tile width.
-    aivss_rows: list[dict[str, str]] = []
-    for row in asi_rows[:5]:
-        aivss_rows.append(
-            {"label": str(row.get("code", "—")), "value": f"{row.get('score_label', '—')}"}
-        )
-    aivss_rows.append({"label": "Composite", "value": f"{score_val:.0f}"})
-
-    # BAND — the threshold scale (mirrors the gauge bands).
-    band_rows: list[dict[str, str]] = [
-        {"label": "Critical", "value": "0-39"},
-        {"label": "Poor", "value": "40-59"},
-        {"label": "Warning", "value": "60-79"},
-        {"label": "Good", "value": "80-89"},
-        {"label": "Excellent", "value": "90-100"},
-    ]
-
-    # FINDINGS — severity counts.
     findings_rows: list[dict[str, str]] = [
         {"label": "Critical", "value": str(counts.get("critical", 0))},
         {"label": "High", "value": str(counts.get("high", 0))},
@@ -282,53 +283,7 @@ def _build_kpi_hover_tables(
         {"label": "Low", "value": str(counts.get("low", 0))},
         {"label": "Total", "value": str(findings_total)},
     ]
-
-    # ELAPSED — best-effort phase split. The Scan model does not surface
-    # per-phase wall-clock today; we approximate from the overall elapsed
-    # so the tile renders something meaningful while the real per-phase
-    # roll-up is being threaded through (TODO: wire ``scan.audit['phases']``
-    # when the swarm runner emits it).
-    elapsed_rows: list[dict[str, str]] = [
-        {"label": "Total", "value": elapsed_label},
-    ]
-    if elapsed > 0:
-        # 15/55/30 split is the historical AIVSS test-runner ratio
-        # (commander dispatch vs attacker probes vs evaluator grading);
-        # used here as a presentation default — replace once the runner
-        # surfaces real per-phase durations.
-        elapsed_rows.append({"label": "Commander", "value": _humanise_seconds(elapsed * 0.15)})
-        elapsed_rows.append({"label": "Attacker", "value": _humanise_seconds(elapsed * 0.55)})
-        elapsed_rows.append({"label": "Evaluator", "value": _humanise_seconds(elapsed * 0.30)})
-
-    # COST — token-spend by phase (same caveat as elapsed).
-    cost_rows: list[dict[str, str]] = [
-        {"label": "Total", "value": f"$ {cost_total:.2f}"},
-        {"label": "Tokens", "value": _humanise_int(tokens_total)},
-    ]
-    if cost_total > 0:
-        cost_rows.append({"label": "Commander", "value": f"$ {cost_total * 0.15:.2f}"})
-        cost_rows.append({"label": "Attacker", "value": f"$ {cost_total * 0.55:.2f}"})
-        cost_rows.append({"label": "Evaluator", "value": f"$ {cost_total * 0.30:.2f}"})
-
-    # COVERAGE — per-ASI status (the 10 OWASP categories).
-    coverage_rows: list[dict[str, str]] = []
-    for row in asi_rows:
-        coverage_rows.append(
-            {
-                "label": str(row.get("code", "—")),
-                "value": ("covered" if sum((row.get("findings") or {}).values()) > 0 else "—"),
-            }
-        )
-    coverage_rows.append({"label": "Covered", "value": f"{asi_covered}/10"})
-
-    return {
-        "aivss": aivss_rows,
-        "band": band_rows,
-        "findings": findings_rows,
-        "elapsed": elapsed_rows,
-        "cost": cost_rows,
-        "coverage": coverage_rows,
-    }
+    return {"findings": findings_rows}
 
 
 def _asi_rows(
@@ -434,6 +389,12 @@ def _findings_page(
                 "severity_label": f.severity.value.upper(),
                 "severity_class": f.severity.value.lower(),
                 "created_label": f.created_at.strftime("%H:%M:%S"),
+                # QA-051 — runtime agent name (e.g. ``goal-hijack-agent``)
+                # populated in-place by ``_attach_evidence_to_findings`` from
+                # the matched probe's ``agent`` field. Defaults to ``""`` so
+                # the Findings table can render an em-dash when no probe
+                # correlation exists (static / recon-derived findings).
+                "agent_name": "",
             }
         )
     pagination: dict[str, Any] = {
@@ -492,6 +453,10 @@ def _attach_evidence_to_findings(
                 "evidence_stats",
                 {"fail": 0, "pass": 0, "inconclusive": 0, "unknown": 0},
             )
+            # QA-051 — keep ``agent_name`` present (empty default from
+            # ``_findings_page``) so callers / templates can rely on the
+            # key existing even when no probes correlate.
+            item.setdefault("agent_name", "")
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -536,6 +501,18 @@ def _attach_evidence_to_findings(
         item["evidence_total"] = total
         item["evidence_truncated"] = total > _FINDING_EVIDENCE_CAP
         item["evidence_stats"] = stats
+        # QA-051 — surface the runtime agent name (e.g. ``goal-hijack-agent``)
+        # on the finding row. The reflection records written by
+        # ``agents/base.py`` carry an ``agent`` field that names the actual
+        # specialist agent that produced the probe attempt; we pick the
+        # first matched record's name so the Findings table's AGENT column
+        # shows the agent the operator can grep for in logs. Findings with
+        # no correlated probes keep the default empty string from
+        # ``_findings_page`` (template renders an em-dash).
+        if capped and not item.get("agent_name"):
+            first_agent = str(capped[0].get("agent") or "").strip()
+            if first_agent:
+                item["agent_name"] = first_agent
 
 
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:
@@ -764,37 +741,42 @@ def build_dashboard_context(
         # ``ⓘ`` popover (``.exec-kpi__desc-popover``) instead of an always-on
         # ``.exec-kpi__desc`` block — payload key is unchanged, only the
         # template render mode flipped.
-        # QA-039 / QA-044 (2026-06-02) — these prose explainers are now
-        # surfaced behind the ``ⓘ`` button (separate from the hover data
-        # table). They are deliberately rendered in sentence case + body
-        # type (see ``.kpi-info-popover`` in executive.css); the previous
-        # ALL-CAPS + tight letter-spacing look was dropped.
+        # QA-039 / QA-044 / QA-067 (2026-06-03) — these prose explainers
+        # are surfaced behind the ``ⓘ`` button. They are written in
+        # sentence case (acronyms preserved: AIVSS, ASI, USD) and read as
+        # short body-scale paragraphs in ``.kpi-info-popover`` (see
+        # ``executive.css`` §3 — the popover renders without
+        # ``text-transform: uppercase`` and without letter-spacing).
+        # QA-062 (2026-06-03) — hover data tables were dropped from every
+        # tile except FINDINGS, so the "hover the tile for X" callouts
+        # were removed from the other tiles' prose to avoid pointing the
+        # operator at a surface that no longer exists.
         "kpi_descriptions": {
             "aivss": (
-                "Composite agent safety score (0-100). A weighted average "
-                "across the ten OWASP ASI sub-scores, blended with the "
-                "tier-specific scoring formula."
+                "Composite agent safety score on a 0-100 scale. It is a "
+                "weighted average across the ten OWASP ASI sub-scores, "
+                "blended with the tier-specific scoring formula."
             ),
             "band": (
                 "Risk tier mapped from the AIVSS composite. Thresholds "
-                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 good, "
-                "90-100 excellent."
+                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 "
+                "good, and 90-100 excellent."
             ),
             "findings": (
                 "Total exploit attempts the evaluator graded as valid. "
                 "Hover the tile for the per-severity breakdown."
             ),
             "elapsed": (
-                "Wall-clock duration of the scan from the first probe "
-                "dispatch through the final evaluator verdict."
+                "Wall-clock duration of the scan, measured from the "
+                "first probe dispatch through the final evaluator "
+                "verdict."
             ),
             "cost": (
-                "Estimated model spend in USD for this scan, summed "
+                "Estimated model spend for this scan in USD, summed "
                 "across the commander, attacker, and evaluator phases."
             ),
             "coverage": (
-                "Probe categories exercised out of the ten OWASP ASI "
-                "dimensions. Hover the tile for the per-category status."
+                "Number of probe categories exercised out of the ten OWASP ASI dimensions."
             ),
         },
         # QA-044 (2026-06-02) — structured hover data tables. Each entry
@@ -802,14 +784,11 @@ def build_dashboard_context(
         # renders as a small table inside ``.exec-kpi__hover-table``. We
         # build it here rather than in Jinja so the row order stays Python-
         # sorted and the breakdown matches what unit tests assert against.
+        # QA-062 (2026-06-03) — only FINDINGS still surfaces a hover table;
+        # the other tiles dropped the popover so we only build the one row.
         "kpi_hover_tables": _build_kpi_hover_tables(
-            scan=scan,
             counts=counts,
             findings_total=findings_total,
-            asi_rows=asi_rows,
-            elapsed=elapsed,
-            elapsed_label=_humanise_seconds(elapsed),
-            asi_covered=asi_covered,
         ),
         # QA-028 sub-ask 2 — per-tile inline-SVG mini-charts. The KPI strip
         # template reads this dict to draw a 64px-tall visualisation inside
@@ -976,10 +955,23 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
           "declared_guardrails": list[str],
           "profile_source": str,
           "profile_confidence": float,
-          "system_prompt_clues": str,   # truncated notes/clue field
-          "system_prompt_clues_full": str,  # full text for "view raw"
           "skipped_agents": list[{agent, asi, reason}],
         }
+
+    QA-059 (2026-06-03) — the ``system_prompt_clues`` /
+    ``system_prompt_clues_full`` fields were removed: the recon panel
+    no longer surfaces the legacy "Recon context" row (operators read
+    the raw `TargetFingerprint.notes` either as a leaked prompt or as
+    duplicative recon metadata, neither helpful). The capability chips
+    + endpoint row carry the same signal in a clearer shape.
+
+    QA-060 (2026-06-03) — ``skipped_agents[*].reason`` is rewritten
+    from the swarm's generic ``"not applicable for fingerprint"`` to
+    the specific capability gap that gated the agent off (e.g.
+    ``"target does not declare memory capability"``). The mapping
+    keys off the agent class name and lives in
+    :data:`_SKIP_REASON_BY_AGENT`. Reasons that don't match the
+    generic placeholder pass through unchanged.
 
     Returns an empty / disabled dict when ``scan_dir`` is ``None``, the
     file is missing, or no fingerprint record has been written yet
@@ -1007,8 +999,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "declared_guardrails": [],
         "profile_source": "",
         "profile_confidence": 0.0,
-        "system_prompt_clues": "",
-        "system_prompt_clues_full": "",
         "skipped_agents": [],
     }
     if scan_dir is None:
@@ -1038,11 +1028,24 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
                 elif rtype == "agent_skipped":
                     payload = rec.get("payload")
                     if isinstance(payload, dict):
+                        agent_name = str(payload.get("agent", ""))
+                        raw_reason = str(payload.get("reason", ""))
+                        # QA-060 — rewrite the swarm's generic
+                        # "not applicable for fingerprint" placeholder
+                        # to the specific capability gap that gated
+                        # this agent off. Any agent absent from
+                        # `_SKIP_REASON_BY_AGENT` keeps the raw reason
+                        # (covers future specialists + any custom
+                        # reason a specialist already writes).
+                        if raw_reason == _GENERIC_SKIP_REASON:
+                            reason = _SKIP_REASON_BY_AGENT.get(agent_name, raw_reason)
+                        else:
+                            reason = raw_reason
                         skipped.append(
                             {
-                                "agent": str(payload.get("agent", "")),
+                                "agent": agent_name,
                                 "asi": str(payload.get("asi", "")),
-                                "reason": str(payload.get("reason", "")),
+                                "reason": reason,
                             }
                         )
     except OSError as exc:  # pragma: no cover — disk-level failure
@@ -1060,10 +1063,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
 
     declared_tools = list(latest_fp.get("declared_tools") or [])
     declared_memory_keys = list(latest_fp.get("declared_memory_keys") or [])
-    notes_full = str(latest_fp.get("notes") or "")
-    # Truncate clues to ~160 chars for the inline render; the full text
-    # lives behind the <details> raw view.
-    clues_short = notes_full[:160].rsplit(" ", 1)[0] + "…" if len(notes_full) > 160 else notes_full
     return {
         "has_data": True,
         "framework_family": (
@@ -1092,8 +1091,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "declared_guardrails": list(latest_fp.get("declared_guardrails") or []),
         "profile_source": str(latest_fp.get("profile_source") or "heuristic"),
         "profile_confidence": float(latest_fp.get("profile_confidence") or 0.0),
-        "system_prompt_clues": clues_short,
-        "system_prompt_clues_full": notes_full,
         "skipped_agents": skipped,
     }
 
