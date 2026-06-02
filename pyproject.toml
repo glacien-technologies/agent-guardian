@@ -157,8 +157,29 @@ examples = [
 # the LangGraph + OpenAI Agents trio stays independent of CrewAI's
 # transitive dependency graph. Install via
 # ``uv sync --extra examples --extra examples-crewai``.
+#
+# SECURITY HOLDING ACTION — CVE-2026-45829 / GHSA-f4j7-r4q5-qw2c
+# ----------------------------------------------------------------
+# chromadb (transitive via crewai) has a pre-auth code-injection CVE
+# (CVSSv4 9.3, CWE-94). Vulnerable range: >=1.0.0,<=1.5.9. As of
+# 2026-06-02 no patched chromadb release exists upstream — the latest
+# published version (1.5.9) is still vulnerable, so an overlay pin like
+# ``chromadb>1.5.9`` is unsatisfiable today and would break ``uv lock``.
+#
+# AgentGuardian itself never imports or runs chromadb. The CrewAI adapter
+# at ``src/agent_guardian/adapters/framework/crewai.py`` is pure
+# duck-typing (no ``import crewai``), and chromadb only lands in the
+# install tree when a user explicitly runs
+# ``uv sync --extra examples-crewai`` AND stands up a chromadb server.
+# The default ``pip install agent-guardian`` install path is unaffected.
+#
+# When chroma-core ships a patched release, **uncomment the overlay
+# below** and run ``uv lock --upgrade-package chromadb`` to pull it in
+# without waiting on a crewai metadata bump. See SECURITY.md /
+# ``docs/security/disclosure-history.md`` for the full risk narrative.
 examples-crewai = [
   "crewai>=0.55",
+  # "chromadb>=<patched>",  # un-pin once GHSA-f4j7-r4q5-qw2c is fixed
 ]
 # ``ws`` carries the websockets client used by the ``websocket`` contract
 # transport. It is strictly opt-in like ``aws`` / ``gcp``: the transport's
