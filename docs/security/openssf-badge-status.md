@@ -75,7 +75,7 @@ written.
 | Quality | New functionality tested | `CONTRIBUTING.md` ("Every new probe must ship with a golden test") |
 | Quality | Test coverage is measured | `coverage.xml` + Codecov badge in `README.md` |
 | Quality | Coding standards documented | `CONTRIBUTING.md`, `.editorconfig`, `pyproject.toml` (ruff, mypy) |
-| Security | Maintainers know how to develop securely | `SECURITY.md`, `governance.md`, `docs.legacy/security/` |
+| Security | Maintainers know how to develop securely | `SECURITY.md`, `governance.md`, `CONTRIBUTING.md` |
 | Security | Cryptography practices | Sigstore keyless OIDC for releases, SSH commit signing — see `MAINTAINERS.md` |
 | Security | Vulnerability response process | `SECURITY.md` (90-day coordinated disclosure) |
 | Analysis | Static-analysis tool used | Bandit + Semgrep + Gitleaks (`.github/workflows/ci.yml`), Scorecard (`scorecard.yml`) |
