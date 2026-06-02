@@ -14,6 +14,7 @@ from textwrap import dedent
 
 import pytest
 
+import agent_guardian.probes.loader as loader_mod
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.probes.loader import load_probes_for_asi
 
@@ -101,8 +102,6 @@ def test_load_probes_for_asi_handles_missing_judges_dir(
         ).lstrip("\n"),
         encoding="utf-8",
     )
-    import agent_guardian.probes.loader as loader_mod
-
     monkeypatch.setattr(loader_mod, "find_corpus_root", lambda: tmp_path)
     with caplog.at_level(logging.WARNING, logger="agent_guardian.probes.loader"):
         probes = load_probes_for_asi(AsiCategory.ASI01)
@@ -137,8 +136,6 @@ def test_load_probes_for_asi_handles_empty_judges_dir(
         encoding="utf-8",
     )
     (tmp_path / "judges").mkdir()  # exists but empty
-    import agent_guardian.probes.loader as loader_mod
-
     monkeypatch.setattr(loader_mod, "find_corpus_root", lambda: tmp_path)
     probes = load_probes_for_asi(AsiCategory.ASI01)
     assert [p.id for p in probes] == ["ASI01-GH-996"]
@@ -175,8 +172,6 @@ def test_load_probes_for_asi_unions_synthetic_judges_dir(
     judges_dir.mkdir()
     (judges_dir / "j1.yaml").write_text(_judge_yaml("JDG-TEST-001", asi="ASI01"), encoding="utf-8")
     (judges_dir / "j2.yaml").write_text(_judge_yaml("JDG-TEST-002", asi="ASI09"), encoding="utf-8")
-    import agent_guardian.probes.loader as loader_mod
-
     monkeypatch.setattr(loader_mod, "find_corpus_root", lambda: tmp_path)
     asi01_probes = {p.id for p in load_probes_for_asi(AsiCategory.ASI01)}
     asi09_probes = {p.id for p in load_probes_for_asi(AsiCategory.ASI09)}

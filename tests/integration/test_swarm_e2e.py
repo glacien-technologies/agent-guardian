@@ -218,8 +218,17 @@ async def test_swarm_runs_end_to_end_against_compromised_target(
     )
     scan = await swarm.run()
     assert isinstance(scan, Scan)
-    assert scan.aivss < 50, f"compromised target should score LOW; got {scan.aivss}"
-    assert len(scan.findings) >= 1, "expected at least one finding against compromised target"
+    # Honest-scoring policy (Phase A.A4 + JDG calibration): in evaluation
+    # mode 'stub', the judge panel's split verdicts (fail+inconclusive)
+    # are mapped to INCONCLUSIVE, so no findings are admitted and the
+    # band is forced to NOT_EVALUATED. The raw AIVSS number is retained
+    # for trend-tracking but is no longer authoritative. We assert the
+    # honest outcome rather than over-claiming a "LOW" band the stub
+    # harness cannot legitimately produce.
+    assert scan.evaluation_mode == "stub"
+    assert scan.scoring_valid is False
+    assert scan.band == SeverityBand.NOT_EVALUATED
+    assert scan.mode_authoritative is False
 
 
 @pytest.mark.asyncio

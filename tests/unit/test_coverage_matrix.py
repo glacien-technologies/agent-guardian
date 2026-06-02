@@ -62,7 +62,7 @@ def test_doc_matches_freshly_generated(generated_markdown: str) -> None:
 
 
 def test_all_ten_asi_rows_present(generated_markdown: str) -> None:
-    for asi in AsiCategory:
+    for asi in list(AsiCategory):
         # Each ASI value should appear in a table row preceded by "| ".
         assert f"| {asi.value} |" in generated_markdown, f"missing ASI table row for {asi.value}"
 
@@ -81,7 +81,7 @@ def test_at_least_ten_atlas_rows(generated_markdown: str) -> None:
 
 
 def test_all_twelve_csa_rows_present(generated_markdown: str) -> None:
-    for cat in CsaCategory:
+    for cat in list(CsaCategory):
         assert f"`{cat.value}`" in generated_markdown, f"missing CSA table row for {cat.value}"
 
 

@@ -268,10 +268,12 @@ def test_route_query_param_executive_picks_executive_template(
     assert resp.status_code == 200, resp.text[:500]
     # Distinguishing marker — Executive's <html> carries data-theme="executive".
     assert 'data-theme="executive"' in resp.text
-    # Locked tab list (5 tabs in locked order).
+    # Locked tab list — QA-030 deleted the Agents tab; 4 tabs remain in
+    # locked order.
     body = resp.text
-    for tab_id in ("tab-overview", "tab-findings", "tab-probes", "tab-agents", "tab-logs"):
+    for tab_id in ("tab-overview", "tab-findings", "tab-probes", "tab-logs"):
         assert f'id="{tab_id}"' in body
+    assert 'id="tab-agents"' not in body
     # The locked findings heading must appear in the Executive theme too.
     assert "All findings so far." in body
 

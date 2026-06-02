@@ -342,17 +342,21 @@ def test_executive_overview_asi_compact_widget_present_before_reproducibility(
     assert twocol_idx < compact_idx < repro_idx
 
 
-def test_executive_overview_asi_compact_preserves_agents_tab(
+def test_executive_overview_asi_compact_widget_present(
     client: TestClient, store: ScanStore
 ) -> None:
-    """QA-033 is a dependency-preserver for QA-030: the Agents-tab content is
-    intentionally left in place by THIS ship. Confirm both surfaces coexist
-    today; QA-030 will delete the Agents tab in its own ship.
+    """QA-033 introduced the Overview ASI compact widget; QA-030 has since
+    deleted the legacy Agents tab and its ``data-component="asi-rows"``
+    partial. Confirm the compact widget still ships on Overview — the rows
+    partial assertion is covered (in the negative) by
+    ``test_executive_clean_control_renders_all_new_partials`` in
+    ``tests/server/test_theme_executive_rendering.py``.
     """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
     # Overview now has the compact widget.
     assert 'data-component="asi-compact"' in body
-    # Agents-tab original rows partial still rendered — untouched here.
-    assert 'data-component="asi-rows"' in body
+    # Agents tab + asi-rows partial were removed by QA-030; the negative
+    # assertion lives in test_theme_executive_rendering.py to avoid
+    # duplicating the lock.

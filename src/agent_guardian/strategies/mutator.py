@@ -70,7 +70,7 @@ class Mutator(Protocol):
     name: ClassVar[str]
 
     def apply(self, text: str, rng: random.Random) -> str:  # pragma: no cover — protocol
-        ...
+        raise NotImplementedError
 
 
 # --------------------------------------------------------------------------- #

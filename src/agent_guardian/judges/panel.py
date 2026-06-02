@@ -178,12 +178,17 @@ class PanelJudge:
             [str(j) for j in self._judges],
         )
 
-        # Concurrent gather, swallow exceptions per seat.
-        async def _call(judge_obj: Any, label: str) -> JudgeVerdict | BaseException:
+        # Concurrent gather, swallow exceptions per seat. ``asyncio.CancelledError``,
+        # ``KeyboardInterrupt`` and ``SystemExit`` are re-raised so cancellation
+        # propagates correctly and the user's Ctrl-C signal is never silently
+        # swallowed (one bad seat must not corrupt task lifecycle).
+        async def _call(judge_obj: Any, label: str) -> JudgeVerdict | Exception:
             try:
                 result: JudgeVerdict = await judge_obj.verdict(prompt, target_response)
                 return result
-            except BaseException as exc:
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
                 return exc
 
         results = await asyncio.gather(
@@ -192,7 +197,7 @@ class PanelJudge:
 
         verdicts: list[JudgeVerdict] = []
         for raw, (_, spec) in zip(results, self._judges, strict=False):
-            if isinstance(raw, BaseException):
+            if isinstance(raw, Exception):
                 _LOG.warning(
                     "PhaseB.B4 panel_seat_exception: family=%s model=%s exc=%s",
                     spec.canonical_family,

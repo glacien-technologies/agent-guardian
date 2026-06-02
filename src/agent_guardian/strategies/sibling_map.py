@@ -26,6 +26,7 @@ Logs are tagged ``PhaseB.B2``.
 
 from __future__ import annotations
 
+import functools
 import logging
 import random
 from typing import TYPE_CHECKING
@@ -97,14 +98,15 @@ def _validate_map() -> None:
 _validate_map()
 
 
-_MAP_LOGGED = False
-
-
+@functools.lru_cache(maxsize=1)
 def _log_map_once() -> None:
-    global _MAP_LOGGED
-    if _MAP_LOGGED:
-        return
-    _MAP_LOGGED = True
+    """Emit the SIBLING_MAP load line at most once per process.
+
+    Implemented via ``functools.lru_cache(maxsize=1)`` so the idempotent
+    behaviour is enforced by the cache (a module-level boolean flag was
+    flagged by CodeQL as ``py/unused-global-variable`` because the read
+    + write both happen inside the same function under ``global``).
+    """
     _LOG.debug(
         "PhaseB.B2 SIBLING_MAP loaded: %d categories mapped",
         len(SIBLING_MAP),

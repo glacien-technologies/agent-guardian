@@ -27,7 +27,7 @@ judges that should not have to round-trip through pytest discovery.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -208,14 +208,6 @@ def load_calibration_set(path: Path | None = None) -> list[CalibrationItem]:
 # --------------------------------------------------------------------------- #
 # Run-a-calibration runner
 # --------------------------------------------------------------------------- #
-
-
-# Judge interface: anything callable that takes (prompt, target_response) and
-# returns an awaitable yielding (verdict, confidence). This intentionally
-# matches the existing Judge / PanelJudge .verdict() signature so the runner
-# composes with both. We use a generic Callable typing rather than importing
-# the Judge ABC so the runner stays decoupled from the agents layer.
-JudgeFn = Callable[[str, str], Awaitable[Any]]
 
 
 async def run_calibration(

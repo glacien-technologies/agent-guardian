@@ -98,13 +98,16 @@ def _build_asi_table(probes: list, asi_to_probe_ids: dict[str, list[str]]) -> st
     lines = [
         "## OWASP Top 10 for Agentic Applications 2026",
         "",
-        "Auto-generated from `src/agent_guardian/probes/asiNN/*.yaml` — one row per ASI category. "
-        "All ten categories are present in the shipped corpus.",
+        (
+            "Auto-generated from `src/agent_guardian/probes/asiNN/*.yaml` — "
+            "one row per ASI category. All ten categories are present in the "
+            "shipped corpus."
+        ),
         "",
         "| ASI | Name | Probe count | Example probe IDs |",
         "|-----|------|-------------|-------------------|",
     ]
-    for asi in AsiCategory:
+    for asi in list(AsiCategory):
         ids = asi_to_probe_ids.get(asi.value, [])
         lines.append(
             f"| {asi.value} | {asi_description(asi)} | {len(ids)} | {_example_probe_ids(ids)} |"
@@ -117,10 +120,13 @@ def _build_atlas_table(atlas_counts: Counter[str], atlas_to_probe_ids: dict[str,
     lines = [
         "## MITRE ATLAS v5.4.0",
         "",
-        "Auto-generated from `mitre_atlas:` entries in every probe YAML. "
-        "Rows are listed for every technique the shipped corpus actually cites "
-        "(no padding, no aspirational entries). Techniques the corpus does not "
-        "yet exercise are flagged honestly rather than hidden.",
+        (
+            "Auto-generated from `mitre_atlas:` entries in every probe YAML. "
+            "Rows are listed for every technique the shipped corpus actually "
+            "cites (no padding, no aspirational entries). Techniques the "
+            "corpus does not yet exercise are flagged honestly rather than "
+            "hidden."
+        ),
         "",
         "| ATLAS Technique | Description | Probe count | Example probe IDs |",
         "|-----------------|-------------|-------------|-------------------|",
@@ -150,15 +156,17 @@ def _build_csa_table(csa_to_probe_ids: dict[str, list[str]]) -> str:
     lines = [
         "## CSA Agentic AI Red Teaming Guide",
         "",
-        "Auto-generated from `csa_category:` entries in every probe YAML. "
-        "All 12 categories from the CSA Agentic AI Red Teaming Guide "
-        "(Huang et al., 2025-05-28) are listed; zero-coverage rows are marked "
-        "honestly rather than dropped.",
+        (
+            "Auto-generated from `csa_category:` entries in every probe YAML. "
+            "All 12 categories from the CSA Agentic AI Red Teaming Guide "
+            "(Huang et al., 2025-05-28) are listed; zero-coverage rows are "
+            "marked honestly rather than dropped."
+        ),
         "",
         "| CSA Category | Name | Probe count | Example probe IDs |",
         "|--------------|------|-------------|-------------------|",
     ]
-    for cat in CsaCategory:
+    for cat in list(CsaCategory):
         ids = csa_to_probe_ids.get(cat.value, [])
         label = _CSA_LABELS[cat]
         example = "(not covered by current corpus)" if not ids else _example_probe_ids(ids)

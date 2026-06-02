@@ -86,8 +86,14 @@ def render_body(
     # Output is JSON, never HTML — every interpolated value is JSON-escaped via
     # the ``json`` filter or ``json_escape()`` upstream. Enabling HTML autoescape
     # would corrupt the JSON (e.g. turn ``"`` into ``&quot;`` mid-string).
+    # Output is application/json sent to upstream LLM HTTP APIs (NOT a
+    # browser). HTML autoescape would corrupt JSON (e.g. `"` -> `&quot;`
+    # mid-string). All user-controlled values are JSON-escaped via the
+    # `json` filter or json_escape() helper before interpolation, which is
+    # the correct escaping for JSON context. StrictUndefined ensures
+    # missing vars fail loud.
     env = jinja2.Environment(  # nosec B701 — JSON output, values pre-escaped via json filter
-        autoescape=False,
+        autoescape=False,  # nosemgrep: python.jinja2.security.audit.autoescape-disabled-false.incorrect-autoescape-disabled — see comment above; JSON output, not browser
         undefined=jinja2.StrictUndefined,
         keep_trailing_newline=False,
     )

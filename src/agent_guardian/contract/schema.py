@@ -123,7 +123,7 @@ def _validate_jinja_template(template: str) -> str:
     # AST parse only; this environment never renders the template — we only
     # walk the parsed Jinja AST via ``meta.find_undeclared_variables``. HTML
     # autoescape is therefore meaningless here.
-    env = Environment(autoescape=False)  # nosec B701 — AST parse only, never rendered
+    env = Environment(autoescape=False)  # nosec B701  # nosemgrep: python.jinja2.security.audit.autoescape-disabled-false.incorrect-autoescape-disabled — AST parse only via env.parse() + meta.find_undeclared_variables(); template is NEVER rendered, never reaches a browser, autoescape is meaningless for AST walking
     try:
         ast = env.parse(template)
     except TemplateSyntaxError as exc:

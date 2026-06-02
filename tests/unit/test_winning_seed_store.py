@@ -184,12 +184,12 @@ def test_query_empty_returns_empty_list(tmp_path: Path) -> None:
 
 def test_concurrent_inserts_are_safe(tmp_path: Path) -> None:
     store = WinningSeedStore(db_path=tmp_path / "seeds.db")
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
 
     def worker(idx: int) -> None:
         try:
             store.insert(_record(target=f"fp-{idx}", text=f"payload-{idx}"))
-        except BaseException as exc:  # pragma: no cover — would fail test below
+        except Exception as exc:  # pragma: no cover — would fail test below
             errors.append(exc)
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]

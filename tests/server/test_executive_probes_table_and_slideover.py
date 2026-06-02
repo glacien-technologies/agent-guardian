@@ -135,10 +135,14 @@ def _seed_memory_jsonl(
 
 
 def _probes_pane(body: str) -> str:
-    """Slice the body to just the ``#tabpanel-probes`` section."""
+    """Slice the body to just the ``#tabpanel-probes`` section.
+
+    QA-030 deleted the Agents tab; the Probes tab is now followed by the
+    Logs tab. Use ``tabpanel-logs`` as the end marker.
+    """
     start = body.find('id="tabpanel-probes"')
     assert start >= 0
-    end = body.find('id="tabpanel-agents"', start)
+    end = body.find('id="tabpanel-logs"', start)
     assert end >= 0
     return body[start:end]
 
