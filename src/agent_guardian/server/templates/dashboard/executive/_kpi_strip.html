@@ -9,18 +9,23 @@
        Overview page. Grid drops from 8 → 6 columns.
 
    QA-044 + QA-039 (2026-06-02):
-     - Hover popover now renders a structured data-table (``kpi-hover-table``)
-       built from ``kpi_hover_tables[key]`` so operators see the breakdown
-       they expected from the metric, not a one-liner repeat of the title.
-     - The ``ⓘ`` button opens a separate prose explainer popover
+     - The ``ⓘ`` button opens a prose explainer popover
        (``kpi-info-popover``) in sentence-case body text with no
        ``text-transform: uppercase`` and reduced letter-spacing.
 
-   QA-040 (2026-06-02):
-     - AIVSS tile mini-chart is now a 5-band horseshoe gauge with a needle
-       at the current score, not a single-arc loading donut. Band thresholds
-       0/40/60/80/90 map to CRITICAL/POOR/WARNING/GOOD/EXCELLENT and reuse
-       the existing ``--exec-sev-*`` brand severity palette.
+   QA-062 (2026-06-03):
+     - Hover data-table popovers were removed from every tile EXCEPT
+       FINDINGS, where the per-severity breakdown is the actual signal
+       (Critical / High / Medium / Low / Total). The other tiles relied on
+       fabricated phase splits or restated the value already on the tile;
+       the prose ⓘ explainer is the single source of detail.
+
+   QA-061 (2026-06-03):
+     - AIVSS tile is now the same plain-text treatment as the BAND tile
+       (big numeric + small band label). Reverses the QA-040/QA-049
+       horseshoe gauge; the gauge restated information already carried by
+       the band pill, so the dependency-free SVG is no longer worth its
+       layout cost.
 
    Each tile reads from the existing shared payload — Executive does NOT
    introduce new KPI fields. Anywhere the value can be live-updated by the
@@ -71,82 +76,13 @@
       AIVSS
       {{ kpi_info('aivss') }}
     </span>
-    {# QA-049 (2026-06-02) — d3-simple-gauge-style 180° AIVSS gauge.
-       Replaces the prior equal-segment horseshoe with a proportionally-sized
-       band axis: critical 0-40 (40°×2), poor 40-60, warning 60-80, good
-       80-90, excellent 90-100 — the same thresholds the BAND tile uses.
-       Major ticks anchor zone boundaries; minor ticks at each decile give
-       the operator a quick way to read off the score without leaning on the
-       centre label. A pure-SVG component (no d3 dependency); the needle
-       animates 0 → current_score on first render via CSS transition.
-       Hover surfaces an `aivss = X · band Y` tooltip via `title`. #}
-    {% set _pct = kpi_chart_data.aivss_pct | default(0) | float %}
-    {% set _angle = -90.0 + (180.0 * _pct / 100.0) %}
-    <span class="exec-kpi__chart exec-kpi__chart--aivss-gauge"
-          data-component="aivss-gauge"
-          data-band="{{ band_class }}"
-          data-score-pct="{{ _pct }}"
-          data-target-angle="{{ _angle }}"
-          aria-hidden="true">
-      <svg viewBox="0 0 240 140" preserveAspectRatio="xMidYMid meet"
-           class="exec-kpi__gauge-svg" role="img">
-        <title>AIVSS = {{ aivss_label }} · band {{ band_label }}</title>
-        {#  Geometry — centre at (120, 120), outer radius 100, stroke width
-            16. Arcs use the SVG arc command A rx ry x-axis-rotation
-            large-arc-flag sweep-flag x y. The five segments butt against
-            each other at the AIVSS band thresholds 0/40/60/80/90/100. #}
-        <path class="gauge-arc gauge-arc--critical"
-              d="M 20.00 120.00 A 100 100 0 0 1 89.10 24.89"
-              fill="none" stroke-width="16" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--poor"
-              d="M 89.10 24.89 A 100 100 0 0 1 150.90 24.89"
-              fill="none" stroke-width="16" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--warning"
-              d="M 150.90 24.89 A 100 100 0 0 1 200.90 61.22"
-              fill="none" stroke-width="16" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--good"
-              d="M 200.90 61.22 A 100 100 0 0 1 215.10 89.10"
-              fill="none" stroke-width="16" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--excellent"
-              d="M 215.10 89.10 A 100 100 0 0 1 220.00 120.00"
-              fill="none" stroke-width="16" stroke-linecap="butt"/>
-
-        {# Major ticks at zone boundaries (0/40/60/80/90/100). Each tick
-           is a short radial line from the outer arc edge to a hair past
-           it; positioned by transforming a vertical line through the
-           gauge centre by the angle that maps to the threshold. #}
-        {% set _major_thresholds = [0, 40, 60, 80, 90, 100] %}
-        {% for _t in _major_thresholds %}
-          {% set _ta = -90.0 + (180.0 * _t / 100.0) %}
-          <line class="gauge-tick gauge-tick--major"
-                x1="120" y1="14" x2="120" y2="26"
-                transform="rotate({{ _ta }} 120 120)"/>
-        {% endfor %}
-
-        {# Minor ticks at each decile that isn't already a major. #}
-        {% for _t in [10, 20, 30, 50, 70] %}
-          {% set _ta = -90.0 + (180.0 * _t / 100.0) %}
-          <line class="gauge-tick gauge-tick--minor"
-                x1="120" y1="18" x2="120" y2="24"
-                transform="rotate({{ _ta }} 120 120)"/>
-        {% endfor %}
-
-        {# Needle — animates from straight-down (rest) to the target
-           angle. The transform's CSS transition is keyed off the value
-           in inline style so the needle motion plays once on load. #}
-        <g class="gauge-needle"
-           style="transform: rotate({{ _angle }}deg); transform-origin: 120px 120px;">
-          <polygon points="120,30 116,120 124,120"
-                   fill="currentColor" stroke="none"/>
-          <circle cx="120" cy="120" r="5" fill="currentColor"/>
-        </g>
-      </svg>
-      <span class="exec-kpi__gauge-center">
-        <span class="exec-kpi__gauge-score" data-live="aivss">{{ aivss_label }}</span>
-        <span class="exec-kpi__gauge-band exec-kpi__gauge-band--{{ band_class }}">{{ band_label }}</span>
-      </span>
-    </span>
-    {{ kpi_hover_table('aivss') }}
+    {# QA-061 (2026-06-03) — AIVSS tile is now the same plain-text treatment as
+       the BAND tile: big numeric score + small band label. Reverses the
+       QA-040/QA-049 horseshoe gauge (the gauge restated information already
+       carried by the band pill, and the centre-anchored numeric was the
+       primary scan signal anyway). #}
+    <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="aivss">{{ aivss_label }}</span>
+    <span class="exec-kpi__sub exec-kpi__sub--{{ band_class }}" data-live="band">{{ band_label }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="band">
@@ -164,7 +100,8 @@
         <span class="exec-kpi__band-seg exec-kpi__band-seg--{{ cls }}{% if loop.index0 == _seg %} exec-kpi__band-seg--active{% endif %}"></span>
       {% endfor %}
     </span>
-    {{ kpi_hover_table('band') }}
+    {# QA-062 (2026-06-03) — hover data-table dropped from every tile except
+       FINDINGS; the prose ⓘ explainer remains the single source of detail. #}
   </div>
 
   <div class="exec-kpi" data-kpi="findings">
@@ -218,7 +155,6 @@
         </span>
       {% endif %}
     </span>
-    {{ kpi_hover_table('elapsed') }}
   </div>
 
   <div class="exec-kpi" data-kpi="cost">
@@ -237,7 +173,6 @@
         </span>
       {% endif %}
     </span>
-    {{ kpi_hover_table('cost') }}
   </div>
 
   <div class="exec-kpi" data-kpi="coverage">
@@ -254,7 +189,6 @@
         <span class="exec-kpi__cov-cell{% if i < _covered %} exec-kpi__cov-cell--on{% endif %}"></span>
       {% endfor %}
     </span>
-    {{ kpi_hover_table('coverage') }}
   </div>
 
 </section>

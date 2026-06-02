@@ -235,46 +235,25 @@ def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
 
 def _build_kpi_hover_tables(
     *,
-    scan: Scan | None,
     counts: dict[str, int],
     findings_total: int,
-    asi_rows: list[dict[str, Any]],
-    elapsed: float,
-    elapsed_label: str,
-    asi_covered: int,
 ) -> dict[str, list[dict[str, str]]]:
-    """Build the per-tile hover data-table payload.
+    """Build the FINDINGS-tile hover data-table payload.
 
-    QA-044 (2026-06-02) — every KPI tile now reveals a small data table
-    on hover. Rather than build the strings in Jinja, we assemble them
-    here so the row order is deterministic and unit-testable.
+    QA-044 (2026-06-02) introduced a per-tile hover data table on every
+    KPI tile.
 
-    Each value is a plain dict ``{"label": str, "value": str}`` (no
+    QA-062 (2026-06-03) dropped the hover popover for every tile EXCEPT
+    FINDINGS: the other tiles either restated the value already on the
+    tile (AIVSS / BAND) or showed a fabricated 15/55/30 phase split
+    (ELAPSED / COST) we never had real data for. Keeping only FINDINGS
+    leaves the one tile where the breakdown is the actual signal — the
+    per-severity count operators are reading to triage.
+
+    Each row is a plain dict ``{"label": str, "value": str}`` (no
     ``class`` is needed today; the field is reserved for future
     severity-tinted rows).
     """
-    score_val = float(scan.aivss) if scan is not None else 0.0
-    cost_total = float(scan.cost_usd) if scan is not None else 0.0
-    tokens_total = int(scan.tokens_total) if scan is not None else 0
-
-    # AIVSS — top 5 ASI sub-scores so the hover table fits the tile width.
-    aivss_rows: list[dict[str, str]] = []
-    for row in asi_rows[:5]:
-        aivss_rows.append(
-            {"label": str(row.get("code", "—")), "value": f"{row.get('score_label', '—')}"}
-        )
-    aivss_rows.append({"label": "Composite", "value": f"{score_val:.0f}"})
-
-    # BAND — the threshold scale (mirrors the gauge bands).
-    band_rows: list[dict[str, str]] = [
-        {"label": "Critical", "value": "0-39"},
-        {"label": "Poor", "value": "40-59"},
-        {"label": "Warning", "value": "60-79"},
-        {"label": "Good", "value": "80-89"},
-        {"label": "Excellent", "value": "90-100"},
-    ]
-
-    # FINDINGS — severity counts.
     findings_rows: list[dict[str, str]] = [
         {"label": "Critical", "value": str(counts.get("critical", 0))},
         {"label": "High", "value": str(counts.get("high", 0))},
@@ -282,53 +261,7 @@ def _build_kpi_hover_tables(
         {"label": "Low", "value": str(counts.get("low", 0))},
         {"label": "Total", "value": str(findings_total)},
     ]
-
-    # ELAPSED — best-effort phase split. The Scan model does not surface
-    # per-phase wall-clock today; we approximate from the overall elapsed
-    # so the tile renders something meaningful while the real per-phase
-    # roll-up is being threaded through (TODO: wire ``scan.audit['phases']``
-    # when the swarm runner emits it).
-    elapsed_rows: list[dict[str, str]] = [
-        {"label": "Total", "value": elapsed_label},
-    ]
-    if elapsed > 0:
-        # 15/55/30 split is the historical AIVSS test-runner ratio
-        # (commander dispatch vs attacker probes vs evaluator grading);
-        # used here as a presentation default — replace once the runner
-        # surfaces real per-phase durations.
-        elapsed_rows.append({"label": "Commander", "value": _humanise_seconds(elapsed * 0.15)})
-        elapsed_rows.append({"label": "Attacker", "value": _humanise_seconds(elapsed * 0.55)})
-        elapsed_rows.append({"label": "Evaluator", "value": _humanise_seconds(elapsed * 0.30)})
-
-    # COST — token-spend by phase (same caveat as elapsed).
-    cost_rows: list[dict[str, str]] = [
-        {"label": "Total", "value": f"$ {cost_total:.2f}"},
-        {"label": "Tokens", "value": _humanise_int(tokens_total)},
-    ]
-    if cost_total > 0:
-        cost_rows.append({"label": "Commander", "value": f"$ {cost_total * 0.15:.2f}"})
-        cost_rows.append({"label": "Attacker", "value": f"$ {cost_total * 0.55:.2f}"})
-        cost_rows.append({"label": "Evaluator", "value": f"$ {cost_total * 0.30:.2f}"})
-
-    # COVERAGE — per-ASI status (the 10 OWASP categories).
-    coverage_rows: list[dict[str, str]] = []
-    for row in asi_rows:
-        coverage_rows.append(
-            {
-                "label": str(row.get("code", "—")),
-                "value": ("covered" if sum((row.get("findings") or {}).values()) > 0 else "—"),
-            }
-        )
-    coverage_rows.append({"label": "Covered", "value": f"{asi_covered}/10"})
-
-    return {
-        "aivss": aivss_rows,
-        "band": band_rows,
-        "findings": findings_rows,
-        "elapsed": elapsed_rows,
-        "cost": cost_rows,
-        "coverage": coverage_rows,
-    }
+    return {"findings": findings_rows}
 
 
 def _asi_rows(
@@ -764,37 +697,42 @@ def build_dashboard_context(
         # ``ⓘ`` popover (``.exec-kpi__desc-popover``) instead of an always-on
         # ``.exec-kpi__desc`` block — payload key is unchanged, only the
         # template render mode flipped.
-        # QA-039 / QA-044 (2026-06-02) — these prose explainers are now
-        # surfaced behind the ``ⓘ`` button (separate from the hover data
-        # table). They are deliberately rendered in sentence case + body
-        # type (see ``.kpi-info-popover`` in executive.css); the previous
-        # ALL-CAPS + tight letter-spacing look was dropped.
+        # QA-039 / QA-044 / QA-067 (2026-06-03) — these prose explainers
+        # are surfaced behind the ``ⓘ`` button. They are written in
+        # sentence case (acronyms preserved: AIVSS, ASI, USD) and read as
+        # short body-scale paragraphs in ``.kpi-info-popover`` (see
+        # ``executive.css`` §3 — the popover renders without
+        # ``text-transform: uppercase`` and without letter-spacing).
+        # QA-062 (2026-06-03) — hover data tables were dropped from every
+        # tile except FINDINGS, so the "hover the tile for X" callouts
+        # were removed from the other tiles' prose to avoid pointing the
+        # operator at a surface that no longer exists.
         "kpi_descriptions": {
             "aivss": (
-                "Composite agent safety score (0-100). A weighted average "
-                "across the ten OWASP ASI sub-scores, blended with the "
-                "tier-specific scoring formula."
+                "Composite agent safety score on a 0-100 scale. It is a "
+                "weighted average across the ten OWASP ASI sub-scores, "
+                "blended with the tier-specific scoring formula."
             ),
             "band": (
                 "Risk tier mapped from the AIVSS composite. Thresholds "
-                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 good, "
-                "90-100 excellent."
+                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 "
+                "good, and 90-100 excellent."
             ),
             "findings": (
                 "Total exploit attempts the evaluator graded as valid. "
                 "Hover the tile for the per-severity breakdown."
             ),
             "elapsed": (
-                "Wall-clock duration of the scan from the first probe "
-                "dispatch through the final evaluator verdict."
+                "Wall-clock duration of the scan, measured from the "
+                "first probe dispatch through the final evaluator "
+                "verdict."
             ),
             "cost": (
-                "Estimated model spend in USD for this scan, summed "
+                "Estimated model spend for this scan in USD, summed "
                 "across the commander, attacker, and evaluator phases."
             ),
             "coverage": (
-                "Probe categories exercised out of the ten OWASP ASI "
-                "dimensions. Hover the tile for the per-category status."
+                "Number of probe categories exercised out of the ten OWASP ASI dimensions."
             ),
         },
         # QA-044 (2026-06-02) — structured hover data tables. Each entry
@@ -802,14 +740,11 @@ def build_dashboard_context(
         # renders as a small table inside ``.exec-kpi__hover-table``. We
         # build it here rather than in Jinja so the row order stays Python-
         # sorted and the breakdown matches what unit tests assert against.
+        # QA-062 (2026-06-03) — only FINDINGS still surfaces a hover table;
+        # the other tiles dropped the popover so we only build the one row.
         "kpi_hover_tables": _build_kpi_hover_tables(
-            scan=scan,
             counts=counts,
             findings_total=findings_total,
-            asi_rows=asi_rows,
-            elapsed=elapsed,
-            elapsed_label=_humanise_seconds(elapsed),
-            asi_covered=asi_covered,
         ),
         # QA-028 sub-ask 2 — per-tile inline-SVG mini-charts. The KPI strip
         # template reads this dict to draw a 64px-tall visualisation inside

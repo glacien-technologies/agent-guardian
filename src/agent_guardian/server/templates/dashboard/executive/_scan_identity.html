@@ -1,0 +1,55 @@
+{# Executive — Scan identity block (Overview only).
+
+   QA-066 (2026-06-03) — lifted from the Reproducibility receipt. The
+   7-row fingerprint (SCAN_ID / SEED / GUARDIAN / AIVSS / PROBES /
+   TARGET / EVIDENCE) is the cheapest "what scan am I looking at"
+   answer, so it now sits ABOVE the KPI strip on Overview as a
+   sentence-case "Scan identity" header. The Reproducibility section
+   below still hosts the rerun shell command + Copy button.
+
+   Payload fields consumed (shared view-model, same as Reproducibility):
+     - scan_id
+     - rng_seed
+     - package_version          (GUARDIAN)
+     - aivss_formula_version    (AIVSS)
+     - probe_library_version    (PROBES)
+     - target_ref               (TARGET)
+     - evidence_fingerprint     (EVIDENCE)
+#}
+<section class="exec-callout exec-callout--identity"
+         id="exec-scan-identity"
+         data-component="scan-identity"
+         role="group"
+         aria-labelledby="exec-scan-identity-label">
+  <p class="exec-callout__label" id="exec-scan-identity-label">Scan identity</p>
+  <dl class="exec-callout__grid">
+    <div class="exec-callout__row">
+      <dt>SCAN_ID</dt>
+      <dd><span class="exec-mono-inline">{{ scan_id }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>SEED</dt>
+      <dd><span class="exec-mono-inline">{{ rng_seed }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>GUARDIAN</dt>
+      <dd><span class="exec-mono-inline">{{ package_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>AIVSS</dt>
+      <dd><span class="exec-mono-inline">{{ aivss_formula_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>PROBES</dt>
+      <dd><span class="exec-mono-inline">{{ probe_library_version }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>TARGET</dt>
+      <dd><span class="exec-mono-inline">{{ target_ref }}</span></dd>
+    </div>
+    <div class="exec-callout__row">
+      <dt>EVIDENCE</dt>
+      <dd><span class="exec-mono-inline">{{ evidence_fingerprint }}</span></dd>
+    </div>
+  </dl>
+</section>

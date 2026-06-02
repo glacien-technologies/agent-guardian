@@ -155,8 +155,11 @@ def test_executive_kpi_info_popover_css_drops_uppercase(client: TestClient) -> N
 @pytest.mark.parametrize(
     "key,component",
     [
-        # QA-040 — AIVSS tile mini-chart is now the horseshoe gauge.
-        ("aivss", "aivss-gauge"),
+        # QA-061 (2026-06-03) — AIVSS tile no longer renders a mini-chart;
+        # it uses the same plain-text big-numeric + band-label treatment
+        # as the BAND tile and is exercised by
+        # ``test_executive_aivss_tile_renders_plain_text_after_qa_061``
+        # below instead of this parametrisation.
         ("band", "kpi-chart-band"),
         ("findings", "kpi-chart-findings"),
         ("elapsed", "kpi-chart-elapsed"),
@@ -174,6 +177,25 @@ def test_executive_kpi_tile_renders_mini_chart(
     assert f'data-component="{component}"' in body, (
         f"KPI tile {key!r} missing mini-chart component {component!r}"
     )
+
+
+def test_executive_aivss_tile_renders_plain_text_after_qa_061(
+    client: TestClient, store: ScanStore
+) -> None:
+    """QA-061 (2026-06-03) — AIVSS tile is plain-text (big numeric + band
+    label) and the horseshoe gauge is gone. The tile MUST NOT carry the
+    ``aivss-gauge`` data-component anymore, but it MUST still carry the
+    ``data-live="aivss"`` hook the SSE patcher uses to update the score.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    # Gauge is gone.
+    assert 'data-component="aivss-gauge"' not in body
+    assert "gauge-arc--critical" not in body
+    assert "gauge-needle" not in body
+    # Plain-text treatment is present.
+    assert 'data-live="aivss"' in body
 
 
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
