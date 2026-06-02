@@ -48,6 +48,20 @@ If the issue is being actively exploited in the wild, we may shorten the embargo
 
 Researchers we have credited for coordinated disclosures are listed in [`docs/security/disclosure-history.md`](docs/security/disclosure-history.md#hall-of-fame). Crediting is opt-in; you may choose named, pseudonymous, or anonymous attribution.
 
+## Acknowledged transitive risks
+
+We track open advisories on transitive dependencies here so users and
+auditors can see what we are (and are not) exposed to. Anything listed
+below is a **deliberate holding action** — not an oversight — and
+will be cleared once an upstream fix lands.
+
+| Advisory                  | Affected package | Vulnerable range   | First patched | AgentGuardian exposure | Holding action |
+|---------------------------|------------------|--------------------|---------------|-----------------------|----------------|
+| GHSA-f4j7-r4q5-qw2c / CVE-2026-45829 (pre-auth code injection, CVSSv4 9.3) | `chromadb` | `>=1.0.0,<=1.5.9` | none yet (as of 2026-06-02) | **None at runtime.** `chromadb` is a transitive of `crewai` and only lands in the install tree under the opt-in `examples-crewai` extra. The AgentGuardian package never imports `chromadb`. The CrewAI adapter in `src/agent_guardian/adapters/framework/crewai.py` is duck-typed and does not `import crewai`. The CVE is a server-side RCE — pulling the library into `site-packages` without running its server is not exploitable on its own. | `pyproject.toml` carries a commented overlay pin under `[project.optional-dependencies].examples-crewai` that maintainers will uncomment the moment chroma-core publishes a patched release. Track upstream: [chroma-core/chroma](https://github.com/chroma-core/chroma). |
+
+If you believe one of the rows above mis-characterises the exposure,
+please open a private advisory via the channel at the top of this file.
+
 ## Supply-chain integrity
 
 Every release wheel and sdist is signed via Sigstore (keyless OIDC through GitHub Actions). The publish workflow attaches the signatures, a CycloneDX SBOM, and PEP-740 attestations to the corresponding GitHub Release. See [`docs/security/reproducible-builds.md`](docs/security/reproducible-builds.md) for the byte-for-byte rebuild protocol.
