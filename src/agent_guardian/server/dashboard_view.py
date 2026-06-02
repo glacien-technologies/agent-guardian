@@ -126,6 +126,28 @@ _ASI_ROW_META: dict[str, tuple[str, str, float, bool]] = {
 }
 
 
+# QA-060 (2026-06-03) — friendly skip-reason strings keyed off the agent
+# class name (matches :attr:`AsiAgent.name`). The swarm currently writes
+# the generic ``"not applicable for fingerprint"`` for every gating
+# predicate that fires in :meth:`AsiAgent.is_applicable`; operators reading
+# the Recon panel's "Skipped agents" table need to know WHICH capability
+# gap rejected the agent so they can either add the capability declaration
+# (for a real target) or accept the skip as intentional. The map below
+# encodes the predicate each known agent applies, in plain language. Any
+# agent absent from the map (e.g. a future specialist) falls back to the
+# original generic reason — no silent rewriting of unknown predicates.
+_SKIP_REASON_BY_AGENT: dict[str, str] = {
+    "memory-poison-agent": "target does not declare memory capability",
+    "a2a-agent": "target is single-agent (no orchestrator surface)",
+    "code-exec-agent": "target does not declare code-execution tools",
+    "tool-abuse-agent": "target does not declare any tools",
+}
+# The placeholder we override when present. Reasons that don't match this
+# token pass through unchanged — preserves any future custom reason a
+# specialist agent might write.
+_GENERIC_SKIP_REASON: Final[str] = "not applicable for fingerprint"
+
+
 @dataclass(frozen=True)
 class DashboardContext:
     """Resolved template context for ``dashboard/scan_detail.html``.
@@ -911,10 +933,23 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
           "declared_guardrails": list[str],
           "profile_source": str,
           "profile_confidence": float,
-          "system_prompt_clues": str,   # truncated notes/clue field
-          "system_prompt_clues_full": str,  # full text for "view raw"
           "skipped_agents": list[{agent, asi, reason}],
         }
+
+    QA-059 (2026-06-03) — the ``system_prompt_clues`` /
+    ``system_prompt_clues_full`` fields were removed: the recon panel
+    no longer surfaces the legacy "Recon context" row (operators read
+    the raw `TargetFingerprint.notes` either as a leaked prompt or as
+    duplicative recon metadata, neither helpful). The capability chips
+    + endpoint row carry the same signal in a clearer shape.
+
+    QA-060 (2026-06-03) — ``skipped_agents[*].reason`` is rewritten
+    from the swarm's generic ``"not applicable for fingerprint"`` to
+    the specific capability gap that gated the agent off (e.g.
+    ``"target does not declare memory capability"``). The mapping
+    keys off the agent class name and lives in
+    :data:`_SKIP_REASON_BY_AGENT`. Reasons that don't match the
+    generic placeholder pass through unchanged.
 
     Returns an empty / disabled dict when ``scan_dir`` is ``None``, the
     file is missing, or no fingerprint record has been written yet
@@ -942,8 +977,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "declared_guardrails": [],
         "profile_source": "",
         "profile_confidence": 0.0,
-        "system_prompt_clues": "",
-        "system_prompt_clues_full": "",
         "skipped_agents": [],
     }
     if scan_dir is None:
@@ -973,11 +1006,24 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
                 elif rtype == "agent_skipped":
                     payload = rec.get("payload")
                     if isinstance(payload, dict):
+                        agent_name = str(payload.get("agent", ""))
+                        raw_reason = str(payload.get("reason", ""))
+                        # QA-060 — rewrite the swarm's generic
+                        # "not applicable for fingerprint" placeholder
+                        # to the specific capability gap that gated
+                        # this agent off. Any agent absent from
+                        # `_SKIP_REASON_BY_AGENT` keeps the raw reason
+                        # (covers future specialists + any custom
+                        # reason a specialist already writes).
+                        if raw_reason == _GENERIC_SKIP_REASON:
+                            reason = _SKIP_REASON_BY_AGENT.get(agent_name, raw_reason)
+                        else:
+                            reason = raw_reason
                         skipped.append(
                             {
-                                "agent": str(payload.get("agent", "")),
+                                "agent": agent_name,
                                 "asi": str(payload.get("asi", "")),
-                                "reason": str(payload.get("reason", "")),
+                                "reason": reason,
                             }
                         )
     except OSError as exc:  # pragma: no cover — disk-level failure
@@ -995,10 +1041,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
 
     declared_tools = list(latest_fp.get("declared_tools") or [])
     declared_memory_keys = list(latest_fp.get("declared_memory_keys") or [])
-    notes_full = str(latest_fp.get("notes") or "")
-    # Truncate clues to ~160 chars for the inline render; the full text
-    # lives behind the <details> raw view.
-    clues_short = notes_full[:160].rsplit(" ", 1)[0] + "…" if len(notes_full) > 160 else notes_full
     return {
         "has_data": True,
         "framework_family": (
@@ -1027,8 +1069,6 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "declared_guardrails": list(latest_fp.get("declared_guardrails") or []),
         "profile_source": str(latest_fp.get("profile_source") or "heuristic"),
         "profile_confidence": float(latest_fp.get("profile_confidence") or 0.0),
-        "system_prompt_clues": clues_short,
-        "system_prompt_clues_full": notes_full,
         "skipped_agents": skipped,
     }
 

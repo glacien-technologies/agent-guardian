@@ -17,8 +17,6 @@
      - inferred_goal / domain
      - sensitive_actions / declared_guardrails
      - profile_source / profile_confidence
-     - system_prompt_clues       — truncated notes
-     - system_prompt_clues_full  — full text for the <details> raw view
      - skipped_agents            — list[{agent, asi, reason}]
 
    When ``has_data`` is False the panel renders a single pending line
@@ -36,11 +34,10 @@
     </h2>
     {# QA-049 (2026-06-02) — the verbose subtitle (`What the recon agent
        learned… profile source X · confidence Y`) was dropped: the same
-       provenance data is already surfaced in the panel rows (and the
-       `View raw` drawer below the recon-context field), so the subtitle
-       was duplicating information without adding signal. The pending-state
-       prose stays — the operator otherwise stares at an empty panel for
-       the first few seconds of a scan. #}
+       provenance data is already surfaced in the panel rows below, so
+       the subtitle was duplicating information without adding signal.
+       The pending-state prose stays — the operator otherwise stares at
+       an empty panel for the first few seconds of a scan. #}
     {% if not recon_summary.has_data %}
       <p class="exec-section-lede exec-recon__lede">
         Recon agent has not finished its sweep yet. Capability
@@ -53,16 +50,23 @@
   {% if recon_summary.has_data %}
     <dl class="exec-recon__grid">
       {# Framework family — the LLM scaffold / agent framework the
-         recon agent detected. Unknown is honest: many HTTP targets
-         expose no framework hint. #}
-      <div class="exec-recon__row">
-        <dt class="exec-recon__dt">Framework family</dt>
-        <dd class="exec-recon__dd">
-          <span class="exec-mono-inline">{{ recon_summary.framework_family }}</span>
-        </dd>
-      </div>
+         recon agent detected. QA-057 (2026-06-03) — only render the
+         row when the recon agent confirmed a framework (e.g.
+         LangGraph / OpenAI Agents). Plain HTTP targets expose no
+         framework hint, so `framework_family == "Unknown"` (the
+         honest default from `_assemble_recon_summary`) is noise:
+         the row was reading as a known signal when it was actually
+         "no signal", which routinely confused operators. #}
+      {% if recon_summary.framework_family and recon_summary.framework_family not in ("Unknown", "—") %}
+        <div class="exec-recon__row">
+          <dt class="exec-recon__dt">Framework family</dt>
+          <dd class="exec-recon__dd">
+            <span class="exec-mono-inline">{{ recon_summary.framework_family }}</span>
+          </dd>
+        </div>
+      {% endif %}
 
-      {# Target — mode + adapter ref. Mode is the transport
+      {# Endpoint — mode + adapter ref. Mode is the transport
          (prompt / code / http / framework); ref is the resolvable
          pointer (URL / module path / prompt id).
 
@@ -71,9 +75,13 @@
          inline `exec-recon__target-cell` so they cling together as
          one logical value rather than reading as two unrelated chips.
          Row shape now matches FRAMEWORK FAMILY / INFERRED GOAL —
-         label + single value cell. #}
+         label + single value cell.
+
+         QA-056 (2026-06-03) — label relabelled from "Target" to
+         "Endpoint" (one-word). The HTTP-mode badge keeps clinging to
+         the URL inside the same target-cell wrapper. #}
       <div class="exec-recon__row">
-        <dt class="exec-recon__dt">Target</dt>
+        <dt class="exec-recon__dt">Endpoint</dt>
         <dd class="exec-recon__dd">
           <span class="exec-recon__target-cell">
             <span class="exec-recon__chip exec-recon__chip--mode">{{ recon_summary.target_mode }}</span>
@@ -197,36 +205,17 @@
         </div>
       {% endif %}
 
-      {# Recon-context clues. QA-049 (2026-06-02) — relabelled from the
-         legacy "System-prompt clues" wording: the field surfaces what
-         the recon agent observed (scan mode, transport, declared shape
-         from `TargetFingerprint.notes`), not the agent's actual system
-         prompt. The old label routinely tripped operators who expected
-         a leaked prompt and instead saw scan metadata.
-
-         The truncated string renders inline; the full raw text lives
-         behind a <details> so the operator can audit what the recon
-         agent actually wrote without bloating the panel. #}
-      {% if recon_summary.system_prompt_clues_full %}
-        <div class="exec-recon__row exec-recon__row--wide">
-          <dt class="exec-recon__dt">
-            Recon context
-            <span class="exec-recon__hint">
-              Scan mode, transport, and shape detected during recon —
-              not the agent's actual prompt.
-            </span>
-          </dt>
-          <dd class="exec-recon__dd">
-            <span class="exec-recon__clues">{{ recon_summary.system_prompt_clues }}</span>
-            {% if recon_summary.system_prompt_clues_full != recon_summary.system_prompt_clues %}
-              <details class="exec-recon__clues-raw">
-                <summary>View raw</summary>
-                <pre class="exec-recon__clues-pre">{{ recon_summary.system_prompt_clues_full }}</pre>
-              </details>
-            {% endif %}
-          </dd>
-        </div>
-      {% endif %}
+      {# QA-059 (2026-06-03) — the legacy "Recon context" row (and its
+         former "System-prompt clues" wording) has been removed. The
+         field surfaced `TargetFingerprint.notes` verbatim: scan mode,
+         transport, and shape detected during recon. Operators read
+         it as either a leaked system prompt (the old label) OR as
+         duplicative recon metadata (the QA-049 relabel) — neither
+         framing carried weight. The capability chips + endpoint row
+         already surface the same provenance signal. The
+         `system_prompt_clues` / `system_prompt_clues_full` fields
+         were dropped from `_assemble_recon_summary` in the same
+         change; no other template consumes them. #}
 
       {# Skipped agents — mirror the swarm INFO log row that said
          "ASIxx skipped — reason". Surfaced here so the operator
