@@ -1081,10 +1081,7 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
     notes_full = str(latest_fp.get("notes") or "")
     # Truncate clues to ~160 chars for the inline render; the full text
     # lives behind the <details> raw view.
-    if len(notes_full) > 160:
-        clues_short = notes_full[:160].rsplit(" ", 1)[0] + "…"
-    else:
-        clues_short = notes_full
+    clues_short = notes_full[:160].rsplit(" ", 1)[0] + "…" if len(notes_full) > 160 else notes_full
     return {
         "has_data": True,
         "framework_family": (
