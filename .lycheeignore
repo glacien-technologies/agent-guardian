@@ -1,3 +1,9 @@
+# gif.ski is a small open-source GIF encoder homepage; the project owner's
+# server occasionally times out (35s+) during burst CI windows. The link is
+# a casual "use this tool to convert mp4 -> gif" reference in
+# docs/_assets/README.md, not a runtime dependency. Suppress to keep CI green.
+^https://gif\.ski/?$
+
 # Mintlify docs apex subroutes not yet published. The docs site is live at
 # docs.agentguardian.io; the apex `agentguardian.io` README links are
 # aspirational. Remove these entries once the Mintlify IA ships these routes.

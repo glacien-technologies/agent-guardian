@@ -44,12 +44,18 @@ def test_readme_does_not_imply_nist_rmf_alignment_for_agent_guardian() -> None:
 @pytest.mark.parametrize(
     "rel_path",
     [
-        "docs.legacy/reference/roadmap.md",
-        "docs.legacy/security/threat-model.md",
+        "docs/reference/roadmap.md",
     ],
 )
 def test_docs_nist_sp800_218a_not_advertised(rel_path: str) -> None:
-    """Roadmap + threat-model — any NIST AI RMF mention must carry a deferral qualifier."""
+    """Roadmap — any NIST AI RMF mention must carry a deferral qualifier.
+
+    The legacy mkdocs tree (`docs.legacy/`) was removed once the Mintlify
+    migration landed; the invariant now lives against the canonical
+    Mintlify roadmap. The companion `threat-model.md` no longer exists in
+    the canonical tree — when it returns under `docs/security/`, add it
+    back to the parametrize list.
+    """
     text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     # Walk every paragraph that mentions NIST AI RMF and confirm it carries
     # one of the deferral qualifiers.
