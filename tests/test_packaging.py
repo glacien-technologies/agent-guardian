@@ -7,7 +7,7 @@ silently regress the PyPI listing once we're shipping at scale.
 What we pin:
 
 1. **Project metadata sanity** — package name, dynamic version, license, the
-   set of "must-have" classifiers (Production/Stable + AI topic + Python 3.10+
+   set of "must-have" classifiers (Production/Stable + AI topic + Python 3.11+
    matrix), and the documented keyword expansion (prompt-injection, jailbreak,
    ai-safety, ai-security, llm-security, genai-security, sarif, cybersecurity,
    ai-red-team).
@@ -24,24 +24,19 @@ What we pin:
    ``agent-guardian`` with the dashboard port exposed; the docker-compose file
    must mount the dashboard.
 
-We use ``tomllib`` (stdlib on 3.11+, ``tomli`` backport on 3.10) so the test
-has no external deps beyond what is already pulled in as a dev dependency.
+We use ``tomllib`` (stdlib on 3.11+) so the test has no external deps beyond
+what is already pulled in as a dev dependency.
 """
 
 from __future__ import annotations
 
 import re
-import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
 import yaml
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - py3.10 fallback
-    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -64,7 +59,7 @@ def test_project_table_basics() -> None:
     assert project["name"] == "agent-guardian"
     assert project["dynamic"] == ["version"]
     assert project["license"] == {"text": "Apache-2.0"}
-    assert project["requires-python"] == ">=3.10,<3.14"
+    assert project["requires-python"] == ">=3.11,<3.14"
 
 
 def test_required_classifiers_present() -> None:
@@ -86,7 +81,6 @@ def test_required_classifiers_present() -> None:
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Security",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",

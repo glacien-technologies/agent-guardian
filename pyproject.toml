@@ -7,7 +7,7 @@ name = "agent-guardian"
 dynamic = ["version"]
 description = "Open-source red teaming toolkit for AI agents, RAG systems, MCP servers, and tool-using LLM applications."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Glacien Pte. Ltd.", email = "opensource@glacien.ai" }]
 keywords = [
@@ -41,7 +41,6 @@ classifiers = [
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -274,7 +273,7 @@ include = ["src/", "tests/", "README.md", "LICENSE", "NOTICE", "CITATION.cff"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
@@ -285,7 +284,7 @@ ignore = ["E501"]
 "src/agent_guardian/cli.py" = ["B008"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

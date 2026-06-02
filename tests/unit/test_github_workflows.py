@@ -9,9 +9,10 @@ cannot regress silently:
   ``/projects/0000`` placeholder and the Discord all-zero server ID.
 * ``link-check.yml`` — lychee link check over ``README.md`` and
   ``docs/**/*.md`` that fails on any broken external link.
-* ``ci.yml`` — cross-platform test matrix (Linux + macOS + Windows)
-  with a single Codecov upload pinned to ubuntu / 3.11 and the
-  Windows leg using the ``pdf-fallback`` extra.
+* ``ci.yml`` — supported-platform test matrix (Linux + macOS, Python
+  3.11/3.12/3.13) with a single Codecov upload pinned to ubuntu / 3.11.
+  Windows + Python 3.10 are tracked as v1.1 portability work in the
+  Guardian backlog (QA-038).
 
 The tests parse the workflow YAML; they intentionally do *not* try to
 run ``act`` or invoke the GitHub API. The goal is fast PR-time
@@ -177,13 +178,17 @@ def test_link_check_fails_on_broken_links() -> None:
 # -------------------------------------------------------------------------- ci
 
 
-def test_ci_test_matrix_covers_three_oses() -> None:
+def test_ci_test_matrix_covers_supported_oses() -> None:
     data = _load_workflow("ci.yml")
     matrix = data["jobs"]["test"]["strategy"]["matrix"]
-    assert sorted(matrix["os"]) == sorted(["ubuntu-latest", "macos-latest", "windows-latest"])
-    # We did not narrow the python matrix — every supported interpreter
-    # still runs on every OS.
-    assert set(matrix["python-version"]) == {"3.10", "3.11", "3.12", "3.13"}
+    # Windows is deliberately excluded (Guardian backlog QA-038 — v1.1
+    # portability milestone). Restoring it requires Rich Console / SO_REUSEADDR
+    # / path-separator / asyncio-teardown portability work first.
+    assert sorted(matrix["os"]) == sorted(["ubuntu-latest", "macos-latest"])
+    # Python 3.10 is excluded — it has a known asyncio subprocess teardown
+    # bug fixed in 3.11. ``pyproject.toml`` declares ``requires-python>=3.11``
+    # to match.
+    assert set(matrix["python-version"]) == {"3.11", "3.12", "3.13"}
 
 
 def test_ci_codecov_only_runs_on_ubuntu_3_11() -> None:
@@ -200,11 +205,13 @@ def test_ci_codecov_only_runs_on_ubuntu_3_11() -> None:
     assert "3.11" in condition
 
 
-def test_ci_windows_uses_pdf_fallback_extra() -> None:
+def test_ci_install_step_uses_dev_aws_otel_extras() -> None:
     data = _load_workflow("ci.yml")
     steps_yaml = yaml.safe_dump(data["jobs"]["test"]["steps"])
-    # Windows leg installs pdf-fallback (ReportLab) instead of the
-    # ``full`` WeasyPrint extra — see test_report_pdf.py for the
-    # matching skip logic.
-    assert "pdf-fallback" in steps_yaml
-    assert "runner.os == 'Windows'" in steps_yaml
+    # Single install step now that Windows is dropped (Guardian backlog QA-038).
+    # ``--extra aws`` lights up the Bedrock provider tests; ``--extra otel``
+    # lights up the OTEL active-path observer tests under tests/unit/test_obs_otel.py.
+    assert "uv sync --extra dev --extra aws --extra otel" in steps_yaml
+    # No Windows-conditional branch should remain on the test job.
+    assert "runner.os == 'Windows'" not in steps_yaml
+    assert "pdf-fallback" not in steps_yaml
