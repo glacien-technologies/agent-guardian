@@ -200,7 +200,7 @@ class WebSocketTransport(Transport):
                     extra_headers=headers or None,
                     open_timeout=self._timeout_seconds,
                 )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise LLMTimeoutError(f"websocket: connect timeout: {exc}") from exc
         except OSError as exc:
             raise LLMTransientError(f"websocket: connect failed: {exc}") from exc
@@ -222,7 +222,7 @@ class WebSocketTransport(Transport):
         """Receive exactly one frame as text, honouring the per-recv timeout."""
         try:
             message = await asyncio.wait_for(connection.recv(), timeout=self._timeout_seconds)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise LLMTimeoutError(f"websocket: recv timeout: {exc}") from exc
         return message.decode() if isinstance(message, bytes) else str(message)
 
@@ -276,7 +276,7 @@ class WebSocketTransport(Transport):
         while True:
             try:
                 message = await asyncio.wait_for(connection.recv(), timeout=self._timeout_seconds)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise LLMTimeoutError(f"websocket: recv timeout: {exc}") from exc
             except closed as exc:
                 _LOG.debug("websocket transport: connection closed mid-stream (%s)", exc)

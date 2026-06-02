@@ -21,7 +21,7 @@ These tests verify:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -36,7 +36,7 @@ from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.severity import Severity
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def _finding_with_secrets() -> Finding:

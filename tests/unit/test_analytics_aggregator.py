@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent_guardian.server.analytics import Aggregator, EventStore
 from agent_guardian.telemetry.events import EventEnvelope, ScanCompletedEvent
 
-_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_event(install_id_suffix: int, aivss: int, **overrides: object) -> EventEnvelope:

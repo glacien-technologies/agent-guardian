@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,7 @@ def _finding(fid: str, *, trigger: str | None) -> Finding:
         confidence=0.9,
         summary="target leaked the canary",
         trigger_prompt=trigger,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

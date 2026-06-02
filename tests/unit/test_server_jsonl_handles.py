@@ -9,7 +9,7 @@ behaviour: one cached writer per active scan, capped at
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,7 +22,7 @@ from agent_guardian.server.scan_store import MAX_OPEN_JSONL_HANDLES
 def _event(kind: str, agent: str | None = None) -> SwarmEvent:
     return SwarmEvent(
         kind=kind,  # type: ignore[arg-type]
-        timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
         agent=agent,
     )
 

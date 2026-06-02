@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -177,7 +177,7 @@ def test_ndjson_sink_emits_one_parseable_line_per_call() -> None:
     for verdict in ("pass", "fail", "inconclusive"):
         renderer.emit(
             _turn_record(verdict=verdict),
-            timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC),
         )
     lines = [ln for ln in stream.getvalue().splitlines() if ln]
     assert len(lines) == 3

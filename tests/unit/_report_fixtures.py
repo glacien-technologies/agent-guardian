@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
@@ -11,7 +11,7 @@ from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, band_for_score
 from agent_guardian.models.tier import Tier
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def make_finding(**overrides: object) -> Finding:

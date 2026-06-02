@@ -12,7 +12,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Load .env BEFORE importing anything that needs the key
@@ -106,7 +106,7 @@ async def main() -> int:
     print(f"  REPORT: {output_path}", file=sys.stderr)
     print(f"{'=' * 70}\n", file=sys.stderr)
 
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
 
     adapter = CodeAdapter(target_path)
     attacker = build_llm(model, role="attacker")
@@ -140,7 +140,7 @@ async def main() -> int:
     )
 
     scan = await swarm.run()
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
 
     print(f"\n{'=' * 70}", file=sys.stderr)
     print("  RESULT", file=sys.stderr)

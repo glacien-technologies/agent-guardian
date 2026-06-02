@@ -10,7 +10,7 @@ to verify reads never deadlock on the writer lock.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,7 @@ def _finding(idx: int) -> Finding:
         success=False,
         confidence=0.5,
         summary=f"finding #{idx}",
-        created_at=datetime(2026, 5, 26, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 26, tzinfo=UTC),
     )
 
 

@@ -10,7 +10,7 @@ opt-out value.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -41,7 +41,7 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _scan_event() -> ScanCompletedEvent:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ScanCompletedEvent(
         install_id="11111111-2222-4333-8444-555555555555",
         scan_id="scan-test-0001",
@@ -66,7 +66,7 @@ def _scan_event() -> ScanCompletedEvent:
 
 
 def _envelope() -> EventEnvelope:
-    return EventEnvelope(client_sent_at=datetime.now(timezone.utc), event=_scan_event())
+    return EventEnvelope(client_sent_at=datetime.now(UTC), event=_scan_event())
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +161,7 @@ def test_emit_posts_for_each_event_type_on_extended() -> None:
         emit(
             ForgetEvent(
                 install_id="11111111-2222-4333-8444-555555555555",
-                opted_out_at=datetime.now(timezone.utc),
+                opted_out_at=datetime.now(UTC),
             )
         )
         assert route.call_count == 1

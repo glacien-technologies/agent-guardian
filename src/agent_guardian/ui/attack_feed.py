@@ -51,7 +51,7 @@ import contextlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import IO, Any, Literal
 
 from rich.console import Console, Group, RenderableType
@@ -411,7 +411,7 @@ class AttackFeedRenderer:
         self._console.print(renderable)
 
     def _emit_json(self, turn: Mapping[str, Any], *, timestamp: datetime | None) -> None:
-        ts = (timestamp or datetime.now(tz=timezone.utc)).isoformat()
+        ts = (timestamp or datetime.now(tz=UTC)).isoformat()
         record = {
             "record_type": "reflection",
             "scan_id": self.scan_id or "",

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -92,7 +92,7 @@ def test_list_scans_page_returns_empty_when_no_scans(tmp_path: Path) -> None:
 
 def test_list_scans_page_paginates_completed_scans_newest_first(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
-    base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC)
     # 25 scans, decreasing recency.
     for i in range(25):
         _persist(store, _make_scan(f"scan-{i:02d}", created_at=base - timedelta(hours=i)))
@@ -113,7 +113,7 @@ def test_list_scans_page_paginates_completed_scans_newest_first(tmp_path: Path) 
 
 def test_list_scans_page_clamps_huge_limit(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
-    _persist(store, _make_scan("only-one", created_at=datetime.now(timezone.utc)))
+    _persist(store, _make_scan("only-one", created_at=datetime.now(UTC)))
     page, _ = store.list_scans_page(offset=0, limit=10_000)
     # Limit clamped to 500 — page still has the one row.
     assert len(page) == 1
@@ -121,7 +121,7 @@ def test_list_scans_page_clamps_huge_limit(tmp_path: Path) -> None:
 
 def test_list_scans_page_clamps_negative_offset(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
-    _persist(store, _make_scan("scan-x", created_at=datetime.now(timezone.utc)))
+    _persist(store, _make_scan("scan-x", created_at=datetime.now(UTC)))
     page, total = store.list_scans_page(offset=-5, limit=10)
     assert total == 1
     assert page[0].scan_id == "scan-x"
@@ -147,7 +147,7 @@ def test_index_written_on_register(tmp_path: Path) -> None:
 
 
 def test_index_updated_on_scan_done(tmp_path: Path) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.core.swarm import SwarmEvent
 
@@ -159,12 +159,12 @@ def test_index_updated_on_scan_done(tmp_path: Path) -> None:
     fake = FakeSwarm()
     store.register("scan-idx", fake)  # type: ignore[arg-type]
     # Persist a scan record so the index upsert can read it.
-    _persist(store, _make_scan("scan-idx", created_at=datetime(2026, 5, 30, tzinfo=timezone.utc)))
+    _persist(store, _make_scan("scan-idx", created_at=datetime(2026, 5, 30, tzinfo=UTC)))
     assert fake.observer is not None
     fake.observer(
         SwarmEvent(
             kind="scan_done",  # type: ignore[arg-type]
-            timestamp=datetime(2026, 5, 30, tzinfo=timezone.utc),
+            timestamp=datetime(2026, 5, 30, tzinfo=UTC),
         )
     )
     raw = json.loads((tmp_path / INDEX_FILENAME).read_text(encoding="utf-8"))
@@ -189,9 +189,7 @@ def test_index_fast_path_used_when_present(tmp_path: Path) -> None:
             "target_ref": "ex",
             "target_mode": "prompt",
             "findings_count": 1,
-            "created_at": (
-                datetime(2026, 5, 30, tzinfo=timezone.utc) - timedelta(hours=i)
-            ).isoformat(),
+            "created_at": (datetime(2026, 5, 30, tzinfo=UTC) - timedelta(hours=i)).isoformat(),
             "is_running": False,
         }
         for i in range(15)
@@ -207,7 +205,7 @@ def test_index_fast_path_used_when_present(tmp_path: Path) -> None:
 def test_index_malformed_json_falls_back_to_cold_path(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
     (tmp_path / INDEX_FILENAME).write_text("not json", encoding="utf-8")
-    _persist(store, _make_scan("scan-1", created_at=datetime(2026, 5, 30, tzinfo=timezone.utc)))
+    _persist(store, _make_scan("scan-1", created_at=datetime(2026, 5, 30, tzinfo=UTC)))
     page, total = store.list_scans_page(offset=0, limit=10)
     # Cold path still finds the on-disk scan.
     assert total == 1
@@ -222,7 +220,7 @@ def test_index_malformed_json_falls_back_to_cold_path(tmp_path: Path) -> None:
 def test_list_scans_page_async_returns_same_result(tmp_path: Path) -> None:
     async def _run() -> None:
         store = ScanStore(root_dir=tmp_path)
-        base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc)
+        base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC)
         for i in range(3):
             _persist(store, _make_scan(f"a-{i}", created_at=base - timedelta(hours=i)))
         sync_page, sync_total = store.list_scans_page(offset=0, limit=10)
@@ -243,7 +241,7 @@ def test_running_scans_appear_first_in_page(tmp_path: Path) -> None:
     # One completed scan.
     _persist(
         store,
-        _make_scan("done-1", created_at=datetime(2026, 5, 30, tzinfo=timezone.utc)),
+        _make_scan("done-1", created_at=datetime(2026, 5, 30, tzinfo=UTC)),
     )
 
     class FakeSwarm:
@@ -274,7 +272,7 @@ def client(store: ScanStore) -> TestClient:
 
 
 def test_home_accepts_page_query_params(client: TestClient, store: ScanStore) -> None:
-    base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 5, 30, 12, 0, 0, tzinfo=UTC)
     for i in range(12):
         _persist(store, _make_scan(f"scan-{i:02d}", created_at=base - timedelta(hours=i)))
 
@@ -294,7 +292,7 @@ def test_home_accepts_page_query_params(client: TestClient, store: ScanStore) ->
 def test_home_404s_past_end(client: TestClient, store: ScanStore) -> None:
     _persist(
         store,
-        _make_scan("only", created_at=datetime(2026, 5, 30, tzinfo=timezone.utc)),
+        _make_scan("only", created_at=datetime(2026, 5, 30, tzinfo=UTC)),
     )
     resp = client.get("/?page=10&page_size=5")
     assert resp.status_code == 404

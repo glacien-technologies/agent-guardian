@@ -39,7 +39,7 @@ import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import ValidationError
@@ -338,7 +338,7 @@ def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class AsiAgent(ABC):

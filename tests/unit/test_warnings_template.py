@@ -10,7 +10,7 @@ authoritative scans emit no banner at all.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -25,7 +25,7 @@ from agent_guardian.reports.warnings import (
     build_authoritativeness_warning,
 )
 
-UTC = timezone.utc
+UTC = UTC
 
 
 # ---------------------------------------------------------------------------

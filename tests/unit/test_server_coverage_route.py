@@ -12,7 +12,7 @@ Covers the pixel-match route added to satisfy the Coverage design from
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -61,7 +61,7 @@ def client(store: ScanStore) -> TestClient:
     return TestClient(app)
 
 
-_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
 
 
 def _f(

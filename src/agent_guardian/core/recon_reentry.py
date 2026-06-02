@@ -210,7 +210,7 @@ class ReconReentryHook:
                     )
                 else:
                     refined = await self._refresh_fn(new_tools)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _LOG.warning(
                     "PhaseC.C5 recon_reentry: refresh timed out after %.1fs — "
                     "fingerprint unchanged",

@@ -16,7 +16,7 @@ attacker / target / judge and verifies:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
@@ -56,7 +56,7 @@ def _stub_scan(scan_id: str) -> Scan:
         cost_usd=0.0,
         # #4 — ``mode`` is required on Scan.
         mode="full",
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
 
 

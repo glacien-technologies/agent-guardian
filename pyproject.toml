@@ -277,7 +277,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
-ignore = ["E501"]
+# E501: line-length is enforced by formatter rather than the linter.
+# UP042: ``class X(str, Enum)`` is the public-API serialisation shape used
+# across the codebase (Pydantic v2 round-trip + JSON dump rely on ``str``
+# subclass identity and ``__str__`` returning ``self.value``). Migrating
+# to ``enum.StrEnum`` changes ``str()`` and hashing semantics in subtle
+# ways that ripple through telemetry envelopes, SARIF emission, and the
+# YAML loader. Tracked as v1.1 portability sweep (Guardian backlog QA-039)
+# — needs a coordinated migration + regression sweep of the 3311 tests
+# before flipping. Ignoring here keeps rc3 shippable on Linux + macOS.
+ignore = ["E501", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 # Typer requires function-call defaults — they are the public API.

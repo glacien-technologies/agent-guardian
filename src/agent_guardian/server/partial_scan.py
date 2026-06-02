@@ -34,7 +34,7 @@ import logging
 import threading
 import traceback
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging import Handler, LogRecord, getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -232,7 +232,7 @@ def build_partial_scan(swarm: SwarmCommander) -> Scan:
             "attacker": swarm.config.attacker_model,
             "evaluator": swarm.config.evaluator_model,
         },
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
 
 
@@ -524,7 +524,7 @@ class JsonlLogHandler(Handler):
                 payload["exc_info"] = "".join(traceback.format_exception(*record.exc_info))
         # Timestamp from the record (when the log call happened), not from
         # emit() (when we serialise it) — matches SwarmEvent semantics.
-        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+        ts = datetime.fromtimestamp(record.created, tz=UTC).isoformat()
         wire = {
             "kind": "log",
             "timestamp": ts,

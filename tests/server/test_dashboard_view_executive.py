@@ -11,7 +11,7 @@ view-model layer is covered in isolation.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -478,7 +478,7 @@ def _make_scan_with_band(band: SeverityBand, *, scan_id: str = "band-fixture") -
         scoring_valid=band is not SeverityBand.NOT_EVALUATED,
         evaluation_mode="real" if band is not SeverityBand.NOT_EVALUATED else "stub",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 

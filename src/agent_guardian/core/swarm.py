@@ -49,7 +49,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -441,7 +441,7 @@ SwarmObserver = Callable[[SwarmEvent], None]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _safe_json_obj(text: str) -> Any:
@@ -683,7 +683,7 @@ class SwarmCommander:
                 self._run_inner(),
                 timeout=self.config.overall_wall_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOG.warning("swarm overall wall budget exhausted (scan_id=%s)", self.config.scan_id)
             return await self._phase_finalise()
 
@@ -756,7 +756,7 @@ class SwarmCommander:
                 recon.run(self.target, self.memory),
                 timeout=self.config.recon_wall_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOG.warning(
                 "recon timed out after %.1fs -- using minimal fingerprint",
                 self.config.recon_wall_seconds,
@@ -2569,7 +2569,7 @@ class SwarmCommander:
         try:
             import platform
             import sys
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             from agent_guardian.telemetry.client import emit
             from agent_guardian.telemetry.consent import is_extended, is_opted_in
@@ -2589,7 +2589,7 @@ class SwarmCommander:
             # in case findings span multiple attempts in some future code
             # path where the relationship inverts.
             successes_count = max(0, attempts_count - findings_total)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             extended_on = is_extended()
             event = ScanCompletedEvent(
                 install_id=get_install_id(),

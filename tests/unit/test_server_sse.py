@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -17,7 +17,7 @@ from agent_guardian.server.sse import format_sse_event, stream_scan_events
 def _event(kind: str, agent: str | None = "tool-abuse-agent") -> SwarmEvent:
     return SwarmEvent(
         kind=kind,  # type: ignore[arg-type]
-        timestamp=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
         agent=agent,
     )
 

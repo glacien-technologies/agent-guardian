@@ -14,7 +14,7 @@ Two surfaces are exercised:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -54,7 +54,7 @@ def _event(
 ) -> SwarmEvent:
     return SwarmEvent(
         kind=kind,
-        timestamp=datetime(2026, 5, 29, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 5, 29, 12, 0, 0, tzinfo=UTC),
         agent=agent,
         provisional_aivss=provisional_aivss,
     )

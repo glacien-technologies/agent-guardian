@@ -9,7 +9,7 @@ a temporary directory so the tests never touch the user's
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -48,7 +48,7 @@ def _make_finding(fid: str = "f-1", asi: AsiCategory = AsiCategory.ASI01) -> Fin
         success=True,
         confidence=0.91,
         summary=f"summary for {fid}",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -78,7 +78,7 @@ def _make_scan(scan_id: str = "scan-abc", findings: list[Finding] | None = None)
         cost_usd=0.0,
         # #4 — ``mode`` is required.
         mode="full",
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -286,7 +286,7 @@ def _make_leaky_finding(fid: str = "f-leak") -> Finding:
         confidence=0.91,
         summary="target leaked victim@example.com and key sk-proj-ABCDEF1234567890",
         transcript_ref="USER: my ssn is 123-45-6789",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 

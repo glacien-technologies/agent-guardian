@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -22,7 +22,7 @@ from agent_guardian.models.severity import (
 )
 from agent_guardian.models.tier import ObservedSurface, Tier
 
-UTC = timezone.utc
+UTC = UTC
 
 
 # --- AsiCategory ---------------------------------------------------------

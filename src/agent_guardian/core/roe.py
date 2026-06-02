@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -280,7 +280,7 @@ class RoeController:
         # separately from ``request_count`` so a budget-bounded scan does not
         # spend its request budget on turns that were never sent (#12).
         self._egress_refused_turns = 0
-        self._started_at = datetime.now(timezone.utc).isoformat()
+        self._started_at = datetime.now(UTC).isoformat()
 
     @classmethod
     def from_contract(cls, contract: Contract) -> RoeController:

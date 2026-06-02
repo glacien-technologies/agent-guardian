@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -73,7 +73,7 @@ def _make_finding(
         success=True,
         confidence=0.91,
         summary=f"finding {fid}: prompt injection observed",
-        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -110,7 +110,7 @@ def _make_scan(scan_id: str = "cli-executive-001", *, with_findings: bool = True
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
 
 
@@ -1009,7 +1009,7 @@ def test_executive_findings_tab_finding_row_exposes_slideover_hooks(
         tokens_total=820_000,
         mode="full",
         engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
-        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
     )
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl_for_finding(scan_dir, seed_id=seed_id, count=2)

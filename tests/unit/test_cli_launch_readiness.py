@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 import types
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -510,7 +510,7 @@ def test_scans_purge_only_removes_old(runner: CliRunner, tmp_path: Path) -> None
     (old_scan / "scan.json").write_text("{}", encoding="utf-8")
     (new_scan / "scan.json").write_text("{}", encoding="utf-8")
     # Backdate the 'old' scan to 60 days ago.
-    sixty_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=60)).timestamp()
+    sixty_days_ago = (datetime.now(tz=UTC) - timedelta(days=60)).timestamp()
     os.utime(old_scan, (sixty_days_ago, sixty_days_ago))
     now = time.time()
     os.utime(new_scan, (now, now))
@@ -526,7 +526,7 @@ def test_scans_purge_dry_run_keeps_files(runner: CliRunner, tmp_path: Path) -> N
     scans_dir = tmp_path / ".agentguardian" / "scans"
     old_scan = scans_dir / "cli-old-dry"
     old_scan.mkdir(parents=True, exist_ok=True)
-    sixty_days_ago = (datetime.now(tz=timezone.utc) - timedelta(days=60)).timestamp()
+    sixty_days_ago = (datetime.now(tz=UTC) - timedelta(days=60)).timestamp()
     os.utime(old_scan, (sixty_days_ago, sixty_days_ago))
     result = runner.invoke(app, ["scans", "purge", "--older-than", "30d", "--dry-run"])
     assert result.exit_code == EXIT_OK

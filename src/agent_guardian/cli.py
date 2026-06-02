@@ -30,7 +30,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -328,7 +328,7 @@ def _show_ethical_banner_once() -> None:
         return
     typer.echo(_BANNER)
     state["ethical_use_acknowledged"] = True
-    state["ethical_use_acknowledged_at"] = datetime.now(tz=timezone.utc).isoformat()
+    state["ethical_use_acknowledged_at"] = datetime.now(tz=UTC).isoformat()
     # Best-effort -- a read-only home shouldn't break the scan.
     with contextlib.suppress(OSError):
         _write_state(state)
@@ -1771,7 +1771,7 @@ def telemetry_extended() -> None:
     compatibility-matrix and per-framework cells. Revoke with
     ``agent-guardian telemetry essential`` or ``telemetry disable``.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.telemetry.client import emit
     from agent_guardian.telemetry.consent import ConsentState, set_consent
@@ -1788,7 +1788,7 @@ def telemetry_extended() -> None:
                 python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
                 os_family=_os_family(),
                 arch=_arch(),
-                opted_in_at=datetime.now(timezone.utc),
+                opted_in_at=datetime.now(UTC),
             )
         )
     except Exception as exc:  # pragma: no cover -- defensive
@@ -1812,7 +1812,7 @@ def telemetry_enable() -> None:
 @telemetry_app.command("disable")
 def telemetry_disable() -> None:
     """Disable telemetry. Emits a ``forget`` event so the collector drops your install_id."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from agent_guardian.telemetry.client import emit
     from agent_guardian.telemetry.consent import ConsentState, set_consent
@@ -1823,7 +1823,7 @@ def telemetry_disable() -> None:
         emit(
             ForgetEvent(
                 install_id=get_install_id(),
-                opted_out_at=datetime.now(timezone.utc),
+                opted_out_at=datetime.now(UTC),
             )
         )
     except Exception as exc:  # pragma: no cover -- defensive
@@ -2246,7 +2246,7 @@ def scans_list() -> None:
     entries.sort(reverse=True)
     typer.echo(f"stored scans (root: {root}):")
     for mtime, name in entries:
-        iso = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(timespec="seconds")
+        iso = datetime.fromtimestamp(mtime, tz=UTC).isoformat(timespec="seconds")
         typer.echo(f"  {iso}  {name}")
 
 
@@ -2323,7 +2323,7 @@ def scans_purge(
     if not root.is_dir():
         typer.echo("no stored scans.")
         return
-    cutoff = datetime.now(tz=timezone.utc) - delta
+    cutoff = datetime.now(tz=UTC) - delta
     cutoff_ts = cutoff.timestamp()
     to_remove: list[Path] = []
     for child in root.iterdir():
@@ -2515,7 +2515,7 @@ def _emit_json_banner(
     record = {
         "record_type": "banner",
         "scan_id": scan_id,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timestamp": datetime.now(tz=UTC).isoformat(),
         "payload": {"kind": kind, **payload},
     }
     line = json.dumps(record, separators=(",", ":"), sort_keys=True)
@@ -3977,7 +3977,7 @@ async def _run_scan_inner(
     state = _read_state()
     state["last_score"] = int(scan_result.aivss)
     state["last_scan_id"] = scan_id
-    state["last_scan_at"] = datetime.now(tz=timezone.utc).isoformat()
+    state["last_scan_at"] = datetime.now(tz=UTC).isoformat()
     with contextlib.suppress(OSError):
         _write_state(state)
 

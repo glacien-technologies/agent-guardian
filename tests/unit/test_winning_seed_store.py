@@ -14,7 +14,7 @@ These tests cover:
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -32,7 +32,7 @@ def _record(
     confidence: float = 0.9,
     ttl_days: int = 30,
 ) -> WinningSeedRecord:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     return WinningSeedRecord(
         target_fingerprint_hash=target,
         asi=asi,
@@ -139,7 +139,7 @@ def test_insert_scrubs_seed_text_before_persist(tmp_path: Path) -> None:
 
 def test_expire_old_purges_past_records(tmp_path: Path) -> None:
     store = WinningSeedStore(db_path=tmp_path / "seeds.db")
-    past = datetime.now(tz=timezone.utc) - timedelta(days=1)
+    past = datetime.now(tz=UTC) - timedelta(days=1)
     past_record = WinningSeedRecord(
         target_fingerprint_hash="fp-past",
         asi="ASI01",

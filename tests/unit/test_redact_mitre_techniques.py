@@ -23,7 +23,7 @@ We cover both paths explicitly:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agent_guardian.core.coverage import compute_coverage_from_memory
@@ -58,7 +58,7 @@ def _stub_scan(scan_id: str) -> Scan:
         duration_seconds=0.0,
         cost_usd=0.0,
         mode="full",
-        created_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
     )
 
 

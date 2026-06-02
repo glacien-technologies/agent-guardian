@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -199,5 +199,5 @@ def emit(event: object) -> None:
         raise TypeError(
             f"telemetry.emit: expected a telemetry event model, got {type(event).__name__}"
         )
-    envelope = EventEnvelope(client_sent_at=datetime.now(timezone.utc), event=event)
+    envelope = EventEnvelope(client_sent_at=datetime.now(UTC), event=event)
     TelemetryClient().emit(envelope)

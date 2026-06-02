@@ -36,7 +36,7 @@ import logging
 import sqlite3
 import threading
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -93,7 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_target_asi
 
 
 def _utcnow() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 class WinningSeedStore:
