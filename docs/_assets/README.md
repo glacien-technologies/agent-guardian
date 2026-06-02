@@ -2,7 +2,7 @@
 
 This directory holds binary / large assets referenced from the repo root
 `README.md`. Two files are expected here; both are produced by a human
-operator out-of-band (see [GTM-002](../../GTM_TASKS.md)).
+operator out-of-band.
 
 | File                      | Purpose                                          | Source                                              | Size cap |
 |---------------------------|--------------------------------------------------|-----------------------------------------------------|----------|

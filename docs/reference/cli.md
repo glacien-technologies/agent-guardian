@@ -215,6 +215,7 @@ below is the authoritative set parsed by the docs-coverage test against
 | `--debug-format` | Debug-log format (`text` / `json`). |
 | `--no-serve` | Do not auto-start the local dashboard during the scan. |
 | `--serve-grace-seconds` | How long to keep the local dashboard alive after the scan finishes. |
+| `--open` / `--no-open` | Open the scan-specific dashboard URL in the default browser once the scan completes. Auto-skipped under CI / SSH / non-TTY environments. |
 | `--yes` | Skip interactive confirmations (CI mode). |
 | `--no-plan-confirm` | Skip the plan-confirmation step. |
 | `--no-plan` | Skip plan generation entirely; run the default probe order. |

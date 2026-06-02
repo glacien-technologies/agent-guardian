@@ -78,3 +78,10 @@ gtm/screenshots/
 gtm/**/*.local.md
 gtm/**/*.draft.md
 .claude/
+
+# Operator-only tracking docs — maintained in the obsidian vault at
+# ~/workspace/obsidian-workspace/jegan-workspace/Guardian/
+# Working copies may exist locally for convenience but must not be committed.
+CLAUDE.md
+GTM_TASKS.md
+QA_FEEDBACKS.md
