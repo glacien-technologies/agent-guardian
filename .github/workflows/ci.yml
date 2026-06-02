@@ -59,7 +59,7 @@ jobs:
       - name: Install deps
         run: uv sync --extra dev --extra aws --extra otel
       - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v6
         # Standard §11.1 — single canonical Codecov upload. Gate on the
         # ubuntu / 3.11 leg so the cross-platform matrix doesn't
         # double-count coverage or race the Codecov upload token.
