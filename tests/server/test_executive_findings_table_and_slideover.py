@@ -262,10 +262,15 @@ def test_executive_logs_tab_omits_reproducibility(client: TestClient, store: Sca
     assert 'data-component="reproducibility"' not in pane
 
 
-def test_executive_reproducibility_count_is_2(client: TestClient, store: ScanStore) -> None:
-    """After QA-029, the receipt renders in exactly 2 tabs: Overview + Probes."""
+def test_executive_reproducibility_count_is_1(client: TestClient, store: ScanStore) -> None:
+    """The reproducibility receipt renders ONLY on the Overview tab.
+
+    QA-029 narrowed includes to Overview + Probes (2 total); BUG-2
+    (2026-06-02) then removed the Probes include — surfacing the same
+    receipt twice was the bug. Per-probe replay lives in the drawer.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
-    assert body.count('data-component="reproducibility"') == 2
+    assert body.count('data-component="reproducibility"') == 1

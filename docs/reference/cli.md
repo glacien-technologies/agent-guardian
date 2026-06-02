@@ -198,7 +198,7 @@ below is the authoritative set parsed by the docs-coverage test against
 | `--output` | One or more output formats (`json`, `sarif`, `junit`, `md`, `pdf`). |
 | `--output-path` | Directory to write report artefacts to. |
 | `--no-tui` | Disable the interactive TUI; emit plain logs only. |
-| `--legacy-board` | Render the legacy swarm board instead of the editorial dashboard. |
+| `--legacy-board` | Render the legacy swarm board instead of the Executive dashboard. |
 | `--config` | Path to a YAML / TOML config to merge over CLI flags. |
 | `--seed` | RNG seed for deterministic probe sampling and replay. |
 | `--goal` | Free-form natural-language goal passed to the commander. |

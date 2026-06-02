@@ -135,6 +135,15 @@
             grid: { color: grid },
             pointLabels: {
               color: ink,
+              /* QA-045 (2026-06-02) — extend the label gutter + bump the
+                 font weight/size so the longer category strings (e.g.
+                 "Privilege abuse", "Supply chain", "Cascading failure")
+                 fit without truncation now that the enclosing card is
+                 480 px square. Chart.js `padding` controls the gap
+                 between the outermost ring and the labels — 14 px gives
+                 the bottom-axis label clearance below the radial
+                 envelope. */
+              padding: 14,
               font: {
                 family: readToken("--exec-font-sans") || "Inter, system-ui, sans-serif",
                 size: 12,

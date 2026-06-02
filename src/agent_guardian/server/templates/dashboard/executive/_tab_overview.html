@@ -18,7 +18,19 @@
      tab content (NOT sticky) and is centred + capped at 1600px to match
      the rest of the Overview panel. #}
   {% include "dashboard/executive/_kpi_strip.html" %}
-  {% include "dashboard/executive/_aivss_hero.html" %}
+  {# QA-042 (2026-06-02) — the AIVSS hero card was removed from the Overview
+     stack. Its big numeric, band pill, and 5-band horizontal axis duplicated
+     the new AIVSS KPI tile horseshoe gauge introduced in QA-040; the
+     ``aivss-block`` + ``band-ladder`` markup is therefore intentionally
+     absent from this tab. Score provenance (tier / findings / version) is
+     still visible in the reproducibility receipt at the bottom of the tab. #}
+  {# QA-047 (2026-06-02) — Recon findings panel. Sits between the KPI row
+     and the Findings-by-severity / ASI radar two-column block so the
+     operator can read "what the agent IS" (capabilities, declared tools,
+     declared guardrails, inferred goal) before drilling into the per-
+     category attack surface chart pair below. View-model lives in
+     ``payload.recon_summary``. #}
+  {% include "dashboard/executive/_recon_panel.html" %}
   {% set tab_key = 'overview' %}
   <div class="exec-overview-twocol">
     {% include "dashboard/executive/_severity_bars.html" %}

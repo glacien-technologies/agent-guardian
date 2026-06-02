@@ -1,14 +1,15 @@
 """GET /scan/{scan_id} + /scans/{scan_id} — live scan dashboard.
 
-The legacy route ``/scan/<id>`` keeps the old short-form URL alive
-(rendering the new editorial dashboard template); the canonical URL the
-CLI emits is ``/scans/<id>`` (note the trailing 's'), which 307-redirects
-to the legacy short URL. Both paths land on the same view-model so a
-bookmarked legacy URL still works.
+The legacy route ``/scan/<id>`` keeps the old short-form URL alive; the
+canonical URL the CLI emits is ``/scans/<id>`` (note the trailing 's'),
+which 307-redirects to the legacy short URL. Both paths land on the same
+view-model so a bookmarked legacy URL still works.
 
 Routes:
 
-* ``GET /scan/{scan_id}`` — renders ``dashboard/scan_detail.html``.
+* ``GET /scan/{scan_id}`` — renders ``dashboard/executive/layout.html``
+  (the only dashboard theme that ships now; the multi-theme switcher was
+  retired in QA-041). ``?theme=`` query params are silently ignored.
 * ``GET /scans/{scan_id}`` — 307 redirect to ``/scan/{scan_id}`` (the
   CLI-emitted canonical URL). The CLI is the contract holder.
 * ``GET /scans/{scan_id}/report`` — canonical ``scan.json`` (200 when
@@ -33,11 +34,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from agent_guardian._version import __version__
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.dashboard_view import (
-    DASHBOARD_THEME_TEMPLATES,
-    DASHBOARD_THEMES,
+    DASHBOARD_TEMPLATE,
+    _assemble_probes_list,
     build_dashboard_context,
     live_snapshot,
-    resolve_theme_from_env,
 )
 from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
@@ -78,7 +78,7 @@ def _started_at_label(scan_dir_mtime: float | None) -> str:
 
 @router.get("/scan/{scan_id}", response_class=HTMLResponse)
 async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
-    """Render the editorial dashboard for a scan (legacy URL)."""
+    """Render the Executive dashboard for a scan (legacy URL)."""
     store = get_scan_store(request)
     templates = get_templates(request)
     is_running = store.is_running(scan_id)
@@ -121,21 +121,75 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         is_terminal=terminal_on_disk and not is_running,
         scan_dir=scan_dir,
     )
-    # Theme resolution: query param > $AGENT_GUARDIAN_DASHBOARD_THEME > 'editorial'.
-    # Invalid theme names fall through silently to the next priority (see
-    # resolve_theme docstring) so a typo never breaks the dashboard.
-    raw_theme = request.query_params.get("theme")
-    active_theme = resolve_theme_from_env(raw_theme)
-    template_path = DASHBOARD_THEME_TEMPLATES[active_theme]
+    # QA-041: only the Executive theme ships. ``?theme=<anything>`` is
+    # silently ignored so any stale bookmark still resolves to a usable
+    # dashboard page rather than 404-ing.
     payload = ctx.to_dict()
-    # Theme partial inputs. The shared switcher partial reads `active_theme`
-    # and `theme_choices` from the context to render the dropdown.
-    payload["active_theme"] = active_theme
-    payload["theme_choices"] = list(DASHBOARD_THEMES)
     return templates.TemplateResponse(
         request,
-        template_path,
+        DASHBOARD_TEMPLATE,
         payload,
+    )
+
+
+@router.get("/scan/{scan_id}/probe", response_class=HTMLResponse)
+async def probe_drawer(
+    request: Request,
+    scan_id: str,
+    index: int | None = None,
+    id: str | None = None,
+) -> HTMLResponse:
+    """Render the probe-detail-sheet drawer fragment for one probe.
+
+    QA-049 / BUG-1 (2026-06-02) — the Probes-tab drawer is now loaded
+    on demand instead of bundled into the initial page HTML. Each row
+    in ``_probes_table.html`` carries a ``data-probe-href`` that points
+    here; the shared slide-over JS ``fetch()``-es this endpoint and
+    injects the response into ``.exec-slideover__body``.
+
+    Lookup priority:
+
+    * ``index=<N>`` — fast path, indexes into the assembled probes
+      list (the table emits ``data-probe-index`` from
+      ``loop.index0``). O(1) and stable across reloads.
+    * ``id=<probe_id>`` — fallback used when a deep link / bookmark
+      carries the probe id (``?tab=probes&probe=<id>``). O(N) scan.
+
+    Returns a 404 (HTML fragment) when the scan exists but the probe
+    can't be located; the drawer JS treats the empty body as "no
+    matching probe" and leaves the previous open-state untouched.
+    """
+    store = get_scan_store(request)
+    templates = get_templates(request)
+    if not store.is_running(scan_id) and not store.scan_dir(scan_id).is_dir():
+        raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
+
+    probes = _assemble_probes_list(store.scan_dir(scan_id))
+    probe: dict[str, object] | None = None
+    if index is not None and 0 <= index < len(probes):
+        probe = probes[index]
+    elif id:
+        for p in probes:
+            if p.get("probe_id") == id:
+                probe = p
+                break
+
+    if probe is None:
+        # Render an empty drawer-body shell — same structural class so
+        # the drawer chrome stays consistent and the client-side CSS
+        # selectors keep matching.
+        return HTMLResponse(
+            '<div class="exec-probe-detail-sheet" data-probe-detail-sheet>'
+            '<p class="exec-probe__reason exec-probe__reason--empty">'
+            "Probe not found in this scan's memory.jsonl."
+            "</p></div>",
+            status_code=200,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/executive/_probe_drawer_body.html",
+        {"probe": probe, "scan_id": scan_id},
     )
 
 

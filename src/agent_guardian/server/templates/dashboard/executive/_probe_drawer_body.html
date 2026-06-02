@@ -1,0 +1,214 @@
+{# Executive — Probe detail-sheet drawer body (QA-049 / BUG-1).
+
+   Server-rendered HTML fragment loaded into ``.exec-slideover__body``
+   when an operator opens a probe row. Replaces the legacy
+   ``#exec-probes-payload`` JSON-island wall (BUG-1, 2026-06-02): the
+   row click triggers a small ``fetch()`` to
+   ``/scan/<scan_id>/probe?index=<row_index>``; this template renders
+   the response body. Initial page HTML no longer carries any per-probe
+   prompt / target-response / judge-reasoning text — that data only
+   enters the DOM on demand, scoped to the probe the operator
+   explicitly opened.
+
+   The fragment is wrapped in ``<div class="exec-probe-detail-sheet">``
+   so the drawer body can be styled / asserted independently of the
+   slide-over chrome.
+
+   Required context:
+     - probe   : one probe record (the locked ``_assemble_probes_list``
+                 shape — agent / asi_category / csa_category / turn /
+                 strategy / probe_id / prompt / target_response /
+                 verdict / confidence / reasoning / timestamp_label /
+                 attacker_refused).
+     - scan_id : the surrounding scan's id (used for the evidence-chain
+                 link + the reproduce CLI command).
+
+   All ``probe.*`` fields are operator-untrusted — Jinja autoescape
+   applies to every emission. Never use ``|safe`` on these values.
+#}
+{%- set _verdict = probe.verdict or 'unknown' -%}
+{%- if _verdict == 'fail' -%}
+  {%- set _verdict_label = 'EXPLOITED' -%}
+{%- elif _verdict == 'pass' -%}
+  {%- set _verdict_label = 'DEFENDED' -%}
+{%- elif _verdict == 'inconclusive' -%}
+  {%- set _verdict_label = 'INCONCLUSIVE' -%}
+{%- else -%}
+  {%- set _verdict_label = 'PENDING' -%}
+{%- endif -%}
+
+{# ---- Header chips slot — JS replaces these via [data-slideover-*]
+       selectors on the parent slide-over header. We emit them again
+       here as a ``<template>`` so the JS bootstrap path can lift them
+       into the header without race-conditions on a second open. The
+       fragment owns the header chip set so the operator sees a fresh
+       header on every row open. #}
+<template data-probe-header
+          data-verdict="{{ _verdict }}"
+          data-verdict-label="{{ _verdict_label }}"
+          data-probe-id="{{ probe.probe_id or '—' }}"
+          data-turn="{{ probe.turn if probe.turn is not none else '—' }}"
+          data-timestamp="{{ probe.timestamp_label or '—' }}"
+          data-summary="{{ ('Probe ' ~ probe.probe_id) if probe.probe_id else 'Probe details' }}"></template>
+
+<div class="exec-probe-detail-sheet" data-probe-detail-sheet>
+
+  {# ----- 1. Probe metadata ----- #}
+  <p class="exec-probe__label">Probe metadata</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Probe ID</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.probe_id or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">ASI category</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.asi_category or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">CSA category</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.csa_category or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">MITRE ATLAS</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if probe.mitre_atlas %}
+        {% for t in probe.mitre_atlas %}<code class="exec-probe__meta-chip">{{ t }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Severity</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.severity_label or probe.severity -%}
+        <code>{{ probe.severity_label or probe.severity }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Tier floor</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.tier_floor -%}<code>{{ probe.tier_floor }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">OWASP scenario</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.owasp_scenario -%}<code>{{ probe.owasp_scenario }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Source YAML</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.source_yaml or probe.source_path -%}
+        <code>{{ probe.source_yaml or probe.source_path }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+  </dl>
+
+  {# ----- 2. Run context ----- #}
+  <p class="exec-probe__label">Run context</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Agent</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.agent or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Turn</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.turn if probe.turn is not none else '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Timestamp</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ probe.timestamp_label or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Seed</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.seed or probe.rng_seed -%}<code>{{ probe.seed or probe.rng_seed }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Strategy</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.strategy -%}<code>{{ probe.strategy }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Mutator operators</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if probe.mutator_operators %}
+        {% for m in probe.mutator_operators %}<code class="exec-probe__meta-chip">{{ m }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Attacker refused</dt>
+    <dd class="exec-probe__meta-dd">
+      <code>{% if probe.attacker_refused %}yes{% else %}no{% endif %}</code>
+    </dd>
+  </dl>
+
+  {# ----- 3. Exact prompt sent ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Exact prompt sent</p>
+    <span class="exec-probe__stats">{{ (probe.prompt or '') | length }} chars</span>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-probe-prompt"
+            aria-label="Copy exact prompt sent">Copy</button>
+  </div>
+  <pre class="exec-probe__prompt" id="exec-probe-prompt">{{ probe.prompt or '' }}</pre>
+
+  {# ----- 4. Target response ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Target response</p>
+    <span class="exec-probe__stats">{{ (probe.target_response or '') | length }} chars</span>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-probe-response"
+            aria-label="Copy target response">Copy</button>
+  </div>
+  <pre class="exec-probe__response" id="exec-probe-response">{{ probe.target_response or '' }}</pre>
+
+  {# ----- 5. Judge verdict ----- #}
+  <p class="exec-probe__label">Judge verdict</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Verdict</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ _verdict_label }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Confidence</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if probe.confidence is not none and probe.confidence > 0 -%}
+        <code>{{ '%.2f' | format(probe.confidence) }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Panel votes</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if probe.panel_votes %}
+        {% for v in probe.panel_votes %}<code class="exec-probe__meta-chip">{{ v }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+  </dl>
+
+  <p class="exec-probe__label">Judge reasoning</p>
+  {% if probe.reasoning %}
+    <blockquote class="exec-probe__reason">{{ probe.reasoning }}</blockquote>
+  {% else %}
+    <p class="exec-probe__reason exec-probe__reason--empty">
+      Not graded per-turn — see the Findings tab for the rolled-up judge verdict.
+    </p>
+  {% endif %}
+
+  {# ----- 6. Evidence chain ----- #}
+  <p class="exec-probe__label">Evidence chain</p>
+  <p class="exec-probe__evidence">
+    <a class="exec-probe__evidence-link"
+       href="/scan/{{ scan_id }}/events{% if probe.probe_id %}?probe={{ probe.probe_id }}{% endif %}"
+       target="_blank"
+       rel="noopener">View JSONL events for this probe</a>
+  </p>
+
+  {# ----- 7. Reproduce CLI command ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Reproduce</p>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-probe-repro"
+            aria-label="Copy reproduce command">Copy</button>
+  </div>
+  <pre class="exec-probe__repro" id="exec-probe-repro">uv run agent-guardian probe \
+{%- if probe.probe_id %}
+  --probe {{ probe.probe_id }}{% endif %}{% if probe.seed or probe.rng_seed %} \
+  --seed {{ probe.seed or probe.rng_seed }}{% endif %} \
+  --scan {{ scan_id }}</pre>
+
+</div>

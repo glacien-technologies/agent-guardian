@@ -1,17 +1,24 @@
-/* Executive Dashboard — Findings + Probes slide-over driver (QA-031 / QA-032).
+/* Executive Dashboard — Findings + Probes slide-over driver (QA-031 / QA-032 / QA-049).
  *
  * Single IIFE wires the shared slide-over component (mounted once per
  * tabpanel by ``_finding_slideover.html``) to:
  *
- *   * ``.exec-findings-table__row`` rows (Findings tab, when wave 1 lands)
- *   * ``.exec-probes-table__row``   rows (Probes tab — this wave)
+ *   * ``.exec-findings-table__row`` rows (Findings tab)
+ *   * ``.exec-probes-table__row``   rows (Probes tab)
  *
  * Each row carries:
- *   * ``data-source``    — ``"finding"`` | ``"probe"``  (selects renderer)
- *   * ``data-probe-id``  — present on probe rows; keys into the
- *                          ``#exec-probes-payload`` JSON island
- *   * ``data-finding-id`` — present on finding rows; keys into the
- *                          ``#exec-findings-payload`` JSON island
+ *   * ``data-action``       — ``"probe-row-click"`` on probe rows (QA-049
+ *                             row-click contract).
+ *   * ``data-source``       — ``"finding"`` | ``"probe"``  (selects renderer).
+ *   * ``data-probe-href``   — server URL the drawer ``fetch()``-es when a
+ *                             probe row is opened (BUG-1: replaces the
+ *                             legacy ``#exec-probes-payload`` JSON-island
+ *                             wall — no per-probe payload ships in the
+ *                             initial page HTML any more).
+ *   * ``data-probe-id``     — present on probe rows; used for the deep-link
+ *                             ``?probe=<id>`` query path.
+ *   * ``data-finding-id``   — present on finding rows; keys into the
+ *                             ``#exec-findings-payload`` JSON island.
  *
  * The slide-over is a single DOM tree per tabpanel; opening a new row
  * overwrites the header + body slots. Esc / backdrop click / X-button
@@ -66,70 +73,85 @@
     if (node) { node.textContent = value == null ? "" : String(value); }
   }
 
-  // ---- 4. Renderers -----------------------------------------------------
   /**
-   * Map the AgentGuardian verdict enum (``fail`` / ``pass`` / ``inconclusive``
-   * / empty) to operator-facing labels + the matching pill modifier class.
+   * Hook every "Copy" button rendered inside the freshly-loaded probe
+   * detail-sheet. Each button declares its source element by id via
+   * ``data-copy-source``; the writer copies that element's textContent
+   * to the clipboard and surfaces a transient "Copied" label.
+   *
+   * @param {HTMLElement} container — the freshly-injected drawer body
    */
-  function verdictPresent(verdict) {
-    if (verdict === "fail") {
-      return { label: "EXPLOITED", cls: "exec-verdict-pill--fail" };
+  function wireCopyButtons(container) {
+    var buttons = container.querySelectorAll("[data-copy-source]");
+    for (var i = 0; i < buttons.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var srcId = btn.getAttribute("data-copy-source");
+          var src = srcId ? document.getElementById(srcId) : null;
+          var text = src ? src.textContent || "" : "";
+          var original = btn.textContent;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard
+              .writeText(text)
+              .then(function () {
+                btn.textContent = "Copied";
+                window.setTimeout(function () { btn.textContent = original; }, 1500);
+              })
+              .catch(function () {
+                btn.textContent = "Copy failed";
+                window.setTimeout(function () { btn.textContent = original; }, 1500);
+              });
+          }
+        });
+      })(buttons[i]);
     }
-    if (verdict === "pass") {
-      return { label: "DEFENDED", cls: "exec-verdict-pill--pass" };
-    }
-    if (verdict === "inconclusive") {
-      return { label: "INCONCLUSIVE", cls: "exec-verdict-pill--inconclusive" };
-    }
-    return { label: "PENDING", cls: "exec-verdict-pill--unknown" };
   }
 
-  function renderProbeHeader(root, p) {
+  /**
+   * After the server-rendered drawer fragment is injected, hoist its
+   * ``<template data-probe-header>`` into the slide-over header chips
+   * (verdict pill / probe id / turn / timestamp / summary). This keeps
+   * the chip state in sync with the freshly-loaded probe without
+   * shipping a second copy of the metadata.
+   *
+   * @param {HTMLElement} root      — ``.exec-slideover-root`` element
+   * @param {HTMLElement} container — the drawer body container
+   */
+  function syncProbeHeader(root, container) {
+    var tpl = container.querySelector("[data-probe-header]");
+    if (!tpl) { return; }
+    var verdict = tpl.getAttribute("data-verdict") || "unknown";
+    var verdictLabel = tpl.getAttribute("data-verdict-label") || "PENDING";
+    var verdictCls = "exec-verdict-pill--unknown";
+    if (verdict === "fail") { verdictCls = "exec-verdict-pill--fail"; }
+    else if (verdict === "pass") { verdictCls = "exec-verdict-pill--pass"; }
+    else if (verdict === "inconclusive") { verdictCls = "exec-verdict-pill--inconclusive"; }
+
     var pill = root.querySelector("[data-slideover-verdict-pill]");
     if (pill) {
-      var v = verdictPresent(p.verdict);
-      pill.className = "exec-verdict-pill " + v.cls;
+      pill.className = "exec-verdict-pill " + verdictCls;
       pill.setAttribute("data-slideover-verdict-pill", "");
-      pill.textContent = v.label;
+      pill.textContent = verdictLabel;
     }
-    setText(root.querySelector("[data-slideover-id]"), p.probe_id || "—");
-    setText(root.querySelector("[data-slideover-turn]"), "turn " + (p.turn != null ? p.turn : "—"));
-    setText(root.querySelector("[data-slideover-time]"), p.timestamp_label || "—");
-    setText(root.querySelector("[data-slideover-summary]"), p.probe_id || "Probe details");
+    setText(root.querySelector("[data-slideover-id]"), tpl.getAttribute("data-probe-id") || "—");
+    var turn = tpl.getAttribute("data-turn") || "—";
+    setText(root.querySelector("[data-slideover-turn]"), "turn " + turn);
+    setText(
+      root.querySelector("[data-slideover-time]"),
+      tpl.getAttribute("data-timestamp") || "—",
+    );
+    setText(
+      root.querySelector("[data-slideover-summary]"),
+      tpl.getAttribute("data-summary") || "Probe details",
+    );
+
+    // The template is one-shot; remove it once consumed so the drawer
+    // body markup stays compact.
+    tpl.parentNode.removeChild(tpl);
   }
 
-  function renderProbeBody(bodyNode, p) {
-    bodyNode.textContent = "";
-
-    bodyNode.appendChild(el("p", "exec-probe__label", "Request prompt"));
-    bodyNode.appendChild(el("pre", "exec-probe__prompt", p.prompt || ""));
-
-    bodyNode.appendChild(el("p", "exec-probe__label", "Target response"));
-    bodyNode.appendChild(el("pre", "exec-probe__response", p.target_response || ""));
-
-    var hasConfidence = typeof p.confidence === "number" && p.confidence > 0.0;
-    var reasonLabel = hasConfidence
-      ? "Judge reasoning (confidence " + p.confidence.toFixed(2) + ")"
-      : "Judge reasoning (no judge confidence)";
-    bodyNode.appendChild(el("p", "exec-probe__label", reasonLabel));
-
-    if (p.reasoning) {
-      bodyNode.appendChild(el("blockquote", "exec-probe__reason", p.reasoning));
-    } else {
-      bodyNode.appendChild(
-        el(
-          "p",
-          "exec-probe__reason exec-probe__reason--empty",
-          "Not graded per-turn — see the Findings tab for the rolled-up judge verdict."
-        )
-      );
-    }
-  }
-
+  // ---- 4. Renderers (finding-mode only — probe-mode is server-rendered) -
   function renderFindingHeader(root, f) {
-    // Finding-mode header — wave 1 will flesh this out. For now we cover
-    // the same slot set so the slide-over stays usable if a finding row
-    // is wired in before wave 1 ships.
     var pill = root.querySelector("[data-slideover-verdict-pill]");
     if (pill) {
       var sevClass = "exec-verdict-pill--unknown";
@@ -172,6 +194,92 @@
     }
   }
 
+  /**
+   * Safe-URL guard for the probe-detail-sheet ``fetch()``.
+   *
+   * Only same-origin, ``/scan/<id>/probe`` paths are accepted. This
+   * blocks a future refactor (or a stray DevTools edit) from pointing
+   * the drawer at an attacker-controlled origin — defence-in-depth for
+   * the ``innerHTML`` swap below, even though the response itself is
+   * always our own Jinja-autoescaped fragment.
+   */
+  function isSafeProbeHref(href) {
+    if (typeof href !== "string" || href.length === 0) { return false; }
+    // Reject absolute URLs (``http://...``, ``//evil.example``,
+    // ``javascript:``); only allow same-origin relative paths.
+    if (/^[a-z]+:/i.test(href) || href.indexOf("//") === 0) { return false; }
+    if (href.charAt(0) !== "/") { return false; }
+    // Lock the path shape: ``/scan/<id>/probe`` with an optional query
+    // string. ``<id>`` is path-safe (no slashes) by construction.
+    return /^\/scan\/[^/]+\/probe(\?.*)?$/.test(href);
+  }
+
+  /**
+   * Fetch the server-rendered probe-detail-sheet for a row and inject
+   * it into the drawer body. BUG-1 — initial page HTML carries no
+   * per-probe payload; this ``fetch()`` is the only path the verbatim
+   * prompt / response / reasoning text takes into the DOM.
+   *
+   * The response is a Jinja-autoescaped HTML fragment from the
+   * ``/scan/<id>/probe`` route — every operator-untrusted field is
+   * escaped by the template, so ``innerHTML`` is safe here. The
+   * ``isSafeProbeHref`` guard above blocks any non-same-origin /
+   * non-probe URL from reaching this assignment as an extra
+   * defence-in-depth check.
+   *
+   * @param {HTMLElement} root     — ``.exec-slideover-root``
+   * @param {HTMLElement} bodyNode — ``[data-slideover-body]``
+   * @param {string}      href     — row's ``data-probe-href``
+   */
+  function loadProbeSheet(root, bodyNode, href) {
+    bodyNode.textContent = "";
+    var pending = el("p", "exec-probe__reason exec-probe__reason--empty", "Loading…");
+    bodyNode.appendChild(pending);
+    if (typeof fetch !== "function") { return; }
+    if (!isSafeProbeHref(href)) {
+      bodyNode.textContent = "";
+      bodyNode.appendChild(
+        el(
+          "p",
+          "exec-probe__reason exec-probe__reason--empty",
+          "Cannot open this probe — invalid drawer URL.",
+        ),
+      );
+      return;
+    }
+    fetch(href, { credentials: "same-origin", headers: { Accept: "text/html" } })
+      .then(function (resp) {
+        if (!resp.ok) { throw new Error("probe fetch failed: " + resp.status); }
+        var ct = resp.headers.get("Content-Type") || "";
+        // Server must return HTML; reject anything else (JSON, script,
+        // attachments) so a mis-routed response can't smuggle markup
+        // past the innerHTML swap.
+        if (ct.indexOf("text/html") === -1) {
+          throw new Error("unexpected content-type: " + ct);
+        }
+        return resp.text();
+      })
+      .then(function (html) {
+        // Server-rendered, Jinja-autoescaped, same-origin HTML fragment
+        // — innerHTML is the canonical pattern for this swap (matches
+        // htmx hx-swap="innerHTML" semantics). See ``isSafeProbeHref``
+        // above for the URL allow-list that gates this assignment.
+        bodyNode.innerHTML = html;
+        syncProbeHeader(root, bodyNode);
+        wireCopyButtons(bodyNode);
+      })
+      .catch(function (err) {
+        bodyNode.textContent = "";
+        bodyNode.appendChild(
+          el(
+            "p",
+            "exec-probe__reason exec-probe__reason--empty",
+            "Could not load probe details (" + err.message + ").",
+          ),
+        );
+      });
+  }
+
   // ---- 5. Slide-over controller ----------------------------------------
   /**
    * Bind a single slide-over root to its surrounding tabpanel's row set.
@@ -179,7 +287,9 @@
    * called once per instance.
    *
    * @param {HTMLElement} root      — ``.exec-slideover-root`` element
-   * @param {object}      payloads  — { finding: {id->row}, probe: {id->row} }
+   * @param {object}      payloads  — { finding: {id->row} } — probe
+   *                                  rows fetch their own payload from
+   *                                  the server on click (BUG-1).
    */
   function attach(root, payloads) {
     if (!root) { return; }
@@ -194,17 +304,32 @@
 
     function open(row) {
       var source = row.getAttribute("data-source");
-      var record = null;
       if (source === "probe") {
-        record = payloads.probe[row.getAttribute("data-probe-id")];
-        if (!record) { return; }
-        renderProbeHeader(root, record);
-        renderProbeBody(bodyNode, record);
+        // Reset the chip header to a neutral state — the server fragment
+        // populates the real values via its ``<template data-probe-header>``
+        // on response.
+        var pill = root.querySelector("[data-slideover-verdict-pill]");
+        if (pill) {
+          pill.className = "exec-verdict-pill exec-verdict-pill--unknown";
+          pill.textContent = "…";
+        }
+        setText(root.querySelector("[data-slideover-id]"), row.getAttribute("data-probe-id") || "—");
+        var verdict = row.getAttribute("data-verdict") || "unknown";
+        if (pill) {
+          var label = "PENDING";
+          var cls = "exec-verdict-pill--unknown";
+          if (verdict === "fail") { label = "EXPLOITED"; cls = "exec-verdict-pill--fail"; }
+          else if (verdict === "pass") { label = "DEFENDED"; cls = "exec-verdict-pill--pass"; }
+          else if (verdict === "inconclusive") { label = "INCONCLUSIVE"; cls = "exec-verdict-pill--inconclusive"; }
+          pill.className = "exec-verdict-pill " + cls;
+          pill.textContent = label;
+        }
+        loadProbeSheet(root, bodyNode, row.getAttribute("data-probe-href"));
       } else if (source === "finding") {
-        record = payloads.finding[row.getAttribute("data-finding-id")];
-        if (!record) { return; }
-        renderFindingHeader(root, record);
-        renderFindingBody(bodyNode, record);
+        var f = payloads.finding[row.getAttribute("data-finding-id")];
+        if (!f) { return; }
+        renderFindingHeader(root, f);
+        renderFindingBody(bodyNode, f);
       } else {
         return;
       }
@@ -232,9 +357,12 @@
       }
     }
 
-    // Row activation — click + Enter/Space keyboard.
+    // Row activation — click + Enter/Space keyboard. QA-049 wires the
+    // ``data-action="probe-row-click"`` contract on probe rows; finding
+    // rows still use the class selector for backwards compatibility.
     var selectors = [
       ".exec-probes-table__row",
+      "[data-action=\"probe-row-click\"]",
       ".exec-findings-table__row",
     ];
     var rows = document.querySelectorAll(selectors.join(","));
@@ -272,7 +400,8 @@
   function boot() {
     var payloads = {
       finding: indexBy(loadPayload("exec-findings-payload"), "id"),
-      probe: indexBy(loadPayload("exec-probes-payload"), "probe_id"),
+      // BUG-1: probe payloads are fetched on demand from
+      // ``/scan/<id>/probe?index=<N>`` — no JSON-island lookup table.
     };
     var roots = document.querySelectorAll(".exec-slideover-root");
     for (var i = 0; i < roots.length; i++) {

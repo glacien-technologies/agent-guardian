@@ -109,37 +109,44 @@ def _persist(store: ScanStore, scan: Scan) -> Path:
 def test_executive_kpi_tile_renders_info_button_and_popover(
     client: TestClient, store: ScanStore
 ) -> None:
-    """Every KPI tile carries a ⓘ button + aria-describedby popover."""
+    """Every remaining KPI tile carries a ⓘ button + prose info popover.
+
+    QA-043 (2026-06-02) — CRITICAL + HIGH tiles removed; the strip is now
+    six tiles. QA-044 + QA-039 — the popover is ``kpi-info-popover`` driven
+    by click-to-open ``aria-controls`` rather than the old hover-only
+    ``aria-describedby`` + ``exec-kpi__desc-popover`` markup.
+    """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    for key in ("aivss", "band", "findings", "critical", "high", "elapsed", "cost", "coverage"):
-        assert f'aria-describedby="kpi-{key}-desc"' in body, (
-            f"missing aria-describedby for KPI {key!r}"
+    for key in ("aivss", "band", "findings", "elapsed", "cost", "coverage"):
+        assert f'aria-controls="kpi-{key}-info"' in body, (
+            f"missing aria-controls for KPI {key!r}"
         )
-        assert f'id="kpi-{key}-desc"' in body, f"missing popover id for KPI {key!r}"
-        assert 'class="exec-kpi__info"' in body
-    assert "exec-kpi__desc-popover" in body
-    # Locked descriptions still render (just inside the popover now).
-    assert "Composite agent safety score from adversarial testing" in body
+        assert f'id="kpi-{key}-info"' in body, f"missing popover id for KPI {key!r}"
+    # New marker classes the QA validation greps for.
+    assert "kpi-info-icon" in body
+    assert "kpi-info-popover" in body
 
 
-def test_executive_kpi_strip_no_longer_renders_always_on_desc_span(
+def test_executive_kpi_strip_drops_critical_and_high_tiles(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The legacy ``<span class="exec-kpi__desc">`` block is removed."""
+    """QA-043 — CRITICAL + HIGH KPI tiles no longer render."""
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    assert 'class="exec-kpi__desc"' not in body
+    assert 'data-kpi="critical"' not in body
+    assert 'data-kpi="high"' not in body
 
 
-def test_executive_kpi_popover_css_uses_hover_focus_within(client: TestClient) -> None:
-    """Popover open state is driven by :hover / :focus-within (no JS)."""
+def test_executive_kpi_info_popover_css_drops_uppercase(client: TestClient) -> None:
+    """QA-039 — the prose info popover renders without ALL-CAPS styling."""
     body = client.get("/static/executive.css").text
-    assert ".exec-kpi__desc-popover" in body
-    assert ".exec-kpi:hover .exec-kpi__desc-popover" in body
-    assert ".exec-kpi:focus-within .exec-kpi__desc-popover" in body
+    # The selector exists.
+    assert ".kpi-info-popover" in body
+    # And it explicitly opts out of uppercase + heavy letter-spacing.
+    assert "text-transform: none" in body
 
 
 # ---------------------------------------------------------------------------
@@ -148,17 +155,27 @@ def test_executive_kpi_popover_css_uses_hover_focus_within(client: TestClient) -
 
 
 @pytest.mark.parametrize(
-    "key",
-    ["aivss", "band", "findings", "critical", "high", "elapsed", "cost", "coverage"],
+    "key,component",
+    [
+        # QA-040 — AIVSS tile mini-chart is now the horseshoe gauge.
+        ("aivss", "aivss-gauge"),
+        ("band", "kpi-chart-band"),
+        ("findings", "kpi-chart-findings"),
+        ("elapsed", "kpi-chart-elapsed"),
+        ("cost", "kpi-chart-cost"),
+        ("coverage", "kpi-chart-coverage"),
+    ],
 )
 def test_executive_kpi_tile_renders_mini_chart(
-    client: TestClient, store: ScanStore, key: str
+    client: TestClient, store: ScanStore, key: str, component: str
 ) -> None:
-    """Every KPI tile renders a ``data-component="kpi-chart-{key}"`` element."""
+    """Every remaining KPI tile renders its declared mini-chart component."""
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    assert f'data-component="kpi-chart-{key}"' in body, f"KPI tile {key!r} missing mini-chart"
+    assert f'data-component="{component}"' in body, (
+        f"KPI tile {key!r} missing mini-chart component {component!r}"
+    )
 
 
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
@@ -203,7 +220,11 @@ def test_executive_row3_radar_squared_up(client: TestClient) -> None:
     body = client.get("/static/executive.css").text
     assert ".exec-overview-twocol .exec-chart--radar .exec-chart__canvas-wrap" in body
     assert "aspect-ratio: 1 / 1" in body
-    assert "max-width: 360px" in body
+    # QA-045 (2026-06-02) — the radar card grew from 360 → 480 px so the
+    # full category names ("Privilege abuse", "Supply chain", "Cascading
+    # failure") fit without truncation. The aspect ratio is preserved;
+    # only the envelope size changed.
+    assert "max-width: 480px" in body
 
 
 # ---------------------------------------------------------------------------

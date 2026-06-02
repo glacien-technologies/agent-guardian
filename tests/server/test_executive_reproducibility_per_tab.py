@@ -3,9 +3,14 @@
 Verify that the reproducibility receipt has been moved out of the layout-level
 footer into per-tab includes.
 
-QA-029 sub-ask 3 restricted the receipt to the two tabs where the
-regenerate-command is contextually relevant — Overview + Probes. (Findings
-and Logs no longer carry it; the Agents tab itself was deleted in QA-030.)
+Timeline:
+* QA-029 sub-ask 3 restricted the receipt to Overview + Probes (Findings
+  and Logs already omit it; the Agents tab itself was deleted in QA-030).
+* BUG-2 (2026-06-02) — the Probes-tab include was removed because
+  surfacing the same scan-level receipt twice was the bug operators
+  flagged. Per-probe reproduction now lives in the drawer's "Reproduce"
+  CLI button (QA-049). Only the Overview tab carries the canonical
+  receipt today.
 """
 
 from __future__ import annotations
@@ -143,14 +148,17 @@ def _slice_tabpanel(html: str, tab_id: str) -> str:
 REPRO_MARKER = 'data-component="reproducibility"'
 
 
-def test_reproducibility_renders_inside_overview_and_probes(
+def test_reproducibility_renders_inside_overview_only(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The reproducibility receipt must appear inside the two tabpanels where
-    the regenerate-command is contextually relevant — Overview + Probes.
+    """The reproducibility receipt must appear ONLY inside the Overview
+    tabpanel.
 
-    QA-029 sub-ask 3 narrowed the include from "every data tab" to those
-    two surfaces; Findings + Logs no longer carry it.
+    QA-029 sub-ask 3 narrowed the include to Overview + Probes; BUG-2
+    (2026-06-02) then removed it from Probes because surfacing the same
+    receipt twice was the bug. Per-probe replay is covered by the
+    drawer's "Reproduce" CLI button (QA-049). Findings + Logs continue
+    to omit it.
     """
     scan = _make_scan()
     _persist(store, scan)
@@ -158,14 +166,15 @@ def test_reproducibility_renders_inside_overview_and_probes(
     body = resp.text
     assert resp.status_code == 200
 
-    for tab in ("overview", "probes"):
-        pane = _slice_tabpanel(body, tab)
-        assert REPRO_MARKER in pane, f"reproducibility receipt missing from tabpanel-{tab}"
-    for tab in ("findings", "logs"):
+    overview_pane = _slice_tabpanel(body, "overview")
+    assert REPRO_MARKER in overview_pane, (
+        "reproducibility receipt missing from tabpanel-overview"
+    )
+    for tab in ("findings", "probes", "logs"):
         pane = _slice_tabpanel(body, tab)
         assert REPRO_MARKER not in pane, (
             f"reproducibility receipt unexpectedly present in tabpanel-{tab} "
-            f"after QA-029 sub-ask 3 narrowed it to Overview + Probes only"
+            f"after BUG-2 (2026-06-02) narrowed it to Overview only"
         )
 
 

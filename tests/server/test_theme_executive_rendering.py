@@ -209,7 +209,12 @@ def test_executive_route_returns_200_with_seeded_scan(client: TestClient, store:
 
 
 def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanStore) -> None:
-    """The sticky topbar + KPI strip render with all 8 KPI labels."""
+    """The sticky topbar + KPI strip render with the 6 remaining tile labels.
+
+    QA-043 (2026-06-02) — CRITICAL + HIGH tiles dropped; the strip now ships
+    six tiles (AIVSS / Band / Findings / Elapsed / Cost / Coverage) and the
+    grid renders 6 columns.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
@@ -218,7 +223,7 @@ def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanS
     # Topbar marker
     assert 'class="exec-topbar"' in body
     assert "AgentGuardian" in body
-    # KPI strip marker + the 8 locked tile labels. Each label now lives
+    # KPI strip marker + the 6 locked tile labels. Each label now lives
     # inside its eyebrow span beside an inline-SVG icon, so we check the
     # tile+label pair via a per-key regex instead of a tight ">Label<".
     assert 'class="exec-kpi-strip"' in body
@@ -226,8 +231,6 @@ def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanS
         ("aivss", "AIVSS"),
         ("band", "Band"),
         ("findings", "Findings"),
-        ("critical", "Critical"),
-        ("high", "High"),
         ("elapsed", "Elapsed"),
         ("cost", "Cost"),
         ("coverage", "Coverage"),
@@ -237,6 +240,9 @@ def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanS
             re.DOTALL,
         )
         assert pattern.search(body), f"missing KPI tile {key!r} with label {label!r}"
+    # And the dropped tiles are gone.
+    assert 'data-kpi="critical"' not in body
+    assert 'data-kpi="high"' not in body
 
 
 def test_executive_sticky_css_loaded(client: TestClient) -> None:
@@ -449,21 +455,25 @@ def test_executive_logs_tab_empty_state_when_no_events_jsonl(
 
 
 # ---------------------------------------------------------------------------
-# 7. Theme switcher dropdown lists Executive (5th option)
+# 7. Theme switcher dropdown — retired in QA-041, the switcher must NOT render
 # ---------------------------------------------------------------------------
 
 
-def test_executive_theme_switcher_dropdown_includes_executive_option(
+def test_executive_theme_switcher_dropdown_is_not_rendered(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The shared dropdown must include the 5th option labelled 'Executive Dashboard'."""
+    """QA-041: the multi-theme switcher dropdown was removed alongside the
+    non-Executive themes. The topbar must no longer carry the shared
+    ``ag-theme-switcher`` partial markers.
+    """
     scan = _make_scan()
     _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    resp = client.get(f"/scan/{scan.id}")
     body = resp.text
     assert resp.status_code == 200
-    assert 'value="executive"' in body
-    assert "Executive Dashboard" in body
+    assert "ag-theme-switcher" not in body
+    assert "Mission Control" not in body
+    assert "Narrative Report" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -593,22 +603,28 @@ def test_executive_keyboard_nav_aria_attributes_correct(
 
 
 # ---------------------------------------------------------------------------
-# 12. Cross-check — all four prior themes also carry the literal heading
+# 12. Stale ?theme= query param ignored — Executive renders regardless
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "theme",
-    ["editorial", "mission", "narrative", "executive"],
+    "stale_theme",
+    ["editorial", "mission", "narrative", "executive", "ide", "totally-bogus"],
 )
-def test_every_theme_renders_locked_findings_literal(
-    client: TestClient, store: ScanStore, theme: str
+def test_stale_theme_query_param_renders_executive(
+    client: TestClient, store: ScanStore, stale_theme: str
 ) -> None:
-    """The greppable ``All findings so far.`` literal renders in every theme."""
+    """QA-041: the ``?theme=`` query param is silently ignored. Any value —
+    a former theme slug, the retired ``ide`` slug, or pure garbage — still
+    resolves to the Executive layout (``data-theme="executive"``) so stale
+    operator bookmarks never 404. The greppable findings literal renders
+    every time.
+    """
     scan = _make_scan()
     _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}?theme={theme}")
+    resp = client.get(f"/scan/{scan.id}?theme={stale_theme}")
     assert resp.status_code == 200, resp.text[:500]
+    assert 'data-theme="executive"' in resp.text
     assert "All findings so far." in resp.text
 
 
@@ -617,28 +633,28 @@ def test_every_theme_renders_locked_findings_literal(
 # ---------------------------------------------------------------------------
 
 
-def test_executive_overview_renders_aivss_hero_partial(
+def test_executive_overview_no_longer_renders_aivss_hero_partial(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The AIVSS hero card (big serif numeric + band axis) renders in the
-    Overview tab. Markers: ``data-component="aivss-hero"`` + the
-    ``exec-hero__number`` class + the 5-segment band axis."""
+    """QA-042 (2026-06-02) — the AIVSS hero card (big serif numeric + 5-band
+    horizontal axis) is no longer included on Overview. Its information now
+    lives in the AIVSS KPI tile horseshoe gauge introduced in QA-040, so
+    the duplicate ``aivss-block`` + ``exec-hero__number`` + ``exec-bandaxis``
+    markup MUST NOT appear in the Overview pane.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Anchor inside the Overview pane.
     idx = body.find('id="tabpanel-overview"')
     next_idx = body.find('id="tabpanel-findings"', idx)
     overview_pane = body[idx:next_idx]
-    assert 'data-component="aivss-hero"' in overview_pane
-    assert "exec-hero__number" in overview_pane
-    # Eyebrow + sub-line carry mono labels.
-    assert "AIVSS" in overview_pane
-    # Band axis: 5 segments with their labels.
-    for label in ("Critical", "Poor", "Warning", "Good", "Excellent"):
-        assert f">{label}<" in overview_pane, f"band axis missing {label}"
+    assert 'data-component="aivss-hero"' not in overview_pane
+    assert "exec-hero__number" not in overview_pane
+    assert "exec-bandaxis" not in overview_pane
+    # But the AIVSS gauge MUST be present in its place.
+    assert 'data-component="aivss-gauge"' in overview_pane
 
 
 def test_executive_overview_renders_severity_bars_partial(
@@ -710,22 +726,26 @@ def test_executive_overview_renders_asi_radar_partial(client: TestClient, store:
 def test_executive_reproducibility_renders_in_each_data_tab(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The reproducibility receipt renders once per data tab — Overview +
-    Probes only after QA-029 sub-ask 3 restricted the receipt to the two
-    surfaces where the regenerate-command is contextually relevant.
+    """The reproducibility receipt renders ONLY on the Overview tab.
 
-    Per the 2026-05-31 UX punch-list, the receipt was moved off the layout
-    footer and into the per-tab partials. QA-029 then narrowed it to
-    Overview + Probes (Findings + Logs no longer carry it). See
-    ``test_executive_reproducibility_per_tab`` for the per-tab DOM placement
-    asserts."""
+    Timeline:
+      * 2026-05-31 — receipt moved off the layout footer into per-tab partials.
+      * QA-029     — narrowed include set to Overview + Probes.
+      * BUG-2 (2026-06-02) — receipt removed from Probes too, since
+        surfacing the same receipt twice was the bug. Per-probe
+        reproduction is covered by the drawer's "Reproduce" CLI button
+        (QA-049). Overview is the single source of truth for the
+        canonical scan-level receipt.
+
+    Findings + Logs continue to omit it.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Overview + Probes only after QA-029 — 2 includes total.
-    assert body.count('data-component="reproducibility"') == 2
+    # Overview only after BUG-2 — exactly 1 include.
+    assert body.count('data-component="reproducibility"') == 1
     # The 7 mono row labels appear at least once.
     for label in (
         "SCAN_ID",
@@ -737,11 +757,11 @@ def test_executive_reproducibility_renders_in_each_data_tab(
         "EVIDENCE",
     ):
         assert label in body, f"reproducibility missing label {label}"
-    # The REPRODUCIBILITY mono eyebrow appears once per included tab.
-    assert body.count("REPRODUCIBILITY") >= 2
+    # The REPRODUCIBILITY mono eyebrow renders exactly once.
+    assert body.count("REPRODUCIBILITY") == 1
     # The Copy button hook is the same across all includes (Copy logic
     # iterates [data-copy-target] via querySelectorAll).
-    assert body.count('data-copy-target="#exec-repro-command"') == 2
+    assert body.count('data-copy-target="#exec-repro-command"') == 1
 
 
 def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> None:
@@ -800,11 +820,14 @@ def test_executive_clean_control_renders_all_new_partials(
     body = resp.text
     assert resp.status_code == 200
     # All surviving partials present even when the scan flagged nothing.
-    assert 'data-component="aivss-hero"' in body
+    # QA-042 (2026-06-02) — the AIVSS hero card was removed from Overview;
+    # its information moved into the AIVSS KPI tile horseshoe gauge (QA-040).
+    assert 'data-component="aivss-gauge"' in body
     assert 'data-component="severity-bars"' in body
     assert 'data-component="asi-radar"' in body
     assert 'data-component="reproducibility"' in body
-    # The deleted asi-rows partial must NOT render anywhere.
+    # The deleted partials must NOT render anywhere.
+    assert 'data-component="aivss-hero"' not in body
     assert 'data-component="asi-rows"' not in body
     # The findings empty-state copy is still wired through.
     assert "Nothing flagged yet." in body
@@ -847,75 +870,88 @@ def _seed_memory_jsonl_without_judge(scan_dir: Path) -> dict[str, object]:
     return turn
 
 
-def test_executive_probes_tab_carries_empty_reasoning_through_slideover_payload(
+def _fetch_probe_drawers(
+    client: TestClient, scan_id: str, count: int
+) -> list[str]:
+    """Fetch the server-rendered drawer fragment for each probe index.
+
+    BUG-1 (2026-06-02) — the legacy ``<script type="application/json"
+    id="exec-probes-payload">`` JSON-island wall was retired. The drawer
+    body is now rendered on demand by ``GET /scan/<id>/probe?index=<N>``
+    when an operator opens a row. This helper retrieves each fragment so
+    the per-row content assertions can still run; the initial Probes-tab
+    HTML never carries the verbatim prompt / response / reasoning text.
+    """
+    out: list[str] = []
+    for idx in range(count):
+        resp = client.get(f"/scan/{scan_id}/probe?index={idx}")
+        if resp.status_code == 200:
+            out.append(resp.text)
+    return out
+
+
+def test_executive_probes_tab_initial_html_never_leaks_payload(
     client: TestClient, store: ScanStore
 ) -> None:
-    """When a probe carries no judge reasoning (empty string) and confidence
-    is 0.0, the probe row still ships through the slide-over JSON island
-    so the client-side renderer can fall back to the humanised eyebrow.
+    """The initial Probes-tab HTML carries NO verbatim prompt /
+    target-response / judge-reasoning text — even for probes whose
+    fields would otherwise pose no obvious sensitivity. BUG-1
+    (2026-06-02) moved the per-probe payload from the centralised JSON
+    island onto the lazy-loaded drawer fragment; the only data that
+    appears in the initial page is the 5-column scannable row.
+    """
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    turn = _seed_memory_jsonl_without_judge(scan_dir)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
 
-    QA-032 replaced the per-card blockquote layout with a 5-col table +
-    slide-over driven by ``#exec-probes-payload``; this test now asserts
-    the data path (not the per-row DOM blockquote that no longer exists).
+    idx = body.find('id="tabpanel-probes"')
+    next_panel_idx = body.find('id="tabpanel-logs"', idx)
+    probes_pane = body[idx:next_panel_idx]
+
+    # The legacy JSON-island wall + per-row payload attribute are gone.
+    assert '<script type="application/json" id="exec-probes-payload">' not in probes_pane
+    assert "data-probe-payload" not in probes_pane
+    # The verbatim prompt + target response never enter the initial HTML.
+    assert turn["prompt"] not in probes_pane
+    assert turn["target_response"] not in probes_pane
+
+
+def test_executive_probe_drawer_route_serves_empty_reasoning_fallback(
+    client: TestClient, store: ScanStore
+) -> None:
+    """When a probe carries no judge reasoning (empty string) and
+    confidence is 0.0, the on-demand drawer fragment falls back to the
+    humanised empty-state copy ("Not graded per-turn — see the Findings
+    tab for the rolled-up judge verdict.").
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl_without_judge(scan_dir)
-    resp = client.get(f"/scan/{scan.id}?theme=executive")
-    body = resp.text
+    resp = client.get(f"/scan/{scan.id}/probe?index=0")
     assert resp.status_code == 200
-
-    idx = body.find('id="tabpanel-probes"')
-    next_panel_idx = body.find('id="tabpanel-logs"', idx)
-    probes_pane = body[idx:next_panel_idx]
-
-    # The JSON island is the new source of truth for slide-over content.
-    island_marker = '<script type="application/json" id="exec-probes-payload">'
-    assert island_marker in probes_pane
-    start = probes_pane.find(island_marker) + len(island_marker)
-    end = probes_pane.find("</script>", start)
-    payload = json.loads(probes_pane[start:end])
-    assert isinstance(payload, list) and payload, "probes payload must be non-empty"
-    # Every row carries reasoning + confidence keys even when empty/zero.
-    for row in payload:
-        assert "reasoning" in row
-        assert "confidence" in row
-    # The fallback path triggers when reasoning is empty AND confidence == 0.
-    assert any(row["reasoning"] == "" and row["confidence"] == 0 for row in payload), (
-        "expected at least one probe row with empty reasoning + zero confidence "
-        "so the slide-over fallback renderer is exercised"
+    body = resp.text
+    assert "Not graded per-turn" in body, (
+        "empty-reasoning fallback prose missing from the drawer fragment"
     )
 
 
-def test_executive_probes_tab_carries_real_reasoning_through_slideover_payload(
+def test_executive_probe_drawer_route_serves_real_reasoning(
     client: TestClient, store: ScanStore
 ) -> None:
     """When a probe DOES carry judge reasoning + non-zero confidence,
-    that data flows through the slide-over JSON island verbatim.
-
-    QA-032 moved the per-row blockquote into the slide-over JSON payload.
+    the on-demand drawer fragment surfaces both verbatim.
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
-    # Use the existing helper that emits real reasoning + 0.85 confidence.
     turns = _seed_memory_jsonl(scan_dir, count=1)
-    resp = client.get(f"/scan/{scan.id}?theme=executive")
-    body = resp.text
+    resp = client.get(f"/scan/{scan.id}/probe?index=0")
     assert resp.status_code == 200
-
-    idx = body.find('id="tabpanel-probes"')
-    next_panel_idx = body.find('id="tabpanel-logs"', idx)
-    probes_pane = body[idx:next_panel_idx]
-
-    island_marker = '<script type="application/json" id="exec-probes-payload">'
-    assert island_marker in probes_pane
-    start = probes_pane.find(island_marker) + len(island_marker)
-    end = probes_pane.find("</script>", start)
-    payload = json.loads(probes_pane[start:end])
-    assert isinstance(payload, list) and payload
-    row = payload[0]
-    assert row["reasoning"] == turns[0]["reasoning"]
-    assert row["confidence"] == 0.85
+    body = resp.text
+    assert turns[0]["reasoning"] in body
+    assert "0.85" in body
 
 
 # ---------------------------------------------------------------------------
