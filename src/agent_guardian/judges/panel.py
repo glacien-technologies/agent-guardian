@@ -50,6 +50,21 @@ __all__ = [
 
 _LOG = logging.getLogger("agent_guardian.judges.panel")
 
+# QA-050 — distilled headline length for the Finding summary column. The
+# panel verdict's ``reasoning`` text flows straight into ``Finding.summary``
+# (see ``Agent._build_finding`` in ``agents/base.py``), so a tight cap keeps
+# the Findings tab from showing the same boilerplate on every row.
+_HEADLINE_MAX_CHARS = 80
+
+# Reasoning strings the LLM judges fall back to when their output is
+# unparseable. Treat them as "no real reasoning" so the headline distiller
+# does not surface stub text as if it were judge analysis.
+_HEADLINE_STUB_PREFIXES: tuple[str, ...] = (
+    "heuristic:",
+    "no reasoning provided",
+    "judge raised:",
+)
+
 
 # --------------------------------------------------------------------------- #
 # Specs / config models
@@ -100,6 +115,44 @@ JudgePanel = JudgePanelConfig
 # --------------------------------------------------------------------------- #
 # PanelJudge
 # --------------------------------------------------------------------------- #
+
+
+def _distill_headline(reasonings: Sequence[str], max_chars: int = _HEADLINE_MAX_CHARS) -> str:
+    """Return the first meaningful sentence from a list of judge reasonings.
+
+    QA-050 — the panel's verdict ``reasoning`` text flows into the
+    ``Finding.summary`` field rendered in the executive Findings tab. The
+    pre-QA-050 boilerplate ("panel unanimous: fail") was identical on every
+    row; this helper picks the first non-stub reasoning string, takes its
+    leading sentence, and truncates with an ellipsis so the Summary column
+    actually says something about why the judges decided as they did.
+
+    The function never raises: an empty / all-stub input yields ``""`` and
+    the caller falls back to the structural blurb.
+    """
+    for raw in reasonings:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(lowered.startswith(stub) for stub in _HEADLINE_STUB_PREFIXES):
+            continue
+        # First sentence — split on the earliest of ``. `` / ``; `` / newline.
+        # ``str.split`` with maxsplit=1 keeps the rest intact so we don't lose
+        # data if the reasoning carries trailing detail we later want to log.
+        for sep in (". ", "; ", "\n"):
+            if sep in text:
+                text = text.split(sep, 1)[0]
+                break
+        text = text.strip().rstrip(".;,")
+        if not text:
+            continue
+        if len(text) > max_chars:
+            # Reserve one char for the ellipsis so the visible length stays
+            # within ``max_chars``.
+            text = text[: max_chars - 1].rstrip() + "…"
+        return text
+    return ""
 
 
 def _build_judge(spec: JudgeSpec) -> Any:
@@ -239,12 +292,22 @@ class PanelJudge:
         # Stay within [0,1] just in case of accumulated float drift.
         final_confidence = max(0.0, min(1.0, final_confidence))
 
+        # QA-050 — distil a one-sentence headline from the majority judges'
+        # reasoning so the Findings tab Summary column reads as analysis,
+        # not "panel unanimous: fail" on every row. Iterate in seat order so
+        # the choice is deterministic across runs with the same inputs.
+        majority_reasonings = [v.reasoning for v in verdicts if v.verdict == majority]
+        headline = _distill_headline(majority_reasonings)
+
         if disagreement:
-            reasoning_blurb = (
-                f"panel split: {dict(counts)} — final via majority+uncertainty mapping"
-            )
+            split_blurb = f"panel split: {dict(counts)} — final via majority+uncertainty mapping"
+            reasoning_blurb = f"{split_blurb} | {headline}" if headline else split_blurb
         else:
-            reasoning_blurb = f"panel unanimous: {majority}"
+            reasoning_blurb = (
+                f"panel unanimous {majority}: {headline}"
+                if headline
+                else f"panel unanimous: {majority}"
+            )
 
         _LOG.debug(
             "PhaseB.B4 panel_majority: majority_verdict=%s agreement_fraction=%.2f "

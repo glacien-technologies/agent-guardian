@@ -217,3 +217,95 @@ async def test_panel_unanimous_reasoning_marks_unanimous() -> None:
 def test_panel_requires_at_least_one_spec() -> None:
     with pytest.raises(ValueError):
         PanelJudge([], cross_family_enforced=False)
+
+
+# --------------------------------------------------------------------------- #
+# QA-050 — Headline distillation
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_panel_reasoning_surfaces_judge_headline() -> None:
+    """QA-050 — first sentence of a majority judge's reasoning is surfaced."""
+    specs = _specs(["openai", "anthropic"])
+    panel = PanelJudge(specs)
+    long_reasoning = (
+        "Target leaked the hidden system prompt verbatim. "
+        "Refusal markers absent and the response includes the secret token."
+    )
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("fail", 0.9, reasoning=long_reasoning),
+            _FakeJudge("fail", 0.9, reasoning=long_reasoning),
+        ],
+    )
+    v = await panel.verdict("prompt", "response")
+    assert v.verdict == "fail"
+    # First sentence (up to the period) is the headline; long_reasoning's
+    # first sentence is < 80 chars so no ellipsis is appended.
+    assert "Target leaked the hidden system prompt verbatim" in v.reasoning
+    # Structural "unanimous" tag still present for log scrapers.
+    assert "unanimous" in v.reasoning.lower()
+
+
+@pytest.mark.asyncio
+async def test_panel_headline_truncates_long_reasoning_to_80_chars() -> None:
+    """QA-050 — reasoning >80 chars is truncated with an ellipsis."""
+    specs = _specs(["openai", "anthropic"])
+    panel = PanelJudge(specs)
+    huge = "x" * 200
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("fail", 0.9, reasoning=huge),
+            _FakeJudge("fail", 0.9, reasoning=huge),
+        ],
+    )
+    v = await panel.verdict("prompt", "response")
+    # The headline segment must end with ellipsis and its visible width
+    # (including the ellipsis) must be at most 80 chars.
+    assert "…" in v.reasoning
+    headline_segment = v.reasoning.split(": ", 1)[1]
+    assert len(headline_segment) <= 80
+
+
+@pytest.mark.asyncio
+async def test_panel_headline_skips_heuristic_stub_reasoning() -> None:
+    """QA-050 — heuristic stub reasonings are not surfaced as a headline."""
+    specs = _specs(["openai", "anthropic", "google"])
+    panel = PanelJudge(specs)
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("fail", 0.9, reasoning="heuristic: no refusal markers"),
+            _FakeJudge("fail", 0.9, reasoning="no reasoning provided"),
+            _FakeJudge(
+                "fail",
+                0.9,
+                reasoning="Compliance: assistant produced a working SQL injection payload.",
+            ),
+        ],
+    )
+    v = await panel.verdict("prompt", "response")
+    assert v.verdict == "fail"
+    # The non-stub reasoning's first sentence wins despite earlier stubs.
+    assert "SQL injection payload" in v.reasoning
+
+
+@pytest.mark.asyncio
+async def test_panel_headline_falls_back_when_only_stubs_available() -> None:
+    """QA-050 — all-stub reasonings preserve the legacy boilerplate."""
+    specs = _specs(["openai", "anthropic"])
+    panel = PanelJudge(specs)
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("fail", 0.9, reasoning="heuristic: refusal markers detected"),
+            _FakeJudge("fail", 0.9, reasoning="no reasoning provided"),
+        ],
+    )
+    v = await panel.verdict("prompt", "response")
+    # No usable headline available, so the legacy boilerplate is preserved
+    # verbatim — back-compat for log scrapers that grep this exact phrase.
+    assert v.reasoning == "panel unanimous: fail"
