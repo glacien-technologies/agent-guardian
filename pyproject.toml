@@ -217,6 +217,12 @@ dev = [
   # the legacy PEP 735 ``[dependency-groups].dev`` table that used to also
   # declare this was deleted to remove the dual-source-of-truth.
   "types-pyyaml>=6.0.12.20260518",
+  # tomllib backport for Python 3.10 — used by ``tests/test_packaging.py``
+  # to parse ``pyproject.toml`` (stdlib ``tomllib`` is 3.11+ only). The
+  # test gates the import on ``sys.version_info`` so this dep is a no-op
+  # on 3.11+. Pinned here so the contract is explicit; without it the
+  # py3.10 CI matrix leg fails collection with ``ModuleNotFoundError``.
+  "tomli>=2.0; python_version<'3.11'",
 ]
 
 # Until the ``agentguardian.ai`` apex DNS lands we point every PyPI URL slot at
@@ -286,13 +292,15 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 exclude = ["tests/"]
 
-# botocore is an optional dependency (``[aws]`` extra) used only by
-# ``agent_guardian.llm.bedrock`` for SigV4 signing + credential
-# resolution. It ships no PEP-561 stubs, and the pre-commit mypy hook
-# runs in an isolated venv where botocore is not installed at all —
-# both cases produce noise we silence here once for the whole project.
+# boto3 + botocore are optional dependencies (``[aws]`` extra) used by
+# ``agent_guardian.llm.bedrock`` (SigV4 signing + credential resolution)
+# and by ``agent_guardian.llm.validation`` (boto3 client construction,
+# guarded by a try/except ImportError). Neither ships PEP-561 stubs, and
+# the pre-commit mypy hook runs in an isolated venv where they are not
+# installed at all — both cases produce noise we silence here once for
+# the whole project.
 [[tool.mypy.overrides]]
-module = ["botocore.*"]
+module = ["boto3", "botocore.*"]
 ignore_missing_imports = true
 
 # sentence_transformers + numpy are optional via the ``[full]`` extra

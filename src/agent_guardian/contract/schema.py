@@ -120,7 +120,10 @@ def _validate_jinja_template(template: str) -> str:
     (:func:`jinja2.meta.find_undeclared_variables`) to enumerate the free
     variables and assert they are a subset of :data:`ALLOWED_TEMPLATE_VARS`.
     """
-    env = Environment(autoescape=False)
+    # AST parse only; this environment never renders the template — we only
+    # walk the parsed Jinja AST via ``meta.find_undeclared_variables``. HTML
+    # autoescape is therefore meaningless here.
+    env = Environment(autoescape=False)  # nosec B701 — AST parse only, never rendered
     try:
         ast = env.parse(template)
     except TemplateSyntaxError as exc:

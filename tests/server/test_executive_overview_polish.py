@@ -158,9 +158,7 @@ def test_executive_kpi_tile_renders_mini_chart(
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    assert f'data-component="kpi-chart-{key}"' in body, (
-        f"KPI tile {key!r} missing mini-chart"
-    )
+    assert f'data-component="kpi-chart-{key}"' in body, f"KPI tile {key!r} missing mini-chart"
 
 
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
@@ -232,9 +230,7 @@ def test_executive_overview_no_longer_renders_fig_eyebrows(
 # ---------------------------------------------------------------------------
 
 
-def test_executive_overview_renders_asi_compact_table(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_executive_overview_renders_asi_compact_table(client: TestClient, store: ScanStore) -> None:
     """The Overview tab includes the new ``data-component="asi-compact"``
     widget with all 10 ASI rows and the locked metadata fields."""
     scan = _make_scan()

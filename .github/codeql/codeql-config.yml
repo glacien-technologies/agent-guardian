@@ -1,0 +1,28 @@
+name: "AgentGuardian CodeQL config"
+
+# Keep the full security coverage we already had.
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+# Filter only the two quality queries that produce false positives on idiomatic
+# Python in this repo. Both are correctness/style queries, not security queries
+# — they remain available via local CodeQL runs for opportunistic review, but
+# do not block PRs.
+#
+# 1) py/non-iterable-in-for-loop: CodeQL's Python type inferencer does not
+#    model EnumMeta.__iter__, so ``for x in MyStrEnum:`` is wrongly flagged as
+#    iterating a non-iterable. The stdlib guarantees Enum subclasses are
+#    iterable; runtime iteration is verified by tests/unit/test_coverage_matrix.py
+#    and scripts/build_coverage_matrix.py.
+#
+# 2) py/implicit-string-concatenation-in-list: we deliberately use adjacent
+#    string concatenation inside ``lines = [...]`` blocks in
+#    scripts/build_coverage_matrix.py to compose long markdown narrative
+#    paragraphs without ``+`` noise. Adding commas would silently change the
+#    output (extra blank lines in docs/reference/framework-coverage-matrix.md).
+query-filters:
+  - exclude:
+      id: py/non-iterable-in-for-loop
+  - exclude:
+      id: py/implicit-string-concatenation-in-list

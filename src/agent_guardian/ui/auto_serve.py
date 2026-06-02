@@ -185,10 +185,12 @@ def probe_is_our_serve(
         port: Port to probe.
         timeout: Hard timeout in seconds for the probe request.
     """
+    # Hardcoded ``http://{host}:{port}/healthz`` against the local dashboard
+    # loopback; no user-controlled scheme or URL reaches ``urlopen``.
     url = f"http://{host}:{port}/healthz"
     req = Request(url, method="GET")
     try:
-        with urlopen(req, timeout=timeout) as resp:
+        with urlopen(req, timeout=timeout) as resp:  # nosec B310 — hardcoded http loopback health probe
             if getattr(resp, "status", None) != 200:
                 return False
             ctype = resp.headers.get("content-type", "")

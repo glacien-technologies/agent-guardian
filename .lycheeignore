@@ -1,0 +1,9 @@
+# Mintlify docs apex subroutes not yet published. The docs site is live at
+# docs.agentguardian.io; the apex `agentguardian.io` README links are
+# aspirational. Remove these entries once the Mintlify IA ships these routes.
+^https://agentguardian\.io/(quickstart|attacks/overview|adapters|cli|standards|attackers)$
+
+# OpenSSF Scorecard project page 404s until the first Scorecard scan runs on
+# the repo. The badge image (with /badge suffix) responds 302 and renders
+# correctly — this entry only suppresses the bare project link in the README.
+^https://api\.securityscorecards\.dev/projects/github\.com/glacien-technologies/agent-guardian$

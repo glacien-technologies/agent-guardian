@@ -3,9 +3,23 @@ on:
   pull_request:
     branches: [main]
 permissions:
+  contents: read
   pull-requests: read
 jobs:
   dco:
     runs-on: ubuntu-latest
     steps:
-      - uses: tim-actions/dco@v1.1.0
+      # ``tim-actions/dco`` requires the JSON commits array as input — it does
+      # NOT walk the PR commits itself. Without this prerequisite step, the
+      # action's ``JSON.parse(core.getInput('commits'))`` parses an empty string
+      # and throws ``SyntaxError: Unexpected end of JSON input`` before any
+      # Signed-off-by check runs.
+      - name: Get PR commits
+        id: get-pr-commits
+        uses: tim-actions/get-pr-commits@v1.3.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: DCO check
+        uses: tim-actions/dco@v1.1.0
+        with:
+          commits: ${{ steps.get-pr-commits.outputs.commits }}

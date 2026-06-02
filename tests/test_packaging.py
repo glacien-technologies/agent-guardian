@@ -24,18 +24,24 @@ What we pin:
    ``agent-guardian`` with the dashboard port exposed; the docker-compose file
    must mount the dashboard.
 
-We use ``tomllib`` (stdlib on 3.11+) so the test has no external deps.
+We use ``tomllib`` (stdlib on 3.11+, ``tomli`` backport on 3.10) so the test
+has no external deps beyond what is already pulled in as a dev dependency.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
-import tomllib
 import yaml
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - py3.10 fallback
+    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"

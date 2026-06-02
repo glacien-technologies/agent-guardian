@@ -49,6 +49,7 @@ dev = [
     { name = "python-dotenv" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "types-pyyaml" },
 ]
 docs = [
@@ -134,6 +135,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'full'", specifier = ">=3.3" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "textual", specifier = ">=0.86" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0" },
     { name = "typer", specifier = ">=0.15" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20260518" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },

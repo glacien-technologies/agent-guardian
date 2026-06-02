@@ -83,8 +83,11 @@ def render_body(
       LLMPermanentError: the template is invalid, or renders to invalid JSON,
         or to a non-object. These are configuration errors, not transport faults.
     """
-    env = jinja2.Environment(
-        autoescape=False,  # output is JSON, every interpolated value is json-escaped
+    # Output is JSON, never HTML — every interpolated value is JSON-escaped via
+    # the ``json`` filter or ``json_escape()`` upstream. Enabling HTML autoescape
+    # would corrupt the JSON (e.g. turn ``"`` into ``&quot;`` mid-string).
+    env = jinja2.Environment(  # nosec B701 — JSON output, values pre-escaped via json filter
+        autoescape=False,
         undefined=jinja2.StrictUndefined,
         keep_trailing_newline=False,
     )
