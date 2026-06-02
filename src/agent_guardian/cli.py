@@ -1219,6 +1219,14 @@ def serve(
             "Intended for ephemeral demos behind a trusted reverse proxy only."
         ),
     ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=(
+            "Open the dashboard in the default browser once the serve is "
+            "listening. Auto-skipped under CI / SSH / non-TTY environments."
+        ),
+    ),
 ) -> None:
     """Start the local dashboard at http://<host>:<port>.
 
@@ -1259,6 +1267,22 @@ def serve(
             ),
             err=True,
         )
+
+    # Auto-open the browser once uvicorn binds. We do this from a daemon
+    # thread that polls the port — uvicorn.run() blocks the main thread until
+    # shutdown, and there's no synchronous "server is ready" hook to attach
+    # to without rewriting the run loop. The thread is gated by --no-open and
+    # the headless guards in _maybe_open_browser, so CI/SSH runs stay quiet.
+    import threading as _threading
+
+    _opener = _threading.Thread(
+        target=_wait_for_port_then_open,
+        args=(host, port),
+        kwargs={"requested": open_browser, "path": "/"},
+        daemon=True,
+        name="ag-serve-open-browser",
+    )
+    _opener.start()
 
     if reload:
         # uvicorn's reload mode imports the app factory inside a child worker,
@@ -2540,6 +2564,72 @@ def _stdout_is_tty() -> bool:
     return bool(isatty and isatty())
 
 
+def _maybe_open_browser(url: str, *, requested: bool) -> None:
+    """Open ``url`` in the operator's default browser, with headless guards.
+
+    The hook is wired from the ``agent-guardian serve`` startup path so the
+    operator doesn't have to alt-tab to a terminal to grab the URL. The
+    behaviour is opt-out via ``--no-open``; we additionally refuse to fire
+    when the environment looks headless (CI, SSH, non-TTY) so the helper is
+    safe to leave on by default for the common laptop-driver case without
+    annoying CI runners.
+
+    Args:
+        url: The dashboard URL to open. Always the root ``/`` on the serve
+            command — the scan command opens the scan-specific deep link
+            instead, but uses the same helper.
+        requested: ``False`` from ``--no-open`` short-circuits the call;
+            keeps the gating logic at the caller's edge.
+    """
+    if not requested:
+        return
+    if os.environ.get("CI") or os.environ.get("SSH_CONNECTION"):
+        return
+    if not _stdout_is_tty():
+        return
+    import webbrowser
+
+    try:
+        webbrowser.open_new_tab(url)
+    except Exception:  # pragma: no cover — best effort; browser failures
+        # must never crash the serve. Log at debug so the helper stays quiet
+        # on the happy path.
+        logging.getLogger(__name__).debug("webbrowser.open_new_tab(%r) failed", url, exc_info=True)
+
+
+def _wait_for_port_then_open(
+    host: str,
+    port: int,
+    *,
+    requested: bool,
+    path: str = "/",
+) -> None:
+    """Background-thread helper: poll for the bound port, then open browser.
+
+    Uses ``socket.create_connection`` with 5x200 ms retries — the
+    deterministic "server is ready" signal — instead of a blind sleep. The
+    helper runs in a daemon thread so it never blocks shutdown.
+    """
+    if not requested:
+        return
+    import socket
+
+    probe_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    for _ in range(5):
+        try:
+            with socket.create_connection((probe_host, port), timeout=0.2):
+                break
+        except OSError:
+            import time as _time
+
+            _time.sleep(0.2)
+    else:
+        # Port never came up — don't open a dead URL.
+        return
+    url = f"http://{probe_host}:{port}{path}"
+    _maybe_open_browser(url, requested=requested)
+
+
 def print_dashboard_banner(
     scan_id: str,
     *,
@@ -3112,6 +3202,15 @@ def scan(
             "you Ctrl-C the command (ngrok-style)."
         ),
     ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=(
+            "Open the scan-specific dashboard URL in the default browser "
+            "once the scan completes. Auto-skipped when no dashboard was "
+            "spawned, or under CI / SSH / non-TTY environments."
+        ),
+    ),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -3225,6 +3324,7 @@ def scan(
                 yes=yes or no_plan_confirm,
                 no_plan=no_plan,
                 legacy_board=legacy_board,
+                open_browser=open_browser,
             )
         )
     except KeyboardInterrupt:
@@ -3273,6 +3373,7 @@ async def _run_scan(
     yes: bool = False,
     no_plan: bool = False,
     legacy_board: bool = False,
+    open_browser: bool = True,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -3647,6 +3748,7 @@ async def _run_scan(
                 getattr(auto_serve_result, "spawned", False)
                 or getattr(auto_serve_result, "reused", False)
             ),
+            open_browser=open_browser,
         )
     finally:
         # Grace period: keep the dashboard alive so the operator can click
@@ -3702,6 +3804,7 @@ async def _run_scan_inner(
     legacy_board: bool = False,
     dashboard_url: str | None = None,
     auto_serve_spawned: bool = False,
+    open_browser: bool = True,
 ) -> int:
     """Run the scan body. Extracted from ``_run_scan`` so the auto-serve
     context manager (QA-009) cleanly wraps every ``return EXIT_X`` exit
@@ -4145,6 +4248,15 @@ async def _run_scan_inner(
             )
         except Exception as _exc:  # pragma: no cover -- never block scan exit
             _LOG.debug("dashboard banner suppressed (%s)", _exc)
+
+        # Fix L — auto-open the scan-specific dashboard URL once the scan is
+        # complete (only if a serve was actually spawned in-band; otherwise
+        # the URL would 404 until the operator started one themselves).
+        if auto_serve_spawned:
+            try:
+                _maybe_open_browser(dashboard_url, requested=open_browser)
+            except Exception as _exc:  # pragma: no cover -- never block exit
+                _LOG.debug("dashboard browser-open suppressed (%s)", _exc)
 
     # Coverage warning: when a scan launched less than the authoritative-mode
     # floor, surface it on stderr so a CI gate downstream knows the scan was
