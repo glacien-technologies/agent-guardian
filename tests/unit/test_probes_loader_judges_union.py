@@ -14,8 +14,8 @@ from textwrap import dedent
 
 import pytest
 
-import agent_guardian.probes.loader as loader_mod
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.probes import loader as loader_mod
 from agent_guardian.probes.loader import load_probes_for_asi
 
 

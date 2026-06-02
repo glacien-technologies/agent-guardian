@@ -190,7 +190,7 @@ def probe_is_our_serve(
     url = f"http://{host}:{port}/healthz"
     req = Request(url, method="GET")
     try:
-        with urlopen(req, timeout=timeout) as resp:  # nosec B310 — hardcoded http loopback health probe
+        with urlopen(req, timeout=timeout) as resp:  # nosec B310  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected — hardcoded http://127.0.0.1:<port>/healthz loopback health probe; URL is constructed from int port we just bound, not user input; scheme is fixed `http://`, not user-controlled
             if getattr(resp, "status", None) != 200:
                 return False
             ctype = resp.headers.get("content-type", "")

@@ -2,24 +2,61 @@ name: DCO
 on:
   pull_request:
     branches: [main]
+
 permissions:
   contents: read
   pull-requests: read
+
 jobs:
   dco:
     runs-on: ubuntu-latest
     steps:
-      # ``tim-actions/dco`` requires the JSON commits array as input — it does
-      # NOT walk the PR commits itself. Without this prerequisite step, the
-      # action's ``JSON.parse(core.getInput('commits'))`` parses an empty string
-      # and throws ``SyntaxError: Unexpected end of JSON input`` before any
-      # Signed-off-by check runs.
-      - name: Get PR commits
-        id: get-pr-commits
-        uses: tim-actions/get-pr-commits@198af03565609bb4ed924d1260247b4881f09e7d  # v1.3.1
+      # Full history + the PR head SHA so ``git rev-list base..head`` is
+      # resolvable on the runner. ``fetch-depth: 0`` is required because
+      # the default shallow fetch (depth=1) does not include the base SHA.
+      - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: DCO check
-        uses: tim-actions/dco@v1.1.0
-        with:
-          commits: ${{ steps.get-pr-commits.outputs.commits }}
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # Inline DCO check using ``git rev-list`` to stream PR commits into
+      # a while-read loop. Each commit's ``Signed-off-by`` trailer is read
+      # via ``git log --format='%(trailers:key=Signed-off-by,valueonly)'``
+      # and any missing trailer fails the job with an ``::error::`` annotation.
+      #
+      # Why this is structurally better than ``tim-actions/dco@v1.1.0``:
+      #
+      #   1. tim-actions/dco passes the entire commits JSON array (with
+      #      message bodies) on the action's argv, hitting ARG_MAX on
+      #      branches with many commits. The streaming form here never
+      #      materialises a large argv at any point -- only a single SHA
+      #      enters the loop per iteration.
+      #
+      #   2. Pinned-action policy: tim-actions/dco@v1.1.0 was flagged by
+      #      CodeQL alert ``actions/unpinned-tag`` (alert #17). The first-
+      #      party ``actions/checkout@v4`` here is already accepted by the
+      #      repo's pinning policy, and no third-party action is added.
+      #
+      #   3. Contract preserved: every commit reachable from
+      #      ``base..head`` must carry a ``Signed-off-by`` trailer; if
+      #      any commit lacks one the job exits non-zero.
+      - name: Verify every PR commit is DCO-signed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          while read -r sha; do
+            [ -z "$sha" ] && continue
+            trailer=$(git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")
+            if [ -z "$trailer" ]; then
+              echo "::error::Commit $sha is missing Signed-off-by trailer"
+              missing=$((missing+1))
+            fi
+          done < <(git rev-list "$BASE_SHA".."$HEAD_SHA")
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing commit(s) missing DCO sign-off. Use 'git commit -s' or rebase with --signoff."
+            exit 1
+          fi
+          echo "DCO: all PR commits carry Signed-off-by."

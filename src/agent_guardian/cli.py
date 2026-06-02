@@ -187,6 +187,20 @@ app = typer.Typer(
     help="Adversarial swarm framework for agentic AI red-teaming.",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_enable=False,
+    # Pin the help-formatter content width so long flag names (e.g.
+    # ``--recon-budget-seconds``) are NEVER wrapped mid-token across two
+    # lines in CI/test environments where ``CliRunner`` reports a narrow
+    # fallback terminal. Without this, rich/click wraps long flags on
+    # narrow terminals, breaking literal-substring assertions in
+    # ``tests/test_cli_serve.py`` and ``tests/unit/test_swarm_config.py``
+    # which check ``"--token" in result.stdout`` and similar. The override
+    # is presentational only — it does not affect any runtime budget
+    # defaults or argument parsing semantics.
+    context_settings={
+        "max_content_width": 200,
+        "help_option_names": ["-h", "--help"],
+    },
 )
 
 telemetry_app = typer.Typer(

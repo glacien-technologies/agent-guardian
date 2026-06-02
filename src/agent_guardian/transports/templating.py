@@ -92,7 +92,7 @@ def render_body(
     # `json` filter or json_escape() helper before interpolation, which is
     # the correct escaping for JSON context. StrictUndefined ensures
     # missing vars fail loud.
-    env = jinja2.Environment(  # nosec B701 — JSON output, values pre-escaped via json filter
+    env = jinja2.Environment(  # nosec B701  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2  # codeql[py/jinja2/autoescape-false] — JSON output sent to upstream LLM HTTP APIs (NOT a browser); values pre-escaped via json filter/json_escape() helper before interpolation, which is the correct escaping for JSON context; HTML autoescape would corrupt JSON (e.g. `"` -> `&quot;`)
         autoescape=False,  # nosemgrep: python.jinja2.security.audit.autoescape-disabled-false.incorrect-autoescape-disabled — see comment above; JSON output, not browser
         undefined=jinja2.StrictUndefined,
         keep_trailing_newline=False,
