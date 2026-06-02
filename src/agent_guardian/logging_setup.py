@@ -469,15 +469,30 @@ def configure_logging(
     redactor = _RedactingFilter()
     for handler in logging.getLogger().handlers:
         handler.addFilter(redactor)
-    # QA-019: pin chatty HTTP deps to WARNING by default so the swarm-board
-    # signal isn't drowned by one ``INFO HTTP Request: ... 200 OK`` per probe.
-    # At DEBUG the operator explicitly opted in to the noise — leave them
-    # inheriting the root level. At INFO/WARNING/ERROR/CRITICAL we clamp to
-    # max(resolved, WARNING) so resolved=ERROR still escalates correctly
-    # while resolved=INFO is quieted from INFO down to WARNING.
-    if resolved > logging.DEBUG:
-        for noisy in ("httpx", "httpcore", "urllib3", "google_genai.models"):
-            logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))
+    # QA-019 + QA-068: pin chatty HTTP deps to WARNING UNCONDITIONALLY so the
+    # swarm-board signal isn't drowned by one ``INFO HTTP Request: ... 200 OK``
+    # per probe — and so ``send_request_headers`` / ``receive_response_body``
+    # wire events stay quiet even when the operator runs at
+    # ``AGENT_GUARDIAN_LOG_LEVEL=DEBUG``. Operators who genuinely want the
+    # network-level trace can still opt back in by calling
+    # ``logging.getLogger("httpx").setLevel(logging.DEBUG)`` after
+    # :func:`configure_logging` returns (see
+    # ``test_operator_can_opt_back_in_to_httpx_info_after_configure``).
+    # The pin floor is ``max(resolved, WARNING)`` so ``resolved=ERROR`` still
+    # escalates correctly while ``resolved=INFO|DEBUG`` clamps to WARNING.
+    # Explicit pins for ``httpcore.http11`` / ``httpcore.connection`` are
+    # defensive — parent-pin should cascade, but stating them prevents a future
+    # logger from leaking wire events past the parent.
+    _NOISY_DEPS = (
+        "httpx",
+        "httpcore",
+        "httpcore.http11",
+        "httpcore.connection",
+        "urllib3",
+        "google_genai.models",
+    )
+    for noisy in _NOISY_DEPS:
+        logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))
     _CONFIGURED = True
 
 

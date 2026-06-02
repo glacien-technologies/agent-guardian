@@ -196,11 +196,15 @@ class PanelJudge:
 
         families = {s.canonical_family for s in self._specs}
         validation_passed = (not cross_family_enforced) or len(families) >= 2
+        # QA-068 — structured one-line init narration. Stays at DEBUG (init is
+        # an internal lifecycle event, not a per-turn milestone the operator
+        # needs to see in the swarm-board scroll).
         _LOG.debug(
-            "PhaseB.B4 panel_init: families=%s cross_family_enforced=%s validation_passed=%s",
+            "panel init: seats=%d families=%s cross_family=%s validation=%s",
+            len(self._specs),
             sorted(families),
             cross_family_enforced,
-            validation_passed,
+            "pass" if validation_passed else "fail",
         )
         if cross_family_enforced and len(families) < 2:
             raise ValueError(
@@ -223,12 +227,24 @@ class PanelJudge:
         """Fire all judges concurrently, majority-vote, return one verdict."""
         n = len(self._judges)
         families = [s.canonical_family for _, s in self._judges]
+        # QA-068 — replace the ``<Judge object at 0x…>`` repr dump with a
+        # structured one-line INFO so the operator sees one human-readable
+        # dispatch event per panel call. Model labels are family-prefixed and
+        # built from spec labels (or model name) — never raw __repr__.
+        seat_labels = [
+            f"{spec.canonical_family}:{spec.label or spec.model}" for _, spec in self._judges
+        ]
+        _LOG.info(
+            "judge panel dispatched: %d seats, %s",
+            n,
+            ", ".join(seat_labels) if seat_labels else "(no seats)",
+        )
         _LOG.debug(
-            "PhaseB.B4 panel_verdict launched: n_judges=%d cross_family_enforced=%s families=%s judges_consulted=%s",
+            "panel verdict launched: n_judges=%d cross_family=%s families=%s seats=%s",
             n,
             self._cross_family_enforced,
             families,
-            [str(j) for j in self._judges],
+            seat_labels,
         )
 
         # Concurrent gather, swallow exceptions per seat. ``asyncio.CancelledError``,
@@ -251,10 +267,12 @@ class PanelJudge:
         verdicts: list[JudgeVerdict] = []
         for raw, (_, spec) in zip(results, self._judges, strict=False):
             if isinstance(raw, Exception):
+                # QA-068 — structured WARNING shape: short, scan-friendly.
                 _LOG.warning(
-                    "PhaseB.B4 panel_seat_exception: family=%s model=%s exc=%s",
+                    "panel seat raised: family=%s model=%s exc=%s: %s",
                     spec.canonical_family,
                     spec.model,
+                    type(raw).__name__,
                     raw,
                 )
                 verdicts.append(
@@ -269,8 +287,9 @@ class PanelJudge:
 
         individual_verdicts = [v.verdict for v in verdicts]
         individual_confidences = [round(v.confidence, 3) for v in verdicts]
+        # QA-068 — structured one-line collected event for DEBUG scroll.
         _LOG.debug(
-            "PhaseB.B4 panel_verdicts_collected: individual_verdicts=%s individual_confidences=%s",
+            "panel verdicts collected: verdicts=%s confidences=%s",
             individual_verdicts,
             individual_confidences,
         )
@@ -309,9 +328,9 @@ class PanelJudge:
                 else f"panel unanimous: {majority}"
             )
 
+        # QA-068 — structured one-line majority shape.
         _LOG.debug(
-            "PhaseB.B4 panel_majority: majority_verdict=%s agreement_fraction=%.2f "
-            "disagreement=%s final_confidence=%.2f",
+            "panel majority: verdict=%s agreement=%.2f disagreement=%s confidence=%.2f",
             majority,
             agreement_fraction,
             disagreement,

@@ -309,3 +309,42 @@ async def test_panel_headline_falls_back_when_only_stubs_available() -> None:
     # No usable headline available, so the legacy boilerplate is preserved
     # verbatim — back-compat for log scrapers that grep this exact phrase.
     assert v.reasoning == "panel unanimous: fail"
+
+
+@pytest.mark.asyncio
+async def test_panel_emits_structured_dispatch_info_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA-068 — panel dispatch narrates ONE structured INFO line with seat
+    labels (NOT a raw ``<Judge object at 0x…>`` repr dump).
+
+    The pre-QA-068 code emitted a DEBUG line containing each judge's
+    Python ``__repr__``, which surfaced as ``<Judge object at 0x10abc234>``
+    on every panel call — useless to the operator. We now emit one INFO
+    line: ``judge panel dispatched: 2 seats, openai:m-0, anthropic:m-1``.
+    """
+    import logging
+
+    specs = _specs(["openai", "anthropic"])
+    panel = PanelJudge(specs)
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("fail", 0.9),
+            _FakeJudge("fail", 0.9),
+        ],
+    )
+    with caplog.at_level(logging.INFO, logger="agent_guardian.judges.panel"):
+        await panel.verdict("prompt", "response")
+    matching = [r for r in caplog.records if r.message.startswith("judge panel dispatched:")]
+    assert matching, (
+        f"expected one INFO 'judge panel dispatched:' line, got "
+        f"{[r.message for r in caplog.records]}"
+    )
+    line = matching[-1].message
+    # Seat labels must mention family + model (or label) — never a repr.
+    assert "openai:" in line
+    assert "anthropic:" in line
+    # No raw __repr__ leakage.
+    assert " object at 0x" not in line
+    assert "<Judge" not in line

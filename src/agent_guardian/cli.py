@@ -3440,6 +3440,38 @@ async def _run_scan(
             typer.echo(f"unknown tier '{tier}' -- must be T1, T2, T3, or T4.", err=True)
             return EXIT_CONFIG
 
+    # 5b. QA-068 — PREFLIGHT phase narration. Run four readiness sub-stages
+    #     and emit one structured INFO line per stage so the scrollback opens
+    #     with a clean PREFLIGHT block (operator request 2026-06-02). The
+    #     stages are deliberately lightweight: model.invoke reuses the
+    #     ``check_model_exists`` cache that 6a will hit (so we never probe
+    #     twice), target.ping wraps the existing endpoint reachability probe,
+    #     contract.schema_check confirms the contract path resolves, and
+    #     budget.parse validates the --budget-* knobs.
+    #
+    #     ``--no-preflight`` skips the entire block (same flag operators use
+    #     to skip model validation today). Stage failures DO NOT abort: the
+    #     operator may explicitly want to scan against a known-unreachable
+    #     target for testing, and the scan will fail at its natural failure
+    #     point regardless.
+    if not no_preflight:
+        from agent_guardian.preflight import run_scan_preflight
+
+        try:
+            await run_scan_preflight(
+                model_spec=eff_attacker,
+                endpoint=endpoint,
+                contract_path=contract,
+                budget_usd=budget_usd,
+                budget_seconds=budget_seconds,
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            _LOG.warning(
+                "preflight phase raised %s: %s — continuing",
+                type(exc).__name__,
+                exc,
+            )
+
     # 6a. Pre-scan model validation (QA-001 + addendum). One cheap probe per
     #     distinct (provider, model) tuple — typically one HTTP call even when
     #     attacker == evaluator == commander. Caches per-session so resume /

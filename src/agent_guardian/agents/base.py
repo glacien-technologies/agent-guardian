@@ -949,10 +949,12 @@ class AsiAgent(ABC):
                     self.budget.tokens_remaining,
                 )
                 break
-            # INFO-level so the Executive Logs tab renders the full per-turn
-            # trace (operator request 2026-06-01 — show what was sent / what
-            # came back / how the judge ruled, not just httpx 200 OK).
-            _LOG.info(
+            # QA-068 — per-turn narration is consolidated into a SINGLE INFO
+            # line emitted AFTER the judge verdict lands (see below). The
+            # legacy "sending probe" line is demoted to DEBUG so the operator
+            # sees one structured event per turn instead of three. The full
+            # prompt body remains accessible at DEBUG for forensic replay.
+            _LOG.debug(
                 "agent %s turn %d sending probe (strategy=%s est_tokens=%d): %s",
                 agent_name,
                 turns + 1,
@@ -972,7 +974,11 @@ class AsiAgent(ABC):
                 # next prompt rather than fabricating a refusal the judge would
                 # mis-score as a clean turn.
                 not_tested_turns += 1
-                _LOG.info(
+                # QA-068 — egress-refused is a per-turn lifecycle event, demoted
+                # to DEBUG. The consolidated per-turn INFO line never fires
+                # because the turn never reached the target; the swarm-board
+                # already surfaces "not tested" counts in its summary.
+                _LOG.debug(
                     "agent %s turn %d: egress-refused (not tested) — %s",
                     agent_name,
                     turns + 1,
@@ -1014,7 +1020,9 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
-            _LOG.info(
+            # QA-068 — target-response is part of the consolidated per-turn
+            # INFO line; raw body stays at DEBUG for forensic replay.
+            _LOG.debug(
                 "agent %s turn %d target response: %s",
                 agent_name,
                 turns + 1,
@@ -1030,8 +1038,10 @@ class AsiAgent(ABC):
                 # single Judge when configured. Both expose the same
                 # async verdict(prompt, target_response) -> JudgeVerdict.
                 if self.panel_judge is not None:
+                    # QA-068 — verdict-path narration stays at DEBUG; the
+                    # consolidated per-turn INFO already records the verdict.
                     _LOG.debug(
-                        "PhaseB.B4 verdict path: agent=%s turn=%d using PanelJudge",
+                        "verdict path: agent=%s turn=%d using PanelJudge",
                         agent_name,
                         turns + 1,
                     )
@@ -1049,13 +1059,32 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
+            # QA-068 — ONE consolidated structured per-turn INFO line. The
+            # operator sees: who ran, what probe, what prompt prefix went out,
+            # what target prefix came back, and how the judge ruled. Full
+            # bodies (prompt + target_response + reasoning) remain at DEBUG
+            # above so forensic replay loses nothing. Pad prefixes to 50 chars
+            # so the line stays scannable in scrollback.
+            _probe_id_meta = result.metadata.get("seed_id", "") if result.metadata else ""
+            _probe_id = str(_probe_id_meta) if _probe_id_meta else "-"
+            _prompt_prefix = (result.text or "").replace("\n", " ")[:50]
+            _response_prefix = (target_response or "").replace("\n", " ")[:50]
+            _verdict_word = (verdict.verdict or "inconclusive").upper()
+            # Normalise "fail" -> EXPLOITED and "pass" -> DEFENDED so the
+            # narration reads as security analysis, not LLM-judge jargon.
+            _verdict_label = {
+                "PASS": "DEFENDED",
+                "FAIL": "EXPLOITED",
+                "INCONCLUSIVE": "INCONCLUSIVE",
+            }.get(_verdict_word, _verdict_word)
             _LOG.info(
-                "agent %s turn %d judge verdict: %s (confidence %.2f) — %s",
+                "[%s] probe %s | prompt %s… | response %s… | verdict %s conf=%.2f",
                 agent_name,
-                turns + 1,
-                verdict.verdict.upper(),
+                _probe_id,
+                _prompt_prefix,
+                _response_prefix,
+                _verdict_label,
                 verdict.confidence,
-                verdict.reasoning or "(no reasoning)",
             )
 
             turns += 1

@@ -477,3 +477,109 @@ async def test_strategy_ctx_verdict_fields_updated_after_turn(tmp_path: Any) -> 
     assert ctx.last_verdict == "pass"
     assert ctx.last_verdict_confidence == pytest.approx(0.61)
     assert ctx.last_verdict_reasoning == judge_reasoning
+
+
+async def test_per_turn_emits_one_consolidated_info_line(
+    tmp_path: Any,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA-068 — per-turn narration is consolidated into ONE INFO line.
+
+    The pre-QA-068 code emitted three INFO lines per turn ("sending probe",
+    "target response", "judge verdict"). We now emit one structured line:
+
+      [agent_id] probe <probe_id> | prompt <50-char>… | response <50-char>… | verdict <X> conf=<f>
+
+    Full bodies remain at DEBUG so forensic replay loses nothing.
+    """
+    import logging
+
+    from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.goal_hijack import GoalHijackAgent
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.llm.stub import StubScript
+
+    class _StaticTarget(TargetAdapter):
+        def fingerprint(self) -> TargetFingerprint:
+            return TargetFingerprint(
+                mode="code",
+                ref="static",
+                has_tools=False,
+                has_memory=False,
+                touches_pii=False,
+                is_multi_agent=False,
+                framework=None,
+                declared_tools=[],
+                declared_memory_keys=[],
+                notes="",
+            )
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            return "OK, here is a benign response."
+
+        async def aclose(self) -> None:
+            return None
+
+    attacker = (
+        StubScript()
+        .respond_to(
+            "Generate a single completely benign opening question",
+            "What is photosynthesis?",
+        )
+        .default("ok")
+        .build()
+    )
+    judge = (
+        StubScript()
+        .default(
+            json.dumps(
+                {
+                    "verdict": "pass",
+                    "confidence": 0.77,
+                    "reasoning": "no goal drift detected",
+                }
+            )
+        )
+        .build()
+    )
+    budget = AgentBudget(tokens_remaining=50_000, max_turns=1)
+    agent = GoalHijackAgent(
+        attacker_llm=attacker,
+        evaluator_llm=judge,
+        attacker_model="stub-model",
+        evaluator_model="stub-model",
+        budget=budget,
+    )
+    memory = SharedMemory("qa068-per-turn", root_dir=tmp_path)
+    target = _StaticTarget()
+    with caplog.at_level(logging.INFO, logger="agent_guardian.agents.base"):
+        await agent.run(target, memory)
+
+    # The consolidated line matches the [agent_id] probe ... | verdict ... shape.
+    consolidated = [
+        r for r in caplog.records if " | verdict " in r.message and r.levelno == logging.INFO
+    ]
+    assert consolidated, (
+        f"expected ONE consolidated per-turn INFO line with ' | verdict ', got "
+        f"{[(r.levelname, r.message) for r in caplog.records]}"
+    )
+    line = consolidated[0].message
+    assert "[" in line and "]" in line  # agent_id wrapper
+    assert "probe " in line
+    assert "prompt " in line
+    assert "response " in line
+    assert "conf=" in line
+    # The three legacy INFO lines must NOT fire at INFO level any more.
+    legacy_sending = [
+        r for r in caplog.records if r.levelno == logging.INFO and "sending probe" in r.message
+    ]
+    legacy_response = [
+        r for r in caplog.records if r.levelno == logging.INFO and "target response:" in r.message
+    ]
+    legacy_verdict = [
+        r for r in caplog.records if r.levelno == logging.INFO and "judge verdict:" in r.message
+    ]
+    assert not legacy_sending, "QA-068 demoted 'sending probe' to DEBUG"
+    assert not legacy_response, "QA-068 demoted 'target response' to DEBUG"
+    assert not legacy_verdict, "QA-068 replaced 'judge verdict' with consolidated line"
