@@ -1,15 +1,26 @@
-{# Executive — Probes tab compact table (QA-032).
+{# Executive — Probes tab compact table (QA-032 / QA-049 / BUG-1).
 
-   Replaces the per-row card list (``exec-probes-list`` / ``exec-probe``)
-   with a 5-column scannable table:
+   A 5-column scannable table:
 
      PROBE ID  |  AGENT · ASI  |  VERDICT  |  TURN  |  TIMESTAMP
 
-   Each row carries ``data-probe-id`` + ``data-source="probe"`` so the
-   shared slide-over JS (``executive_findings.js``) can locate the matching
-   payload in the ``#exec-probes-payload`` JSON island and render its full
-   prompt / target response / judge reasoning into the slide-over body when
-   the row is clicked / Enter-keyed.
+   Row activation
+   --------------
+   Each row carries:
+
+     * ``data-action="probe-row-click"`` — the row-click contract the
+       shared slide-over JS (``executive_findings.js``) keys off (QA-049).
+       Click + Enter/Space open the right-edge details drawer.
+     * ``data-source="probe"`` — selects the probe renderer in JS.
+     * ``data-probe-href="/scan/<id>/probe?index=<N>"`` — the URL the
+       drawer JS ``fetch()``-es when the row is opened. Replaces the
+       legacy ``<script type="application/json" id="exec-probes-payload">``
+       JSON-island wall (BUG-1, 2026-06-02): the initial page HTML
+       carries NO per-probe prompt / target-response / judge-reasoning
+       text — that data only enters the DOM on demand, scoped to the
+       probe the operator explicitly opened.
+     * ``data-probe-id`` + ``data-probe-index`` — both surfaced so deep
+       links + index-based fast lookup both work.
 
    Verdict vocab — same single source of truth as the Findings tab evidence
    pills (QA-031): ``fail`` → EXPLOITED (red), ``pass`` → DEFENDED (green),
@@ -17,7 +28,8 @@
 
    All ``p.*`` fields are operator-untrusted (sourced from
    ``<scan_dir>/memory.jsonl`` via :func:`_assemble_probes_list`) — Jinja
-   autoescape applies. Never use ``|safe`` on these values.
+   autoescape applies to every cell. The verbatim prompt / response /
+   reasoning text never enters the initial HTML render.
 #}
 <table class="exec-probes-table" role="table" aria-label="Probe attempts">
   <thead>
@@ -33,7 +45,10 @@
     {% for p in probes_list %}
       {% set _verdict = p.verdict or 'unknown' %}
       <tr class="exec-probes-table__row"
+          data-action="probe-row-click"
           data-probe-id="{{ p.probe_id }}"
+          data-probe-index="{{ loop.index0 }}"
+          data-probe-href="/scan/{{ scan_id }}/probe?index={{ loop.index0 }}"
           data-source="probe"
           data-verdict="{{ _verdict }}"
           tabindex="0"

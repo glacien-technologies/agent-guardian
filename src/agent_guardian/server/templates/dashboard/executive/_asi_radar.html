@@ -42,6 +42,23 @@
     </p>
   </figcaption>
   <div class="exec-chart__canvas-wrap">
+    {# QA-045 (2026-06-02) — radar label-gutter envelope. Decorative SVG
+       sized at 480 × 480 so the geometric envelope (4 concentric rings
+       at 20 / 40 / 60 / 80 % of the radius) sits behind the Chart.js
+       canvas and gives the pointLabels (Privilege abuse / Supply chain
+       / Cascading failure) the breathing room to render without
+       truncation. aria-hidden: the offscreen <table> below already
+       carries the per-category numbers for SR users. #}
+    <svg class="exec-chart__radar-envelope"
+         viewBox="0 0 480 480"
+         preserveAspectRatio="xMidYMid meet"
+         aria-hidden="true"
+         focusable="false">
+      <circle class="exec-chart__radar-envelope-ring" cx="240" cy="240" r="48"/>
+      <circle class="exec-chart__radar-envelope-ring" cx="240" cy="240" r="96"/>
+      <circle class="exec-chart__radar-envelope-ring" cx="240" cy="240" r="144"/>
+      <circle class="exec-chart__radar-envelope-ring" cx="240" cy="240" r="192"/>
+    </svg>
     <canvas id="exec-asi-radar"
             class="exec-chart__canvas"
             role="img"

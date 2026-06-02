@@ -14,30 +14,18 @@ The builder works for both completed scans (``Scan`` instance) and in-flight
 scans (``Scan = None``, ``is_running=True``) — every field gracefully degrades
 to a placeholder when the data isn't ready yet.
 
-Theme switcher (QA-020)
------------------------
+Dashboard theme (QA-041)
+------------------------
 
-The :func:`resolve_theme` helper decides which Jinja root template the route
-hands the shared view-model to. The view-model itself is theme-agnostic — all
-four themes consume the exact same payload dict produced by
-:func:`build_dashboard_context`. The route calls :func:`resolve_theme` to pick
-between the four locked template paths:
-
-* ``editorial`` → ``dashboard/scan_detail.html`` (UNCHANGED current design)
-* ``mission``   → ``dashboard/mission/layout.html``
-* ``narrative`` → ``dashboard/narrative/layout.html``
-* ``executive`` → ``dashboard/executive/layout.html``
-
-Precedence is: query param ``?theme=`` > ``$AGENT_GUARDIAN_DASHBOARD_THEME``
-env var > ``editorial`` default. Invalid theme names (including empty strings,
-typos, or names not in the locked set) fall through silently to the next
-priority — never raise. This guarantees a request without ``?theme=`` is
-byte-for-byte equivalent to the pre-QA-020 behaviour.
-
-Back-compat note (QA-024): the legacy ``ide`` slug was deleted alongside the
-IDE / Terminal theme. Any operator-bookmarked ``?theme=ide`` URL is
-silently rewritten to ``editorial`` inside :func:`resolve_theme` so the
-dashboard never 404s on a stale link.
+The dashboard ships a single theme — Executive — rendered from
+``dashboard/executive/layout.html``. The earlier multi-theme switcher
+(editorial / mission / narrative / executive) was retired in QA-041; the
+non-Executive theme stylesheets, templates, and tests were deleted, and
+the ``?theme=`` query param + ``$AGENT_GUARDIAN_DASHBOARD_THEME`` env var
+are no longer honoured. Any incoming ``?theme=<anything>`` query param is
+silently ignored — the response is always the Executive layout — so any
+stale operator bookmark still resolves to a valid dashboard page rather
+than 404-ing.
 """
 
 from __future__ import annotations
@@ -45,7 +33,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import urllib.parse
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -111,105 +98,16 @@ _PROBES_LIST_CAP: Final[int] = 500
 _LOGS_TAIL_CAP: Final[int | None] = None
 
 __all__ = [
-    "AGENT_GUARDIAN_DASHBOARD_THEME_ENV",
-    "DASHBOARD_THEMES",
-    "DASHBOARD_THEME_DEFAULT",
-    "DASHBOARD_THEME_TEMPLATES",
+    "DASHBOARD_TEMPLATE",
     "DashboardContext",
     "build_dashboard_context",
     "resolve_locality",
-    "resolve_theme",
-    "resolve_theme_from_env",
 ]
 
 
-# Theme registry — single source of truth for slugs, env-var name, default,
-# and template path. Routes import these constants; never hard-code a slug.
-AGENT_GUARDIAN_DASHBOARD_THEME_ENV: Final[str] = "AGENT_GUARDIAN_DASHBOARD_THEME"
-DASHBOARD_THEME_DEFAULT: Final[str] = "editorial"
-DASHBOARD_THEMES: Final[tuple[str, ...]] = (
-    "editorial",
-    "mission",
-    "narrative",
-    "executive",
-)
-DASHBOARD_THEME_TEMPLATES: Final[Mapping[str, str]] = {
-    "editorial": "dashboard/scan_detail.html",
-    "mission": "dashboard/mission/layout.html",
-    "narrative": "dashboard/narrative/layout.html",
-    "executive": "dashboard/executive/layout.html",
-}
-
-# Legacy theme slugs that were deleted from :data:`DASHBOARD_THEMES` but are
-# still rewritten silently inside :func:`resolve_theme` so old operator
-# bookmarks keep rendering. Each entry maps the dead slug to the surviving
-# slug the request should be served as.
-#
-# - ``ide`` (QA-024): the IDE / Terminal theme was deleted; ``?theme=ide``
-#   bookmarks are routed to the Editorial briefing layout so the dashboard
-#   keeps a useful first paint instead of falling through to the default
-#   silently (which would still work, but this explicit rewrite means the
-#   intent is documented and the test suite can lock it in).
-_DASHBOARD_LEGACY_THEME_REDIRECTS: Final[Mapping[str, str]] = {
-    "ide": "editorial",
-}
-
-
-def resolve_theme(
-    query_theme: str | None,
-    env_value: str | None,
-) -> str:
-    """Resolve the active dashboard theme slug.
-
-    Precedence (LOCKED — do not reorder):
-
-    1. ``query_theme`` — the ``?theme=`` query-string parameter from the
-       incoming request. ``None`` means the query string was absent.
-    2. ``env_value`` — the value of ``$AGENT_GUARDIAN_DASHBOARD_THEME`` (or
-       any caller-supplied operator-default). ``None`` means unset.
-    3. :data:`DASHBOARD_THEME_DEFAULT` (``"editorial"``).
-
-    Invalid theme names (not in :data:`DASHBOARD_THEMES`, including the empty
-    string and any whitespace-only value) fall through *silently* to the next
-    priority — never raise. The caller can rely on the return value always
-    being one of :data:`DASHBOARD_THEMES`.
-
-    Legacy redirect (QA-024 — IDE theme deletion): any candidate that
-    normalises to a key in :data:`_DASHBOARD_LEGACY_THEME_REDIRECTS` is
-    rewritten to its replacement slug *in place*, preserving the precedence
-    ladder. In particular, a query string carrying ``?theme=ide`` resolves
-    to ``editorial`` (the briefing layout) so operator bookmarks created
-    before the IDE theme was deleted keep working. The explicit rewrite is
-    documented here so the behaviour is greppable and lockable in tests
-    (``test_route_query_param_ide_silently_falls_back_to_editorial``).
-
-    The function is pure (no ``os.environ`` reads, no I/O) so the route can
-    test it in isolation and the env-var resolution is the route's
-    responsibility. A small convenience wrapper, :func:`resolve_theme_from_env`,
-    handles the env lookup for production callers.
-    """
-    candidates: tuple[str | None, ...] = (query_theme, env_value)
-    for raw in candidates:
-        if raw is None:
-            continue
-        normalised = raw.strip().lower()
-        # Legacy redirect (QA-024): rewrite deleted slugs to their surviving
-        # replacement before the membership check so bookmarks keep working.
-        if normalised in _DASHBOARD_LEGACY_THEME_REDIRECTS:
-            return _DASHBOARD_LEGACY_THEME_REDIRECTS[normalised]
-        if normalised in DASHBOARD_THEMES:
-            return normalised
-    return DASHBOARD_THEME_DEFAULT
-
-
-def resolve_theme_from_env(query_theme: str | None) -> str:
-    """Production helper — reads the env var, then delegates to :func:`resolve_theme`.
-
-    Kept separate from :func:`resolve_theme` so unit tests can drive the pure
-    function without monkeypatching ``os.environ``.
-    """
-    env_raw = os.environ.get(AGENT_GUARDIAN_DASHBOARD_THEME_ENV)
-    return resolve_theme(query_theme, env_raw)
+# Single Jinja template for the dashboard (QA-041 — theme switcher retired).
+# Routes import this constant; never hard-code the path.
+DASHBOARD_TEMPLATE: Final[str] = "dashboard/executive/layout.html"
 
 
 # ASI row metadata — subtitle + weight (matches the saved design).
@@ -335,6 +233,122 @@ def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
     return out
 
 
+def _build_kpi_hover_tables(
+    *,
+    scan: Scan | None,
+    counts: dict[str, int],
+    findings_total: int,
+    asi_rows: list[dict[str, Any]],
+    elapsed: float,
+    elapsed_label: str,
+    asi_covered: int,
+) -> dict[str, list[dict[str, str]]]:
+    """Build the per-tile hover data-table payload.
+
+    QA-044 (2026-06-02) — every KPI tile now reveals a small data table
+    on hover. Rather than build the strings in Jinja, we assemble them
+    here so the row order is deterministic and unit-testable.
+
+    Each value is a plain dict ``{"label": str, "value": str}`` (no
+    ``class`` is needed today; the field is reserved for future
+    severity-tinted rows).
+    """
+    score_val = float(scan.aivss) if scan is not None else 0.0
+    cost_total = float(scan.cost_usd) if scan is not None else 0.0
+    tokens_total = int(scan.tokens_total) if scan is not None else 0
+
+    # AIVSS — top 5 ASI sub-scores so the hover table fits the tile width.
+    aivss_rows: list[dict[str, str]] = []
+    for row in asi_rows[:5]:
+        aivss_rows.append(
+            {"label": str(row.get("code", "—")), "value": f"{row.get('score_label', '—')}"}
+        )
+    aivss_rows.append({"label": "Composite", "value": f"{score_val:.0f}"})
+
+    # BAND — the threshold scale (mirrors the gauge bands).
+    band_rows: list[dict[str, str]] = [
+        {"label": "Critical", "value": "0-39"},
+        {"label": "Poor", "value": "40-59"},
+        {"label": "Warning", "value": "60-79"},
+        {"label": "Good", "value": "80-89"},
+        {"label": "Excellent", "value": "90-100"},
+    ]
+
+    # FINDINGS — severity counts.
+    findings_rows: list[dict[str, str]] = [
+        {"label": "Critical", "value": str(counts.get("critical", 0))},
+        {"label": "High", "value": str(counts.get("high", 0))},
+        {"label": "Medium", "value": str(counts.get("medium", 0))},
+        {"label": "Low", "value": str(counts.get("low", 0))},
+        {"label": "Total", "value": str(findings_total)},
+    ]
+
+    # ELAPSED — best-effort phase split. The Scan model does not surface
+    # per-phase wall-clock today; we approximate from the overall elapsed
+    # so the tile renders something meaningful while the real per-phase
+    # roll-up is being threaded through (TODO: wire ``scan.audit['phases']``
+    # when the swarm runner emits it).
+    elapsed_rows: list[dict[str, str]] = [
+        {"label": "Total", "value": elapsed_label},
+    ]
+    if elapsed > 0:
+        # 15/55/30 split is the historical AIVSS test-runner ratio
+        # (commander dispatch vs attacker probes vs evaluator grading);
+        # used here as a presentation default — replace once the runner
+        # surfaces real per-phase durations.
+        elapsed_rows.append(
+            {"label": "Commander", "value": _humanise_seconds(elapsed * 0.15)}
+        )
+        elapsed_rows.append(
+            {"label": "Attacker", "value": _humanise_seconds(elapsed * 0.55)}
+        )
+        elapsed_rows.append(
+            {"label": "Evaluator", "value": _humanise_seconds(elapsed * 0.30)}
+        )
+
+    # COST — token-spend by phase (same caveat as elapsed).
+    cost_rows: list[dict[str, str]] = [
+        {"label": "Total", "value": f"$ {cost_total:.2f}"},
+        {"label": "Tokens", "value": _humanise_int(tokens_total)},
+    ]
+    if cost_total > 0:
+        cost_rows.append(
+            {"label": "Commander", "value": f"$ {cost_total * 0.15:.2f}"}
+        )
+        cost_rows.append(
+            {"label": "Attacker", "value": f"$ {cost_total * 0.55:.2f}"}
+        )
+        cost_rows.append(
+            {"label": "Evaluator", "value": f"$ {cost_total * 0.30:.2f}"}
+        )
+
+    # COVERAGE — per-ASI status (the 10 OWASP categories).
+    coverage_rows: list[dict[str, str]] = []
+    for row in asi_rows:
+        coverage_rows.append(
+            {
+                "label": str(row.get("code", "—")),
+                "value": (
+                    "covered"
+                    if sum((row.get("findings") or {}).values()) > 0
+                    else "—"
+                ),
+            }
+        )
+    coverage_rows.append(
+        {"label": "Covered", "value": f"{asi_covered}/10"}
+    )
+
+    return {
+        "aivss": aivss_rows,
+        "band": band_rows,
+        "findings": findings_rows,
+        "elapsed": elapsed_rows,
+        "cost": cost_rows,
+        "coverage": coverage_rows,
+    }
+
+
 def _asi_rows(
     scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]
 ) -> list[dict[str, Any]]:
@@ -391,7 +405,9 @@ def _findings_page(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Return ``(page_items, pagination_meta)`` for the findings feed.
 
-    Findings are sorted critical → high → medium → low, then by creation time.
+    Findings are sorted severity DESC (critical → high → medium → low) then
+    ASI ASC (ASI01 → ASI02 → …) so the QA-048 unified Findings table reads
+    top-down by criticality with stable ASI grouping inside each band.
     """
     if scan is None:
         empty_pagination: dict[str, Any] = {
@@ -409,7 +425,13 @@ def _findings_page(
         Severity.MEDIUM: 2,
         Severity.LOW: 3,
     }
-    sorted_findings = sorted(scan.findings, key=lambda f: (sev_rank[f.severity], f.created_at))
+    # QA-048 tie-breaker — sort by ``asi_code`` ASC inside a severity band so
+    # the unified findings table groups rows of the same ASI together for
+    # quick scanning. ``created_at`` falls in last as a final stable key.
+    sorted_findings = sorted(
+        scan.findings,
+        key=lambda f: (sev_rank[f.severity], f.asi.value, f.created_at),
+    )
     total = len(sorted_findings)
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
@@ -760,16 +782,53 @@ def build_dashboard_context(
         # ``ⓘ`` popover (``.exec-kpi__desc-popover``) instead of an always-on
         # ``.exec-kpi__desc`` block — payload key is unchanged, only the
         # template render mode flipped.
+        # QA-039 / QA-044 (2026-06-02) — these prose explainers are now
+        # surfaced behind the ``ⓘ`` button (separate from the hover data
+        # table). They are deliberately rendered in sentence case + body
+        # type (see ``.kpi-info-popover`` in executive.css); the previous
+        # ALL-CAPS + tight letter-spacing look was dropped.
         "kpi_descriptions": {
-            "aivss": "Composite agent safety score from adversarial testing",
-            "band": "Risk tier mapped from the AIVSS composite score",
-            "findings": "Distinct exploit attempts the swarm graded as valid",
-            "critical": "Findings with severity rating of Critical",
-            "high": "High-severity findings (CVSS 7.0-8.9 equivalent)",
-            "elapsed": "Wall-clock duration of the scan from start to finish",
-            "cost": "Total model API spend in USD for this scan",
-            "coverage": "Probe categories exercised out of 10 OWASP ASI dimensions",
+            "aivss": (
+                "Composite agent safety score (0-100). A weighted average "
+                "across the ten OWASP ASI sub-scores, blended with the "
+                "tier-specific scoring formula."
+            ),
+            "band": (
+                "Risk tier mapped from the AIVSS composite. Thresholds "
+                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 good, "
+                "90-100 excellent."
+            ),
+            "findings": (
+                "Total exploit attempts the evaluator graded as valid. "
+                "Hover the tile for the per-severity breakdown."
+            ),
+            "elapsed": (
+                "Wall-clock duration of the scan from the first probe "
+                "dispatch through the final evaluator verdict."
+            ),
+            "cost": (
+                "Estimated model spend in USD for this scan, summed "
+                "across the commander, attacker, and evaluator phases."
+            ),
+            "coverage": (
+                "Probe categories exercised out of the ten OWASP ASI "
+                "dimensions. Hover the tile for the per-category status."
+            ),
         },
+        # QA-044 (2026-06-02) — structured hover data tables. Each entry
+        # is a list of ``{label, value, class?}`` dicts that ``_kpi_strip.html``
+        # renders as a small table inside ``.exec-kpi__hover-table``. We
+        # build it here rather than in Jinja so the row order stays Python-
+        # sorted and the breakdown matches what unit tests assert against.
+        "kpi_hover_tables": _build_kpi_hover_tables(
+            scan=scan,
+            counts=counts,
+            findings_total=findings_total,
+            asi_rows=asi_rows,
+            elapsed=elapsed,
+            elapsed_label=_humanise_seconds(elapsed),
+            asi_covered=asi_covered,
+        ),
         # QA-028 sub-ask 2 — per-tile inline-SVG mini-charts. The KPI strip
         # template reads this dict to draw a 64px-tall visualisation inside
         # each tile (radial gauge / band axis segment / stacked severity bar
@@ -840,17 +899,22 @@ def build_dashboard_context(
         # above for the Findings tab evidence join) so we don't read
         # memory.jsonl twice per render.
         "probes_list": _probes_list_for_evidence,
-        # QA-032 — Probes tab JSON island. The compact table renders one
-        # row per probe; the slide-over JS pulls the full prompt / target
-        # response / judge reasoning from this serialised payload keyed
-        # by ``data-probe-id``. ``ensure_ascii=False`` keeps unicode in
-        # operator-supplied prompt text readable in the wire transcript;
-        # ``default=str`` lets the dumper survive the (rare) datetime
-        # leakage if a future probe shape ever carries one.
-        "probes_payload_json": json.dumps(
-            _probes_list_for_evidence, ensure_ascii=False, default=str
-        ),
+        # BUG-1 (2026-06-02) — the legacy ``probes_payload_json`` was a
+        # centralised JSON-island wall the slideover JS read on click.
+        # It was removed because it dumped the full prompt + target
+        # response + judge reasoning of every probe as a single ``<script
+        # type="application/json">`` blob below the table — visible to
+        # anyone who inspected the source. The drawer now reads each
+        # probe's payload from a per-row ``data-probe-payload`` attribute
+        # (``tojson`` in the template), so no centralised dump is needed.
         "logs_tail": _assemble_logs_tail(scan_dir),
+        # QA-047 (2026-06-02) — Overview "Recon findings about this agent"
+        # panel. Reads the latest fingerprint + agent-skipped records
+        # from memory.jsonl and projects them into a key-value sheet:
+        # framework / target / capability chips / discovered tools /
+        # refusal baseline / system-prompt clues / skipped agents. Empty
+        # / disabled when no fingerprint has been written yet.
+        "recon_summary": _assemble_recon_summary(scan_dir),
     }
     return DashboardContext(payload=payload)
 
@@ -892,6 +956,169 @@ def _assemble_probes_list(scan_dir: Path | None) -> list[dict[str, Any]]:
         _LOG.debug("dashboard_view: memory.jsonl read failed (%s)", exc)
         return []
     return out
+
+
+def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
+    """Read the recon-derived view-model from ``<scan_dir>/memory.jsonl``.
+
+    QA-047 (2026-06-02). Reads two record types from ``memory.jsonl``:
+
+    * ``record_type=fingerprint`` — the latest wins. Carries the
+      :class:`TargetFingerprint` payload (mode, framework, declared tools,
+      capability flags, inferred goal / domain, declared guardrails,
+      profile source + confidence). Surfaced in the Overview "Recon
+      findings about this agent" panel as a key-value sheet.
+    * ``record_type=agent_skipped`` — each is one row in the "skipped
+      agents" table (which ASI agent was skipped + the recon-derived
+      reason, e.g. ``"not applicable for fingerprint"``).
+
+    Returns a dict shaped for the ``_recon_panel.html`` template:
+
+        {
+          "has_data": bool,             # False ⇒ empty / pending render path
+          "framework_family": str,
+          "target_model": str,
+          "target_mode": str,
+          "target_ref": str,
+          "has_tools": bool,
+          "tool_count": int,
+          "tool_sample": list[str],
+          "discovered_tools": list[str],   # full list for the collapsible
+          "has_memory": bool,
+          "memory_keys": list[str],
+          "is_multi_agent": bool,
+          "touches_pii": bool,
+          "inferred_goal": str,
+          "domain": str,
+          "sensitive_actions": list[str],
+          "declared_guardrails": list[str],
+          "profile_source": str,
+          "profile_confidence": float,
+          "system_prompt_clues": str,   # truncated notes/clue field
+          "system_prompt_clues_full": str,  # full text for "view raw"
+          "skipped_agents": list[{agent, asi, reason}],
+        }
+
+    Returns an empty / disabled dict when ``scan_dir`` is ``None``, the
+    file is missing, or no fingerprint record has been written yet
+    (early in a running scan).
+
+    Never raises — disk / parse failures swallowed (logged at DEBUG).
+    """
+    empty: dict[str, Any] = {
+        "has_data": False,
+        "framework_family": "—",
+        "target_model": "—",
+        "target_mode": "—",
+        "target_ref": "—",
+        "has_tools": False,
+        "tool_count": 0,
+        "tool_sample": [],
+        "discovered_tools": [],
+        "has_memory": False,
+        "memory_keys": [],
+        "is_multi_agent": False,
+        "touches_pii": False,
+        "inferred_goal": "",
+        "domain": "",
+        "sensitive_actions": [],
+        "declared_guardrails": [],
+        "profile_source": "",
+        "profile_confidence": 0.0,
+        "system_prompt_clues": "",
+        "system_prompt_clues_full": "",
+        "skipped_agents": [],
+    }
+    if scan_dir is None:
+        return empty
+    path = scan_dir / "memory.jsonl"
+    if not path.is_file():
+        return empty
+    latest_fp: dict[str, Any] | None = None
+    skipped: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    rec = json.loads(stripped)
+                except (ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                rtype = rec.get("record_type")
+                if rtype == "fingerprint":
+                    payload = rec.get("payload")
+                    if isinstance(payload, dict):
+                        latest_fp = payload
+                elif rtype == "agent_skipped":
+                    payload = rec.get("payload")
+                    if isinstance(payload, dict):
+                        skipped.append(
+                            {
+                                "agent": str(payload.get("agent", "")),
+                                "asi": str(payload.get("asi", "")),
+                                "reason": str(payload.get("reason", "")),
+                            }
+                        )
+    except OSError as exc:  # pragma: no cover — disk-level failure
+        _LOG.debug("dashboard_view: recon read failed (%s)", exc)
+        return empty
+    if latest_fp is None:
+        # No fingerprint written yet. Still surface skipped agents (rare,
+        # but possible if the swarm bypassed agents on a pre-existing
+        # cached fingerprint that was deleted off-disk).
+        if not skipped:
+            return empty
+        out = dict(empty)
+        out["skipped_agents"] = skipped
+        return out
+
+    declared_tools = list(latest_fp.get("declared_tools") or [])
+    declared_memory_keys = list(latest_fp.get("declared_memory_keys") or [])
+    notes_full = str(latest_fp.get("notes") or "")
+    # Truncate clues to ~160 chars for the inline render; the full text
+    # lives behind the <details> raw view.
+    if len(notes_full) > 160:
+        clues_short = notes_full[:160].rsplit(" ", 1)[0] + "…"
+    else:
+        clues_short = notes_full
+    return {
+        "has_data": True,
+        "framework_family": (
+            str(latest_fp.get("framework"))
+            if latest_fp.get("framework")
+            else "Unknown"
+        ),
+        # No model name in the fingerprint payload today — we surface the
+        # target_ref (URL / module path / prompt id) and let the operator
+        # pivot to the engine row in the reproducibility receipt for
+        # commander/attacker/evaluator model ids.
+        "target_model": str(latest_fp.get("ref") or "—"),
+        "target_mode": str(latest_fp.get("mode") or "—"),
+        "target_ref": str(latest_fp.get("ref") or "—"),
+        "has_tools": bool(latest_fp.get("has_tools")),
+        "tool_count": len(declared_tools),
+        # Sample = first 3 tools for the chip strip; full list lives in
+        # the collapsible <details>.
+        "tool_sample": declared_tools[:3],
+        "discovered_tools": declared_tools,
+        "has_memory": bool(latest_fp.get("has_memory")),
+        "memory_keys": declared_memory_keys,
+        "is_multi_agent": bool(latest_fp.get("is_multi_agent")),
+        "touches_pii": bool(latest_fp.get("touches_pii")),
+        "inferred_goal": str(latest_fp.get("inferred_goal") or ""),
+        "domain": str(latest_fp.get("domain") or ""),
+        "sensitive_actions": list(latest_fp.get("sensitive_actions") or []),
+        "declared_guardrails": list(latest_fp.get("declared_guardrails") or []),
+        "profile_source": str(latest_fp.get("profile_source") or "heuristic"),
+        "profile_confidence": float(latest_fp.get("profile_confidence") or 0.0),
+        "system_prompt_clues": clues_short,
+        "system_prompt_clues_full": notes_full,
+        "skipped_agents": skipped,
+    }
 
 
 def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
@@ -1019,13 +1246,21 @@ def _derive_log_level(kind: str, payload: dict[str, Any]) -> str:
     For ``kind == "log"`` records (Python logging handler output, see
     :class:`agent_guardian.server.partial_scan.JsonlLogHandler`), read
     ``payload["level"]`` and map Python log-level names to the renderer's
-    three buckets — ``DEBUG``/``INFO`` → ``info``, ``WARNING``/``WARN`` →
-    ``warn``, ``ERROR``/``CRITICAL`` → ``error``. Unknown values fall back
-    to ``info``. All other ``kind`` values keep the original SwarmEvent
-    heuristic.
+    four buckets — ``DEBUG`` → ``debug``, ``INFO`` → ``info``,
+    ``WARNING``/``WARN`` → ``warn``, ``ERROR``/``CRITICAL`` → ``error``.
+    Unknown values fall back to ``info``. All other ``kind`` values keep
+    the original SwarmEvent heuristic.
+
+    DEBUG used to collapse into the ``info`` bucket, hiding operator-opted-in
+    debug events behind the INFO chip. Splitting it into its own bucket lets
+    the Logs tab surface DEBUG events behind a dedicated, off-by-default
+    filter chip — the renderer still emits every persisted DEBUG row, but
+    the operator clicks "DEBUG" to drill in.
     """
     if kind == "log":
         raw_level = str(payload.get("level", "")).strip().upper()
+        if raw_level == "DEBUG":
+            return "debug"
         if raw_level in ("WARNING", "WARN"):
             return "warn"
         if raw_level in ("ERROR", "CRITICAL"):

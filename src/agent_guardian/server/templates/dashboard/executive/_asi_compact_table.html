@@ -21,6 +21,23 @@
     data-live-scope="asi-compact"
     role="list"
     aria-label="Adversarial Surface Index per category — compact">
+  {# QA-046 (2026-06-02) — column header row. Uses the existing monospace
+     eyebrow styling (.exec-asi-compact__head*) so it reads as a quiet
+     all-caps strip above the body rows; spans line up 1:1 with the same
+     grid template as .exec-asi-compact__row. role="row"/scope="col" gives
+     the assistive-tech tree the same column semantics a real <thead> would. #}
+  <li class="exec-asi-compact__row exec-asi-compact__row--head"
+      role="row"
+      aria-label="Column headers">
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">ASI</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">Category</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">Progress</span>
+    <span class="exec-asi-compact__head exec-asi-compact__head--num"
+          role="columnheader" scope="col">Score</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">Weight</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">C / H / M / L</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col">Status</span>
+  </li>
   {% for row in asi_rows %}
     {% set _f = row.findings %}
     {% set _row_findings = (_f.critical | default(0))

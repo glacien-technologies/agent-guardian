@@ -1,21 +1,25 @@
-{# Executive — Findings tab panel.
+{# Executive — Findings tab panel (QA-048).
 
-   The literal greppable heading ``All findings so far.`` lives here so the
-   Executive theme's findings region matches the other four. The severity
-   bar chart sits directly under the heading; its click handler scrolls to
-   one of the four severity bucket anchors (#exec-sev-{critical|high|medium
-   |low}). Each finding card carries severity / id / summary / agent / ASI
-   / probe metadata, restyled with Narrative serif headlines and mono
-   eyebrow tags. Empty-state copy preserves the ``clean_control`` sentry.
+   Rebuilt 2026-06-02 from div-soup-grouped-by-severity into ONE proper
+   semantic ``<table class="exec-findings-table">`` with a single
+   ``<thead>`` row: Severity · Agent · ASI · Probe · Summary · Turn ·
+   Timestamp.
+
+   Rows are sorted server-side (severity DESC then ASI ASC; see
+   ``_findings_page``). Severity is its OWN column (a pill badge), not a
+   per-bucket section divider — operators can sort/filter top-down
+   instead of context-switching between four sub-tables. Agent (mono
+   ``ASI01`` code) and ASI (sans-serif ``goal-instruction-manipulation``
+   label) ship in SEPARATE ``<td>`` cells so the two never concatenate
+   visually. Summary uses a hard pixel ``max-width`` + ``text-overflow:
+   ellipsis`` and carries ``title="..."`` so the operator gets the full
+   text on hover.
+
+   Row click opens the existing finding slide-over drawer (QA-031). Each
+   ``<tr>`` carries ``data-source="finding"``, ``data-finding-id``,
+   ``tabindex="0"``, and ``role="button"`` so ``executive_findings.js``
+   wires click + Enter/Space handlers automatically.
 #}
-{% set _by_sev = {'critical': [], 'high': [], 'medium': [], 'low': []} %}
-{% for f in findings_page %}
-  {% set _bucket = _by_sev.get(f.severity_class) %}
-  {% if _bucket is not none %}
-    {% set _ = _bucket.append(f) %}
-  {% endif %}
-{% endfor %}
-
 <section id="tabpanel-findings"
          role="tabpanel"
          aria-labelledby="tab-findings"
@@ -23,34 +27,98 @@
          hidden>
   <h2 class="exec-section-title">All findings so far.</h2>
   <p class="exec-section-lede">
-    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality.
+    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality, then ASI.
     Click any row to inspect the full finding, metadata, and evidence drawer.
   </p>
 
   {% if findings_total == 0 %}
     <p class="exec-empty">Nothing flagged yet.</p>
   {% else %}
-    {% for _sev_key, _sev_items in [('critical', _by_sev.critical),
-                                     ('high', _by_sev.high),
-                                     ('medium', _by_sev.medium),
-                                     ('low', _by_sev.low)] %}
-      {% if _sev_items %}
-        <section class="exec-sev-bucket" id="exec-sev-{{ _sev_key }}">
-          <h3 class="exec-sev-bucket__title">
-            <span class="exec-sev-pill exec-sev-pill--{{ _sev_key }}">
-              <span class="exec-sev-pill__dot" aria-hidden="true"></span>
-              {{ _sev_key | upper }}
-            </span>
-            <span class="exec-sev-bucket__count">
-              {{ _sev_items | length }} finding{% if _sev_items | length != 1 %}s{% endif %}
-            </span>
-          </h3>
-          {% with bucket_findings=_sev_items, bucket_key=_sev_key %}
-            {% include "dashboard/executive/_findings_table.html" %}
-          {% endwith %}
-        </section>
-      {% endif %}
-    {% endfor %}
+    <div class="exec-findings-table-wrap">
+      <table class="exec-findings-table"
+             id="exec-findings-table"
+             role="table"
+             aria-label="Findings — sorted by severity then ASI">
+        <thead class="exec-findings-table__head">
+          <tr>
+            <th scope="col" class="exec-findings-table__col--sev">Severity</th>
+            <th scope="col" class="exec-findings-table__col--agent">Agent</th>
+            <th scope="col" class="exec-findings-table__col--asi">ASI</th>
+            <th scope="col" class="exec-findings-table__col--probe">Probe</th>
+            <th scope="col" class="exec-findings-table__col--summary">Summary</th>
+            <th scope="col" class="exec-findings-table__col--turn">Turn</th>
+            <th scope="col" class="exec-findings-table__col--ts">Timestamp</th>
+          </tr>
+        </thead>
+        {# Rows are pre-sorted by (severity DESC, ASI ASC) in
+           ``_findings_page``. We bucket into one ``<tbody>`` per
+           severity so the existing severity-bar chart (Overview tab)
+           keeps working — its onClick handler scrolls to
+           ``#exec-sev-{critical|high|medium|low}``. Multiple
+           ``<tbody>`` per table is valid HTML5 and keeps the table
+           semantically singular for screen readers / sort handlers. #}
+        {% set _sev_groups = {'critical': [], 'high': [], 'medium': [], 'low': []} %}
+        {% for f in findings_page %}
+          {% set _grp = _sev_groups.get(f.severity_class) %}
+          {% if _grp is not none %}{% set _ = _grp.append(f) %}{% endif %}
+        {% endfor %}
+        {% for _sev_key, _sev_items in [('critical', _sev_groups.critical),
+                                         ('high', _sev_groups.high),
+                                         ('medium', _sev_groups.medium),
+                                         ('low', _sev_groups.low)] %}
+          {% if _sev_items %}
+            <tbody id="exec-sev-{{ _sev_key }}" class="exec-findings-table__group" data-severity="{{ _sev_key }}">
+              {% for f in _sev_items %}
+                {# Turn + timestamp derive from the first correlated
+                   evidence row attached in ``_attach_evidence_to_findings``
+                   so the operator sees the canonical (earliest) attempt.
+                   Fall back to em-dash when no probe correlation exists
+                   (e.g. static findings). #}
+                {% set _ev_first = (f.evidence | first) if f.evidence else None %}
+                {% set _turn_label = (_ev_first.turn if _ev_first and _ev_first.turn else None) %}
+                {% set _ts_label = (_ev_first.timestamp_label if _ev_first and _ev_first.timestamp_label else f.created_label) %}
+                <tr class="exec-findings-table__row"
+                    data-source="finding"
+                    data-finding-id="{{ f.id }}"
+                    data-severity="{{ f.severity_class }}"
+                    data-asi="{{ f.asi_code }}"
+                    tabindex="0"
+                    role="button"
+                    aria-controls="exec-finding-slideover"
+                    aria-label="Open finding {{ f.id }} ({{ f.severity_label }} severity)">
+                  <td class="exec-findings-table__cell exec-findings-table__cell--sev">
+                    <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
+                          aria-label="{{ f.severity_label }} severity">
+                      <span class="exec-sev-pill__dot" aria-hidden="true"></span>
+                      {{ f.severity_label }}
+                    </span>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--agent">
+                    <code class="exec-findings-table__agent-code">{{ f.asi_code }}</code>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--asi">
+                    <span class="exec-findings-table__asi-name">{{ f.csa_code }}</span>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--probe">
+                    <code>{{ f.probe_id or '—' }}</code>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--summary"
+                      title="{{ f.summary }}">
+                    <span class="exec-findings-table__summary-text">{{ f.summary }}</span>
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--turn">
+                    {% if _turn_label %}<code>{{ _turn_label }}</code>{% else %}<span class="exec-findings-table__muted">&mdash;</span>{% endif %}
+                  </td>
+                  <td class="exec-findings-table__cell exec-findings-table__cell--ts">
+                    <code>{{ _ts_label }}</code>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          {% endif %}
+        {% endfor %}
+      </table>
+    </div>
     {% if pagination.total_pages > 1 %}
       <nav class="exec-pager" aria-label="Findings pagination">
         <span class="exec-pager__range">
@@ -69,8 +137,7 @@
   {# Hidden JSON island — finding payloads for the slide-over. The
      slide-over JS reads ``data-finding-id`` off the clicked row and
      looks up the matching payload here. Keeps the table markup tiny
-     (table = 4 columns) while preserving all evidence + metadata for
-     the deep-dive. #}
+     while preserving all evidence + metadata for the deep-dive. #}
   <script type="application/json" id="exec-findings-payload">
     {{ findings_payload_json | safe }}
   </script>

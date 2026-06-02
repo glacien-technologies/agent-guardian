@@ -38,6 +38,9 @@
      parsed before the chart initialisers run. #}
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="/static/executive_charts.js?v={{ package_version }}" defer></script>
+  {# QA-039 + QA-044 (2026-06-02) — owns the KPI tile ⓘ click affordance
+     (toggles the prose info popover); the hover data-table is pure CSS. #}
+  <script src="/static/executive_kpi.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"

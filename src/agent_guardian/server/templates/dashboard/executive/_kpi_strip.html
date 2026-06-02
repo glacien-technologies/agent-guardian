@@ -1,15 +1,26 @@
-{# Executive — sticky KPI strip (layer 2).
+{# Executive — KPI strip (in-panel, Overview only).
 
-   Eight tiles in a responsive grid; locked left-to-right order:
-     AIVSS / Band / Findings / Critical / High / Elapsed / Cost / Coverage
+   Six tiles in a responsive grid; locked left-to-right order:
+     AIVSS / Band / Findings / Elapsed / Cost / Coverage
 
-   QA-028 sub-ask 1 + 2 (2026-06-01):
-     - Tile descriptions moved from always-on ``<span class="exec-kpi__desc">``
-       to a hover/focus popover behind a ``ⓘ`` button — DOM payload is the
-       same (``kpi_descriptions[key]``), only the render mode changed.
-     - Every tile now carries an inline-SVG mini-chart sized to ≤ 64 px tall.
-       Chart data lives in ``kpi_chart_data`` on the view-model so this
-       template stays declarative.
+   QA-043 (2026-06-02):
+     - CRITICAL + HIGH severity tiles removed; their dot-cluster mini-chart
+       restated info that lives in the FINDINGS bar chart further down the
+       Overview page. Grid drops from 8 → 6 columns.
+
+   QA-044 + QA-039 (2026-06-02):
+     - Hover popover now renders a structured data-table (``kpi-hover-table``)
+       built from ``kpi_hover_tables[key]`` so operators see the breakdown
+       they expected from the metric, not a one-liner repeat of the title.
+     - The ``ⓘ`` button opens a separate prose explainer popover
+       (``kpi-info-popover``) in sentence-case body text with no
+       ``text-transform: uppercase`` and reduced letter-spacing.
+
+   QA-040 (2026-06-02):
+     - AIVSS tile mini-chart is now a 5-band horseshoe gauge with a needle
+       at the current score, not a single-arc loading donut. Band thresholds
+       0/40/60/80/90 map to CRITICAL/POOR/WARNING/GOOD/EXCELLENT and reuse
+       the existing ``--exec-sev-*`` brand severity palette.
 
    Each tile reads from the existing shared payload — Executive does NOT
    introduce new KPI fields. Anywhere the value can be live-updated by the
@@ -20,14 +31,37 @@
 #}
 {% macro kpi_info(key) -%}
   <button type="button"
-          class="exec-kpi__info"
-          aria-describedby="kpi-{{ key }}-desc"
+          class="exec-kpi__info kpi-info-icon"
+          data-kpi-info-key="{{ key }}"
+          aria-expanded="false"
+          aria-controls="kpi-{{ key }}-info"
           aria-label="About this metric">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
   </button>
-  <span class="exec-kpi__desc-popover"
-        id="kpi-{{ key }}-desc"
-        role="tooltip">{{ kpi_descriptions[key] }}</span>
+  <span class="exec-kpi__info-popover kpi-info-popover"
+        id="kpi-{{ key }}-info"
+        role="tooltip"
+        hidden>{{ kpi_descriptions[key] }}</span>
+{%- endmacro %}
+{% macro kpi_hover_table(key) -%}
+  {% set _rows = kpi_hover_tables.get(key) if kpi_hover_tables else None %}
+  {% if _rows %}
+    <div class="exec-kpi__hover-table"
+         data-component="kpi-hover-table"
+         role="tooltip"
+         aria-label="{{ key }} breakdown">
+      <table class="exec-kpi-hover-table">
+        <tbody>
+          {% for row in _rows %}
+            <tr class="exec-kpi-hover-table__row{% if row.get('class') %} exec-kpi-hover-table__row--{{ row['class'] }}{% endif %}">
+              <th scope="row">{{ row['label'] }}</th>
+              <td>{{ row['value'] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
 {%- endmacro %}
 <section class="exec-kpi-strip" aria-label="Scan key metrics">
 
@@ -37,20 +71,38 @@
       AIVSS
       {{ kpi_info('aivss') }}
     </span>
-    <span class="exec-kpi__value" data-live="aivss">{{ aivss_label }}</span>
-    {# Mini-chart: semi-circle radial gauge tinted by band_class. #}
-    {% set _pct = kpi_chart_data.aivss_pct | default(0) %}
-    {% set _circ = 88 %}
-    <span class="exec-kpi__chart exec-kpi__chart--aivss" data-component="kpi-chart-aivss" aria-hidden="true">
-      <svg viewBox="0 0 64 36" preserveAspectRatio="xMidYMid meet">
-        <path d="M6 32 A26 26 0 0 1 58 32" fill="none" stroke="var(--exec-border-subtle)" stroke-width="4"/>
-        <path d="M6 32 A26 26 0 0 1 58 32" fill="none"
-              stroke="currentColor" stroke-width="4" stroke-linecap="round"
-              stroke-dasharray="{{ _circ }}"
-              stroke-dashoffset="{{ _circ - (_circ * (_pct | float) / 100.0) }}"
-              class="exec-kpi__chart-fill exec-kpi__chart-fill--{{ band_class }}"/>
+    {# QA-040 — 5-band horseshoe gauge with needle. Replaces the previous
+       single-arc "loading donut" with a discrete band axis (Critical / Poor
+       / Warning / Good / Excellent) and a needle at the current score so the
+       tile communicates band membership at a glance, not just an arc fill.
+       Centre label = current score (Source Serif), sub-label = band name. #}
+    {% set _pct = kpi_chart_data.aivss_pct | default(0) | float %}
+    {% set _angle = -90.0 + (180.0 * _pct / 100.0) %}
+    <span class="exec-kpi__chart exec-kpi__chart--aivss-gauge"
+          data-component="aivss-gauge"
+          data-band="{{ band_class }}"
+          aria-hidden="true">
+      <svg viewBox="0 0 120 78" preserveAspectRatio="xMidYMid meet" class="exec-kpi__gauge-svg">
+        {# 5 band arcs, each 36° of a 180° horseshoe centred at (60, 60),
+           radius 48. Path commands hand-rolled so the arc segments butt
+           up cleanly without anti-aliasing seams. #}
+        <path class="gauge-arc gauge-arc--critical"  d="M 12 60 A 48 48 0 0 1 23.07 29.39"   fill="none" stroke-width="9" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--poor"      d="M 23.07 29.39 A 48 48 0 0 1 51.66 12.51"  fill="none" stroke-width="9" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--warning"   d="M 51.66 12.51 A 48 48 0 0 1 84.66 17.27" fill="none" stroke-width="9" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--good"      d="M 84.66 17.27 A 48 48 0 0 1 105.85 36.51" fill="none" stroke-width="9" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--excellent" d="M 105.85 36.51 A 48 48 0 0 1 108 60"      fill="none" stroke-width="9" stroke-linecap="butt"/>
+        {# Needle — rotated about the gauge centre (60, 60). #}
+        <g class="gauge-needle" transform="rotate({{ _angle }} 60 60)">
+          <line x1="60" y1="60" x2="60" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="60" cy="60" r="3" fill="currentColor"/>
+        </g>
       </svg>
+      <span class="exec-kpi__gauge-center">
+        <span class="exec-kpi__gauge-score" data-live="aivss">{{ aivss_label }}</span>
+        <span class="exec-kpi__gauge-band exec-kpi__gauge-band--{{ band_class }}">{{ band_label }}</span>
+      </span>
     </span>
+    {{ kpi_hover_table('aivss') }}
   </div>
 
   <div class="exec-kpi" data-kpi="band">
@@ -68,6 +120,7 @@
         <span class="exec-kpi__band-seg exec-kpi__band-seg--{{ cls }}{% if loop.index0 == _seg %} exec-kpi__band-seg--active{% endif %}"></span>
       {% endfor %}
     </span>
+    {{ kpi_hover_table('band') }}
   </div>
 
   <div class="exec-kpi" data-kpi="findings">
@@ -94,40 +147,15 @@
         <span class="exec-kpi__mix-empty"></span>
       {% endif %}
     </span>
+    {{ kpi_hover_table('findings') }}
   </div>
 
-  <div class="exec-kpi" data-kpi="critical">
-    <span class="exec-kpi__label">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      Critical
-      {{ kpi_info('critical') }}
-    </span>
-    <span class="exec-kpi__value exec-kpi__value--critical" data-live="critical">{{ counts.critical }}</span>
-    {# Mini-chart: small red dot cluster (one dot per critical, capped at 6). #}
-    {% set _crit = counts.critical | int %}
-    {% set _shown = (_crit if _crit <= 6 else 6) %}
-    <span class="exec-kpi__chart exec-kpi__chart--dots exec-kpi__chart--dots-critical" data-component="kpi-chart-critical" aria-hidden="true">
-      {% for _ in range(_shown) %}<span class="exec-kpi__dot exec-kpi__dot--critical"></span>{% endfor %}
-      {% if _crit > 6 %}<span class="exec-kpi__dot-more">+{{ _crit - 6 }}</span>{% endif %}
-      {% if _crit == 0 %}<span class="exec-kpi__dot-empty">none</span>{% endif %}
-    </span>
-  </div>
-
-  <div class="exec-kpi" data-kpi="high">
-    <span class="exec-kpi__label">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      High
-      {{ kpi_info('high') }}
-    </span>
-    <span class="exec-kpi__value exec-kpi__value--high" data-live="high">{{ counts.high }}</span>
-    {% set _high = counts.high | int %}
-    {% set _shown_h = (_high if _high <= 6 else 6) %}
-    <span class="exec-kpi__chart exec-kpi__chart--dots exec-kpi__chart--dots-high" data-component="kpi-chart-high" aria-hidden="true">
-      {% for _ in range(_shown_h) %}<span class="exec-kpi__dot exec-kpi__dot--high"></span>{% endfor %}
-      {% if _high > 6 %}<span class="exec-kpi__dot-more">+{{ _high - 6 }}</span>{% endif %}
-      {% if _high == 0 %}<span class="exec-kpi__dot-empty">none</span>{% endif %}
-    </span>
-  </div>
+  {# QA-043 — CRITICAL + HIGH tiles removed (2026-06-02).
+     The severity breakdown lives in the Findings-by-severity bar chart
+     further down the Overview pane; restating it here as standalone KPI
+     tiles duplicated the information without adding new signal. The grid
+     now renders 6 columns at >=1280px (see ``executive.css`` §3).
+  #}
 
   <div class="exec-kpi" data-kpi="elapsed">
     <span class="exec-kpi__label">
@@ -146,6 +174,7 @@
         </span>
       {% endif %}
     </span>
+    {{ kpi_hover_table('elapsed') }}
   </div>
 
   <div class="exec-kpi" data-kpi="cost">
@@ -164,6 +193,7 @@
         </span>
       {% endif %}
     </span>
+    {{ kpi_hover_table('cost') }}
   </div>
 
   <div class="exec-kpi" data-kpi="coverage">
@@ -180,6 +210,7 @@
         <span class="exec-kpi__cov-cell{% if i < _covered %} exec-kpi__cov-cell--on{% endif %}"></span>
       {% endfor %}
     </span>
+    {{ kpi_hover_table('coverage') }}
   </div>
 
 </section>

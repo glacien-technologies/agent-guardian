@@ -309,7 +309,13 @@ def test_derive_log_summary_priority_order() -> None:
 
 def test_derive_log_level_log_kind_reads_payload_level_info() -> None:
     assert _derive_log_level("log", {"level": "INFO"}) == "info"
-    assert _derive_log_level("log", {"level": "DEBUG"}) == "info"
+
+
+def test_derive_log_level_log_kind_maps_debug_to_debug() -> None:
+    # DEBUG used to collapse into the ``info`` bucket, hiding operator-opted-in
+    # debug events behind the INFO chip. Splitting it into its own bucket lets
+    # the Logs tab surface them behind a dedicated DEBUG filter chip.
+    assert _derive_log_level("log", {"level": "DEBUG"}) == "debug"
 
 
 def test_derive_log_level_log_kind_maps_warning_to_warn() -> None:

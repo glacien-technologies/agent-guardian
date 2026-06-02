@@ -1,15 +1,30 @@
-{# Executive — Probes tab panel (QA-032).
+{# Executive — Probes tab panel (QA-032 / BUG-1 / BUG-2 / QA-049).
 
    Every reflection record the swarm produced — one row per judged turn.
    Data is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
    (``probes_list``).
 
-   As of QA-032 the per-row card list (``exec-probes-list`` / ``exec-probe``)
-   is replaced with a compact 5-column table (``_probes_table.html``). Each
-   row opens a slide-over (``_finding_slideover.html`` with ``kind="probe"``)
-   that renders the full request prompt / target response / judge reasoning.
-   The shared ``executive_findings.js`` IIFE reads the JSON island
-   ``#exec-probes-payload`` to locate the matching probe by ``data-probe-id``.
+   The compact 5-column table (``_probes_table.html``) renders one row per
+   probe. Each row opens a slide-over drawer (``_finding_slideover.html``
+   with ``kind="probe"``) that renders the full probe-detail-sheet —
+   request prompt, target response, judge verdict, panel reasoning,
+   evidence chain link, reproduce CLI command, and run-context metadata.
+
+   2026-06-02 changes
+   ------------------
+   * BUG-1 — The legacy ``<script type="application/json"
+     id="exec-probes-payload">`` JSON-island wall (one giant blob of every
+     probe's prompt + target response + reasoning) is gone. Each row now
+     carries its own ``data-probe-payload`` attribute via Jinja's
+     ``tojson`` filter; the drawer JS parses it on click. No more "wall of
+     debug" below the table.
+   * BUG-2 — The shared ``_reproducibility.html`` include is removed from
+     this tab. The receipt still lives on the Overview tab; surfacing it
+     four times (once per tabpanel) was the bug. Per-probe reproduction is
+     covered by the drawer's "Reproduce" CLI button.
+   * QA-049 — Rows carry ``data-action="probe-row-click"`` so the shared
+     ``executive_findings.js`` IIFE wires click + Enter/Space activation
+     directly; the drawer body renders the full probe-detail-sheet.
 
    Empty-state copy preserves the ``clean_control`` sentry.
 #}
@@ -20,22 +35,16 @@
          hidden>
   <h2 class="exec-section-title">All probes attempted.</h2>
   <p class="exec-section-lede">
-    {{ probes_list | length }} attempts &middot; each row is one judged turn.
+    {{ probes_list | length }} attempts &middot; each row opens the
+    probe-detail-sheet drawer with the verbatim prompt, target response,
+    judge verdict, and a one-click reproduce command.
   </p>
   {% if probes_list | length == 0 %}
     <p class="exec-empty">No probe attempts recorded yet.</p>
   {% else %}
     {% include "dashboard/executive/_probes_table.html" %}
-    {# JSON island — same pattern as the (planned) findings payload. The
-       ``| safe`` filter is acceptable here because the JSON is produced
-       server-side by ``json.dumps`` with ``ensure_ascii=False`` over the
-       trusted ``probes_list`` shape (all string fields are escaped by
-       json.dumps itself; the JSON is parsed by the JS, never injected
-       as HTML). #}
-    <script type="application/json" id="exec-probes-payload">{{ probes_payload_json | safe }}</script>
     {% set kind = "probe" %}
     {% include "dashboard/executive/_finding_slideover.html" %}
     <script src="/static/executive_findings.js?v={{ package_version }}" defer></script>
   {% endif %}
-  {% include "dashboard/executive/_reproducibility.html" %}
 </section>

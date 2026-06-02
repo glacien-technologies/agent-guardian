@@ -243,12 +243,19 @@ def test_scans_report_warns_and_404s_when_raw_json_unparseable(
 
 
 def test_scans_redirect_preserves_query_string(client: TestClient, store: ScanStore) -> None:
-    """``/scans/<id>?page=2&theme=narrative`` → 307 ``/scan/<id>?page=2&theme=narrative``."""
+    """``/scans/<id>?page=2&tab=findings`` → 307 ``/scan/<id>?page=2&tab=findings``.
+
+    The redirect is opaque to query semantics — any query string survives
+    the bounce so a CLI-emitted link can carry pagination / tab anchors
+    intact. ``?theme=`` itself is no longer honoured downstream (QA-041
+    retired the multi-theme switcher), but the redirect must still
+    preserve whatever query string the client supplied.
+    """
     scan = _make_scan("cli-qa022-redir-qs")
     _persist(store, scan)
-    resp = client.get(f"/scans/{scan.id}?page=2&theme=narrative", follow_redirects=False)
+    resp = client.get(f"/scans/{scan.id}?page=2&tab=findings", follow_redirects=False)
     assert resp.status_code == 307
     loc = resp.headers["location"]
     assert loc.startswith(f"/scan/{scan.id}?")
     assert "page=2" in loc
-    assert "theme=narrative" in loc
+    assert "tab=findings" in loc

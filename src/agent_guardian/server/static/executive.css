@@ -204,12 +204,15 @@ body.exec-body {
   border-radius: var(--exec-radius);
   padding: 1rem var(--exec-pad-x);
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  /* QA-043 (2026-06-02): grid dropped from 8 → 6 columns once the
+     CRITICAL + HIGH severity tiles were removed (severity mix lives on
+     the Findings bar chart further down the Overview pane). */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.75rem;
 }
 @media (max-width: 1279px) {
   .exec-kpi-strip {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 719px) {
@@ -276,36 +279,108 @@ body.exec-body {
 .exec-kpi__info:focus-visible {
   box-shadow: 0 0 0 2px var(--exec-brand-tint);
 }
-.exec-kpi__desc-popover {
+/* QA-039 + QA-044 (2026-06-02) — split the single hover popover into two
+   surfaces:
+     1. ``.kpi-info-popover`` — opened by clicking the ⓘ button; prose
+        explainer in sentence case (NO ``text-transform: uppercase`` and
+        reduced letter-spacing relative to the old ALL-CAPS tooltip).
+     2. ``.exec-kpi__hover-table`` — shown on tile :hover / :focus-within;
+        renders a structured data table for the metric instead of a
+        one-line description repeat.
+*/
+.exec-kpi__info-popover.kpi-info-popover {
   position: absolute;
   top: calc(100% - 4px);
   left: 0.875rem;
   right: 0.875rem;
-  z-index: 20;
-  background: var(--exec-ink);
-  color: var(--exec-bg-elev);
+  z-index: 25;
+  background: var(--exec-bg-elev);
+  color: var(--exec-ink);
+  border: 1px solid var(--exec-border-subtle);
   font-family: var(--exec-font-sans);
   font-size: 0.75rem;
-  line-height: 1.35;
-  padding: 0.5rem 0.625rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.45;
+  padding: 0.625rem 0.75rem;
   border-radius: var(--exec-radius-sm);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+.exec-kpi__info-popover[hidden] {
+  display: none;
+}
+/* Tooltip overflow flip for the rightmost two tiles (COST + COVERAGE) so the
+   popover never clips the viewport edge. */
+.exec-kpi[data-kpi="cost"] .exec-kpi__info-popover,
+.exec-kpi[data-kpi="coverage"] .exec-kpi__info-popover {
+  left: auto;
+  right: 0.875rem;
+  min-width: 14rem;
+}
+
+/* Hover data-table popover — surfaces the per-tile breakdown. */
+.exec-kpi__hover-table {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: 0.5rem;
+  right: 0.5rem;
+  z-index: 22;
+  background: var(--exec-bg-elev);
+  color: var(--exec-ink);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+  padding: 0.375rem 0.5rem;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-2px);
   transition: opacity 120ms ease, transform 120ms ease;
 }
-.exec-kpi:hover .exec-kpi__desc-popover,
-.exec-kpi:focus-within .exec-kpi__desc-popover {
+.exec-kpi:hover .exec-kpi__hover-table,
+.exec-kpi:focus-within .exec-kpi__hover-table {
   opacity: 1;
   transform: translateY(0);
 }
-/* Tooltip overflow flip for the rightmost two tiles (COST + COVERAGE) so the
-   popover never clips the viewport edge. */
-.exec-kpi[data-kpi="cost"] .exec-kpi__desc-popover,
-.exec-kpi[data-kpi="coverage"] .exec-kpi__desc-popover {
+/* Suppress the data-table popover while the prose info popover is open
+   so the two surfaces never stack. */
+.exec-kpi.is-info-open .exec-kpi__hover-table {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.exec-kpi[data-kpi="cost"] .exec-kpi__hover-table,
+.exec-kpi[data-kpi="coverage"] .exec-kpi__hover-table {
   left: auto;
-  right: 0.875rem;
+  right: 0.5rem;
+  min-width: 12rem;
+}
+.exec-kpi-hover-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--exec-font-sans);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+}
+.exec-kpi-hover-table__row th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--exec-ink-muted);
+  padding: 0.1875rem 0.375rem 0.1875rem 0;
+  font-family: var(--exec-font-sans);
+  /* Explicitly NOT uppercase, NOT letter-spaced — these popovers replace
+     the previous ALL-CAPS hover tooltip (QA-039). */
+  text-transform: none;
+  letter-spacing: 0;
+}
+.exec-kpi-hover-table__row td {
+  text-align: right;
+  font-family: var(--exec-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--exec-ink);
+  padding: 0.1875rem 0 0.1875rem 0.375rem;
+}
+.exec-kpi-hover-table__row + .exec-kpi-hover-table__row th,
+.exec-kpi-hover-table__row + .exec-kpi-hover-table__row td {
+  border-top: 1px solid var(--exec-border-subtle);
 }
 
 /* QA-028 sub-ask 2 — per-tile mini-chart slot, capped at 32 px tall so the
@@ -317,15 +392,66 @@ body.exec-body {
   height: 28px;
   margin-top: 0.375rem;
 }
-.exec-kpi__chart--aivss { color: var(--exec-brand); }
-.exec-kpi__chart--aivss svg { width: 100%; height: 100%; }
-.exec-kpi__chart-fill--critical { color: var(--exec-sev-critical); stroke: var(--exec-sev-critical); }
-.exec-kpi__chart-fill--poor { color: var(--exec-sev-high); stroke: var(--exec-sev-high); }
-.exec-kpi__chart-fill--warning { color: var(--exec-sev-medium); stroke: var(--exec-sev-medium); }
-.exec-kpi__chart-fill--good { color: var(--exec-sev-low); stroke: var(--exec-sev-low); }
-.exec-kpi__chart-fill--excellent { color: var(--exec-sev-low); stroke: var(--exec-sev-low); }
-.exec-kpi__chart-fill--unknown,
-.exec-kpi__chart-fill--not_evaluated { color: var(--exec-ink-subtle); stroke: var(--exec-ink-subtle); }
+/* QA-040 (2026-06-02) — AIVSS tile horseshoe gauge.
+   Replaces the previous single-arc "loading donut" with a 5-band gauge
+   and a needle. Each ``.gauge-arc--*`` paints one band; ``.gauge-needle``
+   is rotated server-side to the current score. The five colours reuse
+   ``--exec-sev-*`` and ``--exec-brand`` so the gauge stays in the brand
+   severity palette without introducing new tokens. */
+.exec-kpi__chart--aivss-gauge {
+  position: relative;
+  height: 60px;
+  margin-top: 0.25rem;
+}
+.exec-kpi__chart--aivss-gauge .exec-kpi__gauge-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.exec-kpi__chart--aivss-gauge .gauge-arc--critical  { stroke: var(--exec-sev-critical); }
+.exec-kpi__chart--aivss-gauge .gauge-arc--poor      { stroke: var(--exec-sev-high); }
+.exec-kpi__chart--aivss-gauge .gauge-arc--warning   { stroke: var(--exec-sev-medium); }
+.exec-kpi__chart--aivss-gauge .gauge-arc--good      { stroke: var(--exec-sev-low); }
+.exec-kpi__chart--aivss-gauge .gauge-arc--excellent { stroke: var(--exec-brand); }
+.exec-kpi__chart--aivss-gauge .gauge-needle { color: var(--exec-ink); }
+/* When the band is unknown / not-evaluated the needle is invisible-ish
+   so it does not falsely point at "critical". */
+.exec-kpi__chart--aivss-gauge[data-band="unknown"] .gauge-needle,
+.exec-kpi__chart--aivss-gauge[data-band="not_evaluated"] .gauge-needle,
+.exec-kpi__chart--aivss-gauge[data-band="pending"] .gauge-needle {
+  color: var(--exec-ink-subtle);
+}
+.exec-kpi__gauge-center {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  pointer-events: none;
+}
+.exec-kpi__gauge-score {
+  font-family: var(--exec-font-serif);
+  font-weight: 500;
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--exec-ink);
+  font-variant-numeric: tabular-nums;
+}
+.exec-kpi__gauge-band {
+  font-family: var(--exec-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+}
+.exec-kpi__gauge-band--critical { color: var(--exec-sev-critical); }
+.exec-kpi__gauge-band--poor     { color: var(--exec-sev-high); }
+.exec-kpi__gauge-band--warning  { color: var(--exec-sev-medium); }
+.exec-kpi__gauge-band--good     { color: var(--exec-sev-low); }
+.exec-kpi__gauge-band--excellent { color: var(--exec-brand); }
 
 /* BAND tile — 5-segment band axis. */
 .exec-kpi__chart--band { gap: 2px; }
@@ -746,7 +872,10 @@ body.exec-body {
 }
 .exec-overview-twocol .exec-chart__canvas-wrap {
   /* QA-028 sub-ask 3a — drop row-3 vertical extent so both charts fit in a
-     single viewport scroll on 1080p. Was 360 → 280 px floor. */
+     single viewport scroll on 1080p. Was 360 → 280 px floor.
+     QA-045 (2026-06-02) — bumped to 480 px ceiling on the radar side so
+     the full category names (Privilege abuse / Supply chain / Cascading
+     failure) clear the chart envelope. The bar chart keeps the prior cap. */
   flex: 1 1 auto;
   min-height: 280px;
   max-height: 360px;
@@ -760,16 +889,51 @@ body.exec-body {
 }
 /* Square-up the radar — QA-028 sub-ask 3a locks an aspect-ratio: 1
    centred wrap so the radar reads as a square card. Chart.js keeps
-   maintainAspectRatio: false so it fills the CSS-locked box. */
+   maintainAspectRatio: false so it fills the CSS-locked box.
+   QA-045 (2026-06-02) — enlarged the radar envelope so the pointLabels
+   (Privilege abuse, Supply chain, Cascading failure) fit without
+   clipping. Card grows from 360 → 480 px, with the inner SVG label
+   gutter using viewBox 0 0 480 480. The position:relative anchor lets
+   the decorative <svg.exec-chart__radar-envelope> overlay sit behind
+   the Chart.js canvas without breaking flow. */
 .exec-overview-twocol .exec-chart--radar .exec-chart__canvas-wrap {
   aspect-ratio: 1 / 1;
-  max-width: 360px;
+  max-width: 480px;
+  max-height: 480px;
   margin: 0 auto;
+  position: relative;
+}
+.exec-overview-twocol .exec-chart--radar .exec-chart__canvas-wrap--bar {
+  max-height: 360px;
 }
 .exec-overview-twocol .exec-chart__canvas {
   width: 100% !important;
   height: 100% !important;
-  max-height: 360px;
+  max-height: 480px;
+}
+/* QA-045 — radar label-gutter envelope. Decorative SVG sitting behind
+   the Chart.js canvas; carries the viewBox=0 0 480 480 used as the
+   geometric reference for the enlarged radar card. aria-hidden so
+   screen readers ignore it (the offscreen <table> already mirrors the
+   data values for SR users). */
+.exec-chart__radar-envelope {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  color: var(--exec-border-subtle);
+}
+.exec-chart__radar-envelope-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.35;
+}
+.exec-chart--radar .exec-chart__canvas {
+  position: relative;
+  z-index: 1;
 }
 @media (max-width: 1024px) {
   .exec-overview-twocol { grid-template-columns: 1fr; }
@@ -992,6 +1156,30 @@ body.exec-body {
 .exec-asi-compact__row:hover {
   background: var(--exec-bg-sunken);
 }
+/* QA-046 (2026-06-02) — column header row above the compact ASI rows.
+   Reuses the same grid template (above) so the columns align 1:1 with
+   the body cells. The cells themselves wear the same monospace eyebrow
+   styling already used for .exec-asi-compact__code / status pills so
+   the header reads as a quiet all-caps strip, never a heavy table head. */
+.exec-asi-compact__row--head {
+  background: transparent;
+  border-bottom: 1px solid var(--exec-border-strong, var(--exec-border-subtle));
+  min-height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.exec-asi-compact__row--head:hover {
+  background: transparent;
+}
+.exec-asi-compact__head {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  font-weight: 500;
+}
+.exec-asi-compact__head--num { text-align: right; }
 .exec-asi-compact__code {
   font-family: var(--exec-font-mono);
   font-size: 12px;
@@ -1103,9 +1291,290 @@ body.exec-body {
   }
   .exec-asi-compact__bar,
   .exec-asi-compact__weight,
-  .exec-asi-compact__findings {
+  .exec-asi-compact__findings,
+  /* QA-046 — drop the header cells for the columns we hide above so the
+     remaining heads keep 1:1 alignment with the visible body cells. */
+  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(3),
+  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(5),
+  .exec-asi-compact__row--head .exec-asi-compact__head:nth-of-type(6) {
     display: none;
   }
+}
+
+/* ============================================================
+ * 8c. Recon findings panel (QA-047) — Overview-tab key-value sheet
+ *     showing what the recon agent learned before the swarm
+ *     dispatched. Sits between the KPI strip and the
+ *     Findings-by-severity / ASI radar two-column row.
+ *
+ *     Visual idiom mirrors the .exec-callout receipt below: notion-
+ *     style card on bg-elev, mono eyebrow, serif headline, key/value
+ *     <dl> grid. No new design tokens — every colour reads from the
+ *     existing exec-* CSS variables.
+ * ============================================================ */
+.exec-recon {
+  margin: 0 0 1.5rem 0;
+  padding: 20px 24px 22px;
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-md, 8px);
+}
+.exec-recon__head {
+  margin: 0 0 14px 0;
+}
+.exec-recon__eyebrow {
+  margin: 0 0 4px 0;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+.exec-recon__title {
+  margin: 0 0 6px 0;
+}
+.exec-recon__lede {
+  margin: 0;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink-muted);
+}
+
+.exec-recon__grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px 24px;
+}
+.exec-recon__row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--exec-border-subtle);
+}
+.exec-recon__row--wide { grid-column: 1 / -1; }
+.exec-recon__dt {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  margin: 0;
+}
+.exec-recon__dd {
+  margin: 0;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.exec-recon__target-ref {
+  word-break: break-all;
+  max-width: 100%;
+}
+
+/* Chips — small caps mono pills for short signals (mode, source,
+   confidence, domain, ASI code). */
+.exec-recon__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+}
+.exec-recon__chip--mode { background: color-mix(in srgb, var(--exec-brand) 12%, transparent); color: var(--exec-brand-strong); }
+.exec-recon__chip--source { background: color-mix(in srgb, var(--exec-sev-low) 16%, transparent); color: var(--exec-sev-low); }
+.exec-recon__chip--num { font-variant-numeric: tabular-nums; }
+.exec-recon__chip--domain { background: var(--exec-bg-sunken); color: var(--exec-ink); }
+.exec-recon__chip--asi { background: var(--exec-bg-sunken); color: var(--exec-ink); }
+.exec-recon__goal {
+  font-family: var(--exec-font-serif);
+  font-size: 14px;
+  color: var(--exec-ink);
+}
+
+/* Capability chips — boolean signals with on/off colouring. */
+.exec-recon__cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+  border: 1px solid var(--exec-border-subtle);
+}
+.exec-recon__cap-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--exec-ink-subtle);
+}
+.exec-recon__cap-meta {
+  font-family: var(--exec-font-sans);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 4px;
+}
+.exec-recon__cap--on {
+  background: color-mix(in srgb, var(--exec-brand) 10%, transparent);
+  color: var(--exec-brand-strong);
+  border-color: color-mix(in srgb, var(--exec-brand) 24%, transparent);
+}
+.exec-recon__cap--on .exec-recon__cap-dot { background: var(--exec-brand); }
+.exec-recon__cap--on .exec-recon__cap-meta { color: var(--exec-ink); }
+.exec-recon__cap--off { opacity: 0.78; }
+
+/* Discovered tools — chip strip + collapsible drawer for the long
+   tail. Mono so multi-char tool names stay compact. */
+.exec-recon__tools {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.exec-recon__tool-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink);
+  border-radius: var(--exec-radius-sm, 4px);
+  border: 1px solid var(--exec-border-subtle);
+}
+.exec-recon__tool-chip--sensitive {
+  background: color-mix(in srgb, var(--exec-sev-critical) 12%, transparent);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 28%, transparent);
+}
+.exec-recon__tools-more {
+  display: inline-block;
+  margin-left: 4px;
+}
+.exec-recon__tools-more > summary {
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  list-style: none;
+}
+.exec-recon__tools-more > summary::-webkit-details-marker { display: none; }
+.exec-recon__tools-all {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Declared guardrails — small bulleted list of what the agent
+   stated it won't do. */
+.exec-recon__guards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.exec-recon__guard {
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink);
+  padding-left: 14px;
+  position: relative;
+}
+.exec-recon__guard::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--exec-ink-subtle);
+}
+
+/* System-prompt clues — short inline string + <details> raw view. */
+.exec-recon__clues {
+  font-family: var(--exec-font-serif);
+  font-size: 13px;
+  color: var(--exec-ink);
+}
+.exec-recon__clues-raw {
+  display: block;
+  margin-top: 6px;
+}
+.exec-recon__clues-raw > summary {
+  cursor: pointer;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+}
+.exec-recon__clues-pre {
+  margin: 6px 0 0 0;
+  padding: 10px 12px;
+  background: var(--exec-bg-sunken);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm, 4px);
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* Skipped agents — one row per skipped ASI agent with its reason
+   string from the swarm. */
+.exec-recon__skipped {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.exec-recon__skipped-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 220px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+.exec-recon__skipped-agent {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink);
+}
+.exec-recon__skipped-reason {
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink-muted);
+}
+
+@media (max-width: 1023px) {
+  .exec-recon__grid { grid-template-columns: 1fr; }
+  .exec-recon__row { grid-template-columns: 1fr; }
+  .exec-recon__dt { margin-bottom: 2px; }
+  .exec-recon__skipped-row {
+    grid-template-columns: 64px 1fr;
+    row-gap: 2px;
+  }
+  .exec-recon__skipped-reason { grid-column: 1 / -1; }
 }
 
 /* ============================================================
@@ -1152,6 +1621,142 @@ body.exec-body {
   font-size: 12px;
   color: var(--exec-ink-muted);
   font-weight: 400;
+}
+
+/* ============================================================
+ * 9b. Findings tab — unified semantic table (QA-048, 2026-06-02)
+ *
+ * Replaces the per-severity div-soup with ONE ``<table>`` whose
+ * ``<thead>`` row carries: Severity · Agent · ASI · Probe · Summary ·
+ * Turn · Timestamp. Mirrors the Probes-table chrome (section 14) so the
+ * two read as siblings: mono uppercase column headers on a sunken
+ * background, hover/focus row tint, focus-visible outline for keyboard
+ * activation, and 13px sans body type. Width grid is locked via
+ * ``table-layout: fixed`` so a long ``probe_id`` or summary cannot
+ * blow up the layout — the summary cell truncates with ellipsis and
+ * surfaces full text via the row's ``title=""``.
+ * ============================================================ */
+.exec-findings-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 16px 0 24px 0;
+}
+.exec-findings-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+}
+.exec-findings-table thead th {
+  text-align: left;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  background: var(--exec-bg-sunken);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.exec-findings-table__col--sev { width: 7rem; }
+.exec-findings-table__col--agent { width: 5.5rem; }
+.exec-findings-table__col--asi { width: 13rem; }
+.exec-findings-table__col--probe { width: 11rem; }
+.exec-findings-table__col--summary { width: auto; min-width: 18rem; }
+.exec-findings-table__col--turn { width: 4rem; }
+.exec-findings-table__col--ts { width: 6rem; }
+
+.exec-findings-table__row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--exec-border-subtle);
+  transition: background 120ms ease-out;
+}
+.exec-findings-table__row:hover {
+  background: var(--exec-brand-tint);
+}
+.exec-findings-table__row:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: -2px;
+  background: var(--exec-brand-tint);
+}
+.exec-findings-table__cell {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+/* Agent (mono ASI code) — sits in its OWN cell so the next column
+ * (ASI category, sans-serif) cannot visually concatenate against it.
+ * Tested against the QA-048 sentinel ``ASI01goal-instruction-
+ * manipulation`` — the cell boundary plus the 12px column gap
+ * guarantee a hard visual break. */
+.exec-findings-table__cell--agent {
+  font-family: var(--exec-font-mono);
+}
+.exec-findings-table__agent-code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
+  display: inline-block;
+  white-space: nowrap;
+}
+.exec-findings-table__cell--asi {
+  font-family: var(--exec-font-sans);
+}
+.exec-findings-table__asi-name {
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink);
+  font-weight: 500;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.exec-findings-table__cell--probe code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  background: var(--exec-code-bg);
+  padding: 2px 8px;
+  border-radius: var(--exec-radius-sm);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.exec-findings-table__cell--summary {
+  max-width: 0; /* lets the column width plus ellipsis cooperate */
+}
+.exec-findings-table__summary-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--exec-ink);
+  font-size: 13px;
+}
+.exec-findings-table__cell--turn code,
+.exec-findings-table__cell--ts code {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+  white-space: nowrap;
+}
+.exec-findings-table__muted {
+  color: var(--exec-ink-subtle);
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
 }
 
 /* ============================================================
@@ -1727,6 +2332,135 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   border-radius: 0 var(--exec-radius-sm) var(--exec-radius-sm) 0;
 }
 
+/* ----- Probe-detail-sheet drawer (QA-049, 2026-06-02) -----
+ *
+ * The slide-over drawer's probe body is no longer a flat prompt /
+ * response / reasoning stack; QA-049 expanded it into four sections —
+ * metadata, run context, verbatim transcript (prompt + response), and
+ * judge verdict + reasoning + evidence chain + reproduce command. The
+ * extra classes below cover those new sub-components without touching
+ * the legacy ``.exec-probe__prompt`` / ``.exec-probe__response`` /
+ * ``.exec-probe__reason`` selectors above (which the body markup reuses
+ * verbatim for the transcript blocks).
+ */
+.exec-probe__label-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 12px 0 4px 0;
+}
+.exec-probe__label-row .exec-probe__label {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.exec-probe__stats {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  color: var(--exec-ink-subtle);
+  flex: 1 1 auto;
+}
+.exec-probe__copy {
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  padding: 2px 10px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+  cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out;
+  flex: 0 0 auto;
+}
+.exec-probe__copy:hover {
+  background: var(--exec-brand-tint);
+  color: var(--exec-brand-strong);
+}
+.exec-probe__copy:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+
+.exec-probe__meta {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 6px 16px;
+  margin: 0 0 4px 0;
+  padding: 10px 14px;
+  background: var(--exec-bg-sunken);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+}
+.exec-probe__meta-dt {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+  margin: 0;
+}
+.exec-probe__meta-dd {
+  margin: 0;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  color: var(--exec-ink);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  word-break: break-word;
+}
+.exec-probe__meta-dd code {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  background: var(--exec-code-bg);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+  color: var(--exec-ink);
+}
+.exec-probe__meta-chip {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  background: var(--exec-brand-tint);
+  color: var(--exec-brand-strong);
+  padding: 1px 6px;
+  border-radius: var(--exec-radius-sm);
+}
+.exec-probe__meta-empty {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+}
+
+.exec-probe__evidence {
+  margin: 0 0 8px 0;
+}
+.exec-probe__evidence-link {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  color: var(--exec-brand-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.exec-probe__evidence-link:hover,
+.exec-probe__evidence-link:focus-visible {
+  color: var(--exec-brand);
+}
+
+.exec-probe__repro {
+  background: var(--exec-code-bg);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--exec-ink);
+  margin: 0 0 8px 0;
+}
+
 /* ============================================================
  * 13. Agents tab — serif headers, mono agent IDs
  * ============================================================ */
@@ -1815,6 +2549,11 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   border-radius: var(--exec-radius-sm);
   text-align: center;
 }
+/* DEBUG row level pill — same neutral palette as INFO but a touch more muted
+ * so a sea of DEBUG rows reads as background noise rather than competing
+ * with INFO/WARN/ERROR for attention. Uses existing theme tokens — no new
+ * palette entries. */
+.exec-log--debug .exec-log__level { background: var(--exec-bg-sunken); color: var(--exec-ink-subtle); opacity: 0.85; }
 .exec-log--info .exec-log__level { background: var(--exec-bg-sunken); color: var(--exec-ink-muted); }
 .exec-log--warn .exec-log__level { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
 .exec-log--error .exec-log__level { background: var(--exec-sev-critical-bg); color: var(--exec-sev-critical); }
@@ -1873,6 +2612,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-logs-filter__chip:focus-visible {
   outline: 2px solid var(--exec-brand);
   outline-offset: 2px;
+}
+/* DEBUG chip pressed-state — uses the same neutral palette as the INFO chip
+ * but with the muted ink so the active-DEBUG-filter posture reads as
+ * "drilled in, expect noise" rather than "high-signal level". */
+.exec-logs-filter__chip[aria-pressed="true"].exec-logs-filter__chip--debug {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  border-color: var(--exec-ink-subtle);
 }
 .exec-logs-filter__chip[aria-pressed="true"].exec-logs-filter__chip--info {
   background: var(--exec-bg-sunken);

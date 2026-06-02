@@ -24,6 +24,15 @@
        restore on the next visit. All filter logic is client-side. #}
     <div class="exec-logs-filter" role="toolbar" aria-label="Filter scan log events">
       <div class="exec-logs-filter__chips">
+        {# DEBUG chip is rendered first and defaults to OFF (aria-pressed="false")
+           so the page is lightweight by default. The operator clicks DEBUG to
+           drill in when AGENT_GUARDIAN_LOG_LEVEL=DEBUG was set at scan time
+           and events.jsonl actually contains DEBUG rows. The renderer always
+           emits every persisted DEBUG row — only the chip controls visibility. #}
+        <button type="button"
+                class="exec-logs-filter__chip exec-logs-filter__chip--debug"
+                data-filter-level="debug"
+                aria-pressed="false">DEBUG</button>
         <button type="button"
                 class="exec-logs-filter__chip exec-logs-filter__chip--info"
                 data-filter-level="info"
