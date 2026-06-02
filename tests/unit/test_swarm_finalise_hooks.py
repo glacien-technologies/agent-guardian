@@ -30,8 +30,6 @@ from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.severity import Severity
 
-UTC = UTC
-
 
 class _FakeRealLLM(BaseLLM):
     """A non-stub LLM client (``provider`` != "stub") for real-mode detection."""

@@ -36,8 +36,6 @@ from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.severity import Severity
 
-UTC = UTC
-
 
 def _finding_with_secrets() -> Finding:
     return Finding(

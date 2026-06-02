@@ -28,8 +28,6 @@ from agent_guardian.models.severity import SeverityBand
 from agent_guardian.models.tier import Tier
 from agent_guardian.reports.json_report import emit_json
 
-UTC = UTC
-
 
 class _FakeRealLLM(BaseLLM):
     provider = "openai"

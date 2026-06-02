@@ -17,8 +17,6 @@ from agent_guardian.models.tier import Tier
 from agent_guardian.reports.json_report import emit_json
 from agent_guardian.reports.markdown import emit_markdown
 
-UTC = UTC
-
 
 def _make_scan(
     *,

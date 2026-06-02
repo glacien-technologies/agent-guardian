@@ -11,8 +11,6 @@ from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, band_for_score
 from agent_guardian.models.tier import Tier
 
-UTC = UTC
-
 
 def make_finding(**overrides: object) -> Finding:
     defaults: dict[str, object] = {

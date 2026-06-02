@@ -25,9 +25,6 @@ from agent_guardian.reports.warnings import (
     build_authoritativeness_warning,
 )
 
-UTC = UTC
-
-
 # ---------------------------------------------------------------------------
 # Fixture builder.
 # ---------------------------------------------------------------------------

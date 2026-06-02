@@ -26,8 +26,6 @@ from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.severity import Severity, SeverityBand
 
-UTC = UTC
-
 
 class _FakeRealLLM(BaseLLM):
     provider = "openai"

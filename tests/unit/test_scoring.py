@@ -27,8 +27,6 @@ from agent_guardian.models.probe import Probe
 from agent_guardian.models.severity import Severity, SeverityBand
 from agent_guardian.models.tier import Tier
 
-UTC = UTC
-
 
 def _finding(
     *,

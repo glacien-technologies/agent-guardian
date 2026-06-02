@@ -22,9 +22,6 @@ from agent_guardian.models.severity import (
 )
 from agent_guardian.models.tier import ObservedSurface, Tier
 
-UTC = UTC
-
-
 # --- AsiCategory ---------------------------------------------------------
 
 
