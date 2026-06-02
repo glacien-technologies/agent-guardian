@@ -169,21 +169,29 @@ def test_plan_panel_renders_wall_clock_cap_uncapped_when_none() -> None:
 
 def test_scan_help_advertises_budget_seconds_flag() -> None:
     """The new --budget-seconds flag must be discoverable in --help."""
+    from tests._ansi import normalise_help
+
     runner = CliRunner()
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--budget-seconds" in result.stdout
+    # Normalise ANSI + soft-wrap so flag-name substring asserts are robust
+    # against Rich/Click rendering quirks on CI's narrow-terminal CliRunner.
+    # See tests/_ansi.py + conftest._force_wide_terminal_for_click.
+    normalised = normalise_help(result.stdout)
+    assert "--budget-seconds" in normalised
     # Help blurb must mention "uncapped" so an operator who reads --help
     # understands the default-off semantics.
-    assert "uncapped" in result.stdout.lower()
+    assert "uncapped" in normalised.lower()
 
 
 def test_scan_help_still_shows_budget_usd_flag() -> None:
     """Regression guard -- adding --budget-seconds must not displace --budget-usd."""
+    from tests._ansi import normalise_help
+
     runner = CliRunner()
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--budget-usd" in result.stdout
+    assert "--budget-usd" in normalise_help(result.stdout)
 
 
 # ----------------------------------------------------------------------

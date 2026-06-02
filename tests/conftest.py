@@ -9,6 +9,7 @@
 # robustness; setting COLUMNS here is an additional, harmless layer that
 # costs nothing if the CLI override is in place.
 import os
+import shutil
 
 import pytest
 
@@ -37,3 +38,45 @@ def _wide_terminal_for_cli_runner():
             os.environ.pop(k, None)
         else:
             os.environ[k] = v
+
+
+# ---------------------------------------------------------------------------
+# Pass-5 durable fix: monkeypatch shutil.get_terminal_size at the system layer.
+#
+# Pass-4 set COLUMNS=200 + NO_COLOR=1 + TERM=dumb at the env-var layer, but
+# CI logs proved this was insufficient:
+#   - Click's CliRunner does NOT propagate COLUMNS to the wrapped command's
+#     terminal_width detection. It calls shutil.get_terminal_size() directly,
+#     which on CI sandboxes returns the OS-level fallback (80, 24) regardless
+#     of what's in os.environ.
+#   - Rich similarly derives its wrap width from shutil.get_terminal_size()
+#     when stdout is captured (no real TTY), and ignores NO_COLOR in some
+#     captured-stdout configurations -- ANSI escape codes still appear in
+#     result.stdout, breaking substring asserts on flag names.
+#
+# The only durable fix is to monkeypatch shutil.get_terminal_size itself,
+# so EVERY code path (Click, Rich, custom formatters) sees a wide terminal.
+# Function-scoped so each test gets a clean patch lifecycle via monkeypatch.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _force_wide_terminal_for_click(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force shutil.get_terminal_size to report a wide terminal for every test.
+
+    Click/Rich derive their wrap width from shutil.get_terminal_size() at
+    help-render time. CliRunner does NOT propagate COLUMNS to Click, so the
+    only durable fix is monkeypatching shutil itself. We also re-force the
+    env vars here (the session fixture sets them once, but pytest-xdist or
+    nested CliRunner invocations can mutate them mid-test).
+    """
+    monkeypatch.setattr(
+        shutil,
+        "get_terminal_size",
+        lambda fallback=(80, 24): os.terminal_size((200, 24)),
+    )
+    # Also force these for any subprocess-shell-based help renders that
+    # bypass the in-process shutil patch.
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("TERM", "dumb")  # disables Rich ANSI on any code path

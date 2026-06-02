@@ -34,10 +34,17 @@ def test_swarm_config_accepts_custom_recon_wall_seconds() -> None:
 
 def test_scan_help_advertises_recon_budget_seconds_flag() -> None:
     """The new flag must be discoverable in --help so operators find the escape hatch."""
+    from tests._ansi import normalise_help
+
     runner = CliRunner()
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--recon-budget-seconds" in result.stdout
+    # Normalise ANSI + soft-wrap so flag-name substring asserts are robust
+    # against Rich/Click rendering quirks on CI's narrow-terminal CliRunner.
+    # See tests/_ansi.py + conftest._force_wide_terminal_for_click.
+    normalised = normalise_help(result.stdout)
+    assert "--recon-budget-seconds" in normalised
     # Help blurb mentions "cold-start" so operators hitting the silent-skip
     # surface from cold-start targets can grep for the flag.
-    assert "cold-start" in result.stdout.lower() or "cold start" in result.stdout.lower()
+    lowered = normalised.lower()
+    assert "cold-start" in lowered or "cold start" in lowered
