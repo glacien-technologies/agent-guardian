@@ -248,9 +248,7 @@ def test_executive_probes_slideover_partial_mounted_once_per_tab(
 # ---------------------------------------------------------------------------
 
 
-def test_executive_probes_no_initial_payload_leak(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_executive_probes_no_initial_payload_leak(client: TestClient, store: ScanStore) -> None:
     """BUG-1 (2026-06-02) — the initial Probes-tab HTML carries no
     prompt / target-response / judge-reasoning text. Each row references
     a server endpoint via ``data-probe-href``; the drawer JS
@@ -281,14 +279,10 @@ def test_executive_probes_no_initial_payload_leak(
         assert turn["target_response"] not in pane, (
             "target_response leaked into initial Probes HTML"
         )
-        assert turn["reasoning"] not in pane, (
-            "reasoning leaked into initial Probes HTML"
-        )
+        assert turn["reasoning"] not in pane, "reasoning leaked into initial Probes HTML"
 
 
-def test_executive_probes_row_has_drawer_href(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_executive_probes_row_has_drawer_href(client: TestClient, store: ScanStore) -> None:
     """BUG-1 / QA-049 — each row carries a ``data-probe-href`` pointing at
     the server-rendered probe-detail-sheet endpoint.
     """
@@ -304,9 +298,7 @@ def test_executive_probes_row_has_drawer_href(
         assert marker in pane, f"row {idx} missing drawer href {marker!r}"
 
 
-def test_executive_probes_row_has_action_contract(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_executive_probes_row_has_action_contract(client: TestClient, store: ScanStore) -> None:
     """QA-049 — every probe row carries ``data-action="probe-row-click"``
     so the shared slide-over JS wires click + Enter/Space directly.
     """
@@ -324,9 +316,7 @@ def test_executive_probes_row_has_action_contract(
 # ---------------------------------------------------------------------------
 
 
-def test_probe_drawer_route_renders_locked_fields(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_probe_drawer_route_renders_locked_fields(client: TestClient, store: ScanStore) -> None:
     """The on-demand probe-drawer fragment surfaces the locked QA-049
     sections: probe metadata, run context, exact prompt, target
     response, judge verdict / reasoning, evidence chain, reproduce
@@ -361,9 +351,7 @@ def test_probe_drawer_route_renders_locked_fields(
     assert f"--scan {scan.id}" in body
 
 
-def test_probe_drawer_route_supports_id_lookup(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_probe_drawer_route_supports_id_lookup(client: TestClient, store: ScanStore) -> None:
     """``?id=<probe_id>`` fallback is honoured when the deep link
     carries a probe id instead of an index (matches the
     ``?tab=probes&probe=<id>`` deep-link UX).
@@ -507,9 +495,7 @@ def test_executive_probes_table_scroll_budget(client: TestClient, store: ScanSto
     # future cell additions without flapping. The dominant compaction
     # signal is that NO verbatim probe body text appears in the
     # initial render.
-    assert len(pane) < 150_000, (
-        f"probes pane HTML too large: {len(pane)} bytes for 100 probes"
-    )
+    assert len(pane) < 150_000, f"probes pane HTML too large: {len(pane)} bytes for 100 probes"
 
     # Cross-check: legacy card markup is absent and no probe text leaks.
     assert '<ol class="exec-probes-list"' not in pane

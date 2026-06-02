@@ -53,7 +53,7 @@ from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
 from agent_guardian.contract.preflight import PreflightReport
 from agent_guardian.core.sandbox import SandboxViolation
-from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+from agent_guardian.core.swarm import SwarmCommander, SwarmConfig, SwarmEvent
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
@@ -1219,6 +1219,14 @@ def serve(
             "Intended for ephemeral demos behind a trusted reverse proxy only."
         ),
     ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=(
+            "Open the dashboard in the default browser once the serve is "
+            "listening. Auto-skipped under CI / SSH / non-TTY environments."
+        ),
+    ),
 ) -> None:
     """Start the local dashboard at http://<host>:<port>.
 
@@ -1259,6 +1267,22 @@ def serve(
             ),
             err=True,
         )
+
+    # Auto-open the browser once uvicorn binds. We do this from a daemon
+    # thread that polls the port — uvicorn.run() blocks the main thread until
+    # shutdown, and there's no synchronous "server is ready" hook to attach
+    # to without rewriting the run loop. The thread is gated by --no-open and
+    # the headless guards in _maybe_open_browser, so CI/SSH runs stay quiet.
+    import threading as _threading
+
+    _opener = _threading.Thread(
+        target=_wait_for_port_then_open,
+        args=(host, port),
+        kwargs={"requested": open_browser, "path": "/"},
+        daemon=True,
+        name="ag-serve-open-browser",
+    )
+    _opener.start()
 
     if reload:
         # uvicorn's reload mode imports the app factory inside a child worker,
@@ -2540,6 +2564,141 @@ def _stdout_is_tty() -> bool:
     return bool(isatty and isatty())
 
 
+def _maybe_open_browser(url: str, *, requested: bool) -> None:
+    """Open ``url`` in the operator's default browser, with headless guards.
+
+    The hook is wired from the ``agent-guardian serve`` startup path so the
+    operator doesn't have to alt-tab to a terminal to grab the URL. The
+    behaviour is opt-out via ``--no-open``; we additionally refuse to fire
+    when the environment looks headless (CI, SSH, non-TTY) so the helper is
+    safe to leave on by default for the common laptop-driver case without
+    annoying CI runners.
+
+    Args:
+        url: The dashboard URL to open. Always the root ``/`` on the serve
+            command — the scan command opens the scan-specific deep link
+            instead, but uses the same helper.
+        requested: ``False`` from ``--no-open`` short-circuits the call;
+            keeps the gating logic at the caller's edge.
+    """
+    if not requested:
+        return
+    if os.environ.get("CI") or os.environ.get("SSH_CONNECTION"):
+        return
+    if not _stdout_is_tty():
+        return
+    import webbrowser
+
+    try:
+        webbrowser.open_new_tab(url)
+    except Exception:  # pragma: no cover — best effort; browser failures
+        # must never crash the serve. Log at debug so the helper stays quiet
+        # on the happy path.
+        logging.getLogger(__name__).debug("webbrowser.open_new_tab(%r) failed", url, exc_info=True)
+
+
+def _wait_for_port_then_open(
+    host: str,
+    port: int,
+    *,
+    requested: bool,
+    path: str = "/",
+) -> None:
+    """Background-thread helper: poll for the bound port, then open browser.
+
+    Uses ``socket.create_connection`` with 5x200 ms retries — the
+    deterministic "server is ready" signal — instead of a blind sleep. The
+    helper runs in a daemon thread so it never blocks shutdown.
+    """
+    if not requested:
+        return
+    import socket
+
+    probe_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    for _ in range(5):
+        try:
+            with socket.create_connection((probe_host, port), timeout=0.2):
+                break
+        except OSError:
+            import time as _time
+
+            _time.sleep(0.2)
+    else:
+        # Port never came up — don't open a dead URL.
+        return
+    url = f"http://{probe_host}:{port}{path}"
+    _maybe_open_browser(url, requested=requested)
+
+
+def print_dashboard_banner(
+    scan_id: str,
+    *,
+    dashboard_url: str,
+    auto_serve_spawned: bool,
+    accent_style: str = "brand",
+    debug_format: str = "text",
+    use_stderr: bool = False,
+) -> None:
+    """Print a prominent 3-line dashboard URL banner (QA-049).
+
+    The banner is the most-visible line in the scan-end summary so an
+    operator stops hunting for the dashboard link. Rendered via Rich
+    so it picks up the same brand/cyan accent the Phase panels use; on
+    a non-TTY pipe Rich falls back to plain ASCII rules. The banner is
+    a no-op in JSON debug-format runs — NDJSON consumers should pick
+    the URL out of the ``scan_url`` banner record instead.
+
+    Args:
+        scan_id: The scan id under which the swarm ran.
+        dashboard_url: The full ``http://host:port/scans/<scan_id>``
+            link to surface. The caller computes this from
+            ``auto_serve_base_url`` / ``_resolve_dashboard_base_url``
+            so both the in-process auto-serve and the external-serve
+            cases stay consistent.
+        auto_serve_spawned: When ``False`` no serve process is running
+            in-band; we switch the banner copy to instruct the operator
+            to start ``agent-guardian serve`` themselves before opening
+            the link.
+        accent_style: Rich style name for the rule colour. Default
+            ``"brand"`` matches the Phase-3 / scan-plan-panel accent.
+            Callers that fire the banner mid-scan (after Phase 2) can
+            pass ``"status.running"`` to colour-code it as in-flight.
+        debug_format: Mirrors ``print_scan_urls`` — ``"json"`` short-
+            circuits to a no-op because the URL is already in the
+            ``scan_url`` NDJSON banner record. Keeps the stdout stream
+            pure NDJSON.
+    """
+    if (debug_format or "").lower().strip() == "json":
+        return
+    from rich.console import Console
+    from rich.rule import Rule
+    from rich.text import Text
+
+    # ``stderr=True`` routes the banner to stderr — useful when the TUI's
+    # Live region still owns stdout (mid-scan Phase-2-done emission). The
+    # scan-end banner uses stdout because the Live region has already
+    # been torn down by the time it fires.
+    console = Console(stderr=use_stderr)
+    if auto_serve_spawned:
+        body = Text.assemble(
+            ("Dashboard  ", "bold"),
+            ("→  ", f"bold {accent_style}"),
+            (dashboard_url, "bold underline"),
+        )
+    else:
+        body = Text.assemble(
+            ("Dashboard  ", "bold"),
+            ("→  ", f"bold {accent_style}"),
+            ("run ", "default"),
+            ("`agent-guardian serve`", "bold"),
+            (" then open ", "default"),
+            (dashboard_url, "bold underline"),
+        )
+    console.print(Rule(style=accent_style))
+    console.print(body)
+    console.print(Rule(style=accent_style))
+
+
 def print_scan_urls(
     scan_id: str,
     *,
@@ -3043,6 +3202,15 @@ def scan(
             "you Ctrl-C the command (ngrok-style)."
         ),
     ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help=(
+            "Open the scan-specific dashboard URL in the default browser "
+            "once the scan completes. Auto-skipped when no dashboard was "
+            "spawned, or under CI / SSH / non-TTY environments."
+        ),
+    ),
     yes: bool = typer.Option(
         False,
         "--yes",
@@ -3156,6 +3324,7 @@ def scan(
                 yes=yes or no_plan_confirm,
                 no_plan=no_plan,
                 legacy_board=legacy_board,
+                open_browser=open_browser,
             )
         )
     except KeyboardInterrupt:
@@ -3204,6 +3373,7 @@ async def _run_scan(
     yes: bool = False,
     no_plan: bool = False,
     legacy_board: bool = False,
+    open_browser: bool = True,
 ) -> int:
     # 1. Config layer -- file + defaults.
     try:
@@ -3573,6 +3743,12 @@ async def _run_scan(
             debug_level=debug_level,
             debug_format=debug_format,
             legacy_board=legacy_board,
+            dashboard_url=plan_dashboard_url,
+            auto_serve_spawned=bool(
+                getattr(auto_serve_result, "spawned", False)
+                or getattr(auto_serve_result, "reused", False)
+            ),
+            open_browser=open_browser,
         )
     finally:
         # Grace period: keep the dashboard alive so the operator can click
@@ -3626,10 +3802,20 @@ async def _run_scan_inner(
     debug_level: int,
     debug_format: str,
     legacy_board: bool = False,
+    dashboard_url: str | None = None,
+    auto_serve_spawned: bool = False,
+    open_browser: bool = True,
 ) -> int:
     """Run the scan body. Extracted from ``_run_scan`` so the auto-serve
     context manager (QA-009) cleanly wraps every ``return EXIT_X`` exit
-    path via a single ``try/finally`` in the caller."""
+    path via a single ``try/finally`` in the caller.
+
+    ``dashboard_url`` + ``auto_serve_spawned`` are wired through so this
+    function can fire the prominent post-scan dashboard-URL banner
+    (QA-049) without re-resolving the base URL — the caller already
+    computed it for the plan panel and we want the two surfaces to
+    agree byte-for-byte.
+    """
 
     # Stage 1B -- a --contract run replaces the four legacy target modes with a
     # contract-built adapter + RoE controller + OTel observer. The non-contract
@@ -3836,6 +4022,57 @@ async def _run_scan_inner(
         )
         feed_renderer.attach_to(swarm)
 
+    # QA-049 — mid-scan Phase-2-done dashboard banner. A long red-team
+    # phase keeps the operator staring at the TUI for minutes; surfacing
+    # the dashboard URL the moment Phase 2 (Red Teaming) completes lets
+    # them pop the dashboard in another tab while finalise/findings are
+    # still computing. Routed to stderr so the TUI's Live region on
+    # stdout isn't disturbed. The observer is idempotent — it fires at
+    # most once per scan (gated by a sentinel set).
+    _phase2_banner_fired: set[str] = set()
+
+    def _phase2_done_banner(event: SwarmEvent) -> None:
+        if not dashboard_url:
+            return
+        if event.kind != "phase_done":
+            return
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        # The swarm tags the red-team phase with phase_label="Red Teaming"
+        # (see swarm.py:1296). Either match the label or the phase token.
+        is_red_team = (
+            payload.get("phase_label") == "Red Teaming" or payload.get("phase") == "parallel"
+        )
+        if not is_red_team:
+            return
+        if "fired" in _phase2_banner_fired:
+            return
+        _phase2_banner_fired.add("fired")
+        try:
+            print_dashboard_banner(
+                scan_id,
+                dashboard_url=dashboard_url,
+                auto_serve_spawned=auto_serve_spawned,
+                # Cyan accent matches the Phase-2 panel border colour
+                # ("status.running" — the in-flight phase style).
+                accent_style="status.running",
+                debug_format=debug_format,
+                use_stderr=True,
+            )
+        except Exception as _exc:  # pragma: no cover -- never crash the swarm
+            _LOG.debug("phase-2 dashboard banner suppressed (%s)", _exc)
+
+    # Wrap the observer using the same chain-the-prior-observer pattern
+    # used by ScanTUI.attach_to / AttackFeedRenderer.attach_to.
+    _prior_phase_observer = swarm.observer
+
+    def _phase2_observer(event: SwarmEvent) -> None:
+        _phase2_done_banner(event)
+        if _prior_phase_observer is not None:
+            with contextlib.suppress(Exception):
+                _prior_phase_observer(event)
+
+    swarm.observer = _phase2_observer
+
     # 8. Run -- optionally with TUI.
     #    QA-002 — the Live region is the single stdout owner during a
     #    scan. Auto-fall-back to the no-Live path when stdout is not a
@@ -3994,6 +4231,32 @@ async def _run_scan_inner(
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )
+
+    # QA-049 — prominent dashboard URL banner at scan-end. The plain
+    # `▸ Scan … track live at <url>` line that print_scan_urls emits
+    # earlier scrolls up by the time the swarm finishes; operators kept
+    # asking "where do I click?" because they missed it. This banner is
+    # the most-visible line of the scan-end summary by design.
+    if dashboard_url:
+        try:
+            print_dashboard_banner(
+                scan_id,
+                dashboard_url=dashboard_url,
+                auto_serve_spawned=auto_serve_spawned,
+                accent_style="brand",
+                debug_format=debug_format,
+            )
+        except Exception as _exc:  # pragma: no cover -- never block scan exit
+            _LOG.debug("dashboard banner suppressed (%s)", _exc)
+
+        # Fix L — auto-open the scan-specific dashboard URL once the scan is
+        # complete (only if a serve was actually spawned in-band; otherwise
+        # the URL would 404 until the operator started one themselves).
+        if auto_serve_spawned:
+            try:
+                _maybe_open_browser(dashboard_url, requested=open_browser)
+            except Exception as _exc:  # pragma: no cover -- never block exit
+                _LOG.debug("dashboard browser-open suppressed (%s)", _exc)
 
     # Coverage warning: when a scan launched less than the authoritative-mode
     # floor, surface it on stderr so a CI gate downstream knows the scan was

@@ -148,9 +148,7 @@ def _slice_tabpanel(html: str, tab_id: str) -> str:
 REPRO_MARKER = 'data-component="reproducibility"'
 
 
-def test_reproducibility_renders_inside_overview_only(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_reproducibility_renders_inside_overview_only(client: TestClient, store: ScanStore) -> None:
     """The reproducibility receipt must appear ONLY inside the Overview
     tabpanel.
 
@@ -167,9 +165,7 @@ def test_reproducibility_renders_inside_overview_only(
     assert resp.status_code == 200
 
     overview_pane = _slice_tabpanel(body, "overview")
-    assert REPRO_MARKER in overview_pane, (
-        "reproducibility receipt missing from tabpanel-overview"
-    )
+    assert REPRO_MARKER in overview_pane, "reproducibility receipt missing from tabpanel-overview"
     for tab in ("findings", "probes", "logs"):
         pane = _slice_tabpanel(body, tab)
         assert REPRO_MARKER not in pane, (

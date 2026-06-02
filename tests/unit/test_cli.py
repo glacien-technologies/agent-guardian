@@ -23,6 +23,29 @@ from agent_guardian.cli import (
 from agent_guardian.llm import GeminiClient, OpenAIClient, StubLLM
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_scan_id_from_summary(stdout: str) -> str:
+    """Pluck the scan_id from the ``scan <id> done: ...`` summary line.
+
+    Before QA-049 every CLI test parsed the *last* line of stdout to
+    grab the scan_id, because the summary line was always the last
+    line emitted. QA-049 added a prominent dashboard-URL banner after
+    the summary (a Rich rule + URL line), so the last-line heuristic
+    breaks. This helper finds the summary line by prefix so the tests
+    are robust against later additions to the scan-end footer.
+    """
+    for line in stdout.strip().splitlines():
+        if line.startswith("scan ") and " done:" in line:
+            return line.split()[1]
+    raise AssertionError(
+        f"could not find a `scan <id> done: ...` summary line in stdout:\n{stdout}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -1084,7 +1107,7 @@ def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path
         ],
     )
     assert result.exit_code == EXIT_OK, result.output
-    scan_id = result.stdout.strip().splitlines()[-1].split()[1]
+    scan_id = _extract_scan_id_from_summary(result.stdout)
     scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
     canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
     # Canonical scan.json is the signed report (schema-stamped, has signatures).
@@ -1125,7 +1148,7 @@ def test_report_pdf_requires_output_path(runner: CliRunner, tmp_path: Path) -> N
         ],
     )
     assert first.exit_code == EXIT_OK
-    scan_id = first.stdout.strip().splitlines()[-1].split()[1]
+    scan_id = _extract_scan_id_from_summary(first.stdout)
     result = runner.invoke(app, ["report", scan_id, "--output", "pdf"])
     assert result.exit_code == EXIT_CONFIG
     out = result.stdout + (result.stderr or "")
@@ -1154,7 +1177,7 @@ def test_report_writes_to_output_path(runner: CliRunner, tmp_path: Path) -> None
         ],
     )
     assert first.exit_code == EXIT_OK
-    scan_id = first.stdout.strip().splitlines()[-1].split()[1]
+    scan_id = _extract_scan_id_from_summary(first.stdout)
     md_path = tmp_path / "regen.md"
     result = runner.invoke(
         app, ["report", scan_id, "--output", "md", "--output-path", str(md_path)]
@@ -1203,9 +1226,8 @@ def test_report_regenerates_from_persisted_scan(runner: CliRunner, tmp_path: Pat
         ],
     )
     assert first.exit_code == EXIT_OK
-    # Parse scan_id out of the summary line.
-    summary = first.stdout.strip().splitlines()[-1]
-    scan_id = summary.split()[1]
+    # Parse scan_id out of the `scan <id> done: ...` summary line.
+    scan_id = _extract_scan_id_from_summary(first.stdout)
     result = runner.invoke(app, ["report", scan_id, "--output", "md"])
     assert result.exit_code == EXIT_OK
     assert "AIVSS" in result.stdout

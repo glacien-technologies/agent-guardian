@@ -870,9 +870,7 @@ def _seed_memory_jsonl_without_judge(scan_dir: Path) -> dict[str, object]:
     return turn
 
 
-def _fetch_probe_drawers(
-    client: TestClient, scan_id: str, count: int
-) -> list[str]:
+def _fetch_probe_drawers(client: TestClient, scan_id: str, count: int) -> list[str]:
     """Fetch the server-rendered drawer fragment for each probe index.
 
     BUG-1 (2026-06-02) — the legacy ``<script type="application/json"

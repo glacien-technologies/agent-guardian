@@ -100,11 +100,27 @@ def _active_title(state: DashboardState) -> str:
 
 
 def _active_panel(state: DashboardState) -> Panel:
-    parts: list[RenderableType] = [_render_agent_table(state)]
+    # QA-049 — column legend. Without this hint operators read a
+    # "Findings: 0 / Status: done" row on the recon-agent (or any
+    # skipped-mode agent) as "the test failed silently"; in reality
+    # recon-class agents never produce findings by design. Spelling
+    # out what the Findings column actually counts disambiguates the
+    # "0 findings while status=done" surface.
+    legend = Text.assemble(
+        ("legend  ", "brand.dim"),
+        ("Findings", "bold"),
+        (" = security issues surfaced by the agent · ", "brand.dim"),
+        ("Turns", "bold"),
+        (" = attack turns issued / max · ", "brand.dim"),
+        ("recon-class agents (recon-agent, a2a-agent in skipped mode) ", "brand.dim"),
+        ("never produce findings by design", "brand.dim"),
+        (".", "brand.dim"),
+    )
+    parts: list[RenderableType] = [legend, _render_agent_table(state)]
     progress = _render_progress(state)
     if progress is not None:
         parts.append(progress)
-    body: RenderableType = Group(*parts) if len(parts) > 1 else parts[0]
+    body: RenderableType = Group(*parts)
     return Panel(
         body,
         title=_active_title(state),

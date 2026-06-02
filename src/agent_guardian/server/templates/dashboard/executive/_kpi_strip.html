@@ -71,30 +71,74 @@
       AIVSS
       {{ kpi_info('aivss') }}
     </span>
-    {# QA-040 — 5-band horseshoe gauge with needle. Replaces the previous
-       single-arc "loading donut" with a discrete band axis (Critical / Poor
-       / Warning / Good / Excellent) and a needle at the current score so the
-       tile communicates band membership at a glance, not just an arc fill.
-       Centre label = current score (Source Serif), sub-label = band name. #}
+    {# QA-049 (2026-06-02) — d3-simple-gauge-style 180° AIVSS gauge.
+       Replaces the prior equal-segment horseshoe with a proportionally-sized
+       band axis: critical 0-40 (40°×2), poor 40-60, warning 60-80, good
+       80-90, excellent 90-100 — the same thresholds the BAND tile uses.
+       Major ticks anchor zone boundaries; minor ticks at each decile give
+       the operator a quick way to read off the score without leaning on the
+       centre label. A pure-SVG component (no d3 dependency); the needle
+       animates 0 → current_score on first render via CSS transition.
+       Hover surfaces an `aivss = X · band Y` tooltip via `title`. #}
     {% set _pct = kpi_chart_data.aivss_pct | default(0) | float %}
     {% set _angle = -90.0 + (180.0 * _pct / 100.0) %}
     <span class="exec-kpi__chart exec-kpi__chart--aivss-gauge"
           data-component="aivss-gauge"
           data-band="{{ band_class }}"
+          data-score-pct="{{ _pct }}"
+          data-target-angle="{{ _angle }}"
           aria-hidden="true">
-      <svg viewBox="0 0 120 78" preserveAspectRatio="xMidYMid meet" class="exec-kpi__gauge-svg">
-        {# 5 band arcs, each 36° of a 180° horseshoe centred at (60, 60),
-           radius 48. Path commands hand-rolled so the arc segments butt
-           up cleanly without anti-aliasing seams. #}
-        <path class="gauge-arc gauge-arc--critical"  d="M 12 60 A 48 48 0 0 1 23.07 29.39"   fill="none" stroke-width="9" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--poor"      d="M 23.07 29.39 A 48 48 0 0 1 51.66 12.51"  fill="none" stroke-width="9" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--warning"   d="M 51.66 12.51 A 48 48 0 0 1 84.66 17.27" fill="none" stroke-width="9" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--good"      d="M 84.66 17.27 A 48 48 0 0 1 105.85 36.51" fill="none" stroke-width="9" stroke-linecap="butt"/>
-        <path class="gauge-arc gauge-arc--excellent" d="M 105.85 36.51 A 48 48 0 0 1 108 60"      fill="none" stroke-width="9" stroke-linecap="butt"/>
-        {# Needle — rotated about the gauge centre (60, 60). #}
-        <g class="gauge-needle" transform="rotate({{ _angle }} 60 60)">
-          <line x1="60" y1="60" x2="60" y2="20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          <circle cx="60" cy="60" r="3" fill="currentColor"/>
+      <svg viewBox="0 0 240 140" preserveAspectRatio="xMidYMid meet"
+           class="exec-kpi__gauge-svg" role="img">
+        <title>AIVSS = {{ aivss_label }} · band {{ band_label }}</title>
+        {#  Geometry — centre at (120, 120), outer radius 100, stroke width
+            16. Arcs use the SVG arc command A rx ry x-axis-rotation
+            large-arc-flag sweep-flag x y. The five segments butt against
+            each other at the AIVSS band thresholds 0/40/60/80/90/100. #}
+        <path class="gauge-arc gauge-arc--critical"
+              d="M 20.00 120.00 A 100 100 0 0 1 89.10 24.89"
+              fill="none" stroke-width="16" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--poor"
+              d="M 89.10 24.89 A 100 100 0 0 1 150.90 24.89"
+              fill="none" stroke-width="16" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--warning"
+              d="M 150.90 24.89 A 100 100 0 0 1 200.90 61.22"
+              fill="none" stroke-width="16" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--good"
+              d="M 200.90 61.22 A 100 100 0 0 1 215.10 89.10"
+              fill="none" stroke-width="16" stroke-linecap="butt"/>
+        <path class="gauge-arc gauge-arc--excellent"
+              d="M 215.10 89.10 A 100 100 0 0 1 220.00 120.00"
+              fill="none" stroke-width="16" stroke-linecap="butt"/>
+
+        {# Major ticks at zone boundaries (0/40/60/80/90/100). Each tick
+           is a short radial line from the outer arc edge to a hair past
+           it; positioned by transforming a vertical line through the
+           gauge centre by the angle that maps to the threshold. #}
+        {% set _major_thresholds = [0, 40, 60, 80, 90, 100] %}
+        {% for _t in _major_thresholds %}
+          {% set _ta = -90.0 + (180.0 * _t / 100.0) %}
+          <line class="gauge-tick gauge-tick--major"
+                x1="120" y1="14" x2="120" y2="26"
+                transform="rotate({{ _ta }} 120 120)"/>
+        {% endfor %}
+
+        {# Minor ticks at each decile that isn't already a major. #}
+        {% for _t in [10, 20, 30, 50, 70] %}
+          {% set _ta = -90.0 + (180.0 * _t / 100.0) %}
+          <line class="gauge-tick gauge-tick--minor"
+                x1="120" y1="18" x2="120" y2="24"
+                transform="rotate({{ _ta }} 120 120)"/>
+        {% endfor %}
+
+        {# Needle — animates from straight-down (rest) to the target
+           angle. The transform's CSS transition is keyed off the value
+           in inline style so the needle motion plays once on load. #}
+        <g class="gauge-needle"
+           style="transform: rotate({{ _angle }}deg); transform-origin: 120px 120px;">
+          <polygon points="120,30 116,120 124,120"
+                   fill="currentColor" stroke="none"/>
+          <circle cx="120" cy="120" r="5" fill="currentColor"/>
         </g>
       </svg>
       <span class="exec-kpi__gauge-center">
