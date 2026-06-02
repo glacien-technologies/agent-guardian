@@ -10,6 +10,10 @@ Before you start, read:
 
 Thank you for considering a contribution to AgentGuardian. We welcome bug reports, new probes, new adapters, documentation improvements, and pull requests of every shape. The goal of this project is to give the agentic-AI security community a credible, open, deterministic 0–100 score (AIVSS) and a probe corpus that anyone can extend. Your contributions help us get there.
 
+## Community
+
+For real-time discussion — probe and adapter design, informal Q&A, and roadmap chat — join us on [Discord](https://discord.gg/h4FRgxvr). For long-form questions use [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions); see [SUPPORT.md](./SUPPORT.md) for the full channel matrix.
+
 ## Developer Certificate of Origin (DCO)
 
 Every commit to this repository **must** carry a `Signed-off-by:` trailer asserting the [Developer Certificate of Origin 1.1](https://developercertificate.org/). The DCO is a simple statement that you wrote (or otherwise have the right to submit) the code you're contributing, under the project's Apache-2.0 license. We do **not** require a separate Contributor License Agreement — the DCO is sufficient.

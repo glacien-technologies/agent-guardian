@@ -253,6 +253,12 @@ By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md) and th
 
 ---
 
+## Community
+
+Join us on [Discord](https://discord.gg/h4FRgxvr) for real-time discussion — probe and adapter design, informal Q&A, and roadmap chat. For long-form questions, use [GitHub Discussions](https://discord.gg/h4FRgxvr); see [docs/community/support](./docs/community/support.mdx) for the full channel matrix.
+
+---
+
 ## Security
 
 To report a vulnerability, see [SECURITY.md](./SECURITY.md). Please do **not** open public issues for security reports.
