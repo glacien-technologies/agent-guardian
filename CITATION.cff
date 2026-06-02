@@ -7,8 +7,8 @@ authors:
 type: software
 repository-code: "https://github.com/glacien-technologies/agent-guardian"
 license: Apache-2.0
-version: "1.0.0rc2"
-date-released: "2026-05-27"
+version: "1.0.0rc3"
+date-released: "2026-06-02"
 url: "https://github.com/glacien-technologies/agent-guardian"
 preferred-citation:
   type: article
