@@ -159,6 +159,11 @@
           "anchor": "PyPI",
           "href": "https://pypi.org/project/agent-guardian/",
           "icon": "package"
+        },
+        {
+          "anchor": "Discord",
+          "href": "https://discord.gg/h4FRgxvr",
+          "icon": "message-square"
         }
       ]
     }

@@ -11,6 +11,7 @@ AgentGuardian is community-supported open source. There is no paid support tier 
 | To propose a new probe                       | [GitHub Issues — Probe request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=4-probe-request.yml) |
 | To propose a new framework adapter           | [GitHub Issues — Adapter request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=5-adapter-request.yml) |
 | To fix or extend the docs                    | [GitHub Issues — Documentation](https://github.com/glacien-technologies/agent-guardian/issues/new?template=6-documentation.yml) |
+| To chat with maintainers in real time        | [Discord](https://discord.gg/h4FRgxvr) — probe and adapter design, informal Q&A, roadmap chat |
 | To ask a usage question                      | [GitHub Discussions › Q&A](https://github.com/glacien-technologies/agent-guardian/discussions/categories/q-a) |
 | To share what you built                      | [GitHub Discussions › Show and tell](https://github.com/glacien-technologies/agent-guardian/discussions/categories/show-and-tell) |
 | To propose a roadmap idea                    | [GitHub Discussions › Ideas](https://github.com/glacien-technologies/agent-guardian/discussions/categories/ideas) |
