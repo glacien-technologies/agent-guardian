@@ -1126,6 +1126,15 @@ def build_dashboard_context(
         # refusal baseline / system-prompt clues / skipped agents. Empty
         # / disabled when no fingerprint has been written yet.
         "recon_summary": _assemble_recon_summary(scan_dir),
+        # SSE Phase 1, Step 2 — phase-spine snapshot. ``phase_state`` carries
+        # the four-phase state machine (recon / decompose / parallel /
+        # finalise) replayed from events.jsonl; ``started_at_unix`` is the
+        # float-seconds anchor the client-side ``ElapsedTicker`` reads (never
+        # parses ISO timestamps — Safari ``Date.parse`` returns NaN on naive
+        # datetimes, critic patch G16/P9). Both surface verbatim on the
+        # ``/scans/<id>/live`` snapshot via :func:`live_snapshot`.
+        "phase_state": _compute_phase_state(scan_dir),
+        "started_at_unix": (scan.created_at.timestamp() if scan is not None else None),
     }
     return DashboardContext(payload=payload)
 
@@ -1393,6 +1402,120 @@ def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
     }
 
 
+# SSE Phase 1, Step 2 — phase taxonomy. The four producer strings emitted
+# by ``core/swarm.py``'s ``_emit_phase()`` helper (critic patch G1/P1). The
+# order here is the on-screen pill order — Recon → Decompose → Parallel →
+# Finalise — and the snapshot's ``phase_state.phases`` dict is keyed by
+# these strings in the same order.
+_PHASE_NAMES: Final[tuple[str, ...]] = ("recon", "decompose", "parallel", "finalise")
+
+
+def _empty_phase_state() -> dict[str, Any]:
+    """Return the cold-start ``phase_state`` snapshot (every phase pending).
+
+    Shape locked by SSE Phase 1 Step 2: a top-level snapshot key keyed by the
+    four producer phase strings, each phase carrying ``state``,
+    ``agents_completed``, ``agents_total``. ``current_phase`` is ``None`` when
+    no ``phase_start`` has fired yet.
+    """
+    return {
+        "current_phase": None,
+        "phases": {
+            name: {"state": "pending", "agents_completed": 0, "agents_total": 0}
+            for name in _PHASE_NAMES
+        },
+    }
+
+
+def _compute_phase_state(scan_dir: Path | None) -> dict[str, Any]:
+    """Compute the current ``phase_state`` snapshot by replaying ``events.jsonl``.
+
+    SSE Phase 1, Step 2 — the snapshot's ``phase_state`` key drives the
+    PhaseSpine in the dashboard shell. Each ``phase_start`` event flips its
+    phase to ``running``; each ``phase_done`` event flips it to ``done`` and
+    locks in the final ``agents_completed`` / ``agents_total`` numbers from
+    the event payload. ``current_phase`` always points at the latest phase to
+    have transitioned to ``running`` and not yet to ``done`` — if every
+    started phase has also finished, ``current_phase`` snaps back to the
+    most recent ``running``-then-``done`` phase so the spine still shows
+    where the swarm last was. ``current_phase`` is ``None`` only on the
+    cold-start path (no ``phase_*`` event has been written yet).
+
+    Returns the cold-start ``_empty_phase_state()`` shape when ``scan_dir``
+    is ``None``, the file is missing, or every line is malformed. Never
+    raises — disk / parse failures are swallowed (warned at DEBUG level) so
+    a corrupt events.jsonl never 500s the dashboard.
+
+    Each phase state ∈ ``{"pending", "running", "done"}``. The four producer
+    strings (``recon``, ``decompose``, ``parallel``, ``finalise``) are the
+    canonical phase taxonomy — critic patch G1/P1.
+    """
+    state = _empty_phase_state()
+    if scan_dir is None:
+        return state
+    path = scan_dir / "events.jsonl"
+    if not path.is_file():
+        return state
+    current_phase: str | None = None
+    last_running: str | None = None
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    rec = json.loads(stripped)
+                except (ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                kind = rec.get("kind")
+                if kind not in ("phase_start", "phase_done"):
+                    continue
+                payload = rec.get("payload")
+                if not isinstance(payload, dict):
+                    continue
+                phase = payload.get("phase")
+                if phase not in _PHASE_NAMES:
+                    continue
+                # Pull the counter pair if present (Step 1 normalised these
+                # onto every emit site). Missing values default to 0 so a
+                # pre-Step-1 events.jsonl still parses without raising.
+                try:
+                    agents_completed = int(payload.get("agents_completed", 0) or 0)
+                except (TypeError, ValueError):
+                    agents_completed = 0
+                try:
+                    agents_total = int(payload.get("agents_total", 0) or 0)
+                except (TypeError, ValueError):
+                    agents_total = 0
+                phase_slot = state["phases"][phase]
+                if kind == "phase_start":
+                    phase_slot["state"] = "running"
+                    phase_slot["agents_completed"] = agents_completed
+                    phase_slot["agents_total"] = agents_total
+                    current_phase = phase
+                    last_running = phase
+                else:  # phase_done
+                    phase_slot["state"] = "done"
+                    phase_slot["agents_completed"] = agents_completed
+                    phase_slot["agents_total"] = agents_total
+                    # If the phase that just finished was the active one, the
+                    # spine has no live ``running`` phase yet — keep the
+                    # caption anchored to the most recently active phase so
+                    # the pill highlight does not flicker back to ``recon``.
+                    if current_phase == phase:
+                        current_phase = None
+    except OSError as exc:  # pragma: no cover — disk-level failure
+        _LOG.debug("dashboard_view: events.jsonl read failed (%s)", exc)
+        return _empty_phase_state()
+    if current_phase is None and last_running is not None:
+        current_phase = last_running
+    state["current_phase"] = current_phase
+    return state
+
+
 def _assemble_logs_tail(scan_dir: Path | None) -> list[dict[str, Any]]:
     """Read ``<scan_dir>/events.jsonl`` and emit the locked log-tail shape.
 
@@ -1567,6 +1690,15 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
 
     Only the ``data-live=*`` keys are sent over the wire — the static template
     holds everything else.
+
+    SSE Phase 1, Step 2 — ``phase_state`` and ``started_at_unix`` are surfaced
+    at the top level so the PhaseSpine + ElapsedTicker client modules read
+    them straight off the snapshot without a second fetch. ``phase_state``
+    carries the four-phase machine (recon / decompose / parallel /
+    finalise) replayed from ``events.jsonl``; ``started_at_unix`` is the
+    float-seconds anchor for the elapsed ticker. Both default to a safe
+    cold-start shape when the in-flight scan has not yet produced any phase
+    boundaries.
     """
     p = ctx.payload
     counts = p.get("counts", {})
@@ -1590,6 +1722,9 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
         "high": counts.get("high", 0),
         "medium": counts.get("medium", 0),
         "low": counts.get("low", 0),
+        # SSE Phase 1, Step 2 — top-level snapshot additions.
+        "phase_state": p.get("phase_state") or _empty_phase_state(),
+        "started_at_unix": p.get("started_at_unix"),
     }
     return snapshot
 
