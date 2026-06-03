@@ -1705,6 +1705,12 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "aivss": p.get("aivss_label"),
         "band": p.get("band_label"),
+        # SSE Phase 1, Step 4 — the AIVSS tile's sub-caption was
+        # previously also keyed off ``band``; that collided with the
+        # BAND pill writer in the snapshot patcher (critic patch G8/P8).
+        # We expose the same label under a distinct key so the patcher
+        # can target ``data-live="band-sub"`` separately.
+        "band-sub": p.get("band_label"),
         "needle": p.get("needle_pct"),
         "aivss-total": p.get("aivss_label"),
         "elapsed": p.get("elapsed_label"),

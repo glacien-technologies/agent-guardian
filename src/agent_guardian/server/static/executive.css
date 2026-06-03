@@ -3416,3 +3416,39 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+ * 14.x — KPI tile amber-pulse (SSE Phase 1, Step 4)
+ *
+ * Single-fire flash on a divergence-freeze: ``elapsed-ticker.js``
+ * detects that the client-side ticker has drifted >30 s from the
+ * server's authoritative ``elapsed`` snapshot, halts ticking, and
+ * adds ``.exec-kpi--amber-pulse`` to the ELAPSED tile for ~1.5 s.
+ * This is the user-visible signal that the resync happened — without
+ * it the freeze + fallback is silent, and an operator would have no
+ * way to distinguish "ticker drifted" from "scan completed".
+ *
+ * Reduced motion: keep the border tint so the signal is still visible
+ * but skip the keyframe animation (no pulse). The critic patch
+ * G20/P20 posture is consistent with the spine sub-bar fallback.
+ * ============================================================ */
+@keyframes exec-kpi-amber-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--exec-sev-medium, #d97706);
+  }
+  60% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.exec-kpi--amber-pulse {
+  border-color: var(--exec-sev-medium, #d97706);
+  animation: exec-kpi-amber-pulse 1.4s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .exec-kpi--amber-pulse {
+    animation: none;
+  }
+}
