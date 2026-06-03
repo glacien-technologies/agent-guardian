@@ -19,9 +19,7 @@ seeded with operator-mutated seeds:
 
 The mutated probe_id preserves provenance: the parent probe_id can be
 recovered by stripping the ``-mutant-<op>`` suffix (the AsiAgent finding
-builder does this lookup in B6 retention paths).
-
-Logs are tagged ``PhaseB.B2``.
+builder does this lookup in the winning-seed retention paths).
 """
 
 from __future__ import annotations
@@ -83,15 +81,15 @@ def _validate_map() -> None:
     missing_categories = set(AsiCategory) - set(SIBLING_MAP.keys())
     if missing_categories:
         raise RuntimeError(
-            f"PhaseB.B2 SIBLING_MAP missing categories: {sorted(c.value for c in missing_categories)}"
+            f"sibling map missing categories: {sorted(c.value for c in missing_categories)}"
         )
     for cat, ops in SIBLING_MAP.items():
         if not ops:
-            raise RuntimeError(f"PhaseB.B2 SIBLING_MAP[{cat.value}] is empty")
+            raise RuntimeError(f"sibling map for {cat.value} is empty")
         unknown = [op for op in ops if op not in known]
         if unknown:
             raise RuntimeError(
-                f"PhaseB.B2 SIBLING_MAP[{cat.value}] references unknown operators: {unknown}"
+                f"sibling map for {cat.value} references unknown operators: {unknown}"
             )
 
 

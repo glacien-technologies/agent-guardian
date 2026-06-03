@@ -433,6 +433,20 @@ def _json_logging_enabled() -> bool:
     return raw in _JSON_TRUTHY
 
 
+def structured_logging_enabled() -> bool:
+    """True iff the structured/JSON log path is active (``--debug-format json``).
+
+    QA-068 — call-site gate for the verbose, full-body DEBUG lines that are
+    only useful to a machine consumer (the per-turn raw prompt + raw target
+    response). Under the default human-readable DEBUG-text path those bodies
+    drown the consolidated per-turn INFO narration, so the agent loop emits
+    only the truncated previews there and reserves the full bodies for the
+    structured path. The CLI maps ``--debug-format json`` onto
+    ``AGENT_GUARDIAN_LOG_JSON``; setting that env var directly opts in too.
+    """
+    return _json_logging_enabled()
+
+
 def _install_trace_correlation_factory() -> None:
     """Stamp ``trace_id`` / ``span_id`` / ``trace_flags`` on every LogRecord.
 

@@ -119,3 +119,54 @@ def test_build_sibling_strategy_picks_orthogonal_class() -> None:
     for sib in siblings:
         assert not isinstance(sib, TAPStrategy)
         assert isinstance(sib, CrescendoStrategy)
+
+
+# QA-068 — operator-visible exception strings must not leak internal phase
+# codes (``PhaseB.B2`` etc.). The validator runs at import on the real map;
+# we exercise its failure paths against corrupted copies and assert both that
+# the message is descriptive AND that no phase token survives.
+
+
+def test_validate_map_missing_category_message_has_no_phase_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.strategies import sibling_map
+
+    broken = dict(SIBLING_MAP)
+    broken.pop(AsiCategory.ASI01)
+    monkeypatch.setattr(sibling_map, "SIBLING_MAP", broken)
+    with pytest.raises(RuntimeError) as exc:
+        sibling_map._validate_map()
+    msg = str(exc.value)
+    assert "PhaseB" not in msg and "Phase B" not in msg
+    assert "missing categories" in msg
+
+
+def test_validate_map_empty_list_message_has_no_phase_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.strategies import sibling_map
+
+    broken = {cat: list(ops) for cat, ops in SIBLING_MAP.items()}
+    broken[AsiCategory.ASI01] = []
+    monkeypatch.setattr(sibling_map, "SIBLING_MAP", broken)
+    with pytest.raises(RuntimeError) as exc:
+        sibling_map._validate_map()
+    msg = str(exc.value)
+    assert "PhaseB" not in msg and "Phase B" not in msg
+    assert "is empty" in msg
+
+
+def test_validate_map_unknown_operator_message_has_no_phase_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.strategies import sibling_map
+
+    broken = {cat: list(ops) for cat, ops in SIBLING_MAP.items()}
+    broken[AsiCategory.ASI01] = ["definitely_not_a_real_operator"]
+    monkeypatch.setattr(sibling_map, "SIBLING_MAP", broken)
+    with pytest.raises(RuntimeError) as exc:
+        sibling_map._validate_map()
+    msg = str(exc.value)
+    assert "PhaseB" not in msg and "Phase B" not in msg
+    assert "unknown operators" in msg
