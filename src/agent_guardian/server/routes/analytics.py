@@ -33,6 +33,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.analytics import Aggregator, EventStore
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_templates
@@ -280,7 +281,7 @@ async def ingest_event(request: Request, envelope: EventEnvelope) -> dict[str, s
     if not ok:
         _LOG.info(
             "analytics ingest: rejecting envelope event_type=%s (clock-skew or unsupported type)",
-            envelope.event.event_type,
+            sanitize_for_log(envelope.event.event_type),
         )
         raise HTTPException(
             status_code=422,

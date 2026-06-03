@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from agent_guardian.core.swarm import SwarmEvent
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.scan_store import ScanStore, event_to_payload
 
 __all__ = ["format_sse_event", "stream_scan_events"]
@@ -76,6 +77,7 @@ async def stream_scan_events(
     :meth:`fastapi.Request.is_disconnected`. The tests pass ``None``
     and rely on the ``scan_done`` event to terminate the stream.
     """
+    _LOG.debug("sse: opening event stream for scan_id=%s", sanitize_for_log(scan_id))
     queue = store.event_queue(scan_id)
     # Hot-replay of the running scan's history is already enqueued by the
     # ``event_queue`` call above; nothing extra to do for the live case.

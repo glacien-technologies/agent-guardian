@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import IO, Any
 
 from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.models.scan import Scan
 from agent_guardian.server.partial_scan import (
     is_terminal_scan_on_disk,
@@ -744,7 +745,7 @@ class ScanStore:
             except asyncio.QueueFull:
                 _LOG.warning(
                     "scan_store: SSE replay queue full for %s — dropping %s event",
-                    scan_id,
+                    sanitize_for_log(scan_id),
                     event.kind,
                 )
         return queue
@@ -775,7 +776,7 @@ class ScanStore:
                     _LOG.warning(
                         "scan_store: malformed events.jsonl line %d for scan %s (%s)",
                         line_no,
-                        scan_id,
+                        sanitize_for_log(scan_id),
                         exc,
                     )
                     continue

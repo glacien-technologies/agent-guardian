@@ -288,7 +288,7 @@ def test_sse_endpoint_streams_to_running_scan_then_closes(
     )
 
     # Patch the poll interval so the loop exits quickly.
-    import agent_guardian.server.routes.reflections as mod
+    from agent_guardian.server.routes import reflections as mod
 
     saved_poll = mod._POLL_SECONDS
     saved_max = mod._MAX_SECONDS

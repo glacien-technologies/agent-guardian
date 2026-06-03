@@ -1378,9 +1378,13 @@ class SwarmCommander:
                         self._run_agent_with_observer(agent),
                         name=agent.name or type(agent).__name__,
                     )
-        except BaseException as exc:  # pragma: no cover -- defensive
+        except Exception as exc:  # pragma: no cover -- defensive
             # ExceptionGroup on TaskGroup failure -- log but don't propagate;
-            # finalisation still needs to emit a Scan.
+            # finalisation still needs to emit a Scan. Note: this used to catch
+            # ``BaseException`` but that swallowed KeyboardInterrupt /
+            # SystemExit; ``Exception`` covers the ExceptionGroup case (which
+            # subclasses Exception in 3.11+) without trapping the asyncio
+            # cancellation paths the operator needs to see.
             _LOG.warning("TaskGroup raised %s: %s", type(exc).__name__, exc)
 
     async def _run_gather(self, agents: list[AsiAgent]) -> None:

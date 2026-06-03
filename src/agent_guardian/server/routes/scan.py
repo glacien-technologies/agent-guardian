@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -32,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from agent_guardian._version import __version__
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.dashboard_view import (
     DASHBOARD_TEMPLATE,
@@ -245,9 +247,17 @@ async def finding_slideover(
     )
 
 
+_SCAN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
+
+
 @router.get("/scans/{scan_id}")
 async def scans_redirect(request: Request, scan_id: str) -> RedirectResponse:
     """Canonical CLI-emitted URL. Always 307-redirects to ``/scan/{id}``."""
+    # Validate scan_id against a strict allowlist before using it in a
+    # redirect target — prevents open-redirect via crafted path segments
+    # (e.g. ``//evil.com/`` or ``..%2F``).
+    if not _SCAN_ID_RE.match(scan_id):
+        raise HTTPException(status_code=400, detail="invalid scan id")
     store = get_scan_store(request)
     # We don't 404 here — the redirect target does, and we preserve any
     # query string so ``?page=2`` survives the bounce.
@@ -290,7 +300,7 @@ async def scans_report(request: Request, scan_id: str) -> JSONResponse:
                     _LOG.warning(
                         "scans_report: cannot read %s for %s (%s)",
                         path,
-                        scan_id,
+                        sanitize_for_log(scan_id),
                         exc,
                     )
         raise HTTPException(status_code=404, detail=f"no report for scan: {scan_id}")

@@ -400,7 +400,7 @@ def test_manager_spawns_when_no_existing_serve(
         def kill(self) -> None:
             self._polled = True
 
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     # Pretend port 7474 is free AND no existing serve responds.
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: False)
@@ -448,7 +448,7 @@ def test_manager_falls_back_when_preferred_port_is_foreign(
         def kill(self) -> None:
             self._polled = True
 
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: False)
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: True)
@@ -468,7 +468,7 @@ def test_manager_falls_back_when_preferred_port_is_foreign(
 
 def test_manager_degrades_when_spawn_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """Popen raising OSError → DEGRADE to a no-spawn result with reason set."""
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: False)
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: False)
@@ -515,7 +515,7 @@ def test_manager_degrades_when_ready_probe_times_out(
         def kill(self) -> None:
             self._polled = True
 
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: False)
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: False)
@@ -560,7 +560,7 @@ def test_grace_wait_zero_returns_immediately(monkeypatch: pytest.MonkeyPatch) ->
         def kill(self) -> None:
             pass
 
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: False)
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: False)
@@ -761,7 +761,7 @@ def test_port_is_in_use_false_for_free_port() -> None:
 def test_manager_degrades_when_fallback_exhausted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: False)
     monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: True)
@@ -786,7 +786,7 @@ def test_grace_wait_negative_emits_until_ctrl_c_banner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
     """grace=-1 → banner reads 'until Ctrl-C', sleep loop is interruptible."""
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     class _FakePopen:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -836,7 +836,7 @@ def test_grace_wait_negative_emits_until_ctrl_c_banner(
 def test_manager_reuse_via_probe_oracle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import agent_guardian.ui.auto_serve as auto_serve_mod
+    from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: True)
     mgr = AutoServeManager(preferred_port=7474, grace_seconds=0)

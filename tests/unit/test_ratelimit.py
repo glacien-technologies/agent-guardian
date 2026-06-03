@@ -86,7 +86,9 @@ async def test_cancellation_does_not_strand_capacity() -> None:
     await asyncio.sleep(0.01)  # let it enter the wait
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await waiter
+        # Assign the awaited result to ``_`` so static analysis doesn't flag
+        # the bare ``await`` as an ineffectual expression statement.
+        _ = await waiter
 
     # The bucket should refill normally; a fresh acquire succeeds within a
     # bounded time (no token was wrongly deducted by the cancelled waiter).

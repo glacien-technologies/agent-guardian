@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.telemetry.events import EventEnvelope, ScanCompletedEvent
 
 __all__ = ["EventStore", "init_schema"]
@@ -112,7 +113,7 @@ class EventStore:
         if not isinstance(event, ScanCompletedEvent):
             _LOG.debug(
                 "analytics store: ignoring event_type=%s (v1.0 only persists scan_completed)",
-                event.event_type,
+                sanitize_for_log(event.event_type),
             )
             return False
         if not _passes_clock_skew(envelope.client_sent_at):

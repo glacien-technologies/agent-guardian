@@ -389,7 +389,7 @@ async def test_http_adapter_retry_after_garbage_falls_back_to_backoff() -> None:
     adapter = HttpAdapter(_OPENAI_URL, shape="openai", max_retries=1)
     try:
         # Patch the retry's sleep so we don't actually wait.
-        import agent_guardian.adapters.http as http_module
+        from agent_guardian.adapters import http as http_module
 
         original = http_module.with_backoff
 

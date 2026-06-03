@@ -198,7 +198,7 @@ def test_signature_introspection_failure_returns_false(
 ) -> None:
     # Force ``inspect.signature`` to raise inside the helper so we exercise
     # the except branch.
-    import agent_guardian.adapters.code as code_mod
+    from agent_guardian.adapters import code as code_mod
 
     real_sig = code_mod.inspect.signature
 

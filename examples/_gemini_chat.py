@@ -30,6 +30,8 @@ try:  # pragma: no cover - dev-only convenience
             load_dotenv(candidate)
             break
 except ImportError:
+    # python-dotenv is optional for this demo; without it we just fall back to
+    # whatever GEMINI_API_KEY / GOOGLE_API_KEY the operator already exported.
     pass
 
 MODEL_ID = os.environ.get("AG_DEMO_MODEL", "gemini-3.1-pro-preview")

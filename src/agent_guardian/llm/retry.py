@@ -141,9 +141,11 @@ async def _interruptible_sleep(
                 pending_task.cancel()
                 # Cancelled / pending sleep failure is expected; suppress
                 # so cleanup never raises. The caller has already decided
-                # what to do based on ``cancel_event.is_set()``.
+                # what to do based on ``cancel_event.is_set()``. We assign
+                # the awaited result to ``_`` so static analysis doesn't flag
+                # the await as an ineffectual expression statement.
                 with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await pending_task
+                    _ = await pending_task
     return not cancel_event.is_set()
 
 

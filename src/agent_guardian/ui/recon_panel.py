@@ -17,20 +17,21 @@ QA-002 "exactly one Live frame" invariant is trivially preserved.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+# Shared types live in the leaf module ``ui/state.py`` — this used to be a
+# cyclic import via ``ui.dashboard`` (DashboardState referenced ReconSummary,
+# ReconSummary lived here, this module referenced DashboardState).
+from agent_guardian.ui.state import PhaseStatus, ReconSummary
+
 if TYPE_CHECKING:
-    from agent_guardian.ui.dashboard import DashboardState
+    from agent_guardian.ui.state import DashboardState
 
 __all__ = ["PhaseStatus", "ReconSummary", "build_recon_panel"]
-
-
-PhaseStatus = Literal["pending", "running", "done", "skipped", "error"]
 
 
 _STATUS_GLYPH: dict[PhaseStatus, str] = {
@@ -49,26 +50,6 @@ _STATUS_STYLE: dict[PhaseStatus, str] = {
     "skipped": "status.skipped",
     "error": "status.error",
 }
-
-
-@dataclass(frozen=True)
-class ReconSummary:
-    """Frozen snapshot of recon-phase output.
-
-    Populated by the cli_tui ``handle_event`` branch for
-    ``phase_done("recon")`` and read back by :func:`build_recon_panel`.
-    All fields default to safe values so a half-populated summary still
-    renders coherently.
-    """
-
-    goal: str = ""
-    target_ref: str = ""
-    probes_applicable: int = 0
-    probes_skipped: int = 0
-    multi_agent: bool = False
-    duration_seconds: float = 0.0
-    status: PhaseStatus = "running"
-    notes: str = ""
 
 
 def _status_text(status: PhaseStatus) -> Text:

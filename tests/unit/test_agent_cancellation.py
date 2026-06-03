@@ -52,6 +52,7 @@ class _CountingTarget(TargetAdapter):
     """Target that counts calls and can fire a callback after each call."""
 
     def __init__(self, on_call=None) -> None:
+        super().__init__()
         self.calls = 0
         self._on_call = on_call
 

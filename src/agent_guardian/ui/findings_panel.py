@@ -21,21 +21,22 @@ to a blank Group — that would make the layout shift on first finding.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+# Shared types live in the leaf module ``ui/state.py`` — this used to be a
+# cyclic import via ``ui.dashboard`` (DashboardState referenced FindingRow,
+# FindingRow lived here, this module referenced DashboardState).
+from agent_guardian.ui.state import FindingRow, Severity
+
 if TYPE_CHECKING:
-    from agent_guardian.ui.dashboard import DashboardState
+    from agent_guardian.ui.state import DashboardState
 
 __all__ = ["FindingRow", "Severity", "build_findings_panel"]
-
-
-Severity = Literal["critical", "high", "medium", "low", "info"]
 
 
 # Locked ordering — design lock §3 L04. CRITICAL first so the operator's
@@ -68,23 +69,6 @@ _SEVERITY_GLYPH: dict[Severity, str] = {
     "low": "⚠",
     "info": "ℹ",  # noqa: RUF001 - INFORMATION SOURCE glyph is intentional
 }
-
-
-@dataclass(frozen=True)
-class FindingRow:
-    """One row in the streaming findings panel.
-
-    All fields are pre-redacted; the streaming list is built from the
-    PII-safe summary the memory writer produced. Constructors that
-    don't have a per-finding severity (the cli_tui projector when only
-    a per-agent count is available) default to ``"high"`` so the row
-    still surfaces in the most-visible severity group.
-    """
-
-    probe_id: str
-    agent: str
-    severity: Severity = "high"
-    evidence: str = ""
 
 
 def _truncate(line: str, *, limit: int = 80) -> str:

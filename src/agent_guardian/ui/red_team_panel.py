@@ -26,14 +26,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from agent_guardian.ui.dashboard import (
-    AGENT_ROWS,
-    _render_agent_table,
-    _render_progress,
-)
+from agent_guardian.ui.state import AGENT_ROWS
 
 if TYPE_CHECKING:
-    from agent_guardian.ui.dashboard import DashboardState
+    from agent_guardian.ui.state import DashboardState
 
 __all__ = ["build_red_team_panel"]
 
@@ -116,6 +112,11 @@ def _active_panel(state: DashboardState) -> Panel:
         ("never produce findings by design", "brand.dim"),
         (".", "brand.dim"),
     )
+    # Lazy import of the dashboard's private render helpers — keeps
+    # ``ui.red_team_panel`` decoupled from ``ui.dashboard`` at module load
+    # time, which is what breaks the import cycle CodeQL used to flag.
+    from agent_guardian.ui.dashboard import _render_agent_table, _render_progress
+
     parts: list[RenderableType] = [legend, _render_agent_table(state)]
     progress = _render_progress(state)
     if progress is not None:

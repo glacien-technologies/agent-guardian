@@ -64,6 +64,7 @@ class _StaticTarget(TargetAdapter):
     """Trivial target that always returns the same canned reply."""
 
     def __init__(self, reply: str) -> None:
+        super().__init__()
         self._reply = reply
 
     def fingerprint(self) -> TargetFingerprint:

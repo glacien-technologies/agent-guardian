@@ -35,7 +35,6 @@ import threading
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
-from logging import Handler, LogRecord, getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -434,7 +433,7 @@ def make_events_writer(
 _DEFAULT_LOG_ALLOWLIST: tuple[str, ...] = ("agent_guardian", "httpx")
 
 
-class JsonlLogHandler(Handler):
+class JsonlLogHandler(logging.Handler):
     """``logging.Handler`` that appends records to ``<scan_dir>/events.jsonl``.
 
     Wire format (matches the locked shape read by
@@ -506,7 +505,7 @@ class JsonlLogHandler(Handler):
     def _allowed(self, name: str) -> bool:
         return any(name == prefix or name.startswith(prefix + ".") for prefix in self._allowlist)
 
-    def emit(self, record: LogRecord) -> None:
+    def emit(self, record: logging.LogRecord) -> None:
         # Allowlist filter first so we never serialise records we'd drop.
         if not self._allowed(record.name):
             return
@@ -566,7 +565,7 @@ def install_jsonl_log_handler(
     ``logging.getLogger().removeHandler(handler)`` if desired (not required
     — leaving it attached until process exit is harmless).
     """
-    root = getLogger()
+    root = logging.getLogger()
     resolved = scan_dir.resolve()
     for existing in root.handlers:
         if isinstance(existing, JsonlLogHandler) and existing.scan_dir.resolve() == resolved:

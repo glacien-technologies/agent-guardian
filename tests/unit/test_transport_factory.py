@@ -933,7 +933,7 @@ def _install_fake_playwright(monkeypatch: pytest.MonkeyPatch) -> None:
     """Inject a fake ``playwright.async_api`` sufficient for construction."""
     pkg = ModuleType("playwright")
     async_api = ModuleType("playwright.async_api")
-    async_api.async_playwright = lambda: SimpleNamespace()  # type: ignore[attr-defined]
+    async_api.async_playwright = SimpleNamespace  # type: ignore[attr-defined]
     async_api.Error = type("Error", (Exception,), {})  # type: ignore[attr-defined]
     async_api.TimeoutError = type("TimeoutError", (Exception,), {})  # type: ignore[attr-defined]
     pkg.async_api = async_api  # type: ignore[attr-defined]

@@ -133,8 +133,10 @@ async def preflight_target_ping(endpoint: str | None) -> PreflightOutcome:
         return PreflightOutcome(stage="target.ping", ok=True, detail="skipped")
 
     # Lazy import to avoid pulling httpx at module-import time in tests that
-    # never exercise the ping path.
-    from agent_guardian.cli import (
+    # never exercise the ping path. Sourced from the leaf
+    # ``_endpoint_preflight`` module so we don't pull the whole CLI module
+    # graph (and don't form an import cycle).
+    from agent_guardian._endpoint_preflight import (
         _endpoint_reachability_preflight,
         _is_placeholder_endpoint,
     )

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from agent_guardian.core.redact import redact_finding
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
@@ -32,7 +33,7 @@ async def findings_view(request: Request, scan_id: str, asi: str | None = None) 
         try:
             asi_filter = AsiCategory(asi)
         except ValueError as exc:
-            _LOG.warning("findings view: invalid ASI filter %r (%s)", asi, exc)
+            _LOG.warning("findings view: invalid ASI filter %r (%s)", sanitize_for_log(asi), exc)
             raise HTTPException(status_code=400, detail=f"unknown ASI: {asi}") from exc
 
     findings = []

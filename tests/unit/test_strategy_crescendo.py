@@ -395,7 +395,6 @@ async def test_stable_refusal_rotation_capped_at_max_restarts(
     s = CrescendoStrategy(ctx, escalation_step=20)
     history: list[Turn] = []
     response: str | None = None
-    rotations = 0
     for _ in range(40):
         r = await s.generate_next(history, response)
         if isinstance(r, StrategyDone):
@@ -411,8 +410,6 @@ async def test_stable_refusal_rotation_capped_at_max_restarts(
     assert s._restart_count <= s._MAX_SEED_RESTARTS
     # And we should NOT have touched all 5 seeds.
     assert len(s._seeds_used) <= 1 + s._MAX_SEED_RESTARTS
-    # Silence the unused tally — assertion above is the load-bearing check.
-    del rotations
 
 
 # ---------------------------------------------------------------------------

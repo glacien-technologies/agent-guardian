@@ -176,6 +176,27 @@ def redact_secrets(text: str) -> str:
     return text
 
 
+# CR/LF and other ASCII control characters must be stripped from any
+# user-controlled value before it is rendered into a log line, otherwise an
+# attacker can inject newlines to forge log entries (CWE-117).
+_LOG_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_for_log(value: object, *, max_len: int = 256) -> str:
+    """Return a log-safe representation of ``value``.
+
+    Strips ASCII control characters (including CR/LF/TAB) which would let an
+    attacker forge log entries, and clamps the result so a single user-supplied
+    value can't blow out the log line. The result is also passed through the
+    secret redactor for defence in depth.
+    """
+    text = value if isinstance(value, str) else repr(value)
+    text = _LOG_CONTROL_RE.sub("?", text)
+    if len(text) > max_len:
+        text = text[:max_len] + "...[truncated]"
+    return redact_secrets(text)
+
+
 class _RedactingFilter(logging.Filter):
     """Scrubs secrets from every record before it is formatted/emitted.
 
