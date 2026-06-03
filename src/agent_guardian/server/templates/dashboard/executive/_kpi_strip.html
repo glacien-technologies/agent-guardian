@@ -82,7 +82,13 @@
        carried by the band pill, and the centre-anchored numeric was the
        primary scan signal anyway). #}
     <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="aivss">{{ aivss_label }}</span>
-    <span class="exec-kpi__sub exec-kpi__sub--{{ band_class }}" data-live="band">{{ band_label }}</span>
+    {# SSE Phase 1, Step 4 — this band label is the AIVSS tile's
+       sub-caption and is structurally distinct from the BAND pill below
+       (different parent tile, different colour-class binding). The
+       ``data-live="band"`` attribute previously collided with the BAND
+       pill's writer (critic patch G8/P8); we rename to ``band-sub`` so
+       the snapshot patcher can target the two surfaces independently. #}
+    <span class="exec-kpi__sub exec-kpi__sub--{{ band_class }}" data-live="band-sub">{{ band_label }}</span>
   </div>
 
   <div class="exec-kpi" data-kpi="band">

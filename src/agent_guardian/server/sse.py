@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,6 +43,14 @@ _QUEUE_POLL_INTERVAL_SECONDS = 0.5
 # After this many seconds with no events, send a keep-alive comment so
 # intermediaries don't drop the connection.
 _KEEPALIVE_INTERVAL_SECONDS = 15.0
+# SSE Phase 1, Step 5 — server-side data heartbeat. EventSource
+# ``onmessage`` does NOT fire on ``:`` comment-only keepalives, so the
+# client's freshness dot cannot use the keepalive line to refresh its
+# ``lastEventAt`` clock (critic patch G14/P5 of
+# designs/sse-flow-and-live-ui.md). We emit a real ``event: heartbeat``
+# alongside the ``:`` comment so the dot can recolor on healthy quiet
+# phases.
+_HEARTBEAT_INTERVAL_SECONDS = 10.0
 
 
 def format_sse_event(kind: str, data: dict[str, Any]) -> str:
@@ -107,6 +116,7 @@ async def stream_scan_events(
         return
 
     seconds_since_event = 0.0
+    seconds_since_heartbeat = 0.0
     while True:
         try:
             event: SwarmEvent = await asyncio.wait_for(
@@ -114,12 +124,24 @@ async def stream_scan_events(
             )
         except TimeoutError:
             seconds_since_event += _QUEUE_POLL_INTERVAL_SECONDS
+            seconds_since_heartbeat += _QUEUE_POLL_INTERVAL_SECONDS
+            if seconds_since_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                # SSE data heartbeat — EventSource ``onmessage`` (or a
+                # typed ``heartbeat`` listener) fires on this so the
+                # client freshness dot can refresh ``lastEventAt`` on
+                # healthy quiet phases. Critic patch G14/P5.
+                yield format_sse_event("heartbeat", {"now": time.time()})
+                seconds_since_heartbeat = 0.0
             if seconds_since_event >= _KEEPALIVE_INTERVAL_SECONDS:
                 # SSE comment-only keepalive (line starting with ``:``).
+                # Kept for HTTP intermediaries that drop idle connections;
+                # the browser EventSource does NOT fire ``onmessage`` on
+                # these so it cannot drive the freshness clock.
                 yield ": keepalive\n\n"
                 seconds_since_event = 0.0
             continue
         seconds_since_event = 0.0
+        seconds_since_heartbeat = 0.0
         payload = event_to_payload(event)
         yield format_sse_event(event.kind, payload)
         if event.kind == "scan_done":

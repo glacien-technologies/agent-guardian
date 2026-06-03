@@ -7,6 +7,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_guardian.core.swarm import SwarmEvent
@@ -135,6 +136,55 @@ def test_stream_live_terminates_on_scan_done(tmp_path: Path) -> None:
     assert any(c.startswith("event: agent_start") for c in chunks)
     assert any(c.startswith("event: finding") for c in chunks)
     assert any(c.startswith("event: scan_done") for c in chunks)
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat / keepalive — SSE Phase 1, Step 5
+# ---------------------------------------------------------------------------
+
+
+def test_stream_emits_data_heartbeat_on_quiet_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The freshness-dot client relies on ``event: heartbeat`` (NOT ``:``
+    comment) because EventSource ``onmessage`` does not fire on comment-only
+    lines. Verifies a quiet scan emits the typed heartbeat event."""
+    from agent_guardian.server import sse as sse_mod
+
+    monkeypatch.setattr(sse_mod, "_HEARTBEAT_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(sse_mod, "_QUEUE_POLL_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(sse_mod, "_KEEPALIVE_INTERVAL_SECONDS", 0.001)
+
+    store = ScanStore(root_dir=tmp_path)
+
+    class FakeSwarm:
+        observer = None
+
+    fake = FakeSwarm()
+    store.register("scan-heartbeat", fake)  # type: ignore[arg-type]
+
+    async def _run() -> list[str]:
+        out: list[str] = []
+        gen = stream_scan_events("scan-heartbeat", store)
+
+        async def consume() -> None:
+            async for chunk in gen:
+                out.append(chunk)
+                if any(c.startswith("event: heartbeat") for c in out):
+                    fake.observer(_event("scan_done"))
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.wait_for(consumer, timeout=3.0)
+        return out
+
+    chunks = asyncio.run(_run())
+    heartbeats = [c for c in chunks if c.startswith("event: heartbeat")]
+    assert heartbeats, "expected at least one ``event: heartbeat`` on quiet stream"
+    # Payload must carry a numeric ``now`` for client clock-sync use.
+    data_line = heartbeats[0].split("\n")[1]
+    assert data_line.startswith("data: ")
+    payload = json.loads(data_line[len("data: ") :])
+    assert isinstance(payload.get("now"), (int, float))
 
 
 # ---------------------------------------------------------------------------

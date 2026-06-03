@@ -271,15 +271,40 @@
   }
 
   if (typeof EventSource === 'undefined') { return; }
-  var es = new EventSource(
-    '/scans/' + encodeURIComponent(scanId) + '/reflections.sse'
-  );
+  var reflectionsUrl =
+    '/scans/' + encodeURIComponent(scanId) + '/reflections.sse';
+  var es = new EventSource(reflectionsUrl);
+  // SSE Phase 1, Step 5 — wire the reflections EventSource into the
+  // shared freshness dot. Replaces the previously empty ``onerror``
+  // below; the four-state machine reads ``es.readyState`` on every
+  // requestAnimationFrame tick.
+  if (
+    typeof window !== 'undefined' &&
+    window.AGFreshnessDot &&
+    typeof window.AGFreshnessDot.attach === 'function'
+  ) {
+    window.AGFreshnessDot.attach(es, { url: reflectionsUrl });
+  }
   es.addEventListener('reflection', function (evt) {
     try {
       var data = JSON.parse(evt.data);
       prependCard(data);
     } catch (err) { /* swallow malformed event */ }
+    // SSE Phase 1, Step 6 — bump the LOGS tab badge by 1 on each
+    // reflection arrival. Count-only (no severity dial): the
+    // ``reflection`` event has no severity field per
+    // ``core/swarm.py:2687-2695`` (critic patch G4/P4). The bus is
+    // optional — wired only when ``tab-badge-bus.js`` is on the page.
+    if (
+      typeof window !== 'undefined' &&
+      window.AGTabBadgeBus &&
+      typeof window.AGTabBadgeBus.bump === 'function'
+    ) {
+      window.AGTabBadgeBus.bump('logs', 1, { severity: 'notice' });
+    }
   });
   es.addEventListener('scan_done', function () { es.close(); });
-  es.onerror = function () { /* browser auto-reconnects */ };
+  // SSE Phase 1, Step 5 — no per-handler ``onerror``. The shared
+  // ``window.AGFreshnessDot`` reads ``es.readyState`` directly and
+  // drives LIVE / STALE / RECONNECTING / DEAD.
 })();

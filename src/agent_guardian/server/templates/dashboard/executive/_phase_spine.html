@@ -1,0 +1,85 @@
+{# Executive — Phase Spine (sticky layer 2, between topbar and tabbar).
+
+   SSE Phase 1, Step 3 — the four-pill phase heartbeat described in
+   designs/sse-flow-and-live-ui.md ("Proposal C — Phase Spine"). One pill
+   per producer-emitted phase string (``recon``, ``decompose``,
+   ``parallel``, ``finalise`` — critic patch G1/P1). Each pill server-
+   renders its initial state from ``phase_state`` (computed at
+   ``dashboard_view._compute_phase_state``); ``static/phase-spine.js``
+   then takes over for live transitions, subscribing to ``phase_start``
+   / ``phase_done`` / ``agent_start`` / ``agent_done`` /
+   ``agent_skipped`` events on ``/scan/<id>/events``.
+
+   Layout rule (critic patch G10/P10): the spine lives in the layout
+   shell ABOVE ``<main>`` (between ``_topbar.html`` and
+   ``_tab_bar.html``). It is universal across tabs — placing it inside
+   ``tabpanel-overview`` would hide the heartbeat on Findings / Probes
+   / Logs and would fire pulses against an ``hidden`` element when the
+   operator is not on Overview.
+
+   Sub-bar idempotence (critic patch G11/P11): ``data-completed`` /
+   ``data-total`` are advanced by JS via
+   ``agents_completed = max(local_count, snapshot.phase_state[phase].agents_completed)``
+   so a multi-tab race (two tabs draining the same per-scan
+   ``asyncio.Queue`` at ``scan_store.py:736-750``) cannot animate the
+   sub-bar backward.
+
+   Terminal scans: when ``data-is-terminal === 'true'`` the layout
+   shell short-circuits the EventSource (``layout.html:74``). The spine
+   is already in its final state in this initial server-render — every
+   pill carries the ``phase_state`` snapshot computed from
+   ``events.jsonl`` at request time. No JS is required for the spine to
+   read correctly on a completed scan.
+#}
+{% set _phase_state = phase_state or {"current_phase": None, "phases": {}} %}
+{% set _phases_map = _phase_state.get("phases", {}) %}
+{% set _current_phase = _phase_state.get("current_phase") %}
+{% set _phase_labels = {
+     "recon": "Recon",
+     "decompose": "Decompose",
+     "parallel": "Parallel",
+     "finalise": "Finalise"
+   } %}
+<nav class="exec-spine"
+     aria-label="Scan phase progress"
+     data-current-phase="{{ _current_phase or '' }}"
+     data-started-at-unix="{{ started_at_unix if started_at_unix is not none else '' }}">
+  <ol class="exec-spine__list" role="list">
+    {% for _phase in ["recon", "decompose", "parallel", "finalise"] %}
+      {% set _slot = _phases_map.get(_phase, {}) %}
+      {% set _state = _slot.get("state", "pending") %}
+      {% set _completed = _slot.get("agents_completed", 0) %}
+      {% set _total = _slot.get("agents_total", 0) %}
+      {% if _total and _completed %}
+        {% set _pct = (100 * _completed // _total) if _total else 0 %}
+      {% else %}
+        {% set _pct = 100 if _state == "done" else 0 %}
+      {% endif %}
+      <li class="exec-spine__pill"
+          data-phase="{{ _phase }}"
+          data-state="{{ _state }}"
+          {% if _phase == _current_phase %}data-active="true"{% endif %}>
+        <div class="exec-spine__caption">
+          <span class="exec-spine__name">{{ _phase_labels[_phase] }}</span>
+          <span class="exec-spine__elapsed"
+                data-phase-elapsed="{{ _phase }}"
+                aria-label="elapsed in {{ _phase_labels[_phase] }} phase">—</span>
+        </div>
+        <div class="exec-spine__sub"
+             role="progressbar"
+             aria-label="{{ _phase_labels[_phase] }} agents progress"
+             aria-valuemin="0"
+             aria-valuemax="{{ _total if _total else 1 }}"
+             aria-valuenow="{{ _completed }}"
+             data-completed="{{ _completed }}"
+             data-total="{{ _total }}">
+          <div class="exec-spine__sub-fill" style="width: {{ _pct }}%;"></div>
+        </div>
+        <div class="exec-spine__meta">
+          <span class="exec-spine__count" data-phase-count="{{ _phase }}">{{ _completed }}/{{ _total }}</span>
+          <span class="exec-spine__state" data-phase-state-label="{{ _phase }}">{{ _state }}</span>
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+</nav>

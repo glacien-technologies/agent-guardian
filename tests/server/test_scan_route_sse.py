@@ -193,6 +193,37 @@ def test_live_sse_404_for_unknown_scan(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# SSE Phase 1, Step 5 — ``deadline_approaching`` 30s before the soft cap
+# ---------------------------------------------------------------------------
+
+
+def test_live_sse_emits_deadline_approaching_before_deadline(
+    client: TestClient,
+    store: ScanStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client freshness dot listens for ``deadline_approaching`` and
+    suppresses its DEAD/red transition for 60s on receipt. Without this
+    pre-event, healthy 30-minute scans page operators every cap-crossing
+    (critic patch G5 / P-ScheduledReconnect)."""
+    # Cap = lead → the very first while-iteration is "approaching" but
+    # has NOT yet exceeded the hard deadline; the event must fire before
+    # the loop breaks.
+    monkeypatch.setattr(scan_route, "_LIVE_MAX_SECONDS", 0.05)
+    monkeypatch.setattr(scan_route, "_DEADLINE_APPROACHING_LEAD_SECONDS", 0.05)
+    monkeypatch.setattr(scan_route, "_LIVE_POLL_SECONDS", 0.0)
+    scan_id = "cli-running-deadline-pre"
+    _register_running(store, scan_id)
+    try:
+        with client.stream("GET", f"/scans/{scan_id}/live") as resp:
+            assert resp.status_code == 200
+            lines = _drain_sse(resp, max_lines=16)
+        assert any(ln.startswith("event: deadline_approaching") for ln in lines), lines
+    finally:
+        store._running.pop(scan_id, None)
+
+
+# ---------------------------------------------------------------------------
 # Coverage smoke: assert the module's missing-line set is empty after this
 # module runs. Skipped unless explicitly opted-in via PYTEST_COV_QA022=1 so
 # the regular test pass doesn't depend on the coverage plugin's run state.

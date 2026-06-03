@@ -40,7 +40,23 @@ export function mountScanView({ root, scanId }) {
   // Findings accumulator (scan-wide).
   let totalFindings = 0;
 
-  const source = new EventSource(`/scan/${encodeURIComponent(scanId)}/events`);
+  const sourceUrl = `/scan/${encodeURIComponent(scanId)}/events`;
+  const source = new EventSource(sourceUrl);
+
+  // SSE Phase 1, Step 5 — share this EventSource with the global
+  // freshness dot. The dot reads ``readyState`` on every rAF tick and
+  // routes ``heartbeat`` / ``scan_done`` / ``deadline_approaching`` to
+  // the four-state LIVE / STALE / RECONNECTING / DEAD machine. The
+  // previously CLOSED-only ``error`` handler below is retained ONLY to
+  // surface the local Swarm-view status message; freshness state lives
+  // on the dot.
+  if (
+    typeof window !== "undefined" &&
+    window.AGFreshnessDot &&
+    typeof window.AGFreshnessDot.attach === "function"
+  ) {
+    window.AGFreshnessDot.attach(source, { url: sourceUrl });
+  }
 
   const appendEvent = (kind, agent, detail) => {
     if (!eventLog) return;
@@ -174,8 +190,20 @@ export function mountScanView({ root, scanId }) {
   });
 
   source.addEventListener("error", () => {
-    // EventSource auto-reconnects until we explicitly close it. We only
-    // surface a status flip when the readyState is hard-CLOSED (2).
+    // SSE Phase 1, Step 5 — the four-state freshness machine on
+    // ``window.AGFreshnessDot`` owns the global LIVE/STALE/
+    // RECONNECTING/DEAD visualisation. We keep the Swarm-view local
+    // status text as a thin shim only when the freshness dot is NOT
+    // mounted (eg the dashboard's standalone Swarm view sub-page),
+    // otherwise the dot+banner are the single source of operator
+    // truth and this handler is a no-op.
+    if (
+      typeof window !== "undefined" &&
+      window.AGFreshnessDot &&
+      typeof window.AGFreshnessDot.attach === "function"
+    ) {
+      return;
+    }
     if (source.readyState === EventSource.CLOSED) {
       if (statusMessage) statusMessage.textContent = "disconnected";
     }

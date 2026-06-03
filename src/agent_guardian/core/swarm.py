@@ -721,19 +721,23 @@ class SwarmCommander:
             ),
         )
         recon_started = time.monotonic()
+        # SSE Phase 1, Step 1 — wall-clock anchor matched to the monotonic
+        # start so the ``phase_done`` carries the same ``started_at`` as
+        # the corresponding ``phase_start`` (PhaseSpine elapsed caption).
+        recon_started_at = _utcnow()
         # QA-012 — phase boundary event. Fires BEFORE ``recon_start`` so a
         # phase-aware UI flips into the recon panel before the recon agent's
         # own ``recon_start`` ticks the row to "running".
-        self._emit(
-            SwarmEvent(
-                kind="phase_start",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "recon",
-                    "phase_index": 1,
-                    "phase_label": "Reconnaissance",
-                },
-            )
+        self._emit_phase(
+            kind="phase_start",
+            phase="recon",
+            agents_total=1,
+            agents_completed=0,
+            started_at=recon_started_at,
+            extra_payload={
+                "phase_index": 1,
+                "phase_label": "Reconnaissance",
+            },
         )
         self._emit(SwarmEvent(kind="recon_start", timestamp=_utcnow(), agent="recon-agent"))
         recon = ReconAgent(
@@ -809,24 +813,24 @@ class SwarmCommander:
         # by ``_phase_decompose`` so we report a lower-bound here (the
         # full count is the next phase's responsibility — see
         # ``_phase_parallel``'s ``phase_start`` payload).
-        self._emit(
-            SwarmEvent(
-                kind="phase_done",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "recon",
-                    "phase_index": 1,
-                    "phase_label": "Reconnaissance",
-                    "duration_seconds": recon_duration,
-                    "summary": {
-                        "probes_applicable": 0,  # filled by phase_decompose
-                        "probes_skipped": 0,
-                        "multi_agent": bool(fingerprint.is_multi_agent),
-                        "notes": (fingerprint.notes or "")[:200],
-                        "inferred_goal": (fingerprint.inferred_goal or "")[:200],
-                    },
+        self._emit_phase(
+            kind="phase_done",
+            phase="recon",
+            agents_total=1,
+            agents_completed=1,
+            started_at=recon_started_at,
+            extra_payload={
+                "phase_index": 1,
+                "phase_label": "Reconnaissance",
+                "duration_seconds": recon_duration,
+                "summary": {
+                    "probes_applicable": 0,  # filled by phase_decompose
+                    "probes_skipped": 0,
+                    "multi_agent": bool(fingerprint.is_multi_agent),
+                    "notes": (fingerprint.notes or "")[:200],
+                    "inferred_goal": (fingerprint.inferred_goal or "")[:200],
                 },
-            )
+            },
         )
 
     # ------------------------------------------------------------------
@@ -859,56 +863,64 @@ class SwarmCommander:
             # phase counter advances without a matching phase_start. UIs
             # treat a skipped decompose as a no-op and stay on the Recon
             # panel until phase_start("parallel") fires.
-            self._emit(
-                SwarmEvent(
-                    kind="phase_done",
-                    timestamp=_utcnow(),
-                    payload={
-                        "phase": "decompose",
-                        "phase_index": 2,
-                        "phase_label": "Decomposition",
-                        "duration_seconds": 0.0,
-                        "summary": {
-                            "sub_goals": 0,
-                            "skipped": True,
-                            "reason": "no operator or inferred goal",
-                        },
+            # SSE Phase 1, Step 1 — early-skip path: no separate
+            # ``decompose_started`` anchor exists, so the started_at and
+            # phase_done timestamps coincide (duration_seconds=0.0).
+            self._emit_phase(
+                kind="phase_done",
+                phase="decompose",
+                agents_total=0,
+                agents_completed=0,
+                started_at=_utcnow(),
+                extra_payload={
+                    "phase_index": 2,
+                    "phase_label": "Decomposition",
+                    "duration_seconds": 0.0,
+                    "summary": {
+                        "sub_goals": 0,
+                        "skipped": True,
+                        "reason": "no operator or inferred goal",
                     },
-                )
+                },
             )
             return
         if self.commander_llm is None:  # pragma: no cover -- defensive
             _LOG.debug("phase commander-decompose: skipped (commander_llm is None)")
-            self._emit(
-                SwarmEvent(
-                    kind="phase_done",
-                    timestamp=_utcnow(),
-                    payload={
-                        "phase": "decompose",
-                        "phase_index": 2,
-                        "phase_label": "Decomposition",
-                        "duration_seconds": 0.0,
-                        "summary": {
-                            "sub_goals": 0,
-                            "skipped": True,
-                            "reason": "commander_llm is None",
-                        },
+            self._emit_phase(
+                kind="phase_done",
+                phase="decompose",
+                agents_total=0,
+                agents_completed=0,
+                started_at=_utcnow(),
+                extra_payload={
+                    "phase_index": 2,
+                    "phase_label": "Decomposition",
+                    "duration_seconds": 0.0,
+                    "summary": {
+                        "sub_goals": 0,
+                        "skipped": True,
+                        "reason": "commander_llm is None",
                     },
-                )
+                },
             )
             return
         decompose_started = time.monotonic()
+        # SSE Phase 1, Step 1 — wall-clock anchor (see _phase_recon).
+        decompose_started_at = _utcnow()
         # QA-012 — phase boundary event for the goal-decomposition phase.
-        self._emit(
-            SwarmEvent(
-                kind="phase_start",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "decompose",
-                    "phase_index": 2,
-                    "phase_label": "Decomposition",
-                },
-            )
+        # ``agents_total`` is 0 here: at phase_start the brief has not been
+        # parsed yet, so we don't know the per-agent slate count. The
+        # phase_done variants below pass the real n_briefs.
+        self._emit_phase(
+            kind="phase_start",
+            phase="decompose",
+            agents_total=0,
+            agents_completed=0,
+            started_at=decompose_started_at,
+            extra_payload={
+                "phase_index": 2,
+                "phase_label": "Decomposition",
+            },
         )
         _LOG.info(
             "phase commander-decompose: starting (goal[:80]=%r, from=%s)",
@@ -951,22 +963,23 @@ class SwarmCommander:
             self._swarm_brief = self._uniform_brief()
             # QA-012 — phase_done with fallback summary; UI shows
             # "uniform brief (fallback)" in the recon panel's notes line.
-            self._emit(
-                SwarmEvent(
-                    kind="phase_done",
-                    timestamp=_utcnow(),
-                    payload={
-                        "phase": "decompose",
-                        "phase_index": 2,
-                        "phase_label": "Decomposition",
-                        "duration_seconds": time.monotonic() - decompose_started,
-                        "summary": {
-                            "sub_goals": len(self._swarm_brief.agent_briefs),
-                            "skipped": False,
-                            "reason": "llm_call_failed; uniform-brief fallback",
-                        },
+            _decompose_sub_goals = len(self._swarm_brief.agent_briefs)
+            self._emit_phase(
+                kind="phase_done",
+                phase="decompose",
+                agents_total=_decompose_sub_goals,
+                agents_completed=_decompose_sub_goals,
+                started_at=decompose_started_at,
+                extra_payload={
+                    "phase_index": 2,
+                    "phase_label": "Decomposition",
+                    "duration_seconds": time.monotonic() - decompose_started,
+                    "summary": {
+                        "sub_goals": _decompose_sub_goals,
+                        "skipped": False,
+                        "reason": "llm_call_failed; uniform-brief fallback",
                     },
-                )
+                },
             )
             return
 
@@ -976,22 +989,23 @@ class SwarmCommander:
                 "commander returned malformed swarm-brief JSON -- falling back to uniform brief"
             )
             self._swarm_brief = self._uniform_brief()
-            self._emit(
-                SwarmEvent(
-                    kind="phase_done",
-                    timestamp=_utcnow(),
-                    payload={
-                        "phase": "decompose",
-                        "phase_index": 2,
-                        "phase_label": "Decomposition",
-                        "duration_seconds": time.monotonic() - decompose_started,
-                        "summary": {
-                            "sub_goals": len(self._swarm_brief.agent_briefs),
-                            "skipped": False,
-                            "reason": "malformed_brief_json; uniform-brief fallback",
-                        },
+            _decompose_sub_goals = len(self._swarm_brief.agent_briefs)
+            self._emit_phase(
+                kind="phase_done",
+                phase="decompose",
+                agents_total=_decompose_sub_goals,
+                agents_completed=_decompose_sub_goals,
+                started_at=decompose_started_at,
+                extra_payload={
+                    "phase_index": 2,
+                    "phase_label": "Decomposition",
+                    "duration_seconds": time.monotonic() - decompose_started,
+                    "summary": {
+                        "sub_goals": _decompose_sub_goals,
+                        "skipped": False,
+                        "reason": "malformed_brief_json; uniform-brief fallback",
                     },
-                )
+                },
             )
             return
 
@@ -1005,22 +1019,23 @@ class SwarmCommander:
             len(brief.agent_briefs),
             per_agent_summary,
         )
-        self._emit(
-            SwarmEvent(
-                kind="phase_done",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "decompose",
-                    "phase_index": 2,
-                    "phase_label": "Decomposition",
-                    "duration_seconds": time.monotonic() - decompose_started,
-                    "summary": {
-                        "sub_goals": len(brief.agent_briefs),
-                        "skipped": False,
-                        "reason": "",
-                    },
+        _decompose_sub_goals = len(brief.agent_briefs)
+        self._emit_phase(
+            kind="phase_done",
+            phase="decompose",
+            agents_total=_decompose_sub_goals,
+            agents_completed=_decompose_sub_goals,
+            started_at=decompose_started_at,
+            extra_payload={
+                "phase_index": 2,
+                "phase_label": "Decomposition",
+                "duration_seconds": time.monotonic() - decompose_started,
+                "summary": {
+                    "sub_goals": _decompose_sub_goals,
+                    "skipped": False,
+                    "reason": "",
                 },
-            )
+            },
         )
 
     def _asi_coverage_snapshot(self) -> dict[str, int]:
@@ -1266,37 +1281,41 @@ class SwarmCommander:
             _LOG.info("phase parallel: no applicable agents -- skipping")
             # QA-012 — phase_done with skipped=True so the UI advances
             # past the Red Teaming panel into the Findings panel.
-            self._emit(
-                SwarmEvent(
-                    kind="phase_done",
-                    timestamp=_utcnow(),
-                    payload={
-                        "phase": "parallel",
-                        "phase_index": 3,
-                        "phase_label": "Red Teaming",
-                        "duration_seconds": 0.0,
-                        "summary": {
-                            "n_agents": 0,
-                            "n_findings": 0,
-                            "skipped": True,
-                        },
+            self._emit_phase(
+                kind="phase_done",
+                phase="parallel",
+                agents_total=0,
+                agents_completed=0,
+                started_at=_utcnow(),
+                extra_payload={
+                    "phase_index": 3,
+                    "phase_label": "Red Teaming",
+                    "duration_seconds": 0.0,
+                    "summary": {
+                        "n_agents": 0,
+                        "n_findings": 0,
+                        "skipped": True,
                     },
-                )
+                },
             )
             return
 
         # QA-012 — phase boundary event for the Red Teaming phase.
-        self._emit(
-            SwarmEvent(
-                kind="phase_start",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "parallel",
-                    "phase_index": 3,
-                    "phase_label": "Red Teaming",
-                    "n_agents": len(agents),
-                },
-            )
+        # SSE Phase 1, Step 1 — wall-clock anchor; sub-bar fills from
+        # agent_start / agent_done deltas on the client side
+        # (``agents_completed`` here is 0, the sub-bar baseline).
+        parallel_started_at = _utcnow()
+        self._emit_phase(
+            kind="phase_start",
+            phase="parallel",
+            agents_total=len(agents),
+            agents_completed=0,
+            started_at=parallel_started_at,
+            extra_payload={
+                "phase_index": 3,
+                "phase_label": "Red Teaming",
+                "n_agents": len(agents),
+            },
         )
         _LOG.info(
             "phase parallel: starting %d agents (checkpoint every %.1fs, "
@@ -1347,24 +1366,28 @@ class SwarmCommander:
             n_findings = len(self.memory.all_findings())
         except Exception:  # pragma: no cover -- defensive
             n_findings = 0
-        self._emit(
-            SwarmEvent(
-                kind="phase_done",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "parallel",
-                    "phase_index": 3,
-                    "phase_label": "Red Teaming",
-                    "duration_seconds": parallel_duration,
-                    "summary": {
-                        "n_agents": len(agents),
-                        "n_findings": n_findings,
-                        "skipped": False,
-                        "cancelled": cancelled_count,
-                        "last_decision": self._final_decision.value,
-                    },
+        # SSE Phase 1, Step 1 — at phase_done the parallel slate is fully
+        # drained: every agent has finished, errored, or been cancelled.
+        # The PhaseSpine sub-bar saturates here (completed == total) so
+        # the pill flips ``running → done`` cleanly.
+        self._emit_phase(
+            kind="phase_done",
+            phase="parallel",
+            agents_total=len(agents),
+            agents_completed=len(agents),
+            started_at=parallel_started_at,
+            extra_payload={
+                "phase_index": 3,
+                "phase_label": "Red Teaming",
+                "duration_seconds": parallel_duration,
+                "summary": {
+                    "n_agents": len(agents),
+                    "n_findings": n_findings,
+                    "skipped": False,
+                    "cancelled": cancelled_count,
+                    "last_decision": self._final_decision.value,
                 },
-            )
+            },
         )
 
     async def _run_taskgroup(self, agents: list[AsiAgent]) -> None:
@@ -2254,17 +2277,21 @@ class SwarmCommander:
 
     async def _phase_finalise(self) -> Scan:
         finalise_started = time.monotonic()
+        # SSE Phase 1, Step 1 — wall-clock anchor (see _phase_recon).
+        finalise_started_at = _utcnow()
         # QA-012 — phase boundary event for the Findings / finalise phase.
-        self._emit(
-            SwarmEvent(
-                kind="phase_start",
-                timestamp=_utcnow(),
-                payload={
-                    "phase": "finalise",
-                    "phase_index": 4,
-                    "phase_label": "Findings",
-                },
-            )
+        # Finalise is a single-fill phase (no concurrent slate) so the
+        # sub-bar is binary: 0/1 at start, 1/1 on done.
+        self._emit_phase(
+            kind="phase_start",
+            phase="finalise",
+            agents_total=1,
+            agents_completed=0,
+            started_at=finalise_started_at,
+            extra_payload={
+                "phase_index": 4,
+                "phase_label": "Findings",
+            },
         )
         _LOG.info(
             "phase finalise: starting (findings=%d, agent_reports=%d)",
@@ -2523,23 +2550,23 @@ class SwarmCommander:
         # QA-012 — phase_done("finalise") fires alongside ``scan_done`` so the
         # UI's three-panel composer flips ``current_phase`` to ``"done"`` and
         # collapses the Red Teaming panel into its single-line summary.
-        self._emit(
-            SwarmEvent(
-                kind="phase_done",
-                timestamp=_utcnow(),
-                provisional_aivss=result.score,
-                payload={
-                    "phase": "finalise",
-                    "phase_index": 4,
-                    "phase_label": "Findings",
-                    "duration_seconds": time.monotonic() - finalise_started,
-                    "summary": {
-                        "final_aivss": float(result.score),
-                        "band": effective_band.value,
-                        "n_findings": len(findings),
-                    },
+        self._emit_phase(
+            kind="phase_done",
+            phase="finalise",
+            agents_total=1,
+            agents_completed=1,
+            started_at=finalise_started_at,
+            provisional_aivss=result.score,
+            extra_payload={
+                "phase_index": 4,
+                "phase_label": "Findings",
+                "duration_seconds": time.monotonic() - finalise_started,
+                "summary": {
+                    "final_aivss": float(result.score),
+                    "band": effective_band.value,
+                    "n_findings": len(findings),
                 },
-            )
+            },
         )
         _LOG.info(
             "aivss final: score=%d band=%s penalty=%.2f sub_scores=%s "
@@ -2659,6 +2686,70 @@ class SwarmCommander:
         except Exception as exc:
             # Observers must not crash the swarm; log and continue.
             _LOG.warning("observer raised %s: %s", type(exc).__name__, exc)
+
+    # SSE Phase 1, Step 1 — normalise phase_start / phase_done payloads.
+    # See ``designs/sse-flow-and-live-ui.md`` "Producer reshape" section.
+    # The dashboard's PhaseSpine consumer (and any future phase-aware UI)
+    # reads four required fields off every phase boundary event:
+    #
+    #   phase           : Literal of the four producer-side phase strings
+    #                     ("recon" / "decompose" / "parallel" / "finalise").
+    #                     Critic patch G1/P1 — adopt the producer taxonomy
+    #                     (4 strings), not the 5-pill mockup that earlier
+    #                     drafts assumed.
+    #   agents_total    : denominator for the active-pill sub-progress bar.
+    #   agents_completed: numerator. Idempotent on the client side
+    #                     (``max(local, snapshot)`` — no backward animation,
+    #                     critic patch G11/P11).
+    #   started_at      : wall-clock anchor for the per-phase ElapsedTicker
+    #                     caption. We accept a ``datetime`` here so call
+    #                     sites stay readable, and serialise to unix seconds
+    #                     in the payload (Safari ``Date.parse`` returns NaN
+    #                     on naive ISO timestamps — critic patch G16/P9).
+    #
+    # Existing ``phase_label`` / ``phase_index`` / ``duration_seconds`` /
+    # ``summary`` keys are preserved by the caller for backwards
+    # compatibility — the CLI TUI consumer (`cli_tui.py:_on_phase_done`
+    # et al.) keys off them and will keep rendering.
+    def _emit_phase(
+        self,
+        *,
+        kind: Literal["phase_start", "phase_done"],
+        phase: Literal["recon", "decompose", "parallel", "finalise"],
+        agents_total: int,
+        agents_completed: int,
+        started_at: datetime,
+        extra_payload: Mapping[str, Any] | None = None,
+        provisional_aivss: int | None = None,
+    ) -> None:
+        """Emit a ``phase_start`` / ``phase_done`` event with the four
+        SSE-Phase-1 required fields layered on top of the existing
+        backwards-compatibility payload.
+
+        The helper exists so the 13 raw ``_emit()`` sites in this file
+        cannot drift apart on the required-field contract. New callers
+        should funnel through here; if you need to add a phase-boundary
+        event in the future, add a kind to ``EventKind`` and route it
+        through this helper rather than calling ``_emit()`` directly.
+        """
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "agents_total": int(agents_total),
+            "agents_completed": int(agents_completed),
+            # Unix seconds — float — so the client ticker never parses an
+            # ISO string. See critic patch G16/P9.
+            "started_at": started_at.timestamp(),
+        }
+        if extra_payload:
+            payload.update(extra_payload)
+        self._emit(
+            SwarmEvent(
+                kind=kind,
+                timestamp=_utcnow(),
+                provisional_aivss=provisional_aivss,
+                payload=payload,
+            )
+        )
 
     def _make_reflection_sink(self, agent_name: str) -> Callable[[Mapping[str, Any]], None]:
         """Return a per-agent callback that forwards turn records as

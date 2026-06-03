@@ -43,6 +43,38 @@
   {# QA-039 + QA-044 (2026-06-02) — owns the KPI tile ⓘ click affordance
      (toggles the prose info popover); the hover data-table is pure CSS. #}
   <script src="/static/executive_kpi.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 3 — drives the four-pill Phase Spine. Subscribes
+     to ``/scan/<id>/events`` for live transitions and to
+     ``/scans/<id>/live`` for snapshot reconciliation (multi-tab safe,
+     critic patch G11/P11). No-ops on terminal scans. #}
+  <script src="/static/phase-spine.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 4 — client-side ElapsedTicker. Reads
+     ``started_at_unix`` (float) from the snapshot and the spine's
+     ``data-started-at-unix`` attribute; NEVER parses an ISO timestamp
+     (Safari ``Date.parse`` returns NaN on naive timestamps — critic
+     patch G16/P9). ``setTimeout``-driven (NOT ``setInterval``) so
+     ``prefers-reduced-motion`` users fall back cleanly to the server's
+     ``elapsed_label`` refresh (critic patch G20/P20). #}
+  <script src="/static/elapsed-ticker.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 5 — peripheral-vision freshness dot + reconnect
+     banner. ONE shared four-state machine driven by EventSource
+     ``readyState`` and ``Date.now() - lastEventAt``; replaces the empty
+     ``onerror`` at ``layout.html:166`` (below), the CLOSED-only branch
+     at ``swarm.js:176-182``, and the identical empty pattern at
+     ``reflections.js:284``. Uses ``event: heartbeat`` (NOT the ``:``
+     keepalive comment — EventSource ``onmessage`` does not fire on
+     comments; critic patch G14/P5). #}
+  <script src="/static/freshness-dot.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 6 — tab-bar badge bus. Owns the
+     ``<span class="exec-tab__badge" data-badge>`` chip on every tab
+     button. Public API ``window.AGTabBadgeBus.{bump,clear,get}``;
+     persistence via ``sessionStorage`` keyed by ``(scan_id, tab)``;
+     clear semantics = tab-button click + 2s dwell, NOT bare
+     active-tab clearing (critic patch G19/P19). Spine wiring lives in
+     ``phase-spine.js`` (findings / probes) and ``reflections.js``
+     (logs). No severity logic here — the caller passes
+     ``opts.severity`` and the bus paints the matching CSS class. #}
+  <script src="/static/tab-badge-bus.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
@@ -50,6 +82,12 @@
       data-is-terminal="{{ 'true' if is_terminal else 'false' }}">
 
   {% include "dashboard/executive/_topbar.html" %}
+  {# SSE Phase 1, Step 3 — Phase Spine lives in the layout shell, ABOVE
+     ``<main>`` and between the topbar and the tab bar (critic patch
+     G10/P10). Universal across all four tabs; NEVER placed inside
+     ``tabpanel-overview`` (would hide the heartbeat on Findings /
+     Probes / Logs and fire pulses against an ``hidden`` element). #}
+  {% include "dashboard/executive/_phase_spine.html" %}
   {% include "dashboard/executive/_tab_bar.html" %}
 
   <main class="exec-main" role="main">
@@ -65,7 +103,25 @@
 
   {# Live SSE patcher — mirrors the other themes so the same /scans/<id>/live
      stream drives Executive's KPI strip identically. Snapshot-only updates;
-     ``probes_list`` / ``logs_tail`` are NOT data-live (operator F5 refreshes). #}
+     ``probes_list`` / ``logs_tail`` are NOT data-live (operator F5 refreshes).
+
+     SSE Phase 1, Step 4 — the patcher now supports three modes via the
+     ``data-live`` attribute prefix:
+
+       * ``data-live="<key>"`` — default ``text`` mode. Sets ``textContent``
+         to ``snapshot[key]`` (back-compat with every existing site).
+       * ``data-live="attr:<attr-name>:<key>"`` — sets ``node[attr-name]``
+         to ``snapshot[key]``. Used by the BAND pill to recolor via a
+         ``data-band="<class>"`` attribute the CSS keys off.
+       * ``data-live="pulse:<class>:<key>"`` — sets ``textContent`` AND
+         transiently toggles ``<class>`` on the node when the value
+         changes. Used by the FINDINGS tile to flash on every increment.
+
+     The ELAPSED tile keeps the plain ``data-live="elapsed"`` text mode
+     so the ticker can take over on first snapshot. The ticker writes a
+     ``data-elapsed-anchor`` attribute on the same node; once stamped,
+     this patcher still wins on a divergence-freeze fallback because
+     ``elapsed-ticker.js`` removes the anchor in that branch. #}
   <script>
   (function () {
     var body = document.body;
@@ -75,18 +131,70 @@
     if (typeof EventSource === 'undefined') { return; }
     var url = '/scans/' + encodeURIComponent(scanId) + '/live';
     var es = new EventSource(url);
+    // SSE Phase 1, Step 5 — share this EventSource's readyState +
+    // ``heartbeat`` arrivals with the freshness dot. Replaces the
+    // previously empty ``onerror`` at the bottom of this block.
+    if (window.AGFreshnessDot &&
+        typeof window.AGFreshnessDot.attach === 'function') {
+      window.AGFreshnessDot.attach(es, { url: url });
+    }
+    function applyPatch(node, spec, data) {
+      // Mode dispatch — ``text:<key>`` is the implicit default (any
+      // ``data-live`` value that doesn't carry a ``attr:`` / ``pulse:``
+      // prefix is treated as a key into the snapshot dict).
+      if (spec.indexOf('attr:') === 0) {
+        var attrRest = spec.substring(5);
+        var sep = attrRest.indexOf(':');
+        if (sep < 0) { return; }
+        var attrName = attrRest.substring(0, sep);
+        var attrKey = attrRest.substring(sep + 1);
+        if (data[attrKey] === undefined) { return; }
+        node.setAttribute(attrName, String(data[attrKey]));
+        return;
+      }
+      if (spec.indexOf('pulse:') === 0) {
+        var pulseRest = spec.substring(6);
+        var psep = pulseRest.indexOf(':');
+        if (psep < 0) { return; }
+        var pulseClass = pulseRest.substring(0, psep);
+        var pulseKey = pulseRest.substring(psep + 1);
+        if (data[pulseKey] === undefined) { return; }
+        var nextVal = String(data[pulseKey]);
+        if (node.textContent !== nextVal) {
+          node.textContent = nextVal;
+          node.classList.add(pulseClass);
+          window.setTimeout(function () {
+            node.classList.remove(pulseClass);
+          }, 600);
+        }
+        return;
+      }
+      // Default text mode. The ELAPSED tile is special: once the
+      // ticker has stamped a ``data-elapsed-anchor`` it owns the text;
+      // the snapshot writer would otherwise stomp the ticker's tick
+      // value once every 500ms. (On divergence freeze the ticker
+      // removes the anchor, which re-enables this writer.)
+      if (data[spec] === undefined) { return; }
+      if (node.hasAttribute('data-elapsed-anchor')) { return; }
+      node.textContent = data[spec];
+    }
     es.addEventListener('snapshot', function (evt) {
       try {
         var data = JSON.parse(evt.data);
         document.querySelectorAll('[data-live]').forEach(function (node) {
-          var key = node.getAttribute('data-live');
-          if (data[key] === undefined) { return; }
-          node.textContent = data[key];
+          var spec = node.getAttribute('data-live');
+          if (!spec) { return; }
+          applyPatch(node, spec, data);
         });
       } catch (err) { /* swallow */ }
     });
     es.addEventListener('scan_done', function () { es.close(); });
-    es.onerror = function () { /* browser auto-reconnects */ };
+    // SSE Phase 1, Step 5 — no per-handler onerror. The shared
+    // ``window.AGFreshnessDot`` reads ``es.readyState`` on every
+    // requestAnimationFrame tick and drives the four-state
+    // LIVE/STALE/RECONNECTING/DEAD machine. EventSource will keep
+    // attempting to auto-reconnect; the freshness dot recolors to
+    // ``stale`` on CONNECTING and to ``dead`` on hard CLOSED.
   })();
   </script>
 </body>

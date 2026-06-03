@@ -616,6 +616,43 @@ body.exec-body {
   transition: box-shadow 160ms ease-out;
 }
 
+/* SSE Phase 1, Step 6 — tab-bar badge primitive.
+ *
+ * Superscript-style chip rendered inside every tab button. Hidden by
+ * default; ``tab-badge-bus.js`` un-hides on bump and re-hides on clear.
+ * Two severity classes set by the caller:
+ *   .notice  — informational (PROBES / LOGS arrival)
+ *   .alert   — operator-relevant (FINDINGS arrival)
+ * No animation: per the three-rule motion policy (ticker / flash / dot)
+ * the badge is a static chip, not a sixth animated surface. */
+.exec-tab__badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 0.35rem;
+  margin-left: 0.4rem;
+  vertical-align: super;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1rem;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--exec-ink-subtle);
+  color: var(--exec-bg-elev);
+  letter-spacing: 0;
+}
+.exec-tab__badge[hidden] {
+  display: none;
+}
+.exec-tab__badge.notice {
+  background: var(--exec-brand);
+  color: #ffffff;
+}
+.exec-tab__badge.alert {
+  background: var(--exec-sev-high);
+  color: #ffffff;
+}
+
 /* ============================================================
  * 5. Tab panels — Narrative editorial column rhythm
  * ============================================================ */
@@ -3242,4 +3279,353 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   color: var(--exec-ink);
   max-height: 10rem;
   overflow: auto;
+}
+
+/* ============================================================
+ * Phase Spine (SSE Phase 1, Step 3)
+ *
+ * Four-pill heartbeat described in
+ * designs/sse-flow-and-live-ui.md ("Proposal C — Phase Spine").
+ * Lives in the layout shell ABOVE ``<main>``, between the topbar
+ * (sticky layer 1) and the tab bar (sticky layer 3). Universal
+ * across all four tabs — must NOT be placed inside any
+ * ``tabpanel-*`` (critic patch G10/P10).
+ *
+ * Tokens reused: ``--exec-bg-elev`` (pill body), ``--exec-bg-sunken``
+ * (sub-bar track), ``--exec-brand`` (running), ``--exec-sev-low``
+ * (done — green/success), ``--exec-ink-subtle`` (pending /
+ * skipped). No new ``--exec-*`` tokens are introduced; per the
+ * "match the Executive theme" rule the spine borrows the same
+ * palette the ASI compact-status pills already use
+ * (``.exec-asi-compact__status--{done|running|queued}``).
+ * ============================================================ */
+.exec-spine {
+  background: var(--exec-bg-elev);
+  border-bottom: 1px solid var(--exec-border-subtle);
+  padding: 0.625rem var(--exec-pad-x);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+.exec-spine__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  max-width: var(--exec-shell-max);
+}
+.exec-spine__pill {
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.exec-spine__pill[data-active="true"] {
+  border-color: var(--exec-brand);
+  background: var(--exec-brand-tint);
+}
+.exec-spine__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.exec-spine__name {
+  font-family: var(--exec-font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exec-spine__elapsed {
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.exec-spine__sub {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--exec-bg-sunken);
+  overflow: hidden;
+}
+.exec-spine__sub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: var(--exec-ink-subtle);
+  border-radius: 2px;
+  transition: width 220ms ease-out, background-color 160ms ease;
+}
+.exec-spine__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-muted);
+  min-width: 0;
+}
+.exec-spine__count {
+  font-variant-numeric: tabular-nums;
+}
+.exec-spine__state {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--exec-ink-subtle);
+}
+
+/* Per-state coloring — mirrors the .exec-asi-compact__status--*
+ * palette (lines 1180-1191) so the spine reads with the same visual
+ * grammar as the ASI compact-status pills below the fold. */
+.exec-spine__pill[data-state="pending"] .exec-spine__state {
+  color: var(--exec-ink-subtle);
+}
+.exec-spine__pill[data-state="running"] {
+  border-color: color-mix(in srgb, var(--exec-brand) 35%, var(--exec-border-subtle));
+}
+.exec-spine__pill[data-state="running"] .exec-spine__sub-fill {
+  background: var(--exec-brand);
+}
+.exec-spine__pill[data-state="running"] .exec-spine__state {
+  color: var(--exec-brand-strong);
+}
+.exec-spine__pill[data-state="done"] {
+  border-color: color-mix(in srgb, var(--exec-sev-low) 35%, var(--exec-border-subtle));
+}
+.exec-spine__pill[data-state="done"] .exec-spine__sub-fill {
+  background: var(--exec-sev-low);
+  width: 100%;
+}
+.exec-spine__pill[data-state="done"] .exec-spine__state {
+  color: var(--exec-sev-low);
+}
+.exec-spine__pill[data-state="skipped"] .exec-spine__sub-fill {
+  background: var(--exec-ink-subtle);
+  width: 100%;
+  opacity: 0.4;
+}
+.exec-spine__pill[data-state="skipped"] .exec-spine__state {
+  color: var(--exec-ink-subtle);
+}
+
+/* Reduced-motion: strip the width / color transitions on the sub-bar
+ * so a snapshot reconciliation does not visibly slide. The class /
+ * attribute toggles still fire; only the animation is gone (critic
+ * patch G20/P20 mirrors the same setTimeout-driven posture in the
+ * ElapsedTicker for Step 4). */
+@media (prefers-reduced-motion: reduce) {
+  .exec-spine__pill,
+  .exec-spine__sub-fill {
+    transition: none;
+  }
+}
+
+/* Narrow layouts — stack the four pills two-up under ~720 px so the
+ * captions stay readable. The grid template flips from 4 columns to
+ * 2; on very narrow viewports (<= 480 px) we collapse to a single
+ * column, matching the ``_kpi_strip`` responsive ladder. */
+@media (max-width: 720px) {
+  .exec-spine__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .exec-spine__list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+ * 14.x — KPI tile amber-pulse (SSE Phase 1, Step 4)
+ *
+ * Single-fire flash on a divergence-freeze: ``elapsed-ticker.js``
+ * detects that the client-side ticker has drifted >30 s from the
+ * server's authoritative ``elapsed`` snapshot, halts ticking, and
+ * adds ``.exec-kpi--amber-pulse`` to the ELAPSED tile for ~1.5 s.
+ * This is the user-visible signal that the resync happened — without
+ * it the freeze + fallback is silent, and an operator would have no
+ * way to distinguish "ticker drifted" from "scan completed".
+ *
+ * Reduced motion: keep the border tint so the signal is still visible
+ * but skip the keyframe animation (no pulse). The critic patch
+ * G20/P20 posture is consistent with the spine sub-bar fallback.
+ * ============================================================ */
+@keyframes exec-kpi-amber-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--exec-sev-medium, #d97706);
+  }
+  60% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.exec-kpi--amber-pulse {
+  border-color: var(--exec-sev-medium, #d97706);
+  animation: exec-kpi-amber-pulse 1.4s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .exec-kpi--amber-pulse {
+    animation: none;
+  }
+}
+
+/* ============================================================
+ * 15 — Freshness dot + reconnect banner (SSE Phase 1, Step 5)
+ *
+ * One peripheral-vision indicator + an above-spine reconnect banner.
+ * Driven by ``static/freshness-dot.js`` reading EventSource
+ * ``readyState`` and ``Date.now() - lastEventAt`` on every rAF tick.
+ *
+ *   .exec-freshness-dot[data-state="fresh"]        green  / "LIVE"
+ *   .exec-freshness-dot[data-state="stale"]        amber  / "STALE"
+ *   .exec-freshness-dot[data-state="reconnecting"] amber-pulse / "STALE"
+ *   .exec-freshness-dot[data-state="dead"]         red    / "OFFLINE"
+ *
+ * Accessibility: the dot is a labelled ``role="status"`` region
+ * (color paired with text — WCAG 1.4.1). The reconnect banner's retry
+ * button is at least 24x24 CSS px (WCAG 2.5.5). Reduced motion strips
+ * the amber-pulse keyframe.
+ *
+ * Palette: reuses ``--exec-sev-low`` (green), ``--exec-sev-medium``
+ * (amber), and ``--exec-sev-high`` / ``--exec-sev-critical`` (red) —
+ * no new tokens, mirrors the rule applied by the spine.
+ * ============================================================ */
+.exec-freshness-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  margin-right: 0.5rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: 999px;
+  background: var(--exec-bg-elev);
+  font-family: var(--exec-font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+  white-space: nowrap;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+.exec-freshness-dot__swatch {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--exec-ink-subtle);
+  transition: background-color 160ms ease;
+}
+.exec-freshness-dot[data-state="fresh"] {
+  border-color: color-mix(in srgb, var(--exec-sev-low) 35%, var(--exec-border-subtle));
+  color: var(--exec-sev-low);
+}
+.exec-freshness-dot[data-state="fresh"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-low);
+}
+.exec-freshness-dot[data-state="stale"],
+.exec-freshness-dot[data-state="reconnecting"] {
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 35%, var(--exec-border-subtle));
+  color: var(--exec-sev-medium);
+}
+.exec-freshness-dot[data-state="stale"] .exec-freshness-dot__swatch,
+.exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-medium, #d97706);
+}
+.exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+  animation: exec-freshness-pulse 1.2s ease-in-out infinite;
+}
+.exec-freshness-dot[data-state="dead"] {
+  border-color: color-mix(in srgb, var(--exec-sev-high, #dc2626) 45%, var(--exec-border-subtle));
+  color: var(--exec-sev-high, #dc2626);
+}
+.exec-freshness-dot[data-state="dead"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-high, #dc2626);
+}
+
+@keyframes exec-freshness-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Banner — sits above the Phase Spine on RECONNECTING and DEAD. */
+.exec-freshness-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.375rem var(--exec-pad-x);
+  background: var(--exec-bg-sunken);
+  border-bottom: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 0.75rem;
+  color: var(--exec-ink);
+}
+.exec-freshness-banner[hidden] {
+  display: none;
+}
+.exec-freshness-banner[data-state="reconnecting"] {
+  border-bottom-color: color-mix(in srgb, var(--exec-sev-medium) 45%, var(--exec-border-subtle));
+  color: var(--exec-sev-medium);
+}
+.exec-freshness-banner[data-state="dead"] {
+  border-bottom-color: color-mix(in srgb, var(--exec-sev-high, #dc2626) 55%, var(--exec-border-subtle));
+  color: var(--exec-sev-high, #dc2626);
+}
+.exec-freshness-banner__msg {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.exec-freshness-banner__retry {
+  /* WCAG 2.5.5 — 24x24 minimum target size for interactive controls. */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: var(--exec-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exec-freshness-banner__retry:hover,
+.exec-freshness-banner__retry:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.exec-freshness-banner__retry[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exec-freshness-dot__swatch,
+  .exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+    animation: none;
+    transition: none;
+  }
 }
