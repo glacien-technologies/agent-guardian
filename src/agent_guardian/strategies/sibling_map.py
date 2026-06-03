@@ -108,7 +108,7 @@ def _log_map_once() -> None:
     + write both happen inside the same function under ``global``).
     """
     _LOG.debug(
-        "PhaseB.B2 SIBLING_MAP loaded: %d categories mapped",
+        "SIBLING_MAP loaded: %d categories mapped",
         len(SIBLING_MAP),
     )
 
@@ -199,7 +199,7 @@ def build_sibling_strategy(
 
     operators = SIBLING_MAP.get(asi, [])
     _LOG.debug(
-        "PhaseB.B2 build_sibling_strategy: asi=%s operators=%s n_siblings=%d",
+        "build_sibling_strategy: asi=%s operators=%s n_siblings=%d",
         asi.value,
         operators,
         min(len(operators), max_siblings),
@@ -230,7 +230,7 @@ def build_sibling_strategy(
         sib = sibling_cls(new_ctx)
         siblings.append(sib)
         _LOG.debug(
-            "PhaseB.B2 sibling_created: asi=%s operator=%s sibling_strategy_class=%s",
+            "sibling_created: asi=%s operator=%s sibling_strategy_class=%s",
             asi.value,
             op_name,
             sibling_cls.__name__,

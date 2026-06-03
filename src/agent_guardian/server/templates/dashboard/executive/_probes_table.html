@@ -1,8 +1,18 @@
-{# Executive — Probes tab compact table (QA-032 / QA-049 / BUG-1).
+{# Executive — Probes tab compact table (QA-032 / QA-049 / BUG-1 / per-agent
+   grouping 2026-06-03).
 
    A 5-column scannable table:
 
-     PROBE ID  |  AGENT · ASI  |  VERDICT  |  TURN  |  TIMESTAMP
+     AGENT · ASI  |  VERDICT  |  TURNS  |  LAST ACTIVITY  |  (row opens modal)
+
+   One ROW PER AGENT (operator feedback 2026-06-03)
+   -----------------------------------------------
+   Recon alone emits ~17 individual turn records; rendering one row per turn
+   buried the conversation. Each row now represents ONE AGENT's whole probe
+   run — its ordered turns are collapsed into a single conversational entry
+   (:func:`_assemble_probe_groups`). Clicking the row opens the shared modal
+   (``_slideover.html``) with that agent's full turn-by-turn chat plus the
+   final judge reasoning.
 
    Row activation
    --------------
@@ -10,55 +20,53 @@
 
      * ``data-action="probe-row-click"`` — the row-click contract the
        shared slide-over JS (``executive_findings.js``) keys off (QA-049).
-       Click + Enter/Space open the right-edge details drawer.
+       Click + Enter/Space open the modal.
      * ``data-source="probe"`` — selects the probe renderer in JS.
-     * ``data-probe-href="/scan/<id>/probe?index=<N>"`` — the URL the
-       drawer JS ``fetch()``-es when the row is opened. Replaces the
-       legacy ``<script type="application/json" id="exec-probes-payload">``
-       JSON-island wall (BUG-1, 2026-06-02): the initial page HTML
-       carries NO per-probe prompt / target-response / judge-reasoning
-       text — that data only enters the DOM on demand, scoped to the
-       probe the operator explicitly opened.
-     * ``data-probe-id`` + ``data-probe-index`` — both surfaced so deep
-       links + index-based fast lookup both work.
+     * ``data-probe-href="/scan/<id>/probe?group=<agent>"`` — the URL the
+       drawer JS ``fetch()``-es when the row is opened. The server renders
+       the agent's whole conversation. Carries NO verbatim prompt /
+       response / reasoning text in the initial page HTML (BUG-1) — that
+       data only enters the DOM on demand.
+     * ``data-probe-group`` (the agent key) + ``data-probe-id`` (the first
+       seed id, for deep links).
 
    Verdict vocab — same single source of truth as the Findings tab evidence
    pills (QA-031): ``fail`` → EXPLOITED (red), ``pass`` → DEFENDED (green),
    ``inconclusive`` → INCONCLUSIVE (amber), empty/unset → PENDING (muted).
+   The grouped row's pill is the worst-case rollup across the agent's turns
+   (:func:`_rollup_verdict`).
 
-   All ``p.*`` fields are operator-untrusted (sourced from
-   ``<scan_dir>/memory.jsonl`` via :func:`_assemble_probes_list`) — Jinja
+   All ``g.*`` fields are operator-untrusted (sourced from
+   ``<scan_dir>/memory.jsonl`` via :func:`_assemble_probe_groups`) — Jinja
    autoescape applies to every cell. The verbatim prompt / response /
    reasoning text never enters the initial HTML render.
 #}
-<table class="exec-probes-table" role="table" aria-label="Probe attempts">
+<table class="exec-probes-table" role="table" aria-label="Probe attempts by agent">
   <thead>
     <tr>
-      <th scope="col" class="exec-probes-table__col--id">PROBE ID</th>
       <th scope="col" class="exec-probes-table__col--agent">AGENT &middot; ASI</th>
       <th scope="col" class="exec-probes-table__col--verdict">VERDICT</th>
-      <th scope="col" class="exec-probes-table__col--turn">TURN</th>
-      <th scope="col" class="exec-probes-table__col--time">TIMESTAMP</th>
+      <th scope="col" class="exec-probes-table__col--turn">TURNS</th>
+      <th scope="col" class="exec-probes-table__col--time">LAST ACTIVITY</th>
     </tr>
   </thead>
   <tbody>
-    {% for p in probes_list %}
-      {% set _verdict = p.verdict or 'unknown' %}
+    {% for g in probe_groups %}
+      {% set _verdict = g.verdict or 'unknown' %}
       <tr class="exec-probes-table__row"
           data-action="probe-row-click"
-          data-probe-id="{{ p.probe_id }}"
-          data-probe-index="{{ loop.index0 }}"
-          data-probe-href="/scan/{{ scan_id }}/probe?index={{ loop.index0 }}"
+          data-probe-group="{{ g.group_key }}"
+          data-probe-id="{{ g.probe_id }}"
+          data-probe-href="/scan/{{ scan_id }}/probe?group={{ g.group_key | urlencode }}"
           data-source="probe"
           data-verdict="{{ _verdict }}"
           tabindex="0"
           role="button"
           aria-controls="exec-finding-slideover"
-          aria-label="Open probe {{ p.probe_id or 'unknown' }}">
-        <td class="exec-probes-table__cell--id"><code>{{ p.probe_id or '—' }}</code></td>
+          aria-label="Open {{ g.turn_count }}-turn conversation for {{ g.agent or 'unknown agent' }}">
         <td class="exec-probes-table__cell--agent">
-          <code class="exec-probes-table__asi">{{ p.asi_category or '—' }}</code>
-          <span class="exec-probes-table__agent">{{ p.agent or '—' }}</span>
+          <code class="exec-probes-table__asi">{{ g.asi_category or '—' }}</code>
+          <span class="exec-probes-table__agent">{{ g.agent or '—' }}</span>
         </td>
         <td class="exec-probes-table__cell--verdict">
           <span class="exec-verdict-pill exec-verdict-pill--{{ _verdict }}">
@@ -69,8 +77,8 @@
             {%- endif -%}
           </span>
         </td>
-        <td class="exec-probes-table__cell--turn"><span class="exec-probes-table__turn">turn {{ p.turn }}</span></td>
-        <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ p.timestamp_label }}</time></td>
+        <td class="exec-probes-table__cell--turn"><span class="exec-probes-table__turn">{{ g.turn_count }} turn{{ '' if g.turn_count == 1 else 's' }}</span></td>
+        <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ g.timestamp_label }}</time></td>
       </tr>
     {% endfor %}
   </tbody>

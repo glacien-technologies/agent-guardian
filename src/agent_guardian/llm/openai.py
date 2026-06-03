@@ -22,6 +22,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+from agent_guardian.logging_setup import log_model_request, log_model_response
 
 __all__ = ["OpenAIClient"]
 
@@ -88,18 +89,23 @@ class OpenAIClient(BaseLLM):
 
     async def _send(self, request: LLMRequest) -> LLMResponse:
         url = f"{(self.base_url or _DEFAULT_BASE_URL).rstrip('/')}/v1/chat/completions"
-        n_messages = len(request.messages)
-        _LOG.debug(
-            "openai call: model=%s n_messages=%d max_tokens=%s temperature=%s",
-            request.model,
-            n_messages,
-            request.max_tokens,
-            request.temperature,
+        payload = self._build_payload(request)
+        # One coherent block per call (provider+model stamped once on the INFO
+        # narration line emitted here); the full request out lands at DEBUG.
+        log_model_request(
+            _LOG,
+            provider="openai",
+            model=request.model,
+            n_messages=len(request.messages),
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            seed=request.seed,
+            request_body=payload,
         )
         req = self._client.build_request(
             "POST",
             url,
-            json=self._build_payload(request),
+            json=payload,
             headers=self._headers(),
         )
         try:
@@ -117,13 +123,13 @@ class OpenAIClient(BaseLLM):
             _LOG.warning("openai invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"openai: invalid JSON: {exc}") from exc
         parsed = self._parse_response(request.model, data)
-        _LOG.debug(
-            "openai response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
-            parsed.text[:80],
-            parsed.usage.prompt_tokens,
-            parsed.usage.completion_tokens,
-            parsed.usage.total_tokens,
-            parsed.finish_reason,
+        # Response in — full text + usage + finish; a content_filter finish is
+        # surfaced at WARNING by the helper rather than swallowed.
+        log_model_response(
+            _LOG,
+            response_text=parsed.text,
+            usage=parsed.usage,
+            finish_reason=parsed.finish_reason,
         )
         return parsed
 

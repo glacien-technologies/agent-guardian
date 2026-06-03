@@ -434,19 +434,21 @@ class AsiAgent(ABC):
         # construction time) is caught by the caller; if a non-None panel
         # is wired here the agent loop uses it.
         self.panel_judge = panel_judge
-        if panel_judge is not None:
-            _LOG.debug(
-                "PhaseB.B4 AsiAgent.__init__: panel_judge configured — "
-                "single Judge will be bypassed for verdict calls",
-            )
         # Phase B.B6 — optional cross-scan winning-seed persistence. When
         # provided AND enabled, every verdict='fail' turn writes a record
         # into the store after PII scrubbing.
         self.winning_seed_store = winning_seed_store
-        if winning_seed_store is not None:
+        # Both of the above are construction details. Collapse to a single
+        # concise DEBUG line (only when something non-default is wired) rather
+        # than two lines per agent — at ~10 agents the old logging repeated
+        # ~20 lines in a row with no operator-actionable signal.
+        if panel_judge is not None or winning_seed_store is not None:
             _LOG.debug(
-                "PhaseB.B6 AsiAgent.__init__: winning_seed_store configured (enabled=%s)",
-                getattr(winning_seed_store, "enabled", "unknown"),
+                "AsiAgent configured: panel_judge=%s winning_seed_store=%s",
+                panel_judge is not None,
+                getattr(winning_seed_store, "enabled", False)
+                if winning_seed_store is not None
+                else False,
             )
         # Spec §6 — optional per-agent brief attached by SwarmCommander
         # after Commander goal-decomposition. None means the standard
@@ -1176,7 +1178,7 @@ class AsiAgent(ABC):
                 )
             )
             _LOG.debug(
-                "PhaseA.A1 turn-metadata written: agent=%s turn=%d judge_verdict=%s "
+                "turn-metadata written: agent=%s turn=%d judge_verdict=%s "
                 "judge_confidence=%.2f judge_reasoning_len=%d ctx_updated=True",
                 agent_name,
                 turns,
@@ -1192,7 +1194,7 @@ class AsiAgent(ABC):
             ctx.last_verdict_confidence = verdict.confidence
             ctx.last_verdict_reasoning = judge_reasoning_str
             _LOG.debug(
-                "PhaseA.A1 ctx fields updated: last_verdict=%r last_verdict_confidence=%.2f "
+                "ctx fields updated: last_verdict=%r last_verdict_confidence=%.2f "
                 "last_verdict_reasoning=%r",
                 ctx.last_verdict,
                 ctx.last_verdict_confidence,
@@ -1206,8 +1208,7 @@ class AsiAgent(ABC):
             _seed_id_meta = result.metadata.get("seed_id", "") if result.metadata else ""
             if isinstance(_seed_id_meta, str) and _seed_id_meta.startswith("JDG-"):
                 _LOG.debug(
-                    "PhaseA.A4 judge-probe verdict-collected: probe_id=%s verdict=%s "
-                    "confidence=%.2f turn=%d",
+                    "judge-probe verdict-collected: probe_id=%s verdict=%s confidence=%.2f turn=%d",
                     _seed_id_meta,
                     verdict.verdict,
                     verdict.confidence,
@@ -1296,7 +1297,7 @@ class AsiAgent(ABC):
             # is visible in the audit trail.
             if seed_id and seed_id.startswith("JDG-"):
                 _LOG.debug(
-                    "PhaseA.A4 judge-probe turn-persisted: probe_id=%s turn=%d "
+                    "judge-probe turn-persisted: probe_id=%s turn=%d "
                     "verdict=%s written_to_memory=True",
                     seed_id,
                     turns,
@@ -1400,8 +1401,7 @@ class AsiAgent(ABC):
                             mutant=mutant_operator,
                         )
                         _LOG.debug(
-                            "PhaseB.B6 winning_seed_store.persist: agent=%s asi=%s "
-                            "mutant=%s persisted=%s",
+                            "winning_seed_store.persist: agent=%s asi=%s mutant=%s persisted=%s",
                             agent_name,
                             self.asi_category.value,
                             mutant_operator,
@@ -1409,7 +1409,7 @@ class AsiAgent(ABC):
                         )
                     except Exception as exc:  # pragma: no cover — defensive
                         _LOG.warning(
-                            "PhaseB.B6 winning_seed_store.persist failed (%s) — continuing",
+                            "winning_seed_store.persist failed (%s) — continuing",
                             exc,
                         )
 
@@ -1570,7 +1570,7 @@ class AsiAgent(ABC):
             seed = self._seed_index.get(parent_probe_id)
             if seed is not None:
                 _LOG.debug(
-                    "PhaseB.B2 _build_finding: resolved mutant probe_id=%s -> "
+                    "_build_finding: resolved mutant probe_id=%s -> "
                     "parent=%s for severity/mitre/csa inheritance",
                     seed_probe_id,
                     parent_probe_id,
@@ -1630,7 +1630,7 @@ class AsiAgent(ABC):
         # at construction time, so the audit trail shows the backfilled IDs
         # made it from probe YAML -> ProbeSeed -> Finding.mitre_techniques.
         _LOG.debug(
-            "PhaseA.A3 finding technique coverage: probe_id=%s mitre_atlas=%s",
+            "finding technique coverage: probe_id=%s mitre_atlas=%s",
             seed_probe_id or finding_id,
             list(mitre_techniques),
         )

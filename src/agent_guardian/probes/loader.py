@@ -144,7 +144,7 @@ def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[P
         if any(t.startswith("AML.T006") or t.startswith("AML.T007") for t in p.mitre_atlas)
     )
     _LOG.debug(
-        "PhaseA.A3 probe corpus loaded: total=%d probes with AML.T006x/T007x techniques=%d",
+        "probe corpus loaded: total=%d probes with AML.T006x/T007x techniques=%d",
         len(probes),
         backfill_count,
     )
@@ -152,7 +152,7 @@ def load_all_probes(*, root: Path | None = None, strict: bool = False) -> list[P
     # replay can confirm the judges/ subfolder is being discovered.
     judge_probes = [p for p in probes if p.id.startswith("JDG-")]
     _LOG.debug(
-        "PhaseA.A4 judge-probe-loader: judge_probes_loaded=%d ids=%s",
+        "judge-probe-loader: judge_probes_loaded=%d ids=%s",
         len(judge_probes),
         [p.id for p in judge_probes],
     )
@@ -226,7 +226,7 @@ def load_recon_probes(*, strict: bool = False) -> list[Probe]:
             continue
     probes.sort(key=lambda p: p.id)
     _LOG.debug(
-        "PhaseC.C5 load_recon_probes: loaded=%d ids=%s",
+        "load_recon_probes: loaded=%d ids=%s",
         len(probes),
         [p.id for p in probes],
     )
@@ -266,7 +266,7 @@ def load_vision_probes(*, strict: bool = False) -> list[Probe]:
             continue
     probes.sort(key=lambda p: p.id)
     _LOG.debug(
-        "PhaseC.C4d load_vision_probes: loaded=%d ids=%s",
+        "load_vision_probes: loaded=%d ids=%s",
         len(probes),
         [p.id for p in probes],
     )
@@ -302,7 +302,7 @@ def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
     # ProbeSeed.mitre_atlas for this ASI so coverage tooling can confirm
     # the backfill is propagating into the strategy layer.
     _LOG.debug(
-        "PhaseA.A3 seeds_for_asi_with_provenance: asi=%s seeds=%d unique_techniques=%s",
+        "seeds_for_asi_with_provenance: asi=%s seeds=%d unique_techniques=%s",
         asi.value,
         len(out),
         sorted({t for seed in out for t in seed.mitre_atlas}),
@@ -310,7 +310,7 @@ def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
     # Phase A.A4 — count JDG seeds going into the strategy layer.
     judge_seed_count = sum(1 for s in out if s.probe_id.startswith("JDG-"))
     _LOG.debug(
-        "PhaseA.A4 judge-probe seeds dispatched to strategy: asi=%s judge_seeds=%d",
+        "judge-probe seeds dispatched to strategy: asi=%s judge_seeds=%d",
         asi.value,
         judge_seed_count,
     )

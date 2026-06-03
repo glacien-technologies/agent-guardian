@@ -135,7 +135,7 @@ class WinningSeedStore:
             conn.commit()
 
         _LOG.debug(
-            "PhaseB.B6 store_init: db_path=%s enabled=%s retention_days=%d",
+            "store_init: db_path=%s enabled=%s retention_days=%d",
             self._db_path,
             self._enabled,
             self._retention_days,
@@ -172,7 +172,7 @@ class WinningSeedStore:
         except sqlite3.DatabaseError as exc:
             # PRAGMA failures are non-fatal — fall back to whatever default.
             _LOG.debug(
-                "PhaseB.B6 store.pragma_fallback: pragma_set_failed err=%s — "
+                "store.pragma_fallback: pragma_set_failed err=%s — "
                 "using sqlite default journal/sync modes",
                 exc,
             )
@@ -190,7 +190,7 @@ class WinningSeedStore:
         """
         if not self._enabled:
             _LOG.debug(
-                "PhaseB.B6 insert.noop: store_enabled=False target_hash=%s asi=%s",
+                "insert.noop: store_enabled=False target_hash=%s asi=%s",
                 record.target_fingerprint_hash,
                 record.asi,
             )
@@ -198,7 +198,7 @@ class WinningSeedStore:
 
         pre_len = len(record.seed_text)
         _LOG.debug(
-            "PhaseB.B6 insert: target_hash=%s asi=%s mutant=%s seed_len_pre_scrub=%d",
+            "insert: target_hash=%s asi=%s mutant=%s seed_len_pre_scrub=%d",
             record.target_fingerprint_hash,
             record.asi,
             record.mutant,
@@ -208,7 +208,7 @@ class WinningSeedStore:
         n_redactions = self._scrubber.last_redaction_count
         post_len = len(scrubbed_text)
         _LOG.debug(
-            "PhaseB.B6 insert_post_scrub: seed_len_post_scrub=%d n_redactions=%d expires_at=%s",
+            "insert_post_scrub: seed_len_post_scrub=%d n_redactions=%d expires_at=%s",
             post_len,
             n_redactions,
             record.expires_at.isoformat(),
@@ -274,7 +274,7 @@ class WinningSeedStore:
             deleted = cur.rowcount or 0
             conn.commit()
         _LOG.info(
-            "PhaseB.B6 expire_old: rows_deleted=%d retention_days=%d",
+            "expire_old: rows_deleted=%d retention_days=%d",
             deleted,
             self._retention_days,
         )
@@ -333,7 +333,7 @@ class WinningSeedStore:
                 )
             )
         _LOG.debug(
-            "PhaseB.B6 query: target_fingerprint_hash=%s asi=%s hits=%d miss=%s",
+            "query: target_fingerprint_hash=%s asi=%s hits=%d miss=%s",
             target_fingerprint_hash,
             asi,
             len(out),

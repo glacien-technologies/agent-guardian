@@ -117,7 +117,7 @@ class PAIRStrategy(Strategy):
         ctx_reasoning = self.ctx.last_verdict_reasoning
         meta_verdict = prev.metadata.get("judge_verdict", "")
         _LOG.debug(
-            "PhaseA.A1 PAIR reading verdict surfaces: ctx_verdict=%r ctx_confidence=%.2f "
+            "PAIR reading verdict surfaces: ctx_verdict=%r ctx_confidence=%.2f "
             "history_meta_verdict=%r history_meta_confidence=%s",
             ctx_verdict,
             ctx_confidence,

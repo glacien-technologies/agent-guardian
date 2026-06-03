@@ -644,7 +644,7 @@ class SwarmCommander:
             )
         except Exception as e:
             _LOG.debug(
-                "PhaseB.B4 panel construction skipped: %s (degrade to single Judge)",
+                "panel construction skipped: %s (degrade to single Judge)",
                 e,
             )
         try:
@@ -660,7 +660,7 @@ class SwarmCommander:
             self._winning_seed_store = store
         except Exception as e:
             _LOG.debug(
-                "PhaseB.B6 winning_seed_store construction skipped: %s",
+                "winning_seed_store construction skipped: %s",
                 e,
             )
         # PhaseC.C5 — recon-loop re-entry hook. Bound to a real fingerprint by
@@ -998,11 +998,31 @@ class SwarmCommander:
             )
             return
 
-        brief = _parse_swarm_brief(resp.text, scan_id=self.config.scan_id)
+        brief, failure = _parse_swarm_brief(resp.text, scan_id=self.config.scan_id)
         if brief is None:
-            _LOG.warning(
-                "commander returned malformed swarm-brief JSON -- falling back to uniform brief"
-            )
+            # Diagnose the *real* cause. A provider safety filter can decline in
+            # two ways: a structured ``content_filter`` finish_reason, or an
+            # inline prose refusal that the parser flagged (finish_reason
+            # "stop", no JSON). Either reads as a refusal to the operator --
+            # only call it "malformed JSON" when the model genuinely tried.
+            is_refusal = failure == "refusal" or resp.finish_reason == "content_filter"
+            if is_refusal:
+                _LOG.warning(
+                    "commander call was refused/blocked by the model provider "
+                    "(safety filter; provider=%s finish_reason=%s) -- "
+                    "falling back to uniform brief",
+                    resp.provider,
+                    resp.finish_reason,
+                )
+                fallback_reason = "commander refused/blocked by provider; uniform-brief fallback"
+            else:
+                _LOG.warning(
+                    "commander returned malformed swarm-brief JSON "
+                    "(provider=%s finish_reason=%s) -- falling back to uniform brief",
+                    resp.provider,
+                    resp.finish_reason,
+                )
+                fallback_reason = "malformed_brief_json; uniform-brief fallback"
             self._swarm_brief = self._uniform_brief()
             _decompose_sub_goals = len(self._swarm_brief.agent_briefs)
             self._emit_phase(
@@ -1018,7 +1038,7 @@ class SwarmCommander:
                     "summary": {
                         "sub_goals": _decompose_sub_goals,
                         "skipped": False,
-                        "reason": "malformed_brief_json; uniform-brief fallback",
+                        "reason": fallback_reason,
                     },
                 },
             )
@@ -2810,7 +2830,7 @@ class SwarmCommander:
                 reentry.on_reflection(payload)
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.debug(
-                    "PhaseC.C5 recon_reentry sink dispatch raised %s — continuing",
+                    "recon_reentry sink dispatch raised %s — continuing",
                     exc,
                 )
 
@@ -2984,12 +3004,61 @@ def _fingerprint_to_json(fp: TargetFingerprint) -> str:
     )
 
 
-def _parse_swarm_brief(text: str, *, scan_id: str) -> SwarmBrief | None:
+# Why the Commander brief couldn't be used. ``None`` means it parsed cleanly.
+# ``"refusal"`` means the provider's safety filter declined the request (no
+# JSON to parse). ``"malformed_json"`` means the model tried but emitted JSON we
+# couldn't load / validate. The caller turns these into distinct operator
+# warnings so a safety-block isn't misdiagnosed as bad JSON.
+BriefFailure = Literal["refusal", "malformed_json"]
+
+# Phrases a model emits when its safety layer declines the request inline (i.e.
+# as prose with finish_reason "stop", not a structured content_filter signal).
+# Lower-cased substring match -- kept deliberately narrow to avoid flagging a
+# legitimate brief that happens to mention these words.
+_REFUSAL_MARKERS: tuple[str, ...] = (
+    "i cannot fulfill",
+    "i can't fulfill",
+    "i cannot comply",
+    "i can't comply",
+    "i cannot assist",
+    "i can't assist",
+    "i cannot help with",
+    "i can't help with",
+    "i'm unable to",
+    "i am unable to",
+    "i cannot generate",
+    "i can't generate",
+    "i cannot create",
+    "i can't create",
+    "i will not",
+    "i won't",
+    "as an ai",
+    "against my guidelines",
+    "violates my",
+    "i'm not able to",
+    "i am not able to",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """Heuristic: does *text* read as a provider safety-refusal, not a brief?
+
+    Used as a fallback when the provider reports ``finish_reason == "stop"``
+    (refusal delivered inline as prose) and there was no JSON object to parse.
+    """
+    head = text.strip().lower()[:400]
+    return any(marker in head for marker in _REFUSAL_MARKERS)
+
+
+def _parse_swarm_brief(text: str, *, scan_id: str) -> tuple[SwarmBrief | None, BriefFailure | None]:
     """Best-effort parse of the Commander LLM's JSON response.
 
     Strips common wrapping (markdown code fences, prose prefaces). Returns
-    None on any parse / validation failure -- the caller falls back to a
-    uniform brief.
+    ``(brief, None)`` on success. On failure returns ``(None, reason)`` where
+    *reason* is ``"refusal"`` (no JSON object present -- the response reads as a
+    provider safety-refusal) or ``"malformed_json"`` (a JSON object was present
+    but couldn't be loaded / validated). The caller falls back to a uniform
+    brief in either case; the reason only drives the diagnostic warning.
     """
     stripped = text.strip()
     # Strip markdown code fences if the model wrapped its JSON in ```json ... ```
@@ -3002,18 +3071,31 @@ def _parse_swarm_brief(text: str, *, scan_id: str) -> SwarmBrief | None:
         match = re.search(r"\{.*\}", stripped, re.DOTALL)
         if match:
             stripped = match.group(0)
+        else:
+            # No JSON object at all -- the model didn't emit a (broken) brief,
+            # it declined to. Classify as a refusal so the operator sees the
+            # real cause rather than a "malformed JSON" red herring.
+            return None, "refusal"
+
+    # A JSON object was present but broke at parse/validate time. It may still be
+    # a refusal the model wrapped in (or followed with) braces -- prefer the
+    # refusal classification when the response reads as one, so the operator sees
+    # the real cause instead of a "malformed JSON" red herring.
+    def _failure() -> BriefFailure:
+        return "refusal" if _looks_like_refusal(text) else "malformed_json"
+
     try:
         payload = json.loads(stripped)
     except (json.JSONDecodeError, ValueError):
-        return None
+        return None, _failure()
     if not isinstance(payload, dict):
-        return None
+        return None, _failure()
     # Force the scan_id to match this run even if the LLM hallucinated one.
     payload["scan_id"] = scan_id
     try:
-        return SwarmBrief.model_validate(payload)
+        return SwarmBrief.model_validate(payload), None
     except ValidationError:
-        return None
+        return None, _failure()
 
 
 # Silence unused-import warnings: these are part of the public re-export surface.

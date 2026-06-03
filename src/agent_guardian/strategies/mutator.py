@@ -130,12 +130,12 @@ class BoN:
         return candidates
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug("PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "BoN", len(text))
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "BoN", len(text))
         candidates = self.augment(text, rng)
         idx = rng.randint(0, len(candidates) - 1)
         winner = candidates[idx]
         _LOG.debug(
-            "PhaseB.B1 BoN.apply: n=%d candidate_index=%d selected_len=%d",
+            "BoN.apply: n=%d candidate_index=%d selected_len=%d",
             self.n,
             idx,
             len(winner),
@@ -181,7 +181,7 @@ class FlipAttack:
         return ". ".join(reversed([c for c in chunks if c]))
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug("PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "FlipAttack", len(text))
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "FlipAttack", len(text))
         gran = (
             self.granularity if self.granularity in self._VARIANTS else rng.choice(self._VARIANTS)
         )
@@ -192,7 +192,7 @@ class FlipAttack:
         else:
             out = self._flip_sentences(text)
         _LOG.debug(
-            "PhaseB.B1 FlipAttack.apply: granularity=%s input_len=%d output_len=%d",
+            "FlipAttack.apply: granularity=%s input_len=%d output_len=%d",
             gran,
             len(text),
             len(out),
@@ -260,7 +260,7 @@ class ArtPrompt:
         return "\n".join(rows)
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug("PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "ArtPrompt", len(text))
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "ArtPrompt", len(text))
         tokens = text.split()
         if not tokens:
             return text
@@ -284,7 +284,7 @@ class ArtPrompt:
             + "Read each ASCII art block and substitute the masked token before answering."
         )
         _LOG.debug(
-            "PhaseB.B1 ArtPrompt.apply: tokens_masked=%d input_len=%d output_len=%d",
+            "ArtPrompt.apply: tokens_masked=%d input_len=%d output_len=%d",
             len(picked),
             len(text),
             len(out),
@@ -377,9 +377,7 @@ class CipherMutator:
         return "".join(mapping.get(c, c) for c in text)
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug(
-            "PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "CipherMutator", len(text)
-        )
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "CipherMutator", len(text))
         variant = self.variant if self.variant in self._VARIANTS else rng.choice(self._VARIANTS)
         if variant == "base64":
             out = self._base64(text)
@@ -389,14 +387,14 @@ class CipherMutator:
             shift = rng.randint(1, 25)
             out = self._caesar(text, shift)
             _LOG.debug(
-                "PhaseB.B1 CipherMutator.caesar: shift=%d",
+                "CipherMutator.caesar: shift=%d",
                 shift,
             )
         else:
             out = self._custom_bijection(text, rng)
         input_tokens = len(text.split())
         _LOG.debug(
-            "PhaseB.B1 CipherMutator.apply: variant=%s input_tokens=%d output_len=%d",
+            "CipherMutator.apply: variant=%s input_tokens=%d output_len=%d",
             variant,
             input_tokens,
             len(out),
@@ -438,9 +436,7 @@ class LowResourceMutator:
     }
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug(
-            "PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "LowResourceMutator", len(text)
-        )
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "LowResourceMutator", len(text))
         lang_code = rng.choice(self._LANGS)
         lang_name = self._LANG_NAMES[lang_code]
         sample = self._LANG_SAMPLES[lang_code]
@@ -451,7 +447,7 @@ class LowResourceMutator:
             f"then carry out the request and answer in {lang_name}:\n\n{text}"
         )
         _LOG.debug(
-            "PhaseB.B1 LowResourceMutator.apply: lang_code=%s translation_template_used=%s",
+            "LowResourceMutator.apply: lang_code=%s translation_template_used=%s",
             lang_code,
             template_used,
         )
@@ -522,9 +518,7 @@ class ManyShotMutator:
     n_shots: int = -1
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug(
-            "PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "ManyShotMutator", len(text)
-        )
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "ManyShotMutator", len(text))
         n = rng.choice([50, 200]) if self.n_shots < 0 else self.n_shots
         # Cycle fixtures to fill n_shots.
         examples: list[str] = []
@@ -535,7 +529,7 @@ class ManyShotMutator:
         out = f"{body}\n\nUser: {text}\nAssistant:"
         if len(out) > _MANY_SHOT_CHAR_CAP:
             _LOG.warning(
-                "PhaseB.B1 ManyShotMutator.apply: char_cap_hit pre_cap_len=%d cap=%d",
+                "ManyShotMutator.apply: char_cap_hit pre_cap_len=%d cap=%d",
                 len(out),
                 _MANY_SHOT_CHAR_CAP,
             )
@@ -544,7 +538,7 @@ class ManyShotMutator:
             head_budget = _MANY_SHOT_CHAR_CAP - len(tail)
             out = body[: max(0, head_budget)] + tail
         _LOG.debug(
-            "PhaseB.B1 ManyShotMutator.apply: n_shots=%d total_len=%d",
+            "ManyShotMutator.apply: n_shots=%d total_len=%d",
             n,
             len(out),
         )
@@ -574,13 +568,11 @@ class SkeletonKeyMutator:
     name: ClassVar[str] = "skeleton_key"
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug(
-            "PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "SkeletonKeyMutator", len(text)
-        )
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "SkeletonKeyMutator", len(text))
         del rng  # deterministic template, no rng choice needed
         out = _SKELETON_KEY_TEMPLATE.format(request=text)
         _LOG.debug(
-            "PhaseB.B1 SkeletonKeyMutator.apply: input_len=%d output_len=%d template_used=skeleton_key_v1",
+            "SkeletonKeyMutator.apply: input_len=%d output_len=%d template_used=skeleton_key_v1",
             len(text),
             len(out),
         )
@@ -617,7 +609,7 @@ class DeceptiveDelightMutator:
 
     def apply(self, text: str, rng: random.Random) -> str:
         _LOG.debug(
-            "PhaseB.B1 operator_kind=%s apply_entry input_len=%d",
+            "operator_kind=%s apply_entry input_len=%d",
             "DeceptiveDelightMutator",
             len(text),
         )
@@ -629,7 +621,7 @@ class DeceptiveDelightMutator:
             f"{self._BENIGN_PARAGRAPH}\n\n{post}"
         )
         _LOG.debug(
-            "PhaseB.B1 DeceptiveDelightMutator.apply: input_len=%d output_len=%d preamble_idx=%d",
+            "DeceptiveDelightMutator.apply: input_len=%d output_len=%d preamble_idx=%d",
             len(text),
             len(out),
             self._PREAMBLES.index(pre),
@@ -739,12 +731,12 @@ class PAPMutator:
     scheme: PAPScheme | None = None
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug("PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "PAPMutator", len(text))
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "PAPMutator", len(text))
         scheme = self.scheme if self.scheme is not None else rng.choice(list(PAPScheme))
         framing = _PAP_FRAMINGS[scheme]
         persuasion = f"{framing} {text}"
         _LOG.debug(
-            "PhaseB.B1 PAPMutator.apply: scheme=%s persuasion_text_len=%d",
+            "PAPMutator.apply: scheme=%s persuasion_text_len=%d",
             scheme.value,
             len(persuasion),
         )
@@ -799,7 +791,7 @@ class HCoTMutator:
     _FAMILIES: ClassVar[tuple[str, ...]] = ("o1", "claude_thinking", "gemini_thinking")
 
     def apply(self, text: str, rng: random.Random) -> str:
-        _LOG.debug("PhaseB.B1 operator_kind=%s apply_entry input_len=%d", "HCoTMutator", len(text))
+        _LOG.debug("operator_kind=%s apply_entry input_len=%d", "HCoTMutator", len(text))
         family = (
             self.target_model_family
             if self.target_model_family in self._FAMILIES
@@ -808,7 +800,7 @@ class HCoTMutator:
         scaffold = _HCOT_SCAFFOLDS[family]
         out = scaffold.format(request=text)
         _LOG.debug(
-            "PhaseB.B5 HCoTMutator.apply: target_model_family=%s variant_selected=%s input_len=%d",
+            "HCoTMutator.apply: target_model_family=%s variant_selected=%s input_len=%d",
             self.target_model_family,
             family,
             len(text),
@@ -817,13 +809,13 @@ class HCoTMutator:
             "<thinking>" in out or "<extended_thinking>" in out or "[INTERNAL_REASONING]" in out
         )
         _LOG.debug(
-            "PhaseB.B5 HCoTMutator.apply complete: output_len=%d hijack_boundary_present=%s",
+            "HCoTMutator.apply complete: output_len=%d hijack_boundary_present=%s",
             len(out),
             hijack_boundary_present,
         )
         # Also emit the B1-tagged generic line so the mutator audit grep finds it.
         _LOG.debug(
-            "PhaseB.B1 HCoTMutator.apply: target_model_family=%s scaffold_variant=%s hijack_instruction_len=%d",
+            "HCoTMutator.apply: target_model_family=%s scaffold_variant=%s hijack_instruction_len=%d",
             self.target_model_family,
             family,
             len(out),
@@ -879,7 +871,7 @@ def apply_mutation(operator_name: str, text: str, rng: random.Random | None = No
     op = MutatorRegistry.get(operator_name)
     seed_repr = getattr(rng, "getstate", lambda: None)
     _LOG.debug(
-        "PhaseB.B1 apply_mutation: operator=%s input_len=%d rng_seed=%s",
+        "apply_mutation: operator=%s input_len=%d rng_seed=%s",
         operator_name,
         len(text),
         type(seed_repr).__name__,

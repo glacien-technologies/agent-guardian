@@ -285,7 +285,7 @@ async def test_gemini_emits_structured_info_call_line(caplog: pytest.LogCaptureF
     seed / system / tool defs). We now emit one INFO one-liner with the
     just-the-essentials shape ``model call: gemini-<model> (msgs=N, max_tok=M)``
     so the operator's swarm-board narrates each LLM call without drowning
-    in DEBUG noise.
+    in DEBUG noise. The shared ``log_model_request`` helper owns this line.
     """
     import logging
 
@@ -297,6 +297,9 @@ async def test_gemini_emits_structured_info_call_line(caplog: pytest.LogCaptureF
     assert matching, (
         f"expected one INFO 'model call:' line, got {[r.message for r in caplog.records]}"
     )
+    # Exactly one narration line per call — provider+model is stamped once, not
+    # repeated on the response line.
+    assert len(matching) == 1, f"expected exactly one INFO 'model call:' line, got {matching}"
     last = matching[-1]
     # The structured shape includes msgs= and max_tok= tokens.
     assert "msgs=" in last.message
@@ -304,4 +307,53 @@ async def test_gemini_emits_structured_info_call_line(caplog: pytest.LogCaptureF
     # Raw kwargs (temperature / seed / system / tool defs) must NOT leak into INFO.
     assert "temperature=" not in last.message
     assert "seed=" not in last.message
+    await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_logs_full_request_and_response_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """At DEBUG we log the ACTUAL request sent and the ACTUAL full response.
+
+    Replaces the old ``text[:80]`` truncation: a real prompt and a real
+    response must both be readable in the log, not clipped to 80 chars.
+    """
+    import logging
+
+    long_text = "FULL_RESPONSE_BODY " * 20  # well past the old 80-char clip
+    body = _happy_body()
+    body["candidates"][0]["content"]["parts"][0]["text"] = long_text
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=body))
+    llm = GeminiClient(api_key="k")
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.gemini"):
+        await llm.complete(_req())
+    messages = [r.message for r in caplog.records]
+    # Request out: the actual payload (contents / generationConfig) is logged.
+    assert any("request out" in m and "generationConfig" in m for m in messages), messages
+    # Response in: the FULL text is present, plus token usage + finish reason.
+    resp_lines = [m for m in messages if m.startswith("response in:")]
+    assert resp_lines, messages
+    assert long_text.strip() in resp_lines[-1]
+    assert "tokens=" in resp_lines[-1]
+    assert "finish=" in resp_lines[-1]
+    await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_surfaces_safety_block_at_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A SAFETY finishReason maps to content_filter and is logged at WARNING."""
+    import logging
+
+    body = _happy_body()
+    body["candidates"][0]["finishReason"] = "SAFETY"
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=body))
+    llm = GeminiClient(api_key="k")
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.gemini"):
+        await llm.complete(_req())
+    blocked = [r for r in caplog.records if r.levelno == logging.WARNING and "blocked" in r.message]
+    assert blocked, [r.message for r in caplog.records]
+    assert "finish=content_filter" in blocked[-1].message
     await llm.aclose()

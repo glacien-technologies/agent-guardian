@@ -373,20 +373,30 @@ def test_executive_overview_asi_compact_dropped_weight_progress_status(
     assert ">Status<" not in overview_pane
 
 
-def test_executive_overview_asi_compact_widget_present_before_reproducibility(
+def test_executive_overview_asi_compact_widget_present_after_charts(
     client: TestClient, store: ScanStore
 ) -> None:
-    """Widget sits BELOW the row-3 charts and ABOVE the reproducibility receipt."""
+    """Widget sits BELOW the row-3 charts on Overview.
+
+    The reproducibility receipt that used to sit below the compact widget
+    was removed (the Overview was cleaned of framework-internal
+    scaffolding), so the widget is now the last Overview element. The
+    new "Scan plan" panel sits ABOVE the two-column chart row.
+    """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
     idx = body.find('id="tabpanel-overview"')
     next_idx = body.find('id="tabpanel-findings"', idx)
     overview_pane = body[idx:next_idx]
+    plan_idx = overview_pane.find('data-component="scan-plan"')
     compact_idx = overview_pane.find('data-component="asi-compact"')
-    repro_idx = overview_pane.find('data-component="reproducibility"')
     twocol_idx = overview_pane.find('class="exec-overview-twocol"')
-    assert twocol_idx < compact_idx < repro_idx
+    assert plan_idx != -1
+    assert twocol_idx < compact_idx
+    assert plan_idx < twocol_idx
+    # The retired reproducibility receipt must no longer appear anywhere.
+    assert 'data-component="reproducibility"' not in body
 
 
 def test_executive_overview_asi_compact_widget_present(

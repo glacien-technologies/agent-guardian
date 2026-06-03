@@ -4,9 +4,13 @@ Operator request (2026-06-02): before recon kicks off, narrate four readiness
 sub-stages so the scrollback opens with a clean PREFLIGHT block:
 
   preflight model.invoke: <model> reachable (200 OK in <latency_ms>ms)
-  preflight target.ping: <url> reachable (200 OK in <latency_ms>ms)
+  preflight target.ping: <url> validated (HTTP 200, <latency_ms>ms)
   preflight contract.schema_check: <path> ok
   preflight budget.parse: usd=$<budget>, seconds=<seconds>
+
+The target.ping stage is status-aware: a 2xx is "validated", a 401/403 is
+"reachable but returned HTTP 403 — check authorization", a 4xx/5xx is called
+out as reachable-but-unhealthy, and a connect/timeout is "unreachable".
 
 Each sub-stage emits ONE INFO line on success and ONE WARNING line on failure
 with a remediation hint. Failures do NOT abort the scan — the operator may
@@ -137,7 +141,7 @@ async def preflight_target_ping(endpoint: str | None) -> PreflightOutcome:
     # ``_endpoint_preflight`` module so we don't pull the whole CLI module
     # graph (and don't form an import cycle).
     from agent_guardian._endpoint_preflight import (
-        _endpoint_reachability_preflight,
+        _classify_endpoint_health,
         _is_placeholder_endpoint,
     )
 
@@ -150,7 +154,7 @@ async def preflight_target_ping(endpoint: str | None) -> PreflightOutcome:
 
     t0 = time.monotonic()
     try:
-        reachable = await _endpoint_reachability_preflight(endpoint)
+        health = await _classify_endpoint_health(endpoint)
     except Exception as exc:  # pragma: no cover — defensive
         _LOG.warning(
             "preflight target.ping: %s probe raised %s: %s — continuing",
@@ -165,13 +169,66 @@ async def preflight_target_ping(endpoint: str | None) -> PreflightOutcome:
             remediation="verify endpoint URL + network reachability",
         )
     latency_ms = int((time.monotonic() - t0) * 1000)
-    if reachable:
+
+    # Classify the outcome so the operator sees WHAT happened, not just that
+    # *something* answered. A 2xx is validated; a 401/403 means the box is up
+    # but our credentials/headers are wrong; a 4xx/5xx means it answered but
+    # unhealthily; unreachable means transport-level down.
+    if health.classification == "healthy":
         _LOG.info(
-            "preflight target.ping: %s reachable (in %dms)",
+            "preflight target.ping: %s validated (HTTP %d, %dms)",
             endpoint,
+            health.status_code,
             latency_ms,
         )
-        return PreflightOutcome(stage="target.ping", ok=True, detail=f"{latency_ms}ms")
+        return PreflightOutcome(
+            stage="target.ping",
+            ok=True,
+            detail=f"HTTP {health.status_code}, {latency_ms}ms",
+        )
+    if health.classification == "auth_failed":
+        _LOG.warning(
+            "preflight target.ping: %s reachable but returned HTTP %d — check authorization "
+            "(credentials/headers), the target is up (%dms)",
+            endpoint,
+            health.status_code,
+            latency_ms,
+        )
+        return PreflightOutcome(
+            stage="target.ping",
+            ok=False,
+            detail=f"auth_failed (HTTP {health.status_code}, {latency_ms}ms)",
+            remediation="check authorization — verify credentials/auth headers for the target",
+        )
+    if health.classification == "client_error":
+        _LOG.warning(
+            "preflight target.ping: %s reachable but returned HTTP %s — request rejected "
+            "by the target (check URL/route + request shape), the target is up (%dms)",
+            endpoint,
+            health.status_code if health.status_code is not None else "error",
+            latency_ms,
+        )
+        return PreflightOutcome(
+            stage="target.ping",
+            ok=False,
+            detail=f"client_error (HTTP {health.status_code}, {latency_ms}ms)",
+            remediation="verify the endpoint URL/route and the request body shape",
+        )
+    if health.classification == "server_error":
+        _LOG.warning(
+            "preflight target.ping: %s reachable but returned HTTP %d — target erroring "
+            "internally, the listener is up (%dms)",
+            endpoint,
+            health.status_code,
+            latency_ms,
+        )
+        return PreflightOutcome(
+            stage="target.ping",
+            ok=False,
+            detail=f"server_error (HTTP {health.status_code}, {latency_ms}ms)",
+            remediation="target returned 5xx — check the target's own logs/health",
+        )
+    # unreachable — transport-level fault (connect/timeout).
     _LOG.warning(
         "preflight target.ping: %s unreachable — verify URL and that the target is live",
         endpoint,

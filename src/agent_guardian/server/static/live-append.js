@@ -27,8 +27,8 @@
  *
  * Filter integration
  * ------------------
- * The Findings filter chip toolbar (QA-053) and the Logs level chip
- * toolbar both run pure-client-side filters. When a chip filter is
+ * The Findings dropdown filter toolbar (QA-053) and the Logs level
+ * chip toolbar both run pure-client-side filters. When a filter is
  * active we still APPEND the live row (so it's counted in M of the
  * "Showing N of M" counter) but apply the same gate the existing
  * filter functions apply — adding the ``is-filtered-out`` class on
@@ -225,26 +225,28 @@
     return row;
   }
 
+  // Verdict precedence for the per-agent rollup — mirrors the server-side
+  // ``_rollup_verdict`` (worst case wins so a single exploited turn is never
+  // masked behind a defended one). Higher number == worse.
+  var VERDICT_RANK = { fail: 3, inconclusive: 2, pass: 1 };
+
   /**
-   * Build a Probes table row from an ``agent_*`` event payload.
+   * Normalise an ``agent_*`` event payload into the fields a per-agent
+   * probe row cares about.
    *
    * Payload shape:
-   *   { agent, asi, turn, max_turns, probe_id, payload?: {findings_count, turns} }
+   *   { agent, asi, turn, max_turns, probe_id, payload?: {findings_count} }
    *
    * Verdict is derived: ``agent_done`` w/ findings>0 → fail; w/
    * findings==0 → pass; ``agent_skipped`` → inconclusive; otherwise
-   * pending (live progress).
+   * pending (live progress, e.g. ``agent_start`` / ``agent_progress``).
    */
-  function buildProbeRow(payload) {
-    if (!payload) { return null; }
-    var row = cloneTemplate("probe");
-    if (!row) { return null; }
+  function readProbeEvent(payload) {
     var p = payload.payload || {};
     var kind = safeStr(payload.kind || payload._kind);
     var agent = safeStr(payload.agent || p.agent);
     var asi = safeStr(payload.asi || p.asi);
     var probeId = safeStr(payload.probe_id || p.probe_id || "");
-    var turn = safeStr(payload.turn || p.turn || "");
     var verdict = "pending";
     if (kind === "agent_done") {
       var n = Number(p.findings_count || 0);
@@ -260,6 +262,48 @@
         ts = new Date(payload.ts * 1000).toISOString();
       } catch (e) { ts = ""; }
     }
+    // ``agent_progress`` carries the live turn index; ``agent_start`` is the
+    // first turn. We count distinct turn arrivals on the row rather than
+    // trust the event to carry a running total.
+    var isTurn = kind === "agent_start" || kind === "agent_progress";
+    return {
+      kind: kind,
+      agent: agent,
+      asi: asi,
+      probeId: probeId,
+      verdict: verdict,
+      ts: ts,
+      isTurn: isTurn,
+    };
+  }
+
+  /** Set the verdict pill text + modifier class on a probe row. */
+  function setProbeVerdict(row, verdict) {
+    row.setAttribute("data-verdict", verdict);
+    var pillNode = row.querySelector('[data-slot="verdict-pill"]');
+    if (!pillNode) { return; }
+    // Drop any stale modifier before re-applying.
+    pillNode.className = "exec-verdict-pill exec-verdict-pill--" + verdict;
+    pillNode.textContent = VERDICT_LABELS[verdict] || "PENDING";
+  }
+
+  /**
+   * Build a fresh per-agent Probes table row from a normalised event.
+   * One ROW PER AGENT (operator feedback 2026-06-03) — recon's many turns
+   * collapse into this single row, whose turn count + verdict update in
+   * place on later turns (see ``appendProbe``).
+   *
+   * Returns a fully populated <tr>, or null if the template is missing.
+   */
+  function buildProbeRow(payload) {
+    if (!payload) { return null; }
+    var row = cloneTemplate("probe");
+    if (!row) { return null; }
+    var ev = readProbeEvent(payload);
+    var scanId =
+      document.body && document.body.getAttribute
+        ? document.body.getAttribute("data-scan-id") || ""
+        : "";
 
     // Counted attributes (not in the template skeleton — see
     // ``_tab_probes.html`` for the rationale; set them here on every
@@ -269,20 +313,25 @@
     row.setAttribute("data-action", "probe-row-click");
     row.setAttribute("tabindex", "0");
     row.setAttribute("role", "button");
-    row.setAttribute("data-probe-id", probeId);
-    row.setAttribute("data-verdict", verdict);
-    fillSlot(row, "probe-id", probeId || "—");
-    fillSlot(row, "asi", asi || "—");
-    fillSlot(row, "agent", agent || "—");
-    fillSlot(row, "turn", turn ? "turn " + turn : "—");
-    fillSlot(row, "timestamp", ts);
-
-    var pillNode = row.querySelector('[data-slot="verdict-pill"]');
-    if (pillNode) {
-      pillNode.classList.add("exec-verdict-pill--" + verdict);
-      pillNode.textContent = VERDICT_LABELS[verdict] || "PENDING";
+    row.setAttribute("data-probe-group", ev.agent);
+    row.setAttribute("data-probe-id", ev.probeId);
+    if (scanId && ev.agent) {
+      row.setAttribute(
+        "data-probe-href",
+        "/scan/" + encodeURIComponent(scanId) + "/probe?group=" + encodeURIComponent(ev.agent)
+      );
     }
-    row.setAttribute("aria-label", "Open probe " + (probeId || "(new)"));
+    var turnCount = ev.isTurn ? 1 : 0;
+    row.setAttribute("data-turn-count", String(turnCount));
+    setProbeVerdict(row, ev.verdict);
+    fillSlot(row, "asi", ev.asi || "—");
+    fillSlot(row, "agent", ev.agent || "—");
+    fillSlot(row, "turn", turnCount + (turnCount === 1 ? " turn" : " turns"));
+    fillSlot(row, "timestamp", ev.ts);
+    row.setAttribute(
+      "aria-label",
+      "Open conversation for " + (ev.agent || "(new agent)")
+    );
     return row;
   }
 
@@ -329,28 +378,23 @@
   // -------------------------------------------------------------------
 
   /**
-   * Test whether a Findings row passes the active chip filter set.
-   * Mirrors the AND-of-OR logic in ``executive_findings.js`` so the
-   * live-append path is consistent with the existing chip behaviour.
+   * Test whether a Findings row passes the active dropdown filter set.
+   * Mirrors the AND-of-dropdowns logic in ``executive_findings.js`` so
+   * the live-append path is consistent with the dropdown behaviour:
+   * each ``<select>`` with a non-empty value must match the row's
+   * matching ``data-{group}`` attribute.
    */
   function passesFindingsFilter(row) {
     var toolbar = document.getElementById("exec-findings-filter");
     if (!toolbar) { return true; }
-    var chips = toolbar.querySelectorAll(".exec-findings-filter__chip");
-    var groups = { severity: [], agent: [], asi: [], probe: [] };
-    for (var i = 0; i < chips.length; i++) {
-      var c = chips[i];
-      if (c.getAttribute("aria-pressed") !== "true") { continue; }
-      var g = c.getAttribute("data-filter-group");
-      var v = c.getAttribute("data-filter-value");
-      if (g && v && groups[g]) { groups[g].push(v); }
-    }
-    var keys = ["severity", "agent", "asi", "probe"];
-    for (var k = 0; k < keys.length; k++) {
-      var picks = groups[keys[k]];
-      if (!picks.length) { continue; }
-      var rowVal = row.getAttribute("data-" + keys[k]) || "";
-      if (picks.indexOf(rowVal) === -1) { return false; }
+    var selects = toolbar.querySelectorAll(".exec-findings-filter__select");
+    for (var i = 0; i < selects.length; i++) {
+      var sel = selects[i];
+      var g = sel.getAttribute("data-filter-group");
+      var want = sel.value || "";
+      if (!g || !want) { continue; }
+      var rowVal = row.getAttribute("data-" + g) || "";
+      if (rowVal !== want) { return false; }
     }
     return true;
   }
@@ -437,10 +481,39 @@
   function appendProbe(payload) {
     wireHover("probe");
     enqueueOrApply("probe", function () {
-      var row = buildProbeRow(payload);
-      if (!row) { return; }
+      if (!payload) { return; }
       var tbody = document.querySelector("#tabpanel-probes .exec-probes-table tbody");
       if (!tbody) { return; }
+      var ev = readProbeEvent(payload);
+      // One ROW PER AGENT — if this agent already has a row, UPDATE it
+      // (bump the turn count + roll the verdict up) instead of appending a
+      // second row. Recon's ~17 turns therefore land in a single row.
+      var existing = ev.agent
+        ? tbody.querySelector(
+            '.exec-probes-table__row[data-probe-group="' +
+              (window.CSS && CSS.escape ? CSS.escape(ev.agent) : ev.agent) +
+              '"]'
+          )
+        : null;
+      if (existing) {
+        if (ev.isTurn) {
+          var n = (parseInt(existing.getAttribute("data-turn-count") || "0", 10) || 0) + 1;
+          existing.setAttribute("data-turn-count", String(n));
+          fillSlot(existing, "turn", n + (n === 1 ? " turn" : " turns"));
+        }
+        // Roll the verdict up to the worst outcome seen so far.
+        var current = existing.getAttribute("data-verdict") || "pending";
+        if ((VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK[current] || 0)) {
+          setProbeVerdict(existing, ev.verdict);
+        }
+        if (ev.ts) { fillSlot(existing, "timestamp", ev.ts); }
+        if (ev.probeId && !existing.getAttribute("data-probe-id")) {
+          existing.setAttribute("data-probe-id", ev.probeId);
+        }
+        return;
+      }
+      var row = buildProbeRow(payload);
+      if (!row) { return; }
       tbody.appendChild(row);
     });
   }

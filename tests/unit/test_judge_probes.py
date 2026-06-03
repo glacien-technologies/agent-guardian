@@ -130,7 +130,7 @@ async def test_judge_probe_dispatch_logs_fire_in_agent_runtime(
     await agent.run(target, memory)
 
     msgs = [r.getMessage() for r in caplog.records]
-    assert any("PhaseA.A4 judge-probe verdict-collected" in m for m in msgs), (
-        f"expected PhaseA.A4 verdict-collected log; captured messages: "
-        f"{[m for m in msgs if 'PhaseA' in m]}"
+    assert any("judge-probe verdict-collected" in m for m in msgs), (
+        f"expected judge-probe verdict-collected log; captured messages: "
+        f"{[m for m in msgs if 'judge-probe' in m]}"
     )

@@ -1,55 +1,148 @@
-{# Executive — Scan identity block (Overview only).
+{# Executive — Scan plan panel (Overview only).
 
-   QA-066 (2026-06-03) — lifted from the Reproducibility receipt. The
-   7-row fingerprint (SCAN_ID / SEED / GUARDIAN / AIVSS / PROBES /
-   TARGET / EVIDENCE) is the cheapest "what scan am I looking at"
-   answer, so it now sits ABOVE the KPI strip on Overview as a
-   sentence-case "Scan identity" header. The Reproducibility section
-   below still hosts the rerun shell command + Copy button.
+   Mirrors the CLI's Phase-0 scan-plan board (``ui/scan_plan.py``) so the
+   first thing an operator reads on the dashboard is the same plan they
+   confirmed in the terminal. Replaced the framework-internal "Scan
+   identity" fingerprint card (SCAN_ID / SEED / GUARDIAN / AIVSS / PROBES
+   / TARGET / EVIDENCE) — those internal version pins were noise for end
+   users.
 
-   Payload fields consumed (shared view-model, same as Reproducibility):
-     - scan_id
-     - rng_seed
-     - package_version          (GUARDIAN)
-     - aivss_formula_version    (AIVSS)
-     - probe_library_version    (PROBES)
-     - target_ref               (TARGET)
-     - evidence_fingerprint     (EVIDENCE)
+   Grouped into the same six sections as the CLI:
+     TARGET        — URL, Mode, Reachable, Multi-agent
+     MODELS        — Attacker, Evaluator, Commander (+ validated indicator)
+     BUDGET        — Mode, Wall-clock cap, USD cap, Estimated cost
+     OUTPUTS       — --output
+     DASHBOARD     — URL, Server status
+     SAFETY GUARDS — RoE blocklist, Authorization, Egress policy
+
+   Payload (``scan_plan``) is assembled in
+   ``dashboard_view._build_scan_plan``; any field the persisted scan
+   record cannot supply renders as "—" rather than being fabricated.
 #}
-<section class="exec-callout exec-callout--identity"
-         id="exec-scan-identity"
-         data-component="scan-identity"
+<section class="exec-plan"
+         id="exec-scan-plan"
+         data-component="scan-plan"
          role="group"
-         aria-labelledby="exec-scan-identity-label">
-  <p class="exec-callout__label" id="exec-scan-identity-label">Scan identity</p>
-  <dl class="exec-callout__grid">
-    <div class="exec-callout__row">
-      <dt>SCAN_ID</dt>
-      <dd><span class="exec-mono-inline">{{ scan_id }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>SEED</dt>
-      <dd><span class="exec-mono-inline">{{ rng_seed }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>GUARDIAN</dt>
-      <dd><span class="exec-mono-inline">{{ package_version }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>AIVSS</dt>
-      <dd><span class="exec-mono-inline">{{ aivss_formula_version }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>PROBES</dt>
-      <dd><span class="exec-mono-inline">{{ probe_library_version }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>TARGET</dt>
-      <dd><span class="exec-mono-inline">{{ target_ref }}</span></dd>
-    </div>
-    <div class="exec-callout__row">
-      <dt>EVIDENCE</dt>
-      <dd><span class="exec-mono-inline">{{ evidence_fingerprint }}</span></dd>
-    </div>
-  </dl>
+         aria-labelledby="exec-scan-plan-label">
+  <p class="exec-plan__heading" id="exec-scan-plan-label">Scan plan</p>
+  <div class="exec-plan__sections">
+    {# TARGET #}
+    <section class="exec-plan__group" aria-label="Target">
+      <p class="exec-plan__eyebrow">TARGET</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>URL</dt>
+          <dd><span class="exec-mono-inline">{{ scan_plan.target.url }}</span></dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Mode</dt>
+          <dd><span class="exec-mono-inline">{{ scan_plan.target.mode }}</span></dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Reachable</dt>
+          <dd>{{ scan_plan.target.reachable }}</dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Multi-agent</dt>
+          <dd>{{ scan_plan.target.multi_agent }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    {# MODELS — each role carries a validated indicator. #}
+    <section class="exec-plan__group" aria-label="Models">
+      <p class="exec-plan__eyebrow">MODELS</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>Attacker</dt>
+          <dd>
+            <span class="exec-mono-inline">{{ scan_plan.models.attacker }}</span>
+            <span class="exec-plan__validated">{{ scan_plan.models.validated }}</span>
+          </dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Evaluator</dt>
+          <dd>
+            <span class="exec-mono-inline">{{ scan_plan.models.evaluator }}</span>
+            <span class="exec-plan__validated">{{ scan_plan.models.validated }}</span>
+          </dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Commander</dt>
+          <dd>
+            <span class="exec-mono-inline">{{ scan_plan.models.commander }}</span>
+            <span class="exec-plan__validated">{{ scan_plan.models.validated }}</span>
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    {# BUDGET #}
+    <section class="exec-plan__group" aria-label="Budget">
+      <p class="exec-plan__eyebrow">BUDGET</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>Mode</dt>
+          <dd><span class="exec-mono-inline">{{ scan_plan.budget.mode }}</span></dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Wall-clock cap</dt>
+          <dd>{{ scan_plan.budget.wall_cap }}</dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>USD cap</dt>
+          <dd>{{ scan_plan.budget.usd_cap }}</dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Estimated cost</dt>
+          <dd>{{ scan_plan.budget.estimated_cost }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    {# OUTPUTS #}
+    <section class="exec-plan__group" aria-label="Outputs">
+      <p class="exec-plan__eyebrow">OUTPUTS</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>--output</dt>
+          <dd><span class="exec-mono-inline">{{ scan_plan.outputs.output }}</span></dd>
+        </div>
+      </dl>
+    </section>
+
+    {# DASHBOARD #}
+    <section class="exec-plan__group" aria-label="Dashboard">
+      <p class="exec-plan__eyebrow">DASHBOARD</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>URL</dt>
+          <dd><span class="exec-mono-inline">{{ scan_plan.dashboard.url }}</span></dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Server status</dt>
+          <dd>{{ scan_plan.dashboard.server_status }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    {# SAFETY GUARDS #}
+    <section class="exec-plan__group" aria-label="Safety guards">
+      <p class="exec-plan__eyebrow">SAFETY GUARDS</p>
+      <dl class="exec-plan__grid">
+        <div class="exec-plan__row">
+          <dt>RoE blocklist</dt>
+          <dd>{{ scan_plan.safety.roe_blocklist }}</dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Authorization</dt>
+          <dd>{{ scan_plan.safety.authorization }}</dd>
+        </div>
+        <div class="exec-plan__row">
+          <dt>Egress policy</dt>
+          <dd>{{ scan_plan.safety.egress_policy }}</dd>
+        </div>
+      </dl>
+    </section>
+  </div>
 </section>

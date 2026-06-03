@@ -139,8 +139,9 @@ def test_probe_row_carries_drawer_href_for_polymorphic_loader(
     body = resp.text
     # Probe row's ``data-probe-href`` is the polymorphic-loader entry
     # point for the Probes tab (paired with ``data-finding-href`` on
-    # the Findings tab).
-    assert f'data-probe-href="/scan/{scan.id}/probe?index=0"' in body
+    # the Findings tab). Per-agent grouping (2026-06-03) keys it on the
+    # agent so the modal renders that agent's whole conversation.
+    assert f'data-probe-href="/scan/{scan.id}/probe?group=goal-hijack-agent"' in body
 
 
 def test_probe_drawer_html_renders_reproduce_with_scan_and_probe(

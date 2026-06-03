@@ -290,10 +290,18 @@ body.exec-body {
         :focus-within. QA-062 (2026-06-03) only the FINDINGS tile still
         renders this, so the COST + COVERAGE overflow-flip rules were
         dropped (they only existed to keep those popovers in-frame).
+
+   QA-071 (2026-06-03) — operator feedback: the popover surfaced far BELOW
+   the tile, reading as a detached banner. It now floats ABOVE the tile,
+   anchored near the ⓘ icon (which lives at the top-right of the label
+   row), with a down-pointing caret aimed back at the icon. The font is
+   stepped down one notch for a lighter, annotation-like read. The tile
+   is ``position: relative`` (not clipped) so an upward-floating popover
+   is not clipped by the tile or the strip grid.
 */
 .exec-kpi__info-popover.kpi-info-popover {
   position: absolute;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 8px);
   left: 0.875rem;
   right: 0.875rem;
   z-index: 25;
@@ -302,57 +310,42 @@ body.exec-body {
   color: var(--exec-ink-muted);
   border: 1px solid var(--exec-border-subtle);
   font-family: var(--exec-font-sans);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 400;
   letter-spacing: 0;
-  line-height: 1.5;
+  line-height: 1.45;
   /* QA-067 — explicitly opt out of uppercase + letter-spacing so this
      popover never inherits the eyebrow look from ``.exec-kpi__label``. */
   text-transform: none;
-  padding: 0.625rem 0.75rem;
+  padding: 0.5rem 0.625rem;
   border-radius: var(--exec-radius-sm);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
 }
 /* QA-067 (2026-06-03) — small arrow indicator anchored at the (i) icon.
-   The ``::before`` is a CSS-only triangle drawn from the top edge of the
-   popover; ``::after`` paints a one-pixel inset to match the popover's
-   1px border so the arrow looks continuous with the popover frame. */
+   QA-071 (2026-06-03) — the popover now sits above the tile, so the caret
+   points DOWN from the bottom edge of the popover toward the icon. It is
+   anchored to the right edge to track the icon's top-right position. The
+   ``::before`` is the 1px-border triangle and ``::after`` the inner fill. */
 .exec-kpi__info-popover.kpi-info-popover::before,
 .exec-kpi__info-popover.kpi-info-popover::after {
   content: "";
   position: absolute;
-  left: 0.5rem;
+  right: 0.5rem;
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
 }
 .exec-kpi__info-popover.kpi-info-popover::before {
-  top: -7px;
-  border-bottom: 7px solid var(--exec-border-subtle);
+  bottom: -7px;
+  border-top: 7px solid var(--exec-border-subtle);
 }
 .exec-kpi__info-popover.kpi-info-popover::after {
-  top: -6px;
-  border-bottom: 7px solid var(--exec-bg-elev);
+  bottom: -6px;
+  border-top: 7px solid var(--exec-bg-elev);
 }
 .exec-kpi__info-popover[hidden] {
   display: none;
-}
-/* Tooltip overflow flip for the rightmost two tiles (COST + COVERAGE) so the
-   popover never clips the viewport edge. The arrow stays anchored to the
-   right edge in that case. */
-.exec-kpi[data-kpi="cost"] .exec-kpi__info-popover,
-.exec-kpi[data-kpi="coverage"] .exec-kpi__info-popover {
-  left: auto;
-  right: 0.875rem;
-  min-width: 14rem;
-}
-.exec-kpi[data-kpi="cost"] .exec-kpi__info-popover.kpi-info-popover::before,
-.exec-kpi[data-kpi="cost"] .exec-kpi__info-popover.kpi-info-popover::after,
-.exec-kpi[data-kpi="coverage"] .exec-kpi__info-popover.kpi-info-popover::before,
-.exec-kpi[data-kpi="coverage"] .exec-kpi__info-popover.kpi-info-popover::after {
-  left: auto;
-  right: 0.5rem;
 }
 
 /* Hover data-table popover — only the FINDINGS tile uses it (QA-062). */
@@ -1267,12 +1260,26 @@ body.exec-body {
 }
 .exec-recon__title {
   margin: 0 0 6px 0;
+  /* The recon heading folded onto a second line even with horizontal room
+     to spare: the global ``h2`` rule (colors_and_type.css) ships a
+     ``text-wrap: balance``-style tight measure, and ``.exec-section-lede``'s
+     68ch cap was leaking onto the title via the shared head block. Pin the
+     title to the full panel width and let it flow naturally so short copy
+     like "Recon findings about this agent" stays on one line. */
+  width: 100%;
+  max-width: none;
+  text-wrap: pretty;
 }
 .exec-recon__lede {
+  /* The pending-state prose should use the full panel measure rather than
+     inheriting ``.exec-section-lede``'s narrow 68ch cap (which folded the
+     copy prematurely). Cap a touch wider for comfortable reading. */
   margin: 0;
   font-family: var(--exec-font-sans);
   font-size: 13px;
   color: var(--exec-ink-muted);
+  max-width: 90ch;
+  text-wrap: pretty;
 }
 
 .exec-recon__grid {
@@ -1632,19 +1639,25 @@ body.exec-body {
   top: 0;
   z-index: 1;
 }
-/* QA-051 / QA-052 — new column grid:
+/* QA-051 / QA-052 — column grid:
  *   Severity · ASI · Category · Agent · Probe · Summary · Turn
  * The legacy ``ts`` column (QA-052 dropped TIMESTAMP) and the legacy
  * ``agent`` column slot (was the ASI code, now renamed to ``asi``) are
- * gone; the new ``category`` column carries the CSA category label
- * and the new ``agent`` column carries the runtime agent name. */
-.exec-findings-table__col--sev { width: 7rem; }
-.exec-findings-table__col--asi { width: 5.5rem; }
-.exec-findings-table__col--category { width: 13rem; }
-.exec-findings-table__col--agent { width: 11rem; }
-.exec-findings-table__col--probe { width: 11rem; }
+ * gone; the ``category`` column carries the CSA category label and the
+ * ``agent`` column carries the runtime agent name. The in-row turn
+ * accordion was removed — there is no longer a leading toggle column,
+ * so the seven content columns now own the full table width with no
+ * dead left gutter. Percentage widths let the Summary column absorb
+ * slack so the grid fills the wrap edge-to-edge regardless of viewport
+ * width (``table-layout: fixed`` honours these as the authoritative
+ * grid). */
+.exec-findings-table__col--sev { width: 8%; min-width: 6.5rem; }
+.exec-findings-table__col--asi { width: 7%; min-width: 5rem; }
+.exec-findings-table__col--category { width: 17%; }
+.exec-findings-table__col--agent { width: 15%; }
+.exec-findings-table__col--probe { width: 13%; }
 .exec-findings-table__col--summary { width: auto; min-width: 16rem; }
-.exec-findings-table__col--turn { width: 4rem; }
+.exec-findings-table__col--turn { width: 6%; min-width: 4rem; }
 
 .exec-findings-table__row {
   cursor: pointer;
@@ -1758,24 +1771,20 @@ body.exec-body {
 }
 
 /* ============================================================
- * QA-053 — Findings tab filter chip toolbar.
+ * QA-053 — Findings tab dropdown filter toolbar.
  *
- * Sits above the findings table. Operators click chips to compose
- * an AND-of-OR filter: chips in the same group OR together, groups
- * AND together. The toolbar is sticky on scroll so the chip set
- * stays in reach while the operator scans rows. Wiring lives in
- * ``executive_findings.js`` (marker:
+ * Sits above the findings table. Operators pick a value from each of
+ * the Severity / Agent / Probe / ASI ``<select>`` dropdowns; the four
+ * dimensions compose with AND. The toolbar is sticky on scroll so the
+ * controls stay in reach while the operator scans rows. Wiring lives
+ * in ``executive_findings.js`` (marker:
  * ``ag.dashboard.executive.findings.filters``).
- *
- * The pressed-state palette borrows from the Logs filter toolbar
- * (severity chips use the same colour vocabulary as the per-row
- * pills) so the two filter UIs feel like siblings.
  * ============================================================ */
 .exec-findings-filter {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
-  align-items: center;
+  gap: 0.625rem 1rem;
+  align-items: flex-end;
   margin: 0 0 0.75rem 0;
   padding: 0.625rem 0.875rem;
   border: 1px solid var(--exec-border-subtle);
@@ -1785,13 +1794,12 @@ body.exec-body {
   top: 0;
   z-index: 2;
 }
-.exec-findings-filter__group {
+.exec-findings-filter__field {
   display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.25rem;
 }
-.exec-findings-filter__group-label {
+.exec-findings-filter__label {
   font-family: var(--exec-font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -1799,73 +1807,39 @@ body.exec-body {
   text-transform: uppercase;
   color: var(--exec-ink-subtle);
 }
-.exec-findings-filter__chips {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-}
-.exec-findings-filter__chip {
+.exec-findings-filter__select {
   appearance: none;
+  -webkit-appearance: none;
   cursor: pointer;
-  font-family: var(--exec-font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--exec-ink-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  color: var(--exec-ink);
+  background: var(--exec-bg-sunken);
   border: 1px solid var(--exec-border-subtle);
-  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
-  white-space: nowrap;
+  border-radius: var(--exec-radius-sm);
+  padding: 5px 26px 5px 10px;
+  min-width: 9rem;
   max-width: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Inline chevron so the control reads as a dropdown without relying
+   * on the native arrow (which ``appearance: none`` strips). */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 14px) center, calc(100% - 9px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
 }
-.exec-findings-filter__chip:hover {
-  background: var(--exec-brand-tint);
+.exec-findings-filter__select:hover {
   border-color: var(--exec-brand);
-  color: var(--exec-brand-strong);
 }
-.exec-findings-filter__chip:focus-visible {
+.exec-findings-filter__select:focus-visible {
   outline: 2px solid var(--exec-brand);
   outline-offset: 2px;
 }
-/* Pressed-state by chip family — the severity chips inherit the
- * per-pill colours; agent / asi / probe chips fall back to the
- * neutral brand-tint posture. */
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-critical {
-  background: var(--exec-sev-critical-bg);
-  color: var(--exec-sev-critical);
-  border-color: color-mix(in srgb, var(--exec-sev-critical) 30%, transparent);
-}
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-high {
-  background: var(--exec-sev-high-bg);
-  color: var(--exec-sev-high);
-  border-color: color-mix(in srgb, var(--exec-sev-high) 30%, transparent);
-}
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-medium {
-  background: var(--exec-sev-medium-bg);
-  color: var(--exec-sev-medium);
-  border-color: color-mix(in srgb, var(--exec-sev-medium) 30%, transparent);
-}
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--sev-low {
-  background: var(--exec-sev-low-bg);
-  color: var(--exec-sev-low);
-  border-color: color-mix(in srgb, var(--exec-sev-low) 30%, transparent);
-}
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--agent,
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--asi,
-.exec-findings-filter__chip[aria-pressed="true"].exec-findings-filter__chip--probe {
-  background: var(--exec-brand-tint);
-  color: var(--exec-brand-strong);
-  border-color: var(--exec-brand);
-}
-.exec-findings-filter__chip[aria-pressed="false"] {
-  opacity: 0.7;
-}
 .exec-findings-filter__counter {
   margin-left: auto;
+  align-self: flex-end;
+  padding-bottom: 5px;
   font-family: var(--exec-font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -1876,7 +1850,7 @@ body.exec-body {
   font-weight: 600;
   color: var(--exec-ink);
 }
-/* Row hidden by the client-side chip filter. JS toggles this class
+/* Row hidden by the client-side dropdown filter. JS toggles this class
  * on the <tr>; we use ``display: none`` instead of ``visibility``
  * so adjacent-row borders collapse cleanly. */
 .exec-findings-table__row.is-filtered-out {
@@ -2900,6 +2874,87 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   outline-offset: 2px;
 }
 
+/* ------------------------------------------------------------
+ * Scan plan panel (Overview only) — replaces the former Scan
+ * identity fingerprint card. Mirrors the CLI Phase-0 scan-plan
+ * board: a six-section sheet (TARGET / MODELS / BUDGET /
+ * OUTPUTS / DASHBOARD / SAFETY GUARDS). Deep-purple brand accent
+ * + JetBrains-mono row labels, matching the rest of Executive.
+ * ------------------------------------------------------------ */
+.exec-plan {
+  max-width: var(--exec-shell-max);
+  margin: 0 auto 1.5rem auto;
+  padding: 20px 24px 22px;
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-left: 3px solid var(--exec-brand);
+  border-radius: var(--exec-radius-md, 8px);
+}
+.exec-plan__heading {
+  margin: 0 0 16px 0;
+  font-family: var(--exec-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--exec-ink);
+}
+.exec-plan__sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px 32px;
+}
+.exec-plan__group {
+  min-width: 0;
+}
+.exec-plan__eyebrow {
+  margin: 0 0 8px 0;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--exec-brand);
+}
+.exec-plan__grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+.exec-plan__row {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  margin: 0;
+}
+.exec-plan__row dt {
+  margin: 0;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+.exec-plan__row dd {
+  margin: 0;
+  font-family: var(--exec-font-sans);
+  font-size: 13px;
+  color: var(--exec-ink);
+  min-width: 0;
+  word-break: break-word;
+}
+.exec-plan__validated {
+  margin-left: 6px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+@media (max-width: 720px) {
+  .exec-plan__sections { grid-template-columns: 1fr; }
+  .exec-plan__row { grid-template-columns: 110px minmax(0, 1fr); }
+}
+
 /* ============================================================
  * 16. Inline mono code (utility)
  * ============================================================ */
@@ -2962,11 +3017,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   border-bottom: 1px solid var(--exec-border-subtle);
   background: var(--exec-bg-sunken);
 }
-.exec-probes-table__col--id { width: 10rem; }
-.exec-probes-table__col--agent { width: 14rem; }
-.exec-probes-table__col--verdict { width: 6rem; }
-.exec-probes-table__col--turn { width: 3rem; }
-.exec-probes-table__col--time { width: 5rem; }
+/* Per-agent grouping (2026-06-03): the PROBE ID column was dropped — the
+   table now renders one row per agent, so the agent name is the row
+   identity and the AGENT column takes the freed width. The TURNS column
+   widened to fit "NN turns". */
+.exec-probes-table__col--agent { width: auto; }
+.exec-probes-table__col--verdict { width: 7rem; }
+.exec-probes-table__col--turn { width: 6rem; }
+.exec-probes-table__col--time { width: 8rem; }
 
 .exec-probes-table__row {
   cursor: pointer;
@@ -2983,20 +3041,6 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 }
 .exec-probes-table__row > td {
   padding: 10px 12px;
-  vertical-align: middle;
-}
-.exec-probes-table__cell--id code {
-  font-family: var(--exec-font-mono);
-  font-size: 12px;
-  color: var(--exec-ink-muted);
-  background: var(--exec-code-bg);
-  padding: 2px 8px;
-  border-radius: var(--exec-radius-sm);
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   vertical-align: middle;
 }
 .exec-probes-table__asi {
@@ -3075,13 +3119,19 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 }
 
 /* ============================================================
- * 15. Slide-over component (QA-031 / QA-032)
+ * 15. Detail modal component (QA-031 / QA-032)
  *
- * Right-edge drawer used by both Findings (planned) and Probes
+ * Large centered overlay used by both the Findings and Probes
  * tabs to surface the verbatim prompt / target response / judge
- * reasoning for a clicked row. ``hidden`` attribute toggles the
- * whole component; backdrop + drawer ride a 200ms ease-out
+ * reasoning (or the full multi-turn chat conversation) for a
+ * clicked row. Occupies ~90% of the viewport so there is room to
+ * read a long transcript comfortably. ``hidden`` attribute toggles
+ * the whole component; backdrop + modal ride a 200ms ease-out
  * transition when the ``data-open`` attribute flips.
+ *
+ * (Class names keep the ``exec-slideover*`` prefix for continuity
+ * with the JS controller + server templates — the visual treatment
+ * is now a modal, not an edge drawer.)
  * ============================================================ */
 .exec-slideover-root[hidden] { display: none; }
 .exec-slideover-root {
@@ -3093,7 +3143,7 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-slideover__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   opacity: 0;
   transition: opacity 200ms ease-out;
   pointer-events: auto;
@@ -3103,23 +3153,27 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 }
 .exec-slideover {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(560px, 92vw);
+  top: 50%;
+  left: 50%;
+  width: 90vw;
+  height: 90vh;
+  max-width: 1100px;
   background: var(--exec-bg-elev);
-  border-left: 1px solid var(--exec-border-subtle);
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-md, 8px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
-  padding: 20px 24px;
-  transform: translateX(100%);
-  transition: transform 200ms ease-out;
+  padding: 24px 28px;
+  transform: translate(-50%, -48%) scale(0.98);
+  opacity: 0;
+  transition: transform 200ms ease-out, opacity 200ms ease-out;
   pointer-events: auto;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .exec-slideover-root[data-open="true"] .exec-slideover {
-  transform: translateX(0);
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
 }
 .exec-slideover__head {
   display: flex;
@@ -3188,12 +3242,18 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 }
 .exec-slideover__body {
   flex: 1 1 auto;
+  /* Modal chrome (head + title) stays pinned; the body scrolls so a
+     long multi-turn transcript never pushes the close button off-screen. */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 @media (max-width: 768px) {
   .exec-slideover {
-    width: 100vw;
-    border-left: none;
+    width: 96vw;
+    height: 94vh;
+    max-width: none;
+    padding: 16px 18px;
   }
 }
 
@@ -3279,6 +3339,99 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   color: var(--exec-ink);
   max-height: 10rem;
   overflow: auto;
+}
+
+/* ----- Multi-turn chat conversation (QA-061) -----
+ *
+ * Rendered by ``_slideover.html`` when ``ctx.conversation`` is populated.
+ * Each turn is one ``<li>`` carrying a turn header (turn N / verdict pill
+ * / confidence), an outgoing attacker-prompt bubble (right-aligned), an
+ * incoming target-response bubble (left-aligned), and that turn's judge
+ * reasoning. The full-height modal gives the transcript room to breathe.
+ */
+.exec-chat {
+  list-style: none;
+  margin: 8px 0 4px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.exec-chat__turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed var(--exec-border-subtle);
+}
+.exec-chat__turn:last-child { border-bottom: none; }
+.exec-chat__turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exec-chat__turn-no {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.exec-chat__turn-conf {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+}
+.exec-chat__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: var(--exec-radius-md, 8px);
+  border: 1px solid var(--exec-border-subtle);
+}
+.exec-chat__bubble--out {
+  align-self: flex-end;
+  background: var(--exec-brand-tint);
+  border-bottom-right-radius: var(--exec-radius-sm);
+}
+.exec-chat__bubble--in {
+  align-self: flex-start;
+  background: var(--exec-bg-sunken);
+  border-bottom-left-radius: var(--exec-radius-sm);
+}
+.exec-chat__role {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--exec-ink-subtle);
+}
+.exec-chat__text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--exec-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--exec-ink);
+}
+.exec-chat__judge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.exec-chat__reason {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--exec-brand);
+  background: var(--exec-bg-sunken);
+  border-radius: 0 var(--exec-radius-sm) var(--exec-radius-sm) 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--exec-ink-muted);
 }
 
 /* ============================================================

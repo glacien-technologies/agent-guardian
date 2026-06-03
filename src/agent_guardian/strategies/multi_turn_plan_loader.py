@@ -296,7 +296,7 @@ def load_multi_turn_plan_from_yaml(path: Path) -> MultiTurnPlan:
         raise MultiTurnPlanValidationError(f"MultiTurnPlan in {path}: file is empty")
     plan = _coerce_plan(raw, source=str(path))
     _LOG.debug(
-        "PhaseC.C1 plan_loaded: source=%s name=%s turn_count=%d",
+        "plan_loaded: source=%s name=%s turn_count=%d",
         path,
         plan.name or "<unnamed>",
         len(plan.planned_turns),

@@ -111,12 +111,12 @@ class ReflectiveStrategy(Strategy):
         # THINK — read verdict state + scratchpad, decide who acts.
         # ------------------------------------------------------------------
         _LOG.debug(
-            "PhaseB.B3 reflective_pilot_asi01: sibling_pool_size=%d mutation_operator_invoked=%s",
+            "reflective_pilot_asi01: sibling_pool_size=%d mutation_operator_invoked=%s",
             1 if self._sibling is not None else 0,
             getattr(self._primary, "name", type(self._primary).__name__),
         )
         _LOG.debug(
-            "PhaseA.A2 THINK: asi=%s primary=%s sibling=%s ctx_last_verdict=%r "
+            "THINK: asi=%s primary=%s sibling=%s ctx_last_verdict=%r "
             "consecutive_defended=%d scratchpad_len=%d",
             self.asi_category.value,
             type(self._primary).__name__,
@@ -131,7 +131,7 @@ class ReflectiveStrategy(Strategy):
         # and not just ctx.last_verdict. The reasoning field is logged by
         # length only to avoid leaking it into events.jsonl verbatim.
         _LOG.debug(
-            "PhaseB.B3 THINK reading context fields: last_verdict=%r "
+            "THINK reading context fields: last_verdict=%r "
             "last_verdict_confidence=%.2f last_verdict_reasoning_len=%d",
             self.ctx.last_verdict,
             float(self.ctx.last_verdict_confidence or 0.0),
@@ -152,7 +152,7 @@ class ReflectiveStrategy(Strategy):
         # If the inner strategy bowed out, the wrapper also bows out.
         if isinstance(result, StrategyDone):
             _LOG.debug(
-                "PhaseA.A2 ACT inner returned StrategyDone: asi=%s reason=%s",
+                "ACT inner returned StrategyDone: asi=%s reason=%s",
                 self.asi_category.value,
                 result.reason,
             )
@@ -178,8 +178,7 @@ class ReflectiveStrategy(Strategy):
                 )
             )
         _LOG.debug(
-            "PhaseA.A2 OBSERVE: asi=%s turn=%d ctx_verdict=%r meta_verdict=%r "
-            "scratchpad_appended=True",
+            "OBSERVE: asi=%s turn=%d ctx_verdict=%r meta_verdict=%r scratchpad_appended=True",
             self.asi_category.value,
             self._turn_count,
             ctx_verdict,
@@ -205,7 +204,7 @@ class ReflectiveStrategy(Strategy):
             and self._consecutive_defended >= _PIVOT_THRESHOLD
         ):
             _LOG.debug(
-                "PhaseA.A2 REFLECT pivot: asi=%s consecutive_defended=%d >= 2 — "
+                "REFLECT pivot: asi=%s consecutive_defended=%d >= 2 — "
                 "switching primary=%s to sibling=%s scratchpad=%s",
                 self.asi_category.value,
                 self._consecutive_defended,
@@ -216,7 +215,7 @@ class ReflectiveStrategy(Strategy):
 
             # PhaseB.B3 mandatory audit fields: sibling_picked + calibration_brier_so_far
             _LOG.debug(
-                "PhaseB.B3 reflective_pilot_asi01: sibling_picked=%s calibration_brier_so_far=%.4f",
+                "reflective_pilot_asi01: sibling_picked=%s calibration_brier_so_far=%.4f",
                 getattr(
                     self._sibling, "name", type(self._sibling).__name__ if self._sibling else "none"
                 ),

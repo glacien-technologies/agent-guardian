@@ -163,7 +163,7 @@ class MultiTurnPlanStrategy(Strategy):
         self._done = False
 
         _LOG.debug(
-            "PhaseC.C1 plan_init: name=%s goal=%s planned_turn_count=%d",
+            "plan_init: name=%s goal=%s planned_turn_count=%d",
             self._plan.name or "<unnamed>",
             self._plan.goal,
             len(self._plan.planned_turns),
@@ -220,20 +220,20 @@ class MultiTurnPlanStrategy(Strategy):
                 if self._plan.success_predicate(snapshot):
                     self._done = True
                     _LOG.debug(
-                        "PhaseC.C1 predicate_eval: success_predicate=True turn_count=%d — plan_done",
+                        "predicate_eval: success_predicate=True turn_count=%d — plan_done",
                         len(snapshot),
                     )
                     return StrategyDone(reason="success")
                 if self._plan.abort_predicate(snapshot):
                     self._done = True
                     _LOG.debug(
-                        "PhaseC.C1 predicate_eval: abort_predicate=True turn_count=%d — plan_aborted",
+                        "predicate_eval: abort_predicate=True turn_count=%d — plan_aborted",
                         len(snapshot),
                     )
                     return StrategyDone(reason="refused")
             except Exception as e:
                 _LOG.warning(
-                    "PhaseC.C1 predicate_eval: predicate raised %s — treating as exhausted",
+                    "predicate_eval: predicate raised %s — treating as exhausted",
                     type(e).__name__,
                 )
                 self._done = True
@@ -270,7 +270,7 @@ class MultiTurnPlanStrategy(Strategy):
         self._turn_count += 1
 
         _LOG.debug(
-            "PhaseC.C1 plan_turn: idx=%d role=%s expected=%r branch_on_failure=%s rendered_len=%d",
+            "plan_turn: idx=%d role=%s expected=%r branch_on_failure=%s rendered_len=%d",
             current_idx,
             spec.role,
             spec.expected_outcome[:60],
@@ -312,7 +312,7 @@ class MultiTurnPlanStrategy(Strategy):
         except KeyError as e:
             missing = str(e).strip("'\"")
             _LOG.debug(
-                "PhaseC.C1 plan_render: missing template variable=%r — substituting placeholder",
+                "plan_render: missing template variable=%r — substituting placeholder",
                 missing,
             )
             # Render with a safe-default dict so other vars still substitute.

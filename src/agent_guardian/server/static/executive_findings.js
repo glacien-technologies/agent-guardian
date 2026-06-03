@@ -278,8 +278,13 @@
         // — innerHTML is the canonical pattern for this swap (matches
         // htmx hx-swap="innerHTML" semantics). See ``isSafeProbeHref``
         // above for the URL allow-list that gates this assignment.
+        //
+        // QA-061: the probe endpoint now renders the SHARED
+        // ``_slideover.html`` template (``kind="probe"``) — the same
+        // modal body + ``<template data-slideover-header>`` the finding
+        // endpoint uses — so the polymorphic header sync handles both.
         bodyNode.innerHTML = html;
-        syncProbeHeader(root, bodyNode);
+        syncSlideoverHeader(root, bodyNode);
         wireCopyButtons(bodyNode);
       })
       .catch(function (err) {
@@ -538,24 +543,21 @@
     });
   }
 
-  // ---- 6. Findings filter chips (QA-053) -------------------------------
+  // ---- 6. Findings dropdown filters (QA-053) ---------------------------
   /**
-   * Wire the sticky multi-select chip toolbar above the findings table.
+   * Wire the dropdown filter toolbar above the findings table.
    *
-   * Operators click chips to compose an AND-of-OR filter:
-   *   * Multiple chips in the SAME group (e.g. two severities) OR
-   *     together — a row matches the group if it matches ANY selected
-   *     chip in that group.
-   *   * Different groups (severity / agent / asi / probe) AND together
-   *     — a row must match every group that has at least one chip
-   *     selected.
-   *   * A group with NO chips selected is a "no-op" (all rows pass for
-   *     that group).
+   * Four native ``<select>`` controls — Severity / Agent / Probe / ASI
+   * — each carrying ``data-filter-group``. Selecting a non-empty value
+   * in a dropdown filters the table to rows whose ``data-{group}``
+   * attribute matches; the leading empty-value "All …" option clears
+   * that dimension. Dimensions compose with AND — a row must pass every
+   * dropdown that has a non-empty value selected.
    *
    * Pure client-side: walks the rendered ``<tr>`` rows, reads their
    * ``data-severity`` / ``data-agent`` / ``data-asi`` / ``data-probe``
    * attributes, and toggles ``.is-filtered-out``. The Showing-N-of-M
-   * counter is updated on every toggle and announced via ``aria-live``.
+   * counter is updated on every change and announced via ``aria-live``.
    *
    * Marker symbol: ``ag.dashboard.executive.findings.filters``.
    */
@@ -563,21 +565,7 @@
     var toolbar = document.getElementById("exec-findings-filter");
     var table = document.getElementById("exec-findings-table");
     if (!toolbar || !table) { return; }
-    var chips = toolbar.querySelectorAll(".exec-findings-filter__chip");
-    // QA-054 — only PARENT rows count toward the Showing-N-of-M counter and
-    // are subject to chip filtering. Child rows always inherit their
-    // parent's visibility; we re-apply child visibility from the parent's
-    // current ``aria-expanded`` state at the end of ``applyFilters``.
-    var allRowNodes = table.querySelectorAll(".exec-findings-table__row");
-    var rows = [];
-    var childRows = [];
-    for (var ri = 0; ri < allRowNodes.length; ri++) {
-      if (allRowNodes[ri].classList.contains("exec-findings-table__row--child")) {
-        childRows.push(allRowNodes[ri]);
-      } else {
-        rows.push(allRowNodes[ri]);
-      }
-    }
+    var selects = toolbar.querySelectorAll(".exec-findings-filter__select");
     var counter = document.getElementById("exec-findings-filter-counter");
     var visibleSlot = counter
       ? counter.querySelector("[data-counter-visible]")
@@ -585,32 +573,35 @@
     var totalSlot = counter
       ? counter.querySelector("[data-counter-total]")
       : null;
-    var groupKeys = ["severity", "agent", "asi", "probe"];
 
     function activeByGroup() {
-      var out = { severity: [], agent: [], asi: [], probe: [] };
-      for (var i = 0; i < chips.length; i++) {
-        var chip = chips[i];
-        if (chip.getAttribute("aria-pressed") !== "true") { continue; }
-        var g = chip.getAttribute("data-filter-group");
-        var v = chip.getAttribute("data-filter-value");
-        if (g && v && out[g]) { out[g].push(v); }
+      var out = { severity: "", agent: "", asi: "", probe: "" };
+      for (var i = 0; i < selects.length; i++) {
+        var sel = selects[i];
+        var g = sel.getAttribute("data-filter-group");
+        if (g && Object.prototype.hasOwnProperty.call(out, g)) {
+          out[g] = sel.value || "";
+        }
       }
       return out;
     }
 
     function applyFilters() {
+      // Re-read the row set on every pass so live-appended rows
+      // (live-append.js) are gated by the active dropdowns too.
+      var rows = table.querySelectorAll(".exec-findings-table__row");
       var active = activeByGroup();
+      var groupKeys = ["severity", "agent", "asi", "probe"];
       var visible = 0;
       for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
         var pass = true;
         for (var gi = 0; gi < groupKeys.length; gi++) {
           var key = groupKeys[gi];
-          var picks = active[key];
-          if (!picks.length) { continue; }
+          var want = active[key];
+          if (!want) { continue; }
           var rowVal = row.getAttribute("data-" + key) || "";
-          if (picks.indexOf(rowVal) === -1) { pass = false; break; }
+          if (rowVal !== want) { pass = false; break; }
         }
         if (pass) {
           row.classList.remove("is-filtered-out");
@@ -619,114 +610,27 @@
           row.classList.add("is-filtered-out");
         }
       }
-      // QA-054 — propagate parent filter state to children. A filtered-out
-      // parent always hides its children. An expanded, visible parent
-      // reveals its children; a collapsed, visible parent keeps them
-      // hidden. This keeps the expand/collapse state independent of the
-      // filter chips — toggling a chip never collapses an already-open
-      // parent.
-      for (var ci = 0; ci < childRows.length; ci++) {
-        var child = childRows[ci];
-        var parentId = child.getAttribute("data-child-of");
-        var parent = parentId
-          ? table.querySelector(
-            '.exec-findings-table__row[data-finding-id="' + parentId + '"]'
-          )
-          : null;
-        if (!parent || parent.classList.contains("is-filtered-out")) {
-          child.classList.add("is-filtered-out");
-          child.hidden = true;
-          continue;
-        }
-        child.classList.remove("is-filtered-out");
-        var expanded = parent.getAttribute("data-expanded") === "true";
-        child.hidden = !expanded;
-        if (expanded) {
-          child.classList.remove("is-collapsed");
-        } else {
-          child.classList.add("is-collapsed");
-        }
-      }
       if (visibleSlot) { visibleSlot.textContent = String(visible); }
       if (totalSlot) { totalSlot.textContent = String(rows.length); }
     }
 
-    for (var i = 0; i < chips.length; i++) {
-      (function (chip) {
-        chip.addEventListener("click", function () {
-          var pressed = chip.getAttribute("aria-pressed") === "true";
-          chip.setAttribute("aria-pressed", pressed ? "false" : "true");
-          applyFilters();
-        });
-      })(chips[i]);
+    for (var i = 0; i < selects.length; i++) {
+      selects[i].addEventListener("change", applyFilters);
     }
-    // Initial render — render Showing-N-of-M as N == M (no chips active).
+    // Initial render — render Showing-N-of-M as N == M (every dropdown
+    // is on its "All …" option).
     applyFilters();
 
     if (typeof window !== "undefined") {
       window.__ag_executive_findings_filters = "ag.dashboard.executive.findings.filters";
-      // Expose ``applyFilters`` for the QA-054 chevron toggle handler so a
-      // child reveal triggered by chevron click re-runs the parent-visible
-      // gate (otherwise the child would un-hide even when a chip filter
-      // currently hides the parent).
+      // Expose ``applyFilters`` so the live-append path can re-run the
+      // gate after inserting a new row (keeps the counter accurate and
+      // hides a row that the active dropdowns exclude).
       window.__ag_executive_findings_apply = applyFilters;
     }
   }
 
-  // ---- 7. Multi-turn expand/collapse chevrons (QA-054) ------------------
-  /**
-   * Wire chevron toggles on multi-turn finding rows. Click flips
-   * ``aria-expanded`` on the toggle button and ``data-expanded`` on the
-   * parent ``<tr>``; child rows below the parent are revealed via the
-   * filter pipeline (so a parent hidden by a chip filter never reveals
-   * its children, even when previously expanded).
-   *
-   * Pure client-side — no server round-trip. ``stopPropagation`` on the
-   * click event prevents the chevron from also opening the slide-over.
-   *
-   * Marker symbol: ``ag.dashboard.executive.findings.turn_toggle``.
-   */
-  function bootTurnToggles() {
-    var table = document.getElementById("exec-findings-table");
-    if (!table) { return; }
-    var toggles = table.querySelectorAll('[data-action="toggle-turns"]');
-    for (var i = 0; i < toggles.length; i++) {
-      (function (btn) {
-        btn.addEventListener("click", function (ev) {
-          ev.stopPropagation();
-          var parentId = btn.getAttribute("data-target");
-          if (!parentId) { return; }
-          var parent = table.querySelector(
-            '.exec-findings-table__row[data-finding-id="' + parentId + '"]'
-          );
-          if (!parent) { return; }
-          var isOpen = btn.getAttribute("aria-expanded") === "true";
-          btn.setAttribute("aria-expanded", isOpen ? "false" : "true");
-          parent.setAttribute("data-expanded", isOpen ? "false" : "true");
-          // Re-run the filter pipeline; it owns child visibility so the
-          // expand state composes correctly with any active chip filters.
-          if (typeof window !== "undefined" &&
-              typeof window.__ag_executive_findings_apply === "function") {
-            window.__ag_executive_findings_apply();
-          }
-        });
-        btn.addEventListener("keydown", function (ev) {
-          // ``Enter`` / ``Space`` already trigger the native button click,
-          // but we suppress propagation here too so the row's
-          // Enter-to-open-slide-over handler doesn't double-fire.
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.stopPropagation();
-          }
-        });
-      })(toggles[i]);
-    }
-    if (typeof window !== "undefined") {
-      window.__ag_executive_findings_turn_toggle =
-        "ag.dashboard.executive.findings.turn_toggle";
-    }
-  }
-
-  // ---- 8. Boot ---------------------------------------------------------
+  // ---- 7. Boot ---------------------------------------------------------
   function boot() {
     var payloads = {
       finding: indexBy(loadPayload("exec-findings-payload"), "id"),
@@ -738,7 +642,6 @@
       attach(roots[i], payloads);
     }
     bootFindingsFilters();
-    bootTurnToggles();
   }
 
   if (document.readyState === "loading") {

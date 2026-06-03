@@ -16,6 +16,7 @@ import pytest
 from agent_guardian.adapters.base import TargetFingerprint
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+from agent_guardian.llm.base import LLMResponse, LLMUsage
 from agent_guardian.llm.stub import StubLLM, StubScript
 from agent_guardian.models.asi import AsiCategory
 
@@ -102,9 +103,13 @@ async def test_phase_decompose_parses_well_formed_brief() -> None:
 
 
 @pytest.mark.asyncio
-async def test_phase_decompose_falls_back_on_malformed_json() -> None:
-    """Garbage Commander output must trigger the uniform-brief fallback."""
-    commander = StubScript().default("this is not JSON at all, just prose").build()
+async def test_phase_decompose_falls_back_on_malformed_json(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken JSON object must trigger the uniform-brief fallback and be
+    diagnosed as malformed JSON (not a provider refusal)."""
+    # A JSON object that's present but truncated/unparseable -- the model tried.
+    commander = StubScript().default('{"scan_id": "x", "agent_briefs": {').build()
     config = SwarmConfig(scan_id="scan-3", target_goal="generic")
     swarm = SwarmCommander(
         config=config,
@@ -114,7 +119,8 @@ async def test_phase_decompose_falls_back_on_malformed_json() -> None:
         commander_llm=commander,
     )
     swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
-    await swarm._phase_decompose_with_llm()
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
     brief = swarm._swarm_brief
     assert brief is not None  # uniform fallback fired
     # Uniform brief covers all 10 ASI agents.
@@ -123,6 +129,99 @@ async def test_phase_decompose_falls_back_on_malformed_json() -> None:
         assert ab.priority_weight == 0.5
         assert ab.n_scenarios_requested == 5
         assert ab.attack_surface_summary == "generic"
+    # The warning names malformed JSON, not a refusal.
+    assert "malformed swarm-brief JSON" in caplog.text
+    assert "refused/blocked" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_phase_decompose_diagnoses_inline_provider_refusal(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A prose refusal (finish_reason "stop", no JSON) must be diagnosed as a
+    provider safety-block, NOT as malformed JSON."""
+    refusal = (
+        "Sorry, I cannot fulfill your request to generate attack briefs or scanning configurations."
+    )
+    commander = StubScript().default(refusal).build()
+    config = SwarmConfig(scan_id="scan-refusal", target_goal="generic")
+    swarm = SwarmCommander(
+        config=config,
+        target=_make_target(),
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
+    # Fallback behaviour is unchanged: full uniform brief.
+    assert swarm._swarm_brief is not None
+    assert len(swarm._swarm_brief.agent_briefs) == 10
+    # The warning names the real cause and avoids the misleading diagnosis.
+    assert "refused/blocked by the model provider" in caplog.text
+    assert "safety filter" in caplog.text
+    assert "malformed swarm-brief JSON" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_phase_decompose_diagnoses_content_filter_finish_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A structured ``content_filter`` finish_reason is a refusal even if the
+    text would otherwise look JSON-ish."""
+    # Stub returns a full LLMResponse so we can set the finish_reason directly.
+    blocked = LLMResponse(
+        text="",
+        model="stub",
+        provider="gemini",
+        usage=LLMUsage(prompt_tokens=1, completion_tokens=0, total_tokens=1),
+        finish_reason="content_filter",
+    )
+    commander = StubLLM(default=blocked)
+    config = SwarmConfig(scan_id="scan-cf", target_goal="generic")
+    swarm = SwarmCommander(
+        config=config,
+        target=_make_target(),
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
+    assert swarm._swarm_brief is not None
+    assert len(swarm._swarm_brief.agent_briefs) == 10
+    assert "refused/blocked by the model provider" in caplog.text
+    assert "finish_reason=content_filter" in caplog.text
+    assert "provider=gemini" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_phase_decompose_diagnoses_refusal_with_stray_brace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A prose refusal that happens to contain a brace must still be diagnosed
+    as a refusal -- the JSON-extraction path must not relabel it "malformed
+    JSON" just because a ``{...}`` block was present but unparseable."""
+    # Has a "{...}" block (so it enters the parse path) but reads as a refusal.
+    refusal = "I cannot comply with this request. {note: blocked by policy}"
+    commander = StubScript().default(refusal).build()
+    config = SwarmConfig(scan_id="scan-brace-refusal", target_goal="generic")
+    swarm = SwarmCommander(
+        config=config,
+        target=_make_target(),
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
+    assert swarm._swarm_brief is not None
+    assert len(swarm._swarm_brief.agent_briefs) == 10
+    assert "refused/blocked by the model provider" in caplog.text
+    assert "malformed swarm-brief JSON" not in caplog.text
 
 
 @pytest.mark.asyncio

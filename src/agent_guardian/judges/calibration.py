@@ -201,7 +201,7 @@ def load_calibration_set(path: Path | None = None) -> list[CalibrationItem]:
             # Re-raise with the row index so an operator authoring a malformed
             # YAML can find the bad row immediately.
             raise ValueError(f"Calibration item #{i} is malformed: {e}") from e
-    _LOG.debug("PhaseC.C7 calibration_loaded: n_items=%d source=%s", len(items), src)
+    _LOG.debug("calibration_loaded: n_items=%d source=%s", len(items), src)
     return items
 
 
@@ -263,7 +263,7 @@ async def run_calibration(
     label = judge_label or getattr(judge, "label", "") or judge.__class__.__name__
 
     _LOG.debug(
-        "PhaseC.C7 calibration_done: n_items=%d brier=%.4f accuracy=%.4f judge=%s",
+        "calibration_done: n_items=%d brier=%.4f accuracy=%.4f judge=%s",
         len(items),
         brier,
         acc,

@@ -2,16 +2,17 @@
  * elapsed-ticker.js — drives the live ELAPSED clock for the Executive
  * dashboard (SSE Phase 1, Step 4 of designs/sse-flow-and-live-ui.md).
  *
- * Two consumers — both keyed off the unified ``data-elapsed-anchor``
- * attribute, a float of unix seconds:
- *
- *   (a) Global KPI ELAPSED tile (``.exec-kpi [data-live="elapsed"]``)
- *       — anchored to ``started_at_unix`` from the live snapshot.
- *
- *   (b) Per-phase elapsed caption inside each spine pill
- *       (``[data-phase-elapsed="<phase>"]``) — anchored to that
- *       phase's ``phase_start.timestamp`` (the float ``started_at`` in
- *       the SSE payload, see ``swarm.py:2741``).
+ * The Global KPI ELAPSED tile (``.exec-kpi [data-live="elapsed"]``) is
+ * keyed off the unified ``data-elapsed-anchor`` attribute, a float of
+ * unix seconds. It seeds from the <body>'s ``data-started-at-unix``
+ * attribute on first paint (server-render anchor) and from
+ * ``started_at_unix`` on the first live snapshot — whichever lands
+ * first. The four-phase Phase Spine (and its per-pill elapsed captions)
+ * was retired, so the spine is no longer an anchor source; the
+ * ``stampPhaseAnchor`` / ``phase_start`` handlers below are now
+ * defensive no-ops (``querySelector`` returns null with no spine in the
+ * DOM) but are kept so the SSE wiring stays intact if the per-phase
+ * captions are ever reintroduced.
  *
  * Why a float, not an ISO string (critic patch G16/P9): Safari's
  * ``Date.parse`` returns NaN on the naive ISO timestamps produced by
@@ -274,15 +275,22 @@
     }
   }
 
-  function seedFromSpineAttribute() {
-    // Server-render path: the Jinja spine carries data-started-at-unix
-    // even before the first snapshot arrives. Seed the KPI tile anchor
-    // from it so the ticker has something to animate immediately.
-    var spine = document.querySelector(".exec-spine");
-    if (!spine) {
+  function seedFromBodyAttribute() {
+    // Server-render path: the <body> carries ``data-started-at-unix`` (a
+    // stable float of unix seconds) even before the first snapshot
+    // arrives. Seed the KPI tile anchor from it so the ticker has
+    // something to animate immediately on first paint — without it the
+    // tile sits on the server's ``elapsed`` label, which the snapshot
+    // patcher rewrites each poll and flickers between 00:00 and 00:01.
+    //
+    // This attribute replaced the retired Phase Spine's
+    // ``data-started-at-unix`` (the four-phase strip was removed); the
+    // body is now the single server-render anchor source.
+    var body = document.body;
+    if (!body) {
       return;
     }
-    var raw = spine.getAttribute("data-started-at-unix");
+    var raw = body.getAttribute("data-started-at-unix");
     if (raw) {
       stampGlobalAnchor(raw);
       SEEDED_GLOBAL = true;
@@ -298,7 +306,7 @@
     if (!scanId) {
       return;
     }
-    seedFromSpineAttribute();
+    seedFromBodyAttribute();
     if (body.getAttribute("data-is-terminal") === "true") {
       // Completed scan: every elapsed surface is server-rendered in
       // its final state. No ticking, no SSE.

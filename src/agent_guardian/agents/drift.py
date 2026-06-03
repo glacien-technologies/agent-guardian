@@ -81,7 +81,7 @@ Specific techniques:
         siblings = build_sibling_strategy(AsiCategory.ASI10, ctx, primary)
         first_sibling = siblings[0] if siblings else None
         _LOG.debug(
-            "PhaseB.B2 DriftAgent.strategy_stack: asi=ASI10 operators=%s n_siblings=%d primary=%s",
+            "DriftAgent.strategy_stack: asi=ASI10 operators=%s n_siblings=%d primary=%s",
             SIBLING_MAP[AsiCategory.ASI10],
             len(siblings),
             type(primary).__name__,

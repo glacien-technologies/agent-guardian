@@ -197,6 +197,113 @@ def sanitize_for_log(value: object, *, max_len: int = 256) -> str:
     return redact_secrets(text)
 
 
+# Truncation cap for the full request/response bodies logged at DEBUG by the
+# provider clients via :func:`log_model_exchange`. Generous on purpose: the
+# operator-feedback complaint was that the old ``text[:80]`` truncation hid the
+# actual prompt and response, so the cap has to be large enough to read a real
+# system prompt + tool-call argument. Still bounded so a runaway response can't
+# write megabytes per call into the log.
+MODEL_EXCHANGE_LOG_CAP = 4000
+
+
+def log_model_request(
+    logger: logging.Logger,
+    *,
+    provider: str,
+    model: str,
+    n_messages: int,
+    max_tokens: int | None,
+    temperature: float | None = None,
+    seed: int | None = None,
+    request_body: object | None = None,
+) -> None:
+    """Log the start of one model call (the "request out" half), shared by all providers.
+
+    Emits the single INFO narration line that feeds the operator's swarm-board
+    — the ONLY place the provider + model name is stamped, so the paired
+    :func:`log_model_response` line does not repeat it. At DEBUG it then dumps
+    the full request that was actually sent (capped at
+    :data:`MODEL_EXCHANGE_LOG_CAP` and run through :func:`sanitize_for_log` so
+    API keys / control chars stay safe) — not the old ``[:80]`` truncation.
+
+    Args:
+      logger: the provider's module logger.
+      provider: e.g. ``"gemini"`` / ``"openai"`` / ``"anthropic"``.
+      model: the model name as requested.
+      n_messages: number of messages in the request.
+      max_tokens: requested completion cap, if any.
+      temperature: sampling temperature, if known (DEBUG only).
+      seed: deterministic-replay seed, if any (DEBUG only).
+      request_body: the actual payload sent to the provider (dict / str).
+    """
+    logger.info("model call: %s-%s (msgs=%d, max_tok=%s)", provider, model, n_messages, max_tokens)
+    if request_body is not None and logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "request out (temperature=%s seed=%s): %s",
+            temperature,
+            seed,
+            sanitize_for_log(request_body, max_len=MODEL_EXCHANGE_LOG_CAP),
+        )
+
+
+def log_model_response(
+    logger: logging.Logger,
+    *,
+    response_text: str | None = None,
+    usage: object | None = None,
+    finish_reason: str | None = None,
+    error: BaseException | str | None = None,
+) -> None:
+    """Log the result of one model call (the "response in" half), shared by all providers.
+
+    Pairs with :func:`log_model_request` and deliberately does NOT repeat the
+    provider/model name. On success at DEBUG it logs the full response text
+    (capped at :data:`MODEL_EXCHANGE_LOG_CAP`, sanitized) plus token usage and
+    finish_reason — the usage + finish ARE useful, the ``[:80]`` truncation was
+    not.
+
+    Pass ``error`` (an exception or a string cause) to surface a failed call at
+    WARNING with the cause spelled out instead of swallowing it. A
+    ``finish_reason`` of ``content_filter`` is treated as a refusal / safety
+    block and logged at WARNING with the (capped) returned text.
+
+    Args:
+      logger: the provider's module logger.
+      response_text: the actual full text the provider returned.
+      usage: an object exposing ``prompt_tokens`` / ``completion_tokens`` /
+        ``total_tokens`` (our :class:`LLMUsage`).
+      finish_reason: normalised finish reason.
+      error: exception or cause string when the call failed.
+    """
+    if error is not None:
+        cause = error if isinstance(error, str) else f"{type(error).__name__}: {error}"
+        logger.warning(
+            "model call failed: %s", sanitize_for_log(cause, max_len=MODEL_EXCHANGE_LOG_CAP)
+        )
+        return
+    if finish_reason == "content_filter":
+        # Refusal / safety block — surface it loudly with the full (capped)
+        # text rather than folding it into the generic response line.
+        logger.warning(
+            "model call blocked: finish=%s text=%s",
+            finish_reason,
+            sanitize_for_log(response_text or "", max_len=MODEL_EXCHANGE_LOG_CAP),
+        )
+        return
+    if logger.isEnabledFor(logging.DEBUG):
+        prompt_tokens = getattr(usage, "prompt_tokens", 0)
+        completion_tokens = getattr(usage, "completion_tokens", 0)
+        total_tokens = getattr(usage, "total_tokens", 0)
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — operator-requested DEBUG echo of the real model response; text passes through sanitize_for_log() (redact_secrets() masks API keys + control-char strip + length cap) and is scrubbed again by _RedactingFilter before emit
+            "response in: tokens={i:%s o:%s t:%s} finish=%s text=%s",
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            finish_reason,
+            sanitize_for_log(response_text or "", max_len=MODEL_EXCHANGE_LOG_CAP),
+        )
+
+
 class _RedactingFilter(logging.Filter):
     """Scrubs secrets from every record before it is formatted/emitted.
 

@@ -260,7 +260,7 @@ def _load_upstream_suite(suite_name: str) -> AgentDojoSuite | None:
         from agentdojo import attacks as _ad_attacks
         from agentdojo import task_suite as _ad_task_suite
     except ImportError as exc:
-        _LOG.debug("PhaseC.C3 agentdojo upstream not importable: %s", exc)
+        _LOG.debug("agentdojo upstream not importable: %s", exc)
         return None
 
     # Upstream public API: ``get_suite(name)`` returns a TaskSuite object
@@ -271,7 +271,7 @@ def _load_upstream_suite(suite_name: str) -> AgentDojoSuite | None:
         suite_obj = _ad_task_suite.get_suite(suite_name)
     except (AttributeError, KeyError, ValueError) as exc:
         _LOG.debug(
-            "PhaseC.C3 agentdojo upstream get_suite(%s) raised %s -- vendored fallback",
+            "agentdojo upstream get_suite(%s) raised %s -- vendored fallback",
             suite_name,
             exc,
         )
@@ -300,7 +300,7 @@ def _load_upstream_suite(suite_name: str) -> AgentDojoSuite | None:
                     )
                 )
     _LOG.debug(
-        "PhaseC.C3 agentdojo upstream loaded suite=%s tasks=%d strategies=%d",
+        "agentdojo upstream loaded suite=%s tasks=%d strategies=%d",
         suite_name,
         len(tasks),
         len(attacker_names),
@@ -354,7 +354,7 @@ def load_suite(suite_name: str, *, allow_vendored: bool = True) -> AgentDojoSuit
 
     tasks = _vendored_tasks_for_suite(suite_norm)
     _LOG.debug(
-        "PhaseC.C3 agentdojo vendored loaded suite=%s tasks=%d (install [agentdojo] for full corpus)",
+        "agentdojo vendored loaded suite=%s tasks=%d (install [agentdojo] for full corpus)",
         suite_norm,
         len(tasks),
     )

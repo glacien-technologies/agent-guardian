@@ -38,9 +38,12 @@ from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.dashboard_view import (
     DASHBOARD_TEMPLATE,
+    _assemble_probe_groups,
     _assemble_probes_list,
     build_dashboard_context,
     build_finding_slideover_ctx,
+    build_probe_group_slideover_ctx,
+    build_probe_slideover_ctx,
     live_snapshot,
 )
 from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
@@ -149,6 +152,7 @@ async def probe_drawer(
     scan_id: str,
     index: int | None = None,
     id: str | None = None,
+    group: str | None = None,
 ) -> HTMLResponse:
     """Render the probe-detail-sheet drawer fragment for one probe.
 
@@ -160,9 +164,13 @@ async def probe_drawer(
 
     Lookup priority:
 
-    * ``index=<N>`` — fast path, indexes into the assembled probes
-      list (the table emits ``data-probe-index`` from
-      ``loop.index0``). O(1) and stable across reloads.
+    * ``group=<agent>`` — per-agent grouping (operator feedback
+      2026-06-03). The Probes table renders ONE row per agent; the row
+      carries ``?group=<agent>``. We collect every turn that agent ran
+      and render them as a single turn-by-turn chat conversation.
+    * ``index=<N>`` — legacy fast path, indexes into the FLAT per-turn
+      probes list. Retained for the Findings-tab evidence join and any
+      deep link that still carries a turn index.
     * ``id=<probe_id>`` — fallback used when a deep link / bookmark
       carries the probe id (``?tab=probes&probe=<id>``). O(N) scan.
 
@@ -176,6 +184,27 @@ async def probe_drawer(
         raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
 
     probes = _assemble_probes_list(store.scan_dir(scan_id))
+
+    # Per-agent group path — collect the whole conversation for one agent and
+    # render it through the SHARED modal so the operator reads turn 1
+    # request / turn 1 response / turn 2 request / ... inline as a chat.
+    if group is not None:
+        for grp in _assemble_probe_groups(probes):
+            if str(grp.get("group_key") or "") == group:
+                ctx = build_probe_group_slideover_ctx(grp.get("turns") or [])
+                return templates.TemplateResponse(
+                    request,
+                    "dashboard/executive/_slideover.html",
+                    {"ctx": ctx, "scan_id": scan_id, "kind": "probe"},
+                )
+        return HTMLResponse(
+            '<div class="exec-slideover-sheet" data-slideover-sheet>'
+            '<p class="exec-probe__reason exec-probe__reason--empty">'
+            "Probe not found in this scan's memory.jsonl."
+            "</p></div>",
+            status_code=200,
+        )
+
     probe: dict[str, object] | None = None
     if index is not None and 0 <= index < len(probes):
         probe = probes[index]
@@ -186,21 +215,27 @@ async def probe_drawer(
                 break
 
     if probe is None:
-        # Render an empty drawer-body shell — same structural class so
-        # the drawer chrome stays consistent and the client-side CSS
+        # Render an empty modal-body shell — same structural class so
+        # the modal chrome stays consistent and the client-side CSS
         # selectors keep matching.
         return HTMLResponse(
-            '<div class="exec-probe-detail-sheet" data-probe-detail-sheet>'
+            '<div class="exec-slideover-sheet" data-slideover-sheet>'
             '<p class="exec-probe__reason exec-probe__reason--empty">'
             "Probe not found in this scan's memory.jsonl."
             "</p></div>",
             status_code=200,
         )
 
+    # QA-049 / QA-055 — render through the SHARED ``_slideover.html`` template
+    # (``kind="probe"``) so probes get the same large modal + per-turn chat
+    # conversation as findings. ``build_probe_slideover_ctx`` correlates the
+    # sibling turn records sharing this probe's ``probe_id`` into the chat
+    # thread.
+    ctx = build_probe_slideover_ctx(probe, probes=probes)
     return templates.TemplateResponse(
         request,
-        "dashboard/executive/_probe_drawer_body.html",
-        {"probe": probe, "scan_id": scan_id},
+        "dashboard/executive/_slideover.html",
+        {"ctx": ctx, "scan_id": scan_id, "kind": "probe"},
     )
 
 

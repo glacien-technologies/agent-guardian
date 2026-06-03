@@ -62,7 +62,7 @@ Techniques in your toolbox include:
         # filtered out by a directory-mismatch issue).
         hcot_ids = sorted({s.probe_id for s in seeds if s.probe_id.startswith("ASI01-HCOT")})
         _LOG.debug(
-            "PhaseB.B5 H-CoT probes loaded: count=%d probe_ids=%s",
+            "H-CoT probes loaded: count=%d probe_ids=%s",
             len(hcot_ids),
             hcot_ids,
         )
@@ -161,8 +161,7 @@ Techniques in your toolbox include:
             )
             siblings_added += 1
             _LOG.debug(
-                "PhaseB.B3 sibling instantiated: operator=%s "
-                "mutated_seed_count=%d strategy_class=%s",
+                "sibling instantiated: operator=%s mutated_seed_count=%d strategy_class=%s",
                 op_used,
                 len(mutator_sib.ctx.seeds),
                 type(mutator_sib).__name__,
@@ -171,14 +170,14 @@ Techniques in your toolbox include:
         result = MadMaxStrategy(ctx, children=children)
         total_seeds = sum(len(c.ctx.seeds) for c in children)
         _LOG.info(
-            "PhaseB.B3 ASI01 pilot strategy_stack built: primary=%s siblings=%s total_seeds=%d",
+            "ASI01 pilot strategy_stack built: primary=%s siblings=%s total_seeds=%d",
             "MadMaxStrategy",
             [type(c).__name__ for c in children],
             total_seeds,
         )
         _LOG.debug(
-            "PhaseA.A2 GoalHijackAgent.strategy_stack: constructed MadMaxStrategy "
-            "over %d ReflectiveStrategy children for ASI01 (B3 added=%d)",
+            "GoalHijackAgent.strategy_stack: constructed MadMaxStrategy "
+            "over %d ReflectiveStrategy children for ASI01 (added=%d)",
             len(children),
             siblings_added,
         )

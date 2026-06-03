@@ -27,6 +27,7 @@ import httpx
 import pytest
 import respx
 
+from agent_guardian._endpoint_preflight import _classify_endpoint_health
 from agent_guardian.cli import _endpoint_reachability_preflight
 
 ENDPOINT = "https://target.example.com/finbot/chat"
@@ -160,3 +161,66 @@ async def test_cold_start_recovers_on_attempt_three() -> None:
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is True
     assert route.call_count == 3
+
+
+# --------------------------------------------------------------------------- #
+# Status-aware classification: the preflight must validate a real response, not
+# just connectivity. A 2xx is healthy; 401/403 is an auth failure (box is up,
+# our creds are wrong); other 4xx is a client error; 5xx is a server error;
+# connect/timeout is transport-unreachable.
+# --------------------------------------------------------------------------- #
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_classify_healthy_2xx() -> None:
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(200, json={"output": "pong"}))
+    health = await _classify_endpoint_health(ENDPOINT)
+    assert health.classification == "healthy"
+    assert health.healthy is True
+    assert health.reachable is True
+    assert health.status_code == 200
+
+
+@respx.mock
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_classify_auth_failure(status: int) -> None:
+    """401/403 is its own bucket: reachable, but credentials/headers are wrong."""
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(status, text="forbidden"))
+    health = await _classify_endpoint_health(ENDPOINT)
+    assert health.classification == "auth_failed"
+    assert health.reachable is True
+    assert health.healthy is False
+    assert health.status_code == status
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_classify_client_error_4xx() -> None:
+    """A 404/422 (not 401/403) is a client error — reachable but request rejected."""
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(404, text="not found"))
+    health = await _classify_endpoint_health(ENDPOINT)
+    assert health.classification == "client_error"
+    assert health.reachable is True
+    assert health.status_code == 404
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_classify_server_error_5xx() -> None:
+    respx.post(ENDPOINT).mock(return_value=httpx.Response(503, text="upstream down"))
+    health = await _classify_endpoint_health(ENDPOINT)
+    assert health.classification == "server_error"
+    assert health.reachable is True
+    assert health.status_code == 503
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_classify_unreachable_on_connect_error() -> None:
+    respx.post(ENDPOINT).mock(side_effect=httpx.ConnectError("connection refused"))
+    health = await _classify_endpoint_health(ENDPOINT)
+    assert health.classification == "unreachable"
+    assert health.reachable is False
+    assert health.status_code is None

@@ -4,25 +4,28 @@
    ------------------------------------------------
    This tab is NO LONGER snapshot-only. ``static/live-append.js`` listens
    on ``/scan/<id>/events`` for ``agent_start`` / ``agent_progress`` /
-   ``agent_done`` / ``agent_skipped`` arrivals and APPENDS a freshly
-   built ``<tr>`` into the Probes table on every event. The per-tab
+   ``agent_done`` / ``agent_skipped`` arrivals and UPDATES the per-agent
+   row in the Probes table on every event (one row per agent — the row's
+   turn count + verdict update in place as more turns arrive; a brand-new
+   agent appends a fresh row). The per-tab
    ``<template data-row-template data-kind="probe">`` block below is the
-   canonical row shape — the JS clones it, fills text + data-attrs from
-   the event payload, and appends. Hover-freeze applies: while the
-   cursor is over the rows container, arrivals queue and flush on
-   ``mouseleave``. Acceptance: new probe row visible in this tab within
-   200ms of the producer emit (design doc: "Phase 2 decisions (resolved
-   2026-06-03)").
+   canonical row shape — the JS clones it for a new agent, fills text +
+   data-attrs, and appends. Hover-freeze applies: while the cursor is over
+   the rows container, arrivals queue and flush on ``mouseleave``.
 
-   Every reflection record the swarm produced — one row per judged turn.
-   Data is read from ``<scan_dir>/memory.jsonl`` via the shared view-model
-   (``probes_list``).
+   Per-agent grouping (operator feedback 2026-06-03)
+   -------------------------------------------------
+   Recon alone produces ~17 individual turn records; one row per turn
+   buried the conversation. Reflection records are now GROUPED by agent
+   (``<scan_dir>/memory.jsonl`` → :func:`_assemble_probe_groups` →
+   ``probe_groups``) so the table renders ONE conversational row per agent.
 
-   The compact 5-column table (``_probes_table.html``) renders one row per
-   probe. Each row opens a slide-over drawer (``_finding_slideover.html``
-   with ``kind="probe"``) that renders the full probe-detail-sheet —
-   request prompt, target response, judge verdict, panel reasoning,
-   evidence chain link, reproduce CLI command, and run-context metadata.
+   The compact table (``_probes_table.html``) renders one row per agent.
+   Each row opens the shared modal (``_slideover.html`` with ``kind="probe"``)
+   that renders the agent's FULL turn-by-turn chat conversation — turn 1
+   request, turn 1 response, turn 2 request, ... — plus the final judge
+   verdict / reasoning, evidence chain link, reproduce CLI command, and
+   run-context metadata.
 
    2026-06-02 changes
    ------------------
@@ -49,11 +52,13 @@
          hidden>
   <h2 class="exec-section-title">All probes attempted.</h2>
   <p class="exec-section-lede">
-    {{ probes_list | length }} attempts &middot; each row opens the
-    probe-detail-sheet drawer with the verbatim prompt, target response,
-    judge verdict, and a one-click reproduce command.
+    {{ probe_groups | length }} agent{{ '' if probe_groups | length == 1 else 's' }}
+    across {{ probes_list | length }} turn{{ '' if probes_list | length == 1 else 's' }}
+    &middot; each row opens the agent's full turn-by-turn conversation —
+    verbatim prompts, target responses, judge verdicts, and a one-click
+    reproduce command.
   </p>
-  {% if probes_list | length == 0 %}
+  {% if probe_groups | length == 0 %}
     <p class="exec-empty">No probe attempts recorded yet.</p>
   {% else %}
     {% include "dashboard/executive/_probes_table.html" %}
@@ -63,27 +68,28 @@
   {% endif %}
 
   {# SSE Phase 2, Step 2.4 — live-append row template. ``live-append.js``
-     clones this ``<tr>`` skeleton for every agent lifecycle event.
-     Element shape mirrors ``_probes_table.html`` exactly so the visual
-     row produced by an SSE event is indistinguishable from a
-     server-rendered row. The template lives inside ``#tabpanel-probes``
-     and is always present (even when ``probes_list`` is empty) — the
-     first arriving event must have a clone target before the snapshot
-     table has been hydrated. #}
+     clones this ``<tr>`` skeleton for a brand-new agent's first event and
+     UPDATES the existing row (turn count + verdict) for subsequent turns
+     of an agent it has already rendered. Element shape mirrors
+     ``_probes_table.html`` exactly so the visual row produced by an SSE
+     event is indistinguishable from a server-rendered row. The template
+     lives inside ``#tabpanel-probes`` and is always present (even when
+     ``probe_groups`` is empty) — the first arriving event must have a
+     clone target before the snapshot table has been hydrated. #}
   {# NOTE: counted attributes (``data-action="probe-row-click"`` /
      ``data-source="probe"`` / ``tabindex="0"`` / ``role="button"``)
      are intentionally OMITTED from this skeleton — the JS builder sets
      them on clone instead. Static probe-tab tests count those tokens
-     across the rendered pane to assert "one per turn"; if the template
-     pre-stamped them the counts would be off-by-one. #}
+     across the rendered pane to assert "one per agent row"; if the
+     template pre-stamped them the counts would be off-by-one. #}
   <template data-row-template data-kind="probe">
     <tr class="exec-probes-table__row"
+        data-probe-group=""
         data-probe-id=""
-        data-probe-index=""
         data-probe-href=""
         data-verdict=""
+        data-turn-count="0"
         aria-controls="exec-finding-slideover">
-      <td class="exec-probes-table__cell--id"><code data-slot="probe-id"></code></td>
       <td class="exec-probes-table__cell--agent">
         <code class="exec-probes-table__asi" data-slot="asi"></code>
         <span class="exec-probes-table__agent" data-slot="agent"></span>

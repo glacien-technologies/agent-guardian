@@ -727,45 +727,29 @@ def test_executive_overview_renders_asi_radar_partial(client: TestClient, store:
     assert "Adversarial Surface Index" in overview_pane
 
 
-def test_executive_reproducibility_renders_in_each_data_tab(
-    client: TestClient, store: ScanStore
-) -> None:
-    """The reproducibility receipt renders ONLY on the Overview tab.
+def test_executive_reproducibility_receipt_is_retired(client: TestClient, store: ScanStore) -> None:
+    """The reproducibility receipt was removed from the Overview tab.
 
     Timeline:
       * 2026-05-31 — receipt moved off the layout footer into per-tab partials.
       * QA-029     — narrowed include set to Overview + Probes.
-      * BUG-2 (2026-06-02) — receipt removed from Probes too, since
-        surfacing the same receipt twice was the bug. Per-probe
-        reproduction is covered by the drawer's "Reproduce" CLI button
-        (QA-049). Overview is the single source of truth for the
-        canonical scan-level receipt.
+      * BUG-2 (2026-06-02) — receipt removed from Probes too.
+      * Overview cleanup — the receipt's copy-block was dropped entirely;
+        the framework-internal "Scan identity" fingerprint card it shared
+        a partial with was replaced by the CLI-style "Scan plan" panel.
 
-    Findings + Logs continue to omit it.
+    Nothing on the page may still render the receipt or its copy hook.
     """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Overview only after BUG-2 — exactly 1 include.
-    assert body.count('data-component="reproducibility"') == 1
-    # The 7 mono row labels appear at least once.
-    for label in (
-        "SCAN_ID",
-        "SEED",
-        "GUARDIAN",
-        "AIVSS",
-        "PROBES",
-        "TARGET",
-        "EVIDENCE",
-    ):
-        assert label in body, f"reproducibility missing label {label}"
-    # The REPRODUCIBILITY mono eyebrow renders exactly once.
-    assert body.count("REPRODUCIBILITY") == 1
-    # The Copy button hook is the same across all includes (Copy logic
-    # iterates [data-copy-target] via querySelectorAll).
-    assert body.count('data-copy-target="#exec-repro-command"') == 1
+    assert 'data-component="reproducibility"' not in body
+    assert "REPRODUCIBILITY" not in body
+    assert 'data-copy-target="#exec-repro-command"' not in body
+    # The replacement Scan plan panel renders exactly once, on Overview.
+    assert body.count('data-component="scan-plan"') == 1
 
 
 def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> None:
@@ -834,9 +818,12 @@ def test_executive_clean_control_renders_all_new_partials(
     assert 'data-live="aivss"' in body
     assert 'data-component="severity-bars"' in body
     assert 'data-component="asi-radar"' in body
-    assert 'data-component="reproducibility"' in body
-    # QA-066 (2026-06-03) — Scan identity block sits above the KPI strip.
-    assert 'data-component="scan-identity"' in body
+    # Overview cleanup — the reproducibility receipt + the "Scan identity"
+    # fingerprint card were retired; the CLI-style "Scan plan" panel sits
+    # above the KPI strip in their place.
+    assert 'data-component="reproducibility"' not in body
+    assert 'data-component="scan-identity"' not in body
+    assert 'data-component="scan-plan"' in body
     # The deleted partials must NOT render anywhere.
     assert 'data-component="aivss-hero"' not in body
     assert 'data-component="aivss-gauge"' not in body
@@ -933,9 +920,12 @@ def test_executive_probe_drawer_route_serves_empty_reasoning_fallback(
     client: TestClient, store: ScanStore
 ) -> None:
     """When a probe carries no judge reasoning (empty string) and
-    confidence is 0.0, the on-demand drawer fragment falls back to the
-    humanised empty-state copy ("Not graded per-turn — see the Findings
-    tab for the rolled-up judge verdict.").
+    confidence is 0.0, the on-demand modal fragment falls back to the
+    shared ``(no data available)`` empty-state copy.
+
+    QA-061 — the probe endpoint now renders the SHARED ``_slideover.html``
+    template, so the empty-reasoning placeholder matches the finding
+    endpoint's wording rather than the legacy probe-only prose.
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
@@ -943,8 +933,9 @@ def test_executive_probe_drawer_route_serves_empty_reasoning_fallback(
     resp = client.get(f"/scan/{scan.id}/probe?index=0")
     assert resp.status_code == 200
     body = resp.text
-    assert "Not graded per-turn" in body, (
-        "empty-reasoning fallback prose missing from the drawer fragment"
+    assert "Judge reasoning" in body
+    assert "(no data available)" in body, (
+        "empty-reasoning fallback prose missing from the modal fragment"
     )
 
 

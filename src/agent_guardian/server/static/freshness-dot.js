@@ -54,6 +54,15 @@
   var FRESH_LIMIT_MS = 20 * 1000;
   var STALE_LIMIT_MS = 60 * 1000;
   var DEADLINE_SUPPRESS_MS = 60 * 1000;
+  // Initial-connect grace window. A freshly created EventSource sits in
+  // CONNECTING (readyState 0), and before any stream has attached the
+  // aggregate readyState reads CLOSED (2). Neither is a genuine
+  // "connection lost" — it's just the normal startup handshake. We
+  // suppress the red/DEAD transition for this long after boot so an
+  // operator who opens the UI the instant a scan starts never sees a
+  // false "Connection lost. Click to retry." banner (2026-06-03 bug).
+  // Once any stream confirms OPEN once, the grace is lifted early.
+  var FIRST_CONNECT_GRACE_MS = 15 * 1000;
 
   // --- shared state across every attached EventSource ------------------
   // ``readyState`` from EventSource: 0 CONNECTING, 1 OPEN, 2 CLOSED.
@@ -62,6 +71,11 @@
     readyState: 0,
     scanDone: false,
     suppressDeadUntil: 0,
+    // End of the initial-connect grace window (epoch ms). Set in
+    // ``boot()``; cleared (set to 0) the first time any stream reaches
+    // OPEN so a genuine later disconnect is reported promptly.
+    firstConnectGraceUntil: 0,
+    everConnected: false,
     // Map of attached source -> { url } for click-to-retry. We keep the
     // newest non-CLOSED source as the "primary" — the dot reflects its
     // readyState. Multiple streams (events / live / reflections) can
@@ -200,6 +214,10 @@
         continue;
       }
       if (src.readyState === 1) {
+        // First confirmed OPEN lifts the initial-connect grace window —
+        // from here on a real CLOSED is reported as DEAD promptly.
+        STATE.everConnected = true;
+        STATE.firstConnectGraceUntil = 0;
         return 1;
       }
       if (src.readyState === 0 && best !== 1) {
@@ -207,6 +225,19 @@
       }
     }
     return best;
+  }
+
+  // True while we're still inside the post-boot initial-connect window
+  // AND no stream has ever confirmed OPEN. During this window CONNECTING
+  // / not-yet-attached / CLOSED are all treated as "still connecting"
+  // rather than a genuine disconnect, so the UI never flashes a false
+  // "Connection lost" before the first handshake completes.
+  function inFirstConnectGrace() {
+    return (
+      !STATE.everConnected &&
+      STATE.firstConnectGraceUntil > 0 &&
+      now() < STATE.firstConnectGraceUntil
+    );
   }
 
   function computeState() {
@@ -230,9 +261,24 @@
       return "dead";
     }
     if (rs === 0) {
+      // CONNECTING. During the initial-connect grace this is just the
+      // normal first handshake — keep the dot in its resting ``fresh``
+      // state instead of flashing the reconnecting banner on every load.
+      if (inFirstConnectGrace()) {
+        return "fresh";
+      }
       return "reconnecting";
     }
-    // rs === 2 (CLOSED) and scan still running.
+    // rs === 2 (CLOSED) and scan still running — also the resting state
+    // before any source has attached (sources is empty -> aggregate
+    // reads CLOSED). During the initial-connect grace this is NOT a
+    // disconnect; rest as ``fresh`` so the first paint shows a calm dot
+    // rather than a false "Connection lost" banner.
+    if (inFirstConnectGrace()) {
+      return "fresh";
+    }
+    // A recent ``deadline_approaching`` suppresses the DEAD transition
+    // while the long-scan reconnect happens.
     if (now() < STATE.suppressDeadUntil) {
       return "reconnecting";
     }
@@ -259,12 +305,28 @@
       return;
     }
     var url = (opts && opts.url) || source.url || null;
-    var record = { source: source, url: url };
+    // Optional caller-supplied factory that returns a FRESH, fully-wired
+    // EventSource (same url, all data handlers re-bound). Used by the
+    // click-to-retry path so the reopened stream keeps its snapshot /
+    // live-append handlers — a bare ``new EventSource(url)`` here would
+    // reconnect the socket but lose every downstream listener.
+    var reconnect =
+      opts && typeof opts.reconnect === "function" ? opts.reconnect : null;
+    var record = { source: source, url: url, reconnect: reconnect };
     STATE.sources.push(record);
 
     function refresh() {
       STATE.lastEventAt = now();
     }
+
+    // ``open`` confirms a live handshake — lift the initial-connect
+    // grace window immediately so a genuine later disconnect is reported
+    // without waiting out the remaining grace.
+    source.addEventListener("open", function () {
+      STATE.everConnected = true;
+      STATE.firstConnectGraceUntil = 0;
+      refresh();
+    });
 
     // Generic onmessage covers the new ``event: heartbeat`` (which has
     // no ``addEventListener`` registration anywhere else) plus any
@@ -321,14 +383,18 @@
   }
 
   // --- click-to-retry --------------------------------------------------
+  // Bound to the dynamically-created banner's Retry button in
+  // ``findOrCreateBanner``. Closes every attached EventSource and opens
+  // a fresh one to the SAME url, then resets the freshness state. When a
+  // source carries a caller-supplied ``reconnect`` factory we use it so
+  // the reopened stream keeps its downstream data handlers (snapshot /
+  // live-append); otherwise we fall back to a bare reopen via
+  // ``attachReuse`` (freshness-only — the dot recovers but data rows
+  // won't re-bind).
   function reconnectAll() {
     var reopened = [];
     for (var i = 0; i < STATE.sources.length; i += 1) {
       var rec = STATE.sources[i];
-      if (!rec.url) {
-        reopened.push(rec);
-        continue;
-      }
       try {
         if (rec.source && typeof rec.source.close === "function") {
           rec.source.close();
@@ -336,9 +402,27 @@
       } catch (err) {
         /* swallow — best-effort close */
       }
+      if (rec.reconnect) {
+        try {
+          var rewired = rec.reconnect();
+          if (rewired) {
+            rec.source = rewired;
+            reopened.push(rec);
+            continue;
+          }
+        } catch (err) {
+          /* swallow — fall through to bare reopen below */
+        }
+      }
+      if (!rec.url) {
+        // No url and no factory — nothing to reopen; keep the record so
+        // the source count stays stable, but it stays CLOSED.
+        reopened.push(rec);
+        continue;
+      }
       try {
-        // Phase 1: no Last-Event-ID. Resync rides on the next ``/live``
-        // snapshot.
+        // Phase 1 fallback: no Last-Event-ID. Resync rides on the next
+        // ``/live`` snapshot.
         var fresh = new window.EventSource(rec.url);
         rec.source = fresh;
         attachReuse(fresh, rec);
@@ -350,6 +434,15 @@
     STATE.sources = reopened;
     STATE.lastEventAt = now();
     STATE.scanDone = false;
+    // Treat a manual retry like a fresh boot: re-open a grace window and
+    // clear ``everConnected`` so a still-connecting socket doesn't snap
+    // straight back to the DEAD banner before the new handshake lands.
+    STATE.everConnected = false;
+    STATE.firstConnectGraceUntil = now() + FIRST_CONNECT_GRACE_MS;
+    STATE.suppressDeadUntil = 0;
+    // Force the next ``tick`` to re-render even if the computed state
+    // matches the cached one.
+    _lastVisualState = null;
   }
 
   function attachReuse(source, record) {
@@ -358,6 +451,11 @@
     function refresh() {
       STATE.lastEventAt = now();
     }
+    source.addEventListener("open", function () {
+      STATE.everConnected = true;
+      STATE.firstConnectGraceUntil = 0;
+      refresh();
+    });
     source.onmessage = refresh;
     source.addEventListener("heartbeat", refresh);
     source.addEventListener("scan_done", function () {
@@ -391,6 +489,10 @@
       setVisualState("fresh");
       return;
     }
+    // Open the initial-connect grace window so the first handshake
+    // (sources not yet attached / EventSource still CONNECTING) does not
+    // trip the false "Connection lost" banner.
+    STATE.firstConnectGraceUntil = now() + FIRST_CONNECT_GRACE_MS;
     findOrCreateDot();
     findOrCreateBanner();
     setVisualState("fresh");
