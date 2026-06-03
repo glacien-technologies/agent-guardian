@@ -262,15 +262,87 @@ def test_executive_logs_tab_omits_reproducibility(client: TestClient, store: Sca
     assert 'data-component="reproducibility"' not in pane
 
 
-def test_executive_reproducibility_count_is_1(client: TestClient, store: ScanStore) -> None:
-    """The reproducibility receipt renders ONLY on the Overview tab.
+def test_executive_reproducibility_receipt_removed(client: TestClient, store: ScanStore) -> None:
+    """The reproducibility receipt was retired from the dashboard.
 
-    QA-029 narrowed includes to Overview + Probes (2 total); BUG-2
-    (2026-06-02) then removed the Probes include — surfacing the same
-    receipt twice was the bug. Per-probe replay lives in the drawer.
+    QA-029 narrowed includes to Overview + Probes; BUG-2 (2026-06-02)
+    removed the Probes include; the Overview cleanup then dropped the
+    receipt's copy-block entirely. Nothing renders it anymore.
     """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
-    assert body.count('data-component="reproducibility"') == 1
+    assert body.count('data-component="reproducibility"') == 0
+
+
+# ----------------------------------------------------------------------
+# QA-053 — dropdown filter toolbar (replaces the legacy chip strip)
+# ----------------------------------------------------------------------
+
+
+def test_executive_findings_filter_renders_dropdowns_not_chips(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    # The dropdown toolbar mounts above the table.
+    assert 'id="exec-findings-filter"' in pane
+    # Real <select> controls — one per dimension — carrying the
+    # data-filter-group contract the JS reads.
+    assert 'class="exec-findings-filter__select"' in pane
+    # Dropdowns render per dimension that the page's findings populate.
+    # Severity / Probe / ASI are always present for these fixtures; the
+    # Agent dropdown only mounts when a finding correlates to a probe
+    # agent (no dead options), so it isn't asserted here.
+    assert 'data-filter-group="severity"' in pane
+    assert 'data-filter-group="probe"' in pane
+    assert 'data-filter-group="asi"' in pane
+    # The legacy chip-button markup is gone.
+    assert "exec-findings-filter__chip" not in pane
+    assert "data-filter-value" not in pane
+
+
+def test_executive_findings_filter_dropdown_has_all_option(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    # Each dropdown opens on an "All …" empty-value no-op option.
+    assert '<option value="">All severities</option>' in pane
+
+
+def test_executive_findings_counter_present(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    # Showing-N-of-M counter survives the chip→dropdown swap. Three
+    # findings on this page → counter denominator of 3.
+    assert 'id="exec-findings-filter-counter"' in pane
+    assert 'data-counter-total="3"' in pane
+
+
+# ----------------------------------------------------------------------
+# In-row turn accordion removed — one clean row per finding
+# ----------------------------------------------------------------------
+
+
+def test_executive_findings_table_has_no_turn_accordion(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    # The chevron toggle, child rows, and leading toggle column are gone;
+    # per-turn detail lives only in the detail drawer now.
+    assert 'data-action="toggle-turns"' not in pane
+    assert "exec-findings-table__row--child" not in pane
+    assert "exec-findings-table__row--has-children" not in pane
+    assert "exec-findings-table__col--toggle" not in pane
+    assert "data-child-of" not in pane

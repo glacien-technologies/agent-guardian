@@ -13,12 +13,11 @@
          role="tabpanel"
          aria-labelledby="tab-overview"
          tabindex="0">
-  {# QA-066 (2026-06-03) — Scan identity block. Lifted from the
-     Reproducibility receipt at the bottom of the Overview tab so the
-     7-row fingerprint (SCAN_ID / SEED / GUARDIAN / AIVSS / PROBES /
-     TARGET / EVIDENCE) is the first thing an operator reads when they
-     land on the page. The Reproducibility section below still hosts the
-     rerun shell command + Copy button. #}
+  {# Scan plan panel — mirrors the CLI's Phase-0 scan-plan board
+     (TARGET / MODELS / BUDGET / OUTPUTS / DASHBOARD / SAFETY GUARDS).
+     Replaced the framework-internal "Scan identity" fingerprint card so
+     the first thing an operator reads is the same plan they confirmed in
+     the terminal. #}
   {% include "dashboard/executive/_scan_identity.html" %}
   {# KPI strip — formerly a sticky layer in layout.html. Moved here on
      2026-05-31 so it is only visible on Overview. It scrolls with the
@@ -55,5 +54,4 @@
     </p>
     {% include "dashboard/executive/_asi_compact_table.html" %}
   </section>
-  {% include "dashboard/executive/_reproducibility.html" %}
 </section>

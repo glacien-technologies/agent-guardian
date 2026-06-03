@@ -30,10 +30,12 @@
      6. Judge verdict + reasoning — verdict label + confidence + panel
         votes (when populated) + judge reasoning prose. Reasoning falls
         back to a "(no data available)" placeholder when not populated.
-     7. Per-turn conversation thread (multi-turn findings only) —
-        composes with QA-054 ``turn_children``. Each turn is a numbered
-        subsection with prompt preview, response preview, and verdict
-        pill.
+     7. Multi-turn chat conversation (multi-turn records only) — when
+        ``ctx.conversation`` is populated the flat prompt/response/judge
+        sections (3-5) are replaced by a chat thread: per turn an
+        outgoing attacker-prompt bubble + an incoming target-response
+        bubble + that turn's judge reasoning, closed by the rolled-up
+        verdict. Single-turn records keep the flat layout.
      8. Evidence chain — link to the JSONL events for the scan, scoped
         by probe id when known.
      9. Reproduce CLI — copy-button monospaced snippet built from the
@@ -175,7 +177,58 @@
   </dl>
   {% endif %}
 
-  {# ----- 3. Exact prompt sent ----- #}
+  {% if ctx.conversation %}
+  {# ----- 3a. Multi-turn chat conversation -----
+       A multi-turn attack is rendered as a chat thread: per turn, an
+       outgoing "attacker prompt" bubble followed by an incoming "target
+       response" bubble, in turn order. The judge verdict + reasoning for
+       the whole attack close the thread. This replaces the flat
+       prompt/response/judge sections for multi-turn records. #}
+  <p class="exec-probe__label">Attack conversation</p>
+  <ol class="exec-chat" aria-label="Multi-turn attack conversation">
+    {% for turn in ctx.conversation %}
+      <li class="exec-chat__turn" data-turn="{{ turn.turn_no }}">
+        <div class="exec-chat__turn-head">
+          <span class="exec-chat__turn-no">turn {{ turn.turn_no }}{% if turn.max_turns %} / {{ turn.max_turns }}{% endif %}</span>
+          <span class="exec-verdict-pill exec-verdict-pill--{{ turn.verdict }}">{{ turn.verdict_label }}</span>
+          {% if turn.confidence_pct %}
+            <span class="exec-chat__turn-conf">{{ turn.confidence_pct }}</span>
+          {% endif %}
+        </div>
+        <div class="exec-chat__bubble exec-chat__bubble--out">
+          <span class="exec-chat__role">Attacker prompt</span>
+          <pre class="exec-chat__text">{{ turn.prompt or '(no data available)' }}</pre>
+        </div>
+        <div class="exec-chat__bubble exec-chat__bubble--in">
+          <span class="exec-chat__role">Target response</span>
+          <pre class="exec-chat__text">{{ turn.target_response or '(no data available)' }}</pre>
+        </div>
+        {% if turn.reasoning %}
+          <div class="exec-chat__judge">
+            <span class="exec-chat__role">Judge reasoning</span>
+            <blockquote class="exec-chat__reason">{{ turn.reasoning }}</blockquote>
+          </div>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+
+  {# Rolled-up verdict for the whole multi-turn attack. #}
+  <p class="exec-probe__label">Judge verdict</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Verdict</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ _verdict_label }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Confidence</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.confidence is not none and ctx.confidence > 0 -%}
+        <code>{{ '%.2f' | format(ctx.confidence) }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+  </dl>
+
+  {% else %}
+  {# ----- 3. Exact prompt sent (single-turn layout) ----- #}
   <div class="exec-probe__label-row">
     <p class="exec-probe__label">Exact prompt sent</p>
     <span class="exec-probe__stats">{{ (ctx.prompt or '') | length }} chars</span>
@@ -236,27 +289,6 @@
       (no data available)
     </p>
   {% endif %}
-
-  {# ----- 6. Per-turn conversation thread (multi-turn findings) ----- #}
-  {% if _kind == 'finding' and ctx.turn_children %}
-    <p class="exec-probe__label">Per-turn conversation thread</p>
-    <ol class="exec-slideover-thread">
-      {% for child in ctx.turn_children %}
-        <li class="exec-slideover-thread__item" data-turn="{{ child.turn_no }}">
-          <header class="exec-slideover-thread__head">
-            <span class="exec-slideover-thread__turn">turn {{ child.turn_no }}</span>
-            <span class="exec-verdict-pill exec-verdict-pill--{{ child.verdict }}">{{ child.verdict_label }}</span>
-            {% if child.confidence_pct %}
-              <span class="exec-slideover-thread__conf">{{ child.confidence_pct }}</span>
-            {% endif %}
-          </header>
-          <p class="exec-slideover-thread__label">Prompt</p>
-          <pre class="exec-slideover-thread__prompt">{{ child.prompt_preview or '(no data available)' }}</pre>
-          <p class="exec-slideover-thread__label">Response</p>
-          <pre class="exec-slideover-thread__response">{{ child.response_preview or '(no data available)' }}</pre>
-        </li>
-      {% endfor %}
-    </ol>
   {% endif %}
 
   {# ----- 7. Evidence chain ----- #}

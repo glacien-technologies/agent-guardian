@@ -148,15 +148,16 @@ def _slice_tabpanel(html: str, tab_id: str) -> str:
 REPRO_MARKER = 'data-component="reproducibility"'
 
 
-def test_reproducibility_renders_inside_overview_only(client: TestClient, store: ScanStore) -> None:
-    """The reproducibility receipt must appear ONLY inside the Overview
-    tabpanel.
+def test_reproducibility_receipt_is_gone_from_every_tab(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The reproducibility receipt was retired from the dashboard.
 
-    QA-029 sub-ask 3 narrowed the include to Overview + Probes; BUG-2
-    (2026-06-02) then removed it from Probes because surfacing the same
-    receipt twice was the bug. Per-probe replay is covered by the
-    drawer's "Reproduce" CLI button (QA-049). Findings + Logs continue
-    to omit it.
+    QA-029 narrowed the include to Overview + Probes; BUG-2 (2026-06-02)
+    removed the Probes include; the Overview cleanup then dropped the
+    receipt's copy-block entirely (its "Scan identity" companion card was
+    replaced by the CLI-style "Scan plan" panel). The receipt must not
+    appear in any tabpanel anymore.
     """
     scan = _make_scan()
     _persist(store, scan)
@@ -164,13 +165,11 @@ def test_reproducibility_renders_inside_overview_only(client: TestClient, store:
     body = resp.text
     assert resp.status_code == 200
 
-    overview_pane = _slice_tabpanel(body, "overview")
-    assert REPRO_MARKER in overview_pane, "reproducibility receipt missing from tabpanel-overview"
-    for tab in ("findings", "probes", "logs"):
+    for tab in ("overview", "findings", "probes", "logs"):
         pane = _slice_tabpanel(body, tab)
         assert REPRO_MARKER not in pane, (
             f"reproducibility receipt unexpectedly present in tabpanel-{tab} "
-            f"after BUG-2 (2026-06-02) narrowed it to Overview only"
+            f"after the Overview cleanup retired it"
         )
 
 
@@ -194,6 +193,5 @@ def test_reproducibility_no_longer_a_layout_level_footer(
     assert last_section_close != -1
     tail = body[last_section_close + len("</section>") : main_close]
     assert REPRO_MARKER not in tail, (
-        "reproducibility receipt must not appear as a layout-level sibling "
-        "of <main>; it now lives inside each tabpanel"
+        "reproducibility receipt must not appear as a layout-level sibling of <main>"
     )

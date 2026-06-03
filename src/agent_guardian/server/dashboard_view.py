@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
 import urllib.parse
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -117,6 +118,7 @@ __all__ = [
     "DashboardContext",
     "build_dashboard_context",
     "build_finding_slideover_ctx",
+    "build_probe_group_slideover_ctx",
     "build_probe_slideover_ctx",
     "resolve_locality",
 ]
@@ -412,16 +414,6 @@ def _findings_page(
                 # the Findings table can render an em-dash when no probe
                 # correlation exists (static / recon-derived findings).
                 "agent_name": "",
-                # QA-054 — turn-aggregation defaults. Populated in-place by
-                # ``_attach_evidence_to_findings`` once the matched evidence
-                # list is known. Callers that skip the attach step (e.g.
-                # narrow unit tests on _findings_page in isolation) still
-                # see safe empty defaults.
-                "turn_children": [],
-                "turn_total": 0,
-                "turn_failed": 0,
-                "is_multi_turn": False,
-                "turn_progress_label": "",
             }
         )
     pagination: dict[str, Any] = {
@@ -538,13 +530,6 @@ def _attach_evidence_to_findings(
             # ``_findings_page``) so callers / templates can rely on the
             # key existing even when no probes correlate.
             item.setdefault("agent_name", "")
-            # QA-054 — turn-aggregation defaults so the template can branch
-            # on ``is_multi_turn`` without worrying about KeyError.
-            item.setdefault("turn_children", [])
-            item.setdefault("turn_total", 0)
-            item.setdefault("turn_failed", 0)
-            item.setdefault("is_multi_turn", False)
-            item.setdefault("turn_progress_label", "")
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -601,45 +586,73 @@ def _attach_evidence_to_findings(
             first_agent = str(capped[0].get("agent") or "").strip()
             if first_agent:
                 item["agent_name"] = first_agent
-        # QA-054 — multi-turn aggregation. The Finding row already represents
-        # one rolled-up attack thread (one probe_id / agent / scenario); its
-        # per-turn detail is the matched evidence list we just attached. We
-        # surface that detail as inline child rows so the operator can scan
-        # which turn flipped the verdict without opening the slide-over.
-        #
-        # ``turn_children`` is the canonical child-row payload (prompt /
-        # response previews + verdict + confidence + turn number). The
-        # template renders one ``<tr class="…__child">`` per entry below
-        # the parent row, hidden by default and revealed by chevron click.
-        # ``turn_total`` and ``turn_failed`` drive the "N of M turns failed"
-        # progress label so a critical 3-turn run reads ``1 of 3 turns
-        # failed`` at a glance. ``is_multi_turn`` is the back-compat flag —
-        # single-turn probes render exactly as before (no chevron, no
-        # children) so the existing QA-031 / QA-051 / QA-053 tests stay
-        # green without per-test snapshot updates.
-        children: list[dict[str, Any]] = []
-        for ev in capped:
-            verdict = str(ev.get("verdict") or "")
-            verdict_label = _verdict_label(verdict)
-            children.append(
-                {
-                    "turn_no": int(ev.get("turn", 0) or 0),
-                    "prompt_preview": _truncate_for_preview(ev.get("prompt")),
-                    "response_preview": _truncate_for_preview(ev.get("target_response")),
-                    "verdict": verdict or "unknown",
-                    "verdict_label": verdict_label,
-                    "confidence_pct": _confidence_pct(ev.get("confidence")),
-                }
-            )
-        turn_total = len(children)
-        turn_failed = sum(1 for c in children if c["verdict"] == "fail")
-        item["turn_children"] = children
-        item["turn_total"] = turn_total
-        item["turn_failed"] = turn_failed
-        item["is_multi_turn"] = turn_total > 1
-        item["turn_progress_label"] = (
-            f"{turn_failed} of {turn_total} turns failed" if turn_total > 1 else ""
+
+
+def _sort_turns_in_order(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return ``records`` ordered by their ``turn`` index (stable).
+
+    ``_assemble_probes_list`` reads ``memory.jsonl`` in file order; for a
+    multi-turn attack thread the rows usually land in turn order, but that
+    is not guaranteed once the ``agent + asi_category`` fallback pulls in
+    records from interleaved threads. Sorting by ``turn`` here is what lets
+    the chat conversation (and the representative-turn pick below) line up
+    the right prompt with the right response with the right verdict.
+    """
+    return sorted(records, key=lambda r: int(r.get("turn", 0) or 0))
+
+
+def _representative_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pick the single turn whose prompt/response/verdict/reasoning best
+    describe the exchange surfaced in the slide-over's top-level fields.
+
+    The historical bug (operator: "the displayed values don't look correct")
+    was that the top-level prompt/response came from ``capped[0]`` — the
+    first record in file order, almost always turn 1 — while the top-level
+    verdict was rolled up from the *finding* (``EXPLOITED`` for a successful
+    multi-turn attack). On a multi-turn thread turn 1 is usually a defended
+    (``pass``) exchange, so the operator saw the turn-1 prompt + turn-1
+    response under an ``EXPLOITED`` verdict with turn-1's (defended)
+    reasoning: three fields describing two different exchanges.
+
+    The fix: surface the turn that actually flipped the attack — the first
+    ``fail`` turn if any, else the last turn — so the prompt, the response,
+    the verdict, AND the reasoning all describe the same exchange.
+    """
+    if not records:
+        return {}
+    ordered = _sort_turns_in_order(records)
+    for rec in ordered:
+        if str(rec.get("verdict") or "") == "fail":
+            return rec
+    return ordered[-1]
+
+
+def _conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build the per-turn chat-conversation rows for the slide-over.
+
+    One entry per correlated turn record, in turn order. Each entry carries
+    the verbatim attacker ``prompt`` and ``target_response`` (rendered as
+    outgoing / incoming chat bubbles) plus that turn's own judge verdict,
+    confidence, and reasoning — so every turn's verdict matches its own
+    exchange rather than the rolled-up finding verdict.
+    """
+    out: list[dict[str, Any]] = []
+    for rec in _sort_turns_in_order(records):
+        verdict = str(rec.get("verdict") or "")
+        out.append(
+            {
+                "turn_no": int(rec.get("turn", 0) or 0),
+                "max_turns": int(rec.get("max_turns", 0) or 0),
+                "agent": str(rec.get("agent") or ""),
+                "prompt": str(rec.get("prompt") or ""),
+                "target_response": str(rec.get("target_response") or ""),
+                "verdict": verdict or "unknown",
+                "verdict_label": _verdict_label(verdict),
+                "confidence_pct": _confidence_pct(rec.get("confidence")),
+                "reasoning": str(rec.get("reasoning") or ""),
+            }
         )
+    return out
 
 
 def build_finding_slideover_ctx(
@@ -653,20 +666,21 @@ def build_finding_slideover_ctx(
     marshals the :class:`Finding` model + any correlated probe attempts
     from ``memory.jsonl`` into the SAME ctx shape the probe-mode
     endpoint uses, so the shared template renders the same audit
-    detail (prompt + response + judge reasoning + per-turn thread +
-    reproduce-CLI) for both row sources.
+    detail (prompt + response + judge reasoning + per-turn chat
+    conversation + reproduce-CLI) for both row sources.
 
     Correlation rule mirrors :func:`_attach_evidence_to_findings`:
     primary match on ``probe_id``; fallback on ``agent + asi_category``
-    (broader). The first correlated probe attempt fills the verbatim
-    prompt + target_response + judge reasoning fields; subsequent
-    attempts surface as the per-turn conversation thread.
+    (broader). The correlated attempts are sorted into turn order; the
+    *representative* turn (:func:`_representative_turn` — the turn that
+    flipped the attack) fills the verbatim prompt / target_response /
+    verdict / reasoning fields so those four values describe the SAME
+    exchange. The full ordered set surfaces as the per-turn chat
+    conversation.
 
     Genuinely-missing data renders as ``(no data available)`` in the
-    template — the Finding model carries no ``judge_reasoning`` field
-    of its own (verdicts are turn-scoped), so a finding with no
-    correlated probe attempts gets a placeholder for those fields. The
-    operator can iterate on data plumbing in a follow-up.
+    template — a finding with no correlated probe attempts gets a
+    placeholder for those fields.
     """
     probes = _assemble_probes_list(scan_dir)
     matched: list[dict[str, Any]] = []
@@ -679,38 +693,34 @@ def build_finding_slideover_ctx(
         for p in probes:
             if str(p.get("asi_category") or "") == asi_value:
                 matched.append(p)
-    capped = matched[:_FINDING_EVIDENCE_CAP]
-    first = capped[0] if capped else {}
+    capped = _sort_turns_in_order(matched)[:_FINDING_EVIDENCE_CAP]
 
-    children: list[dict[str, Any]] = []
-    for ev in capped:
-        verdict = str(ev.get("verdict") or "")
-        children.append(
-            {
-                "turn_no": int(ev.get("turn", 0) or 0),
-                "prompt_preview": _truncate_for_preview(ev.get("prompt")),
-                "response_preview": _truncate_for_preview(ev.get("target_response")),
-                "verdict": verdict or "unknown",
-                "verdict_label": _verdict_label(verdict),
-                "confidence_pct": _confidence_pct(ev.get("confidence")),
-            }
-        )
+    # The representative turn anchors the top-level prompt / response /
+    # verdict / reasoning so all four describe the same exchange (the
+    # exchange that flipped the attack on a successful finding). This is
+    # the field-correctness fix for the operator's "values don't look
+    # correct" report.
+    rep = _representative_turn(capped)
+
+    conversation = _conversation_turns(capped)
 
     # Roll up the finding-level verdict: a finding that succeeded
     # (``success=True``) is the "EXPLOITED" verdict regardless of which
-    # specific turn flipped it. ``inconclusive`` and ``pass`` cases follow
-    # the same enum the slide-over template translates to a label.
+    # specific turn flipped it; otherwise mirror the representative turn's
+    # verdict so the header pill and the surfaced reasoning agree.
     if finding.success:
         verdict = "fail"
     elif capped and all(str(c.get("verdict")) == "pass" for c in capped):
         verdict = "pass"
+    elif rep:
+        verdict = str(rep.get("verdict") or "inconclusive")
     else:
         verdict = "inconclusive"
 
     return {
         "record_id": finding.id,
         "probe_id": finding.probe_id,
-        "agent": str(first.get("agent") or ""),
+        "agent": str(rep.get("agent") or ""),
         "asi_category": finding.asi.value,
         "csa_category": finding.csa_category.value,
         "mitre_atlas": [t for t in finding.mitre_atlas],
@@ -721,61 +731,267 @@ def build_finding_slideover_ctx(
         "owasp_scenario": "",
         "source_yaml": "",
         "source_path": "",
-        "turn": first.get("turn") if first else None,
-        "timestamp_label": str(first.get("timestamp_label") or "")
+        "turn": rep.get("turn") if rep else None,
+        "timestamp_label": str(rep.get("timestamp_label") or "")
         or finding.created_at.strftime("%H:%M:%S"),
         "seed": "",
         "rng_seed": "",
-        "strategy": str(first.get("strategy") or ""),
+        "strategy": str(rep.get("strategy") or ""),
         "mutator_operators": [],
-        "attacker_refused": bool(first.get("attacker_refused") or False),
-        "prompt": str(first.get("prompt") or finding.trigger_prompt or ""),
-        "target_response": str(first.get("target_response") or ""),
+        "attacker_refused": bool(rep.get("attacker_refused") or False),
+        "prompt": str(rep.get("prompt") or finding.trigger_prompt or ""),
+        "target_response": str(rep.get("target_response") or ""),
         "verdict": verdict,
-        "confidence": finding.confidence,
+        # Confidence comes from the representative turn's own judge call so
+        # it matches the surfaced reasoning; the finding-level confidence is
+        # an aggregate and could disagree with the shown exchange.
+        "confidence": rep.get("confidence") if rep else finding.confidence,
         "panel_votes": [],
-        "reasoning": str(first.get("reasoning") or ""),
-        "turn_children": children if len(children) > 1 else [],
+        "reasoning": str(rep.get("reasoning") or ""),
+        # Chat conversation is only meaningful when there's more than one
+        # turn; a single-turn finding uses the flat prompt/response layout.
+        "conversation": conversation if len(conversation) > 1 else [],
         "summary": finding.summary,
     }
 
 
-def build_probe_slideover_ctx(probe: dict[str, Any]) -> dict[str, Any]:
+def build_probe_slideover_ctx(
+    probe: dict[str, Any],
+    *,
+    probes: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Adapt a ``_assemble_probes_list`` row into the shared ctx shape.
 
     The probes_list row already carries the locked Executive-tab fields;
-    this rename layer is a pure remap so the shared ``_slideover.html``
-    template can address the same keys for both kinds.
+    this rename layer is mostly a pure remap so the shared
+    ``_slideover.html`` template can address the same keys for both kinds.
+
+    When ``probes`` (the full assembled list) is supplied, sibling turn
+    records sharing the clicked probe's ``probe_id`` are correlated into a
+    per-turn chat conversation — so a multi-turn probe opens with the same
+    conversation view as a multi-turn finding. The representative-turn rule
+    keeps the top-level prompt / response / verdict / reasoning describing a
+    single exchange.
     """
+    pid = str(probe.get("probe_id") or "")
+    siblings: list[dict[str, Any]] = []
+    if probes and pid:
+        siblings = [p for p in probes if str(p.get("probe_id") or "") == pid]
+    # Always include the clicked record so a probe with no siblings still
+    # has a well-defined representative turn.
+    if not siblings:
+        siblings = [probe]
+    ordered = _sort_turns_in_order(siblings)
+    conversation = _conversation_turns(ordered)
+    # The clicked row is itself one turn of the thread; surface its own
+    # prompt/response/verdict/reasoning verbatim (the operator clicked THAT
+    # row), and keep the conversation as the multi-turn context.
+    rep = probe
+
     return {
-        "record_id": probe.get("probe_id") or "",
-        "probe_id": probe.get("probe_id") or "",
-        "agent": probe.get("agent") or "",
-        "asi_category": probe.get("asi_category") or "",
-        "csa_category": probe.get("csa_category") or "",
-        "mitre_atlas": probe.get("mitre_atlas") or [],
-        "severity": probe.get("severity") or "",
-        "severity_label": probe.get("severity_label") or "",
+        "record_id": rep.get("probe_id") or "",
+        "probe_id": rep.get("probe_id") or "",
+        "agent": rep.get("agent") or "",
+        "asi_category": rep.get("asi_category") or "",
+        "csa_category": rep.get("csa_category") or "",
+        "mitre_atlas": rep.get("mitre_atlas") or [],
+        "severity": rep.get("severity") or "",
+        "severity_label": rep.get("severity_label") or "",
         "severity_class": "",
-        "tier_floor": probe.get("tier_floor") or "",
-        "owasp_scenario": probe.get("owasp_scenario") or "",
-        "source_yaml": probe.get("source_yaml") or "",
-        "source_path": probe.get("source_path") or "",
-        "turn": probe.get("turn"),
-        "timestamp_label": probe.get("timestamp_label") or "",
-        "seed": probe.get("seed") or "",
-        "rng_seed": probe.get("rng_seed") or "",
-        "strategy": probe.get("strategy") or "",
-        "mutator_operators": probe.get("mutator_operators") or [],
-        "attacker_refused": bool(probe.get("attacker_refused") or False),
-        "prompt": probe.get("prompt") or "",
-        "target_response": probe.get("target_response") or "",
-        "verdict": probe.get("verdict") or "",
-        "confidence": probe.get("confidence"),
-        "panel_votes": probe.get("panel_votes") or [],
-        "reasoning": probe.get("reasoning") or "",
-        "turn_children": [],
-        "summary": f"Probe {probe.get('probe_id')}" if probe.get("probe_id") else "Probe details",
+        "tier_floor": rep.get("tier_floor") or "",
+        "owasp_scenario": rep.get("owasp_scenario") or "",
+        "source_yaml": rep.get("source_yaml") or "",
+        "source_path": rep.get("source_path") or "",
+        "turn": rep.get("turn"),
+        "timestamp_label": rep.get("timestamp_label") or "",
+        "seed": rep.get("seed") or "",
+        "rng_seed": rep.get("rng_seed") or "",
+        "strategy": rep.get("strategy") or "",
+        "mutator_operators": rep.get("mutator_operators") or [],
+        "attacker_refused": bool(rep.get("attacker_refused") or False),
+        "prompt": rep.get("prompt") or "",
+        "target_response": rep.get("target_response") or "",
+        "verdict": rep.get("verdict") or "",
+        "confidence": rep.get("confidence"),
+        "panel_votes": rep.get("panel_votes") or [],
+        "reasoning": rep.get("reasoning") or "",
+        "conversation": conversation if len(conversation) > 1 else [],
+        "summary": f"Probe {rep.get('probe_id')}" if rep.get("probe_id") else "Probe details",
+    }
+
+
+# Verdict precedence for the per-agent rollup. The grouped probe row shows a
+# single verdict pill for the whole conversation; we surface the *worst*
+# outcome the agent reached so a single ``fail`` turn in an otherwise-defended
+# thread is never hidden behind a green pill. Higher number == worse.
+_VERDICT_RANK: Final[dict[str, int]] = {
+    "fail": 3,
+    "inconclusive": 2,
+    "pass": 1,
+}
+
+
+def _rollup_verdict(turns: list[dict[str, Any]]) -> str:
+    """Roll a multi-turn thread's per-turn verdicts up into one pill value.
+
+    Worst-case wins (``fail`` > ``inconclusive`` > ``pass``) so the grouped
+    row never masks an exploited turn behind a defended one. Empty / unknown
+    turn verdicts contribute nothing; a thread with no graded turn rolls up to
+    ``""`` (renders as PENDING — live recon turns that haven't been judged yet).
+    """
+    best = ""
+    best_rank = 0
+    for t in turns:
+        v = str(t.get("verdict") or "")
+        rank = _VERDICT_RANK.get(v, 0)
+        if rank > best_rank:
+            best_rank = rank
+            best = v
+    return best
+
+
+def _group_key_for(probe: dict[str, Any]) -> str:
+    """Return the grouping key for a probe/turn record.
+
+    Operator feedback: recon emits ~17 individual turn records under one
+    agent; rendering them as one row per turn buries the conversation. We
+    group by ``agent`` so all of an agent's turns collapse into a single
+    conversational entry.
+
+    Recon writes turns with NO ``seed_id`` (empty ``probe_id``), so it can
+    only be grouped by agent — there is no finer key to fall back on. For
+    specialist agents that run several probe seeds we still key on the agent
+    alone: "what this agent did" is the unit operators triage on, and the
+    modal renders the full ordered conversation regardless of how many seeds
+    it spans. (See ``build_probe_group_slideover_ctx`` implementation_notes.)
+    """
+    return str(probe.get("agent") or "")
+
+
+def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse the flat per-turn probes list into ONE entry per agent.
+
+    The flat list (:func:`_assemble_probes_list`) carries one record per
+    judged turn — recon alone can produce ~17. This groups those records by
+    :func:`_group_key_for` (the agent) so the Probes table renders a single
+    conversational row per agent. First-seen order is preserved (groups are
+    keyed in the order their first turn appears in ``memory.jsonl``).
+
+    Each returned entry is shaped for ``_probes_table.html``:
+
+        {
+          "group_key": str,          # the agent name (row identity + href)
+          "agent": str,
+          "asi_category": str,       # first non-empty asi seen in the group
+          "probe_id": str,           # first non-empty seed_id (drawer header)
+          "verdict": str,            # worst-case rollup across the turns
+          "turn_count": int,         # how many turns this agent ran
+          "timestamp_label": str,    # last turn's timestamp
+          "turns": list[dict],       # the ordered turn records (modal source)
+        }
+
+    Never raises; an empty input yields an empty list.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+    for p in probes_list:
+        key = _group_key_for(p)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(p)
+
+    groups: list[dict[str, Any]] = []
+    for key in order:
+        turns = _sort_turns_in_order(buckets[key])
+        agent = next((str(t.get("agent") or "") for t in turns if t.get("agent")), key)
+        asi = next((str(t.get("asi_category") or "") for t in turns if t.get("asi_category")), "")
+        probe_id = next((str(t.get("probe_id") or "") for t in turns if t.get("probe_id")), "")
+        # Last turn's timestamp is the most recent activity for this agent.
+        timestamp_label = next(
+            (
+                str(t.get("timestamp_label") or "")
+                for t in reversed(turns)
+                if t.get("timestamp_label")
+            ),
+            "",
+        )
+        groups.append(
+            {
+                "group_key": key,
+                "agent": agent,
+                "asi_category": asi,
+                "probe_id": probe_id,
+                "verdict": _rollup_verdict(turns),
+                "turn_count": len(turns),
+                "timestamp_label": timestamp_label,
+                "turns": turns,
+            }
+        )
+    return groups
+
+
+def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build the shared slide-over ctx for a whole per-agent probe group.
+
+    Sibling of :func:`build_probe_slideover_ctx`, but the unit of work is the
+    full set of an agent's turns (recon's ~17 turns; a specialist's multi-turn
+    attack thread) rather than one clicked turn. The ordered turns become the
+    per-turn chat conversation; the representative turn (:func:`_representative_turn`
+    — the turn that flipped the attack, else the last turn) fills the top-level
+    prompt / response / verdict / reasoning so those four fields describe one
+    exchange. The header verdict pill uses the worst-case rollup
+    (:func:`_rollup_verdict`) so it agrees with the table row.
+    """
+    ordered = _sort_turns_in_order(turns)
+    if not ordered:
+        ordered = []
+    rep = _representative_turn(ordered)
+    conversation = _conversation_turns(ordered)
+    agent = str(rep.get("agent") or "") or next(
+        (str(t.get("agent") or "") for t in ordered if t.get("agent")), ""
+    )
+    probe_id = str(rep.get("probe_id") or "") or next(
+        (str(t.get("probe_id") or "") for t in ordered if t.get("probe_id")), ""
+    )
+    rollup = _rollup_verdict(ordered) or str(rep.get("verdict") or "")
+    summary = (
+        f"{agent} — {len(ordered)} turn{'s' if len(ordered) != 1 else ''}"
+        if agent
+        else "Probe conversation"
+    )
+    return {
+        "record_id": probe_id or agent,
+        "probe_id": probe_id,
+        "agent": agent,
+        "asi_category": str(rep.get("asi_category") or ""),
+        "csa_category": str(rep.get("csa_category") or ""),
+        "mitre_atlas": rep.get("mitre_atlas") or [],
+        "severity": rep.get("severity") or "",
+        "severity_label": rep.get("severity_label") or "",
+        "severity_class": "",
+        "tier_floor": rep.get("tier_floor") or "",
+        "owasp_scenario": rep.get("owasp_scenario") or "",
+        "source_yaml": rep.get("source_yaml") or "",
+        "source_path": rep.get("source_path") or "",
+        "turn": rep.get("turn"),
+        "timestamp_label": str(rep.get("timestamp_label") or ""),
+        "seed": rep.get("seed") or "",
+        "rng_seed": rep.get("rng_seed") or "",
+        "strategy": str(rep.get("strategy") or ""),
+        "mutator_operators": rep.get("mutator_operators") or [],
+        "attacker_refused": bool(rep.get("attacker_refused") or False),
+        "prompt": str(rep.get("prompt") or ""),
+        "target_response": str(rep.get("target_response") or ""),
+        "verdict": rollup,
+        "confidence": rep.get("confidence"),
+        "panel_votes": rep.get("panel_votes") or [],
+        "reasoning": str(rep.get("reasoning") or ""),
+        # Always surface the conversation for a group — even a single-turn
+        # agent reads as a one-message thread here (the row promised "all its
+        # turns inline as the chat conversation").
+        "conversation": conversation,
+        "summary": summary,
     }
 
 
@@ -874,6 +1090,146 @@ def _engine_field(scan: Scan | None, key: str, default: str = "—") -> str:
     return scan.engine.get(key, default)
 
 
+# Per-mode estimated-cost band (USD). Mirrors ``ui.scan_plan_data.MODE_COST_USD``
+# so the Overview "Scan plan" panel quotes the same figures the CLI's Phase-0
+# scan-plan board prints. Duplicated (not imported) to keep this view module
+# free of the CLI's heavier import chain.
+_MODE_COST_USD: Final[dict[str, tuple[float, float]]] = {
+    "fast": (0.005, 0.010),
+    "smart": (0.020, 0.040),
+    "full": (0.040, 0.080),
+}
+
+
+def _humanise_wall_cap(seconds: float | None) -> str:
+    """Render a wall-clock cap the way the CLI scan-plan board does.
+
+    ``None`` (no cap recorded on the persisted scan) renders as an em dash;
+    a recorded cap renders as ``"15 min"`` / ``"90 s"`` / ``"2 min 30 s"``.
+    """
+    if seconds is None or seconds <= 0:
+        return "—"
+    total = int(seconds)
+    minutes = total // 60
+    secs = total % 60
+    if minutes and secs:
+        return f"{minutes} min {secs} s"
+    if minutes:
+        return f"{minutes} min"
+    return f"{secs} s"
+
+
+def _build_scan_plan(
+    scan: Scan | None,
+    *,
+    base_url: str,
+    locality_label: str,
+    commander_model: str,
+    attacker_model: str,
+    evaluator_model: str,
+    is_multi_agent: bool | None = None,
+) -> dict[str, Any]:
+    """Assemble the Overview "Scan plan" panel view-model.
+
+    Mirrors the CLI's Phase-0 scan-plan board (``ui/scan_plan.py``) — the same
+    TARGET / MODELS / BUDGET / OUTPUTS / DASHBOARD / SAFETY GUARDS sections — so
+    the first thing an operator reads on the dashboard is the plan they
+    confirmed in the terminal. Sourced entirely from the persisted ``Scan``
+    record (plus the dashboard ``base_url``); fields a completed scan does not
+    carry (live reachability latency, per-model preflight verdicts, server
+    spawn state) render as ``"—"`` rather than being fabricated.
+    """
+    EM_DASH = "—"
+    if scan is None:
+        target_mode = EM_DASH
+        target_ref = EM_DASH
+        is_http = False
+        mode = EM_DASH
+        usd_cap = EM_DASH
+        wall_cap = EM_DASH
+        est_cost = EM_DASH
+        roe_blocklist = EM_DASH
+        authorization = EM_DASH
+        egress = EM_DASH
+    else:
+        target_mode = scan.target_mode
+        target_ref = scan.target_ref
+        is_http = scan.target_mode == "http"
+        mode = scan.mode
+        # USD cap: prefer the budget envelope's recorded cap; ``None`` = uncapped.
+        if scan.budget is not None and scan.budget.cap_usd is not None:
+            usd_cap = f"${scan.budget.cap_usd:.4f}"
+        else:
+            usd_cap = "uncapped"
+        # Wall-clock cap is not persisted on the terminal Scan record today.
+        wall_cap = EM_DASH
+        lo_hi = _MODE_COST_USD.get(scan.mode)
+        if lo_hi is not None:
+            est_cost = f"${lo_hi[0]:.4f} - ${lo_hi[1]:.4f} (typical for {scan.mode} mode)"
+        else:
+            est_cost = EM_DASH
+        # SAFETY GUARDS — read from the RoE audit envelope when present.
+        audit = scan.audit if isinstance(scan.audit, dict) else {}
+        observed = audit.get("observed_blocklisted_tools")
+        if isinstance(observed, list) and observed:
+            roe_blocklist = ", ".join(str(t) for t in observed)
+        else:
+            roe_blocklist = "none"
+        auth_ref = audit.get("authorization_ref")
+        authorization = str(auth_ref) if auth_ref else "n/a"
+        # Egress policy is not surfaced verbatim on the audit dict; the
+        # default for a non-contract scan is unrestricted egress.
+        egress = "unrestricted" if not audit else audit.get("egress_label", "unrestricted")
+
+    # ``Reachable`` is a live preflight signal not retained on the terminal
+    # Scan; we honestly mark it as not-preflighted rather than guess.
+    reachable = EM_DASH
+    # ``Multi-agent`` comes from the recon fingerprint (memory.jsonl) — the
+    # terminal Scan record does not carry it, so the caller threads through
+    # the recon-derived flag. ``None`` ⇒ recon hasn't reported yet.
+    if is_multi_agent is None:
+        multi_agent = EM_DASH
+    else:
+        multi_agent = "yes (orchestrator declared)" if is_multi_agent else "no (single endpoint)"
+
+    return {
+        "target": {
+            "url": target_ref if is_http else EM_DASH,
+            "mode": target_mode,
+            "reachable": reachable,
+            "multi_agent": multi_agent,
+        },
+        "models": {
+            "attacker": attacker_model,
+            "evaluator": evaluator_model,
+            "commander": commander_model,
+            # Per-model preflight verdicts are not retained on the terminal
+            # Scan; the engine map only records which spec drove each role.
+            "validated": EM_DASH,
+        },
+        "budget": {
+            "mode": mode,
+            "wall_cap": wall_cap,
+            "usd_cap": usd_cap,
+            "estimated_cost": est_cost,
+        },
+        "outputs": {
+            # ``--output`` formats are a CLI-invocation detail not persisted
+            # on the Scan; the dashboard cannot reconstruct them honestly.
+            "output": EM_DASH,
+        },
+        "dashboard": {
+            "url": base_url or EM_DASH,
+            "server_status": locality_label or EM_DASH,
+        },
+        "safety": {
+            "roe_blocklist": roe_blocklist,
+            "authorization": authorization,
+            "egress_policy": egress,
+        },
+    }
+
+
 def build_dashboard_context(
     *,
     scan_id: str,
@@ -934,11 +1290,56 @@ def build_dashboard_context(
     else:
         commander_model = attacker_model = evaluator_model = "—"
 
+    # Recon-derived view-model (read once; reused by the Overview recon panel
+    # AND the Scan plan panel's Multi-agent row, which the terminal Scan record
+    # cannot supply on its own).
+    recon_summary = _assemble_recon_summary(scan_dir)
+    _recon_multi_agent = (
+        bool(recon_summary.get("is_multi_agent")) if recon_summary.get("has_data") else None
+    )
+    scan_plan = _build_scan_plan(
+        scan,
+        base_url=base_url,
+        locality_label=locality_label,
+        commander_model=commander_model,
+        attacker_model=attacker_model,
+        evaluator_model=evaluator_model,
+        is_multi_agent=_recon_multi_agent,
+    )
+
     elapsed = (
         elapsed_seconds
         if elapsed_seconds is not None
         else (scan.duration_seconds if scan is not None else 0.0)
     )
+
+    # ``started_at_unix`` is the STABLE float-seconds anchor the client-side
+    # ElapsedTicker counts up from (it never parses an ISO timestamp — Safari
+    # ``Date.parse`` returns NaN on naive datetimes, critic patch G16/P9).
+    #
+    # Bug fix: a terminal scan anchors to ``scan.created_at`` as before, but an
+    # IN-FLIGHT scan (``scan is None`` / partial-on-disk) previously produced
+    # ``None`` here — so the ticker had nothing to seed from, never stamped its
+    # anchor, and the KPI ELAPSED tile fell back to the server's ``elapsed``
+    # label which the snapshot patcher rewrote each poll, flickering between
+    # "00:00" and "00:01". We now derive the anchor as ``now - elapsed``: a
+    # single ``time.time()`` read per render that yields a steady wall-clock
+    # start the ticker can animate against from the very first paint, before
+    # the recon agent has written anything. (This is the one intentional clock
+    # read in this otherwise-pure builder — both terms move together, so
+    # re-renders agree on the same anchor.)
+    if scan is not None:
+        started_at_unix: float | None = scan.created_at.timestamp()
+    elif elapsed_seconds is not None:
+        # Floor to a whole second so the anchor is STABLE across the live
+        # SSE poll loop (``live_snapshot`` recomputes the context every
+        # poll; an un-floored ``time.time()`` would jitter by milliseconds
+        # each call and defeat the stream's duplicate-snapshot suppression).
+        # The ELAPSED clock only renders MM:SS, so 1-second granularity is
+        # exact for display purposes.
+        started_at_unix = float(int(time.time() - elapsed_seconds))
+    else:
+        started_at_unix = None
 
     probe_library_version = scan.probe_library_version if scan is not None else "—"
     package_version = scan.package_version if scan is not None else version_label
@@ -1122,8 +1523,18 @@ def build_dashboard_context(
         # are missing) so template authors can iterate without guarding.
         # ``_probes_list_for_evidence`` is reused here (already assembled
         # above for the Findings tab evidence join) so we don't read
-        # memory.jsonl twice per render.
+        # memory.jsonl twice per render. ``probes_list`` stays the FLAT
+        # per-turn list — it's still the source the Findings evidence join
+        # and the ``/probe?index=N`` drawer fast-path index into.
         "probes_list": _probes_list_for_evidence,
+        # Per-agent grouping (operator feedback 2026-06-03): recon emits
+        # ~17 individual turn records, one row per turn buries the
+        # conversation. ``probe_groups`` collapses the flat list into ONE
+        # entry per agent so the Probes table renders one conversational row
+        # per agent; clicking it opens the modal with that agent's full
+        # turn-by-turn chat. Derived from the SAME flat list (no extra disk
+        # read).
+        "probe_groups": _assemble_probe_groups(_probes_list_for_evidence),
         # BUG-1 (2026-06-02) — the legacy ``probes_payload_json`` was a
         # centralised JSON-island wall the slideover JS read on click.
         # It was removed because it dumped the full prompt + target
@@ -1139,7 +1550,11 @@ def build_dashboard_context(
         # framework / target / capability chips / discovered tools /
         # refusal baseline / system-prompt clues / skipped agents. Empty
         # / disabled when no fingerprint has been written yet.
-        "recon_summary": _assemble_recon_summary(scan_dir),
+        "recon_summary": recon_summary,
+        # Overview "Scan plan" panel — mirrors the CLI Phase-0 scan-plan board
+        # (TARGET / MODELS / BUDGET / OUTPUTS / DASHBOARD / SAFETY GUARDS).
+        # Replaced the framework-internal "Scan identity" fingerprint card.
+        "scan_plan": scan_plan,
         # SSE Phase 1, Step 2 — phase-spine snapshot. ``phase_state`` carries
         # the four-phase state machine (recon / decompose / parallel /
         # finalise) replayed from events.jsonl; ``started_at_unix`` is the
@@ -1148,7 +1563,7 @@ def build_dashboard_context(
         # datetimes, critic patch G16/P9). Both surface verbatim on the
         # ``/scans/<id>/live`` snapshot via :func:`live_snapshot`.
         "phase_state": _compute_phase_state(scan_dir),
-        "started_at_unix": (scan.created_at.timestamp() if scan is not None else None),
+        "started_at_unix": started_at_unix,
     }
     return DashboardContext(payload=payload)
 

@@ -225,7 +225,7 @@ def test_finding_slideover_header_template_emitted(client: TestClient, store: Sc
 # ---------------------------------------------------------------------------
 
 
-def test_finding_slideover_renders_per_turn_thread_when_multi_turn(
+def test_finding_slideover_renders_chat_conversation_when_multi_turn(
     client: TestClient, store: ScanStore
 ) -> None:
     scan = _make_scan()
@@ -233,13 +233,17 @@ def test_finding_slideover_renders_per_turn_thread_when_multi_turn(
     _seed_memory_jsonl(scan_dir, count=3)
     resp = client.get(f"/scan/{scan.id}/finding/f-crit-1")
     body = resp.text
-    assert "Per-turn conversation thread" in body
-    assert 'class="exec-slideover-thread"' in body
-    # Three numbered subsections, one per correlated probe attempt.
-    assert body.count('class="exec-slideover-thread__item"') == 3
+    # QA-061 — multi-turn renders as a chat conversation, one turn block
+    # per correlated probe attempt, each with an outgoing attacker bubble
+    # and an incoming target bubble.
+    assert "Attack conversation" in body
+    assert 'class="exec-chat"' in body
+    assert body.count('class="exec-chat__turn"') == 3
+    assert body.count("exec-chat__bubble--out") == 3
+    assert body.count("exec-chat__bubble--in") == 3
 
 
-def test_finding_slideover_omits_thread_when_single_turn(
+def test_finding_slideover_omits_chat_when_single_turn(
     client: TestClient, store: ScanStore
 ) -> None:
     scan = _make_scan()
@@ -247,7 +251,9 @@ def test_finding_slideover_omits_thread_when_single_turn(
     _seed_memory_jsonl(scan_dir, count=1)
     resp = client.get(f"/scan/{scan.id}/finding/f-crit-1")
     body = resp.text
-    assert "Per-turn conversation thread" not in body
+    assert "Attack conversation" not in body
+    # Single-turn keeps the flat prompt/response layout.
+    assert "Exact prompt sent" in body
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +279,87 @@ def test_findings_slideover_js_handles_finding_fetch(client: TestClient) -> None
     assert "loadFindingSheet" in body
     assert "isSafeFindingHref" in body
     assert "data-finding-href" in body
+
+
+# ---------------------------------------------------------------------------
+# 4. Field-correctness: the representative turn anchors prompt / response /
+#    verdict / reasoning to a SINGLE exchange (QA-061).
+# ---------------------------------------------------------------------------
+
+
+def _seed_turns(scan_dir: Path, turns: list[dict[str, object]]) -> None:
+    """Write the given turn dicts to ``memory.jsonl`` verbatim (file order)."""
+    lines: list[str] = []
+    for i, turn in enumerate(turns):
+        record = {
+            "timestamp": f"2026-05-27T12:{30 + i:02d}:00+00:00",
+            "record_type": "reflection",
+            "payload": {"agent": turn.get("agent", ""), "content": json.dumps(turn)},
+        }
+        lines.append(json.dumps(record))
+    (scan_dir / "memory.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _turn(*, turn_no: int, verdict: str, probe_id: str = "PROBE-001") -> dict[str, object]:
+    return {
+        "agent": "goal-hijack-agent",
+        "asi_category": "ASI01",
+        "csa_category": "GOAL_INSTRUCTION_MANIPULATION",
+        "turn": turn_no,
+        "strategy": "crescendo",
+        "prompt": f"attacker prompt turn {turn_no}",
+        "target_response": f"target response turn {turn_no}",
+        "verdict": verdict,
+        "confidence": 0.5 + 0.1 * turn_no,
+        "reasoning": f"judge reasoning turn {turn_no}",
+        "seed_id": probe_id,
+        "attacker_refused": False,
+    }
+
+
+def test_finding_ctx_anchors_fields_to_the_flipping_turn(store: ScanStore) -> None:
+    """The exchange that flipped the attack (first ``fail`` turn) supplies
+    the top-level prompt / response / verdict / reasoning — they must all
+    describe the SAME turn, not turn 1's defended exchange under an
+    EXPLOITED verdict (the operator's "values don't look correct" bug).
+    """
+    from agent_guardian.server.dashboard_view import build_finding_slideover_ctx
+
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    # Turn 1 defended, turn 2 defended, turn 3 EXPLOITED — and written in a
+    # scrambled file order to prove the builder sorts by turn.
+    _seed_turns(
+        scan_dir,
+        [
+            _turn(turn_no=3, verdict="fail"),
+            _turn(turn_no=1, verdict="pass"),
+            _turn(turn_no=2, verdict="pass"),
+        ],
+    )
+    finding = next(f for f in scan.findings if f.id == "f-crit-1")
+    ctx = build_finding_slideover_ctx(finding, scan_dir=scan_dir)
+
+    # Representative = the flipping (turn 3) exchange — all four fields agree.
+    assert ctx["verdict"] == "fail"
+    assert ctx["prompt"] == "attacker prompt turn 3"
+    assert ctx["target_response"] == "target response turn 3"
+    assert ctx["reasoning"] == "judge reasoning turn 3"
+    assert ctx["turn"] == 3
+
+    # Conversation is in turn order regardless of file order.
+    convo = ctx["conversation"]
+    assert [t["turn_no"] for t in convo] == [1, 2, 3]
+    assert [t["verdict"] for t in convo] == ["pass", "pass", "fail"]
+
+
+def test_finding_ctx_single_turn_has_no_conversation(store: ScanStore) -> None:
+    from agent_guardian.server.dashboard_view import build_finding_slideover_ctx
+
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_turns(scan_dir, [_turn(turn_no=1, verdict="fail")])
+    finding = next(f for f in scan.findings if f.id == "f-crit-1")
+    ctx = build_finding_slideover_ctx(finding, scan_dir=scan_dir)
+    assert ctx["conversation"] == []
+    assert ctx["prompt"] == "attacker prompt turn 1"

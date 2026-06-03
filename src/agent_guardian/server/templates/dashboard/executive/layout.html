@@ -43,14 +43,11 @@
   {# QA-039 + QA-044 (2026-06-02) — owns the KPI tile ⓘ click affordance
      (toggles the prose info popover); the hover data-table is pure CSS. #}
   <script src="/static/executive_kpi.js?v={{ package_version }}" defer></script>
-  {# SSE Phase 1, Step 3 — drives the four-pill Phase Spine. Subscribes
-     to ``/scan/<id>/events`` for live transitions and to
-     ``/scans/<id>/live`` for snapshot reconciliation (multi-tab safe,
-     critic patch G11/P11). No-ops on terminal scans. #}
-  <script src="/static/phase-spine.js?v={{ package_version }}" defer></script>
   {# SSE Phase 1, Step 4 — client-side ElapsedTicker. Reads
-     ``started_at_unix`` (float) from the snapshot and the spine's
-     ``data-started-at-unix`` attribute; NEVER parses an ISO timestamp
+     ``started_at_unix`` (float) from the snapshot and from the body's
+     ``data-started-at-unix`` attribute (the former Phase Spine source
+     was retired with the four-phase strip — the body now carries the
+     stable scan-start anchor); NEVER parses an ISO timestamp
      (Safari ``Date.parse`` returns NaN on naive timestamps — critic
      patch G16/P9). ``setTimeout``-driven (NOT ``setInterval``) so
      ``prefers-reduced-motion`` users fall back cleanly to the server's
@@ -86,15 +83,14 @@
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
       data-is-running="{{ 'true' if is_running else 'false' }}"
-      data-is-terminal="{{ 'true' if is_terminal else 'false' }}">
+      data-is-terminal="{{ 'true' if is_terminal else 'false' }}"
+      data-started-at-unix="{{ started_at_unix if started_at_unix is not none else '' }}">
 
   {% include "dashboard/executive/_topbar.html" %}
-  {# SSE Phase 1, Step 3 — Phase Spine lives in the layout shell, ABOVE
-     ``<main>`` and between the topbar and the tab bar (critic patch
-     G10/P10). Universal across all four tabs; NEVER placed inside
-     ``tabpanel-overview`` (would hide the heartbeat on Findings /
-     Probes / Logs and fire pulses against an ``hidden`` element). #}
-  {% include "dashboard/executive/_phase_spine.html" %}
+  {# The four-phase strip (RECON / DECOMPOSE / PARALLEL / FINALISE) was
+     retired — it exposed framework-internal phases to end users. The
+     ElapsedTicker now seeds its anchor from the body's
+     ``data-started-at-unix`` attribute (above) instead of the spine. #}
   {% include "dashboard/executive/_tab_bar.html" %}
 
   <main class="exec-main" role="main">
@@ -131,20 +127,22 @@
      ``elapsed-ticker.js`` removes the anchor in that branch. #}
   <script>
   (function () {
+    // The SSE bootstrap MUST run AFTER the deferred enhancer modules
+    // (``freshness-dot.js``, ``live-append.js``) have executed —
+    // otherwise ``window.AGFreshnessDot`` / ``window.AGLiveAppend`` are
+    // still undefined when we call ``.attach()`` and the wiring is
+    // silently skipped (the live dot stays OFFLINE and no event rows
+    // append until an F5; 2026-06-03 operator bug). Deferred scripts run
+    // before ``DOMContentLoaded`` and in order, so gating on that event
+    // guarantees both modules are present. ``boot()`` runs immediately
+    // when the document is already parsed (re-entrant / cached case).
+    function boot() {
     var body = document.body;
     var scanId = body.getAttribute('data-scan-id');
     if (!scanId) { return; }
     if (body.getAttribute('data-is-terminal') === 'true') { return; }
     if (typeof EventSource === 'undefined') { return; }
     var url = '/scans/' + encodeURIComponent(scanId) + '/live';
-    var es = new EventSource(url);
-    // SSE Phase 1, Step 5 — share this EventSource's readyState +
-    // ``heartbeat`` arrivals with the freshness dot. Replaces the
-    // previously empty ``onerror`` at the bottom of this block.
-    if (window.AGFreshnessDot &&
-        typeof window.AGFreshnessDot.attach === 'function') {
-      window.AGFreshnessDot.attach(es, { url: url });
-    }
     function applyPatch(node, spec, data) {
       // Mode dispatch — ``text:<key>`` is the implicit default (any
       // ``data-live`` value that doesn't carry a ``attr:`` / ``pulse:``
@@ -185,23 +183,45 @@
       if (node.hasAttribute('data-elapsed-anchor')) { return; }
       node.textContent = data[spec];
     }
-    es.addEventListener('snapshot', function (evt) {
-      try {
-        var data = JSON.parse(evt.data);
-        document.querySelectorAll('[data-live]').forEach(function (node) {
-          var spec = node.getAttribute('data-live');
-          if (!spec) { return; }
-          applyPatch(node, spec, data);
-        });
-      } catch (err) { /* swallow */ }
-    });
-    es.addEventListener('scan_done', function () { es.close(); });
-    // SSE Phase 1, Step 5 — no per-handler onerror. The shared
-    // ``window.AGFreshnessDot`` reads ``es.readyState`` on every
-    // requestAnimationFrame tick and drives the four-state
-    // LIVE/STALE/RECONNECTING/DEAD machine. EventSource will keep
-    // attempting to auto-reconnect; the freshness dot recolors to
-    // ``stale`` on CONNECTING and to ``dead`` on hard CLOSED.
+    // Bind every snapshot/terminator handler onto an EventSource. Split
+    // out so the freshness dot's click-to-retry can recreate the stream
+    // AND re-bind these data handlers (a bare reopen would reconnect the
+    // socket but lose the snapshot patcher, so KPIs would stop updating
+    // after a manual Retry).
+    function wire(source) {
+      source.addEventListener('snapshot', function (evt) {
+        try {
+          var data = JSON.parse(evt.data);
+          document.querySelectorAll('[data-live]').forEach(function (node) {
+            var spec = node.getAttribute('data-live');
+            if (!spec) { return; }
+            applyPatch(node, spec, data);
+          });
+        } catch (err) { /* swallow */ }
+      });
+      source.addEventListener('scan_done', function () { source.close(); });
+      return source;
+    }
+    // SSE Phase 1, Step 5 — share this EventSource's readyState +
+    // ``heartbeat`` arrivals with the freshness dot, and hand it a
+    // ``reconnect`` factory so the Retry button reopens AND rewires the
+    // stream. No per-handler onerror: the shared ``window.AGFreshnessDot``
+    // reads ``es.readyState`` on every requestAnimationFrame tick and
+    // drives the four-state LIVE/STALE/RECONNECTING/DEAD machine.
+    var es = wire(new EventSource(url));
+    if (window.AGFreshnessDot &&
+        typeof window.AGFreshnessDot.attach === 'function') {
+      window.AGFreshnessDot.attach(es, {
+        url: url,
+        reconnect: function () { return wire(new EventSource(url)); },
+      });
+    }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
   })();
   </script>
 
@@ -217,6 +237,13 @@
      guaranteed but the module guards anyway). #}
   <script>
   (function () {
+    // Same defer-order gate as the snapshot bootstrap above: wait for
+    // ``DOMContentLoaded`` so the deferred ``live-append.js`` has run and
+    // ``window.AGLiveAppend`` exists. Without this gate the inline script
+    // executes DURING parse (before the deferred module), the guard below
+    // short-circuits, and Findings / Probes / Logs rows never append live
+    // (operators saw rows only after an F5).
+    function boot() {
     var body = document.body;
     var scanId = body.getAttribute('data-scan-id');
     if (!scanId) { return; }
@@ -226,9 +253,33 @@
       return;
     }
     var url = '/scan/' + encodeURIComponent(scanId) + '/events';
-    var es = new EventSource(url);
-    window.AGLiveAppend.attach(es);
-    es.addEventListener('scan_done', function () { es.close(); });
+    // Wire live-append + the terminator onto a stream. Re-runnable so the
+    // freshness dot's Retry reopens AND re-attaches live-append (the
+    // attach is idempotent per source via its own marker attribute).
+    function wire(source) {
+      window.AGLiveAppend.attach(source);
+      source.addEventListener('scan_done', function () { source.close(); });
+      return source;
+    }
+    var es = wire(new EventSource(url));
+    // Share this stream's readyState + heartbeats with the freshness dot
+    // too, so a healthy event stream keeps the dot LIVE even when the
+    // snapshot stream is momentarily quiet (and vice-versa via the
+    // aggregate-readyState machine). The ``reconnect`` factory lets the
+    // Retry button reopen this stream with its handlers intact.
+    if (window.AGFreshnessDot &&
+        typeof window.AGFreshnessDot.attach === 'function') {
+      window.AGFreshnessDot.attach(es, {
+        url: url,
+        reconnect: function () { return wire(new EventSource(url)); },
+      });
+    }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
   })();
   </script>
 </body>

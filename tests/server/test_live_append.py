@@ -205,8 +205,9 @@ def test_probes_row_template_slots(client: TestClient, store: ScanStore) -> None
     tpl_end = pane.find("</template>", tpl_start)
     assert tpl_end != -1
     tpl = pane[tpl_start:tpl_end]
+    # Per-agent grouping (2026-06-03) dropped the PROBE ID column — the row
+    # is identified by its agent, so there's no ``probe-id`` slot any more.
     for slot in (
-        "probe-id",
         "asi",
         "agent",
         "verdict-pill",

@@ -173,14 +173,19 @@ def test_executive_probes_renders_table_not_card_list(client: TestClient, store:
 # ---------------------------------------------------------------------------
 
 
-def test_executive_probes_table_has_5_columns(client: TestClient, store: ScanStore) -> None:
+def test_executive_probes_table_has_4_columns(client: TestClient, store: ScanStore) -> None:
+    # Per-agent grouping (2026-06-03) dropped the PROBE ID column: the table
+    # renders one row per agent (its conversation), so the agent name is the
+    # row identity and the TURNS column counts the agent's turns.
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl(scan_dir, count=2)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    for header in ("PROBE ID", "AGENT", "VERDICT", "TURN", "TIMESTAMP"):
+    for header in ("AGENT", "VERDICT", "TURNS", "LAST ACTIVITY"):
         assert header in pane, f"missing header {header!r}"
+    # The PROBE ID header is gone.
+    assert "PROBE ID" not in pane
 
 
 def test_executive_probes_table_columns_use_locked_widths(
@@ -192,7 +197,6 @@ def test_executive_probes_table_columns_use_locked_widths(
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
     for cls in (
-        "exec-probes-table__col--id",
         "exec-probes-table__col--agent",
         "exec-probes-table__col--verdict",
         "exec-probes-table__col--turn",
@@ -285,16 +289,19 @@ def test_executive_probes_no_initial_payload_leak(client: TestClient, store: Sca
 def test_executive_probes_row_has_drawer_href(client: TestClient, store: ScanStore) -> None:
     """BUG-1 / QA-049 — each row carries a ``data-probe-href`` pointing at
     the server-rendered probe-detail-sheet endpoint.
+
+    Per-agent grouping (2026-06-03) — the href now keys on the agent
+    (``?group=<agent>``) so the modal renders that agent's whole
+    conversation. The fixture seeds a distinct agent per turn, so each turn
+    becomes its own one-row group.
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl(scan_dir, count=3)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    # Each of the 3 rows carries a probe-drawer href on the configured
-    # scan id, indexed by ``loop.index0``.
     for idx in range(3):
-        marker = f'data-probe-href="/scan/{scan.id}/probe?index={idx}"'
+        marker = f'data-probe-href="/scan/{scan.id}/probe?group=agent-{idx}"'
         assert marker in pane, f"row {idx} missing drawer href {marker!r}"
 
 
@@ -328,8 +335,10 @@ def test_probe_drawer_route_renders_locked_fields(client: TestClient, store: Sca
     resp = client.get(f"/scan/{scan.id}/probe?index=0")
     assert resp.status_code == 200
     body = resp.text
-    # Structural class so the drawer body styles cleanly.
-    assert 'class="exec-probe-detail-sheet"' in body
+    # QA-061 — the probe endpoint now renders the SHARED ``_slideover.html``
+    # modal body (``exec-slideover-sheet``) so probes get the same large
+    # modal + chat conversation as findings.
+    assert 'class="exec-slideover-sheet"' in body
     # Section labels for the seven QA-049 panels.
     for label in (
         "Probe metadata",
@@ -380,7 +389,113 @@ def test_probe_drawer_route_renders_empty_on_unknown_id(
     resp = client.get(f"/scan/{scan.id}/probe?id=DOES-NOT-EXIST")
     assert resp.status_code == 200
     body = resp.text
-    assert 'class="exec-probe-detail-sheet"' in body
+    assert 'class="exec-slideover-sheet"' in body
+    assert "Probe not found" in body
+
+
+# ---------------------------------------------------------------------------
+# 5c. Per-agent grouping (operator feedback 2026-06-03) — recon's many turns
+#     collapse into ONE conversational row; the modal renders all turns.
+# ---------------------------------------------------------------------------
+
+
+def _seed_single_agent_multi_turn(
+    scan_dir: Path,
+    *,
+    agent: str = "recon",
+    turns: int = 17,
+    verdicts: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """Write ``turns`` reflection records that all belong to ONE agent.
+
+    Mirrors the real recon case: one agent, no per-turn ``seed_id`` (recon
+    writes turns without a probe seed), many turns in chronological order.
+    """
+    out: list[dict[str, object]] = []
+    lines: list[str] = []
+    for i in range(turns):
+        verdict = (verdicts[i % len(verdicts)]) if verdicts else "pass"
+        turn = {
+            "agent": agent,
+            "asi_category": "ASI01",
+            "csa_category": "GOAL_INSTRUCTION_MANIPULATION",
+            "turn": i + 1,
+            "strategy": "recon_probe",
+            "prompt": f"recon prompt turn {i + 1}",
+            "target_response": f"recon response turn {i + 1}",
+            "verdict": verdict,
+            "confidence": 0.7,
+            "reasoning": f"recon reasoning turn {i + 1}",
+            "seed_id": "",
+            "attacker_refused": False,
+        }
+        record = {
+            "timestamp": f"2026-05-27T12:{30 + i:02d}:00+00:00",
+            "record_type": "reflection",
+            "payload": {"agent": agent, "content": json.dumps(turn)},
+        }
+        out.append(turn)
+        lines.append(json.dumps(record))
+    (scan_dir / "memory.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
+def test_executive_probes_groups_one_row_per_agent(client: TestClient, store: ScanStore) -> None:
+    """17 recon turns under one agent collapse into a SINGLE table row."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_single_agent_multi_turn(scan_dir, agent="recon", turns=17)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _probes_pane(resp.text)
+    # Exactly one data row (the live-append <template> skeleton is NOT
+    # counted — it carries no ``data-action`` token).
+    assert pane.count('data-action="probe-row-click"') == 1
+    # The single row shows the rolled-up turn count, not "turn 1".
+    assert "17 turns" in pane
+    # Row href targets the per-agent group endpoint.
+    assert f'data-probe-href="/scan/{scan.id}/probe?group=recon"' in pane
+
+
+def test_executive_probes_group_verdict_is_worst_case(client: TestClient, store: ScanStore) -> None:
+    """A thread with one exploited turn rolls up to EXPLOITED, not DEFENDED."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_single_agent_multi_turn(
+        scan_dir, agent="recon", turns=3, verdicts=["pass", "fail", "pass"]
+    )
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _probes_pane(resp.text)
+    assert pane.count('data-action="probe-row-click"') == 1
+    assert "EXPLOITED" in pane
+    assert 'data-verdict="fail"' in pane
+
+
+def test_probe_drawer_group_renders_full_conversation(client: TestClient, store: ScanStore) -> None:
+    """``?group=<agent>`` renders every turn of the agent as a chat thread."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    turns = _seed_single_agent_multi_turn(scan_dir, agent="recon", turns=4)
+    resp = client.get(f"/scan/{scan.id}/probe?group=recon")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'class="exec-slideover-sheet"' in body
+    # Every turn's verbatim prompt + response appears (the full conversation),
+    # not just the representative turn.
+    for t in turns:
+        assert t["prompt"] in body, f"missing prompt for {t['turn']}"
+        assert t["target_response"] in body, f"missing response for {t['turn']}"
+
+
+def test_probe_drawer_group_unknown_agent_renders_empty(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_single_agent_multi_turn(scan_dir, agent="recon", turns=2)
+    resp = client.get(f"/scan/{scan.id}/probe?group=does-not-exist")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'class="exec-slideover-sheet"' in body
     assert "Probe not found" in body
 
 
@@ -440,10 +555,9 @@ def test_executive_probes_clean_control_empty_state_preserved(
 def test_executive_probes_reproducibility_no_longer_included(
     client: TestClient, store: ScanStore
 ) -> None:
-    """BUG-2 (2026-06-02) — the shared reproducibility receipt was
-    included once per tabpanel (Overview + Probes). Surfacing it twice
-    was the bug; the receipt now lives ONLY on the Overview tab. The
-    Probes drawer's "Reproduce" CLI button covers per-probe replay.
+    """BUG-2 (2026-06-02) removed the Probes-tab reproducibility include;
+    the later Overview cleanup retired the receipt entirely. The Probes
+    drawer's "Reproduce" CLI button still covers per-probe replay.
     """
     scan = _make_scan()
     scan_dir = _persist(store, scan)
@@ -453,11 +567,11 @@ def test_executive_probes_reproducibility_no_longer_included(
     # The reproducibility component must NOT render inside the Probes
     # tabpanel any more.
     assert 'data-component="reproducibility"' not in pane
-    # Cross-check: the canonical receipt still lives on the Overview tab.
+    # Cross-check: the receipt is gone from the Overview tab too.
     overview_start = resp.text.find('id="tabpanel-overview"')
     overview_end = resp.text.find('id="tabpanel-findings"', overview_start)
     overview_pane = resp.text[overview_start:overview_end]
-    assert 'data-component="reproducibility"' in overview_pane
+    assert 'data-component="reproducibility"' not in overview_pane
 
 
 # ---------------------------------------------------------------------------
