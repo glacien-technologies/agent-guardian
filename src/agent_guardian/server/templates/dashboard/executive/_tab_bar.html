@@ -8,6 +8,14 @@
    ``tabindex="0"``; all others ``aria-selected="false"`` AND
    ``tabindex="-1"``. ``executive_tabs.js`` flips both attributes on click /
    Space / Enter.
+
+   SSE Phase 1, Step 6 — each tab button carries a single
+   ``<span class="exec-tab__badge" data-badge data-tab="<slug>"></span>``
+   slot. ``tab-badge-bus.js`` writes the count into the slot, toggles
+   ``.notice`` / ``.alert`` per caller intent, and clears on tab-button
+   click + 2s dwell (NOT bare active-tab clearing — critic patch G19/P19).
+   The slot is empty in the server-rendered HTML so terminal scans never
+   show stale badge counts.
 #}
 <h2 id="executive-tablist-label" class="exec-sr-only">Scan dashboard sections</h2>
 <div role="tablist"
@@ -18,23 +26,23 @@
           role="tab"
           aria-selected="true"
           aria-controls="tabpanel-overview"
-          tabindex="0">Overview</button>
+          tabindex="0">Overview<span class="exec-tab__badge" data-badge data-tab="overview"></span></button>
   <button id="tab-findings"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-findings"
-          tabindex="-1">Findings</button>
+          tabindex="-1">Findings<span class="exec-tab__badge" data-badge data-tab="findings"></span></button>
   <button id="tab-probes"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-probes"
-          tabindex="-1">Probes</button>
+          tabindex="-1">Probes<span class="exec-tab__badge" data-badge data-tab="probes"></span></button>
   <button id="tab-logs"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-logs"
-          tabindex="-1">Logs</button>
+          tabindex="-1">Logs<span class="exec-tab__badge" data-badge data-tab="logs"></span></button>
 </div>

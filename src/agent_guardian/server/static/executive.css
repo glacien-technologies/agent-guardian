@@ -616,6 +616,43 @@ body.exec-body {
   transition: box-shadow 160ms ease-out;
 }
 
+/* SSE Phase 1, Step 6 — tab-bar badge primitive.
+ *
+ * Superscript-style chip rendered inside every tab button. Hidden by
+ * default; ``tab-badge-bus.js`` un-hides on bump and re-hides on clear.
+ * Two severity classes set by the caller:
+ *   .notice  — informational (PROBES / LOGS arrival)
+ *   .alert   — operator-relevant (FINDINGS arrival)
+ * No animation: per the three-rule motion policy (ticker / flash / dot)
+ * the badge is a static chip, not a sixth animated surface. */
+.exec-tab__badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 0.35rem;
+  margin-left: 0.4rem;
+  vertical-align: super;
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1rem;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--exec-ink-subtle);
+  color: var(--exec-bg-elev);
+  letter-spacing: 0;
+}
+.exec-tab__badge[hidden] {
+  display: none;
+}
+.exec-tab__badge.notice {
+  background: var(--exec-brand);
+  color: #ffffff;
+}
+.exec-tab__badge.alert {
+  background: var(--exec-sev-high);
+  color: #ffffff;
+}
+
 /* ============================================================
  * 5. Tab panels — Narrative editorial column rhythm
  * ============================================================ */

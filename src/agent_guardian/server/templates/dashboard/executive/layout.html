@@ -65,6 +65,16 @@
      keepalive comment — EventSource ``onmessage`` does not fire on
      comments; critic patch G14/P5). #}
   <script src="/static/freshness-dot.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 6 — tab-bar badge bus. Owns the
+     ``<span class="exec-tab__badge" data-badge>`` chip on every tab
+     button. Public API ``window.AGTabBadgeBus.{bump,clear,get}``;
+     persistence via ``sessionStorage`` keyed by ``(scan_id, tab)``;
+     clear semantics = tab-button click + 2s dwell, NOT bare
+     active-tab clearing (critic patch G19/P19). Spine wiring lives in
+     ``phase-spine.js`` (findings / probes) and ``reflections.js``
+     (logs). No severity logic here — the caller passes
+     ``opts.severity`` and the bus paints the matching CSS class. #}
+  <script src="/static/tab-badge-bus.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"

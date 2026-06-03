@@ -278,6 +278,25 @@
       }
     }
 
+    // SSE Phase 1, Step 6 — tab-bar badge bus wiring.
+    // The spine is the single fan-out point for ``/scan/<id>/events``,
+    // so it bumps the badge bus on behalf of the tab buttons. The bus
+    // is a thin chip primitive and intentionally doesn't open its own
+    // EventSource. Reflection arrivals (LOGS badge) are wired
+    // separately in ``reflections.js`` because the reflection stream
+    // is a different endpoint (``/scans/<id>/reflections.sse``).
+    function bumpBadge(tab, n, severity) {
+      if (
+        typeof window === "undefined" ||
+        !window.AGTabBadgeBus ||
+        typeof window.AGTabBadgeBus.bump !== "function"
+      ) {
+        return;
+      }
+      var opts = severity ? { severity: severity } : undefined;
+      window.AGTabBadgeBus.bump(tab, n, opts);
+    }
+
     es.addEventListener("phase_start", function (evt) {
       var data = parsePayload(evt);
       if (!data) {
@@ -301,18 +320,41 @@
       applyPhaseDone("recon", null);
     });
     es.addEventListener("agent_start", function () {
-      // agent_start doesn't bump the counter — only agent_done /
+      // agent_start doesn't bump the spine counter — only agent_done /
       // agent_skipped do. We use it only to confirm the active phase
-      // has work in flight (no-op for now; reserved for the per-pill
-      // running-agent caption in Phase 2).
+      // has work in flight (no-op for the spine; reserved for the
+      // per-pill running-agent caption in Phase 2).
+      // SSE Phase 1, Step 6 — bump the PROBES badge by 1 on each
+      // agent_start arrival so an operator on a different tab sees
+      // probe activity. Severity ``notice`` (informational, not alert).
+      bumpBadge("probes", 1, "notice");
     });
     es.addEventListener("agent_done", function (evt) {
       var data = parsePayload(evt);
-      applyAgentBump(data ? data.payload || data : null);
+      var payload = data ? data.payload || data : null;
+      applyAgentBump(payload);
+      // SSE Phase 1, Step 6 — PROBES badge tracks every agent arrival.
+      bumpBadge("probes", 1, "notice");
+      // FINDINGS badge tracks discovered findings only. Severity
+      // ``alert`` because the operator-pain target is "I missed a
+      // finding because the count bumped silently."
+      var count = 0;
+      if (payload && typeof payload === "object") {
+        var raw = Number(payload.findings_count);
+        if (isFinite(raw) && raw > 0) {
+          count = Math.floor(raw);
+        }
+      }
+      if (count > 0) {
+        bumpBadge("findings", count, "alert");
+      }
     });
     es.addEventListener("agent_skipped", function (evt) {
       var data = parsePayload(evt);
       applyAgentBump(data ? data.payload || data : null);
+      // SSE Phase 1, Step 6 — a skipped agent still counts as PROBES
+      // activity (the slot ran, just with no work).
+      bumpBadge("probes", 1, "notice");
     });
     es.addEventListener("scan_done", function () {
       try {
