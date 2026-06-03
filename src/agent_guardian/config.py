@@ -103,7 +103,11 @@ class OutputConfig(BaseModel):
     """
 
     formats: list[str] = Field(default_factory=lambda: ["json"])
-    redact_pii: bool = True
+    # Opt-IN PII redaction — off by default, matching the ``memory.jsonl``
+    # durable-storage default and the report emitters
+    # (``reports.json_report``). Operators asked to see verbatim target output;
+    # set this (or ``AGENT_GUARDIAN_REDACT_PII=1``) to scrub shareable artifacts.
+    redact_pii: bool = False
     sign_evidence: bool = True
     output_dir: str | None = None
     model_config = ConfigDict(extra="forbid")

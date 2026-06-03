@@ -1,10 +1,10 @@
 """QA-049 / QA-055 — Shared slide-over: probe endpoint sanity.
 
 The Probes-tab row-click contract (existing
-``/scan/<id>/probe?index=N``) is still served by the locked
-``_probe_drawer_body.html`` template; this test file complements
+``/scan/<id>/probe?index=N``) is served by the polymorphic shared
+``_slideover.html`` template; this test file complements
 ``test_executive_probes_table_and_slideover.py`` by adding the
-contract checks for the polymorphic shared-template surface: when an
+contract checks for that shared-template surface: when an
 operator clicks a probe row the drawer body emits the same locked
 section labels as the finding endpoint (``Probe metadata``, ``Run
 context``, ``Exact prompt sent``, ``Target response``, ``Judge

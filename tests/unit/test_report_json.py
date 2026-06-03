@@ -292,7 +292,7 @@ def test_emit_json_engine_none_when_unset() -> None:
     assert "audit" not in payload  # omitted when scan.audit is None
 
 
-def test_emit_json_redacts_secrets_in_findings() -> None:
+def _leaky_scan():
     from agent_guardian.models.severity import Severity
     from tests.unit._report_fixtures import make_finding
 
@@ -303,14 +303,48 @@ def test_emit_json_redacts_secrets_in_findings() -> None:
         summary="target returned ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
         trigger_prompt="leaked bearer abc123def456ghi789 token",
     )
-    scan = make_scan(findings=[leaky])
-    payload = emit_json(scan, sign=False)
+    return make_scan(findings=[leaky])
+
+
+def test_emit_json_redacts_secrets_in_findings_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Redaction is opt-in (off by default) — set AGENT_GUARDIAN_REDACT_PII like
+    # the memory-redaction tests do to exercise the scrubbing path.
+    monkeypatch.setenv("AGENT_GUARDIAN_REDACT_PII", "1")
+    payload = emit_json(_leaky_scan(), sign=False)
     blob = json.dumps(payload)
     assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in blob
     assert "[REDACTED:GITHUB_TOKEN]" in blob
     # trigger_prompt is redacted too.
     assert "abc123def456ghi789" not in blob
     assert "[REDACTED:BEARER_TOKEN]" in blob
+
+
+def test_emit_json_leaves_secrets_raw_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Off by default: without the opt-in env var (and no explicit flag) the
+    verbatim target output is preserved — parity with memory.jsonl."""
+    monkeypatch.delenv("AGENT_GUARDIAN_REDACT_PII", raising=False)
+    payload = emit_json(_leaky_scan(), sign=False)
+    blob = json.dumps(payload)
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" in blob
+    assert "[REDACTED:GITHUB_TOKEN]" not in blob
+
+
+def test_emit_json_explicit_redact_pii_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ``redact_pii=`` bool wins over the env var either way."""
+    # Env says on, explicit False wins -> raw.
+    monkeypatch.setenv("AGENT_GUARDIAN_REDACT_PII", "1")
+    raw = json.dumps(emit_json(_leaky_scan(), sign=False, redact_pii=False))
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" in raw
+    # Env unset, explicit True wins -> scrubbed.
+    monkeypatch.delenv("AGENT_GUARDIAN_REDACT_PII", raising=False)
+    scrubbed = json.dumps(emit_json(_leaky_scan(), sign=False, redact_pii=True))
+    assert "[REDACTED:GITHUB_TOKEN]" in scrubbed
 
 
 # ----------------------------------------------------------------------

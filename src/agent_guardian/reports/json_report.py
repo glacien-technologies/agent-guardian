@@ -5,8 +5,12 @@ both HMAC-SHA256 and Ed25519 signature blocks under the ``signatures`` key.
 The signing input is the canonical JSON of the payload *without* the
 ``signatures`` field so verifiers can reconstruct the signed bytes.
 
-PII / secret redaction is **on by default** (``redact_pii=True``). Every
-finding is routed through the shared :func:`agent_guardian.core.redact.redact_finding`
+PII / secret redaction is **opt-in** (off by default; set
+``AGENT_GUARDIAN_REDACT_PII=1`` or pass ``redact_pii=True``). This mirrors the
+``memory.jsonl`` durable-storage default — operators asked to see the verbatim
+target output (account ids, transaction ids, dollar amounts were being mangled
+into ``[REDACTED:PHONE_NUMBER]``). When redaction is enabled every finding is
+routed through the shared :func:`agent_guardian.core.redact.redact_finding`
 helper, which scrubs ``summary``, ``description``, ``trigger_prompt``,
 ``transcript_ref`` and ``evidence`` of PII *and* credential shapes (OpenAI /
 AWS / GitHub / Google keys, JWTs, bearer tokens, ``password=`` assignments)
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -52,6 +57,25 @@ __all__ = [
 SCHEMA_VERSION = "agentguardian-scan-v1"
 
 _LOG = logging.getLogger(__name__)
+
+# Opt-IN PII redaction of report findings — off by default, mirroring the
+# ``memory.jsonl`` durable-storage default (see ``core.memory``). Set
+# ``AGENT_GUARDIAN_REDACT_PII=1`` to re-enable scrubbing for shareable
+# artifacts. Callers may still force it on/off by passing ``redact_pii=`` an
+# explicit bool; the env var only resolves the unset (``None``) default.
+_REDACT_ENV = "AGENT_GUARDIAN_REDACT_PII"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _resolve_redact(redact_pii: bool | None) -> bool:
+    """Resolve the effective redaction flag.
+
+    An explicit ``True``/``False`` wins; ``None`` (the default) reads
+    ``AGENT_GUARDIAN_REDACT_PII`` and is off unless opted in.
+    """
+    if redact_pii is not None:
+        return redact_pii
+    return os.environ.get(_REDACT_ENV, "").strip().lower() in _TRUTHY
 
 
 def _finding_to_dict(finding: Finding, redact: bool) -> dict[str, Any]:
@@ -87,7 +111,7 @@ def sign_payload(
 def emit_json(
     scan: Scan,
     *,
-    redact_pii: bool = True,
+    redact_pii: bool | None = None,
     sign: bool = True,
     secret: str | None = None,
     keys_dir: Path | None = None,
@@ -95,12 +119,18 @@ def emit_json(
 ) -> dict[str, Any]:
     """Build the ``agentguardian-scan-v1`` payload for a :class:`Scan`.
 
+    PII / secret redaction of findings is **opt-in**: ``redact_pii`` defaults
+    to ``None``, which resolves from ``AGENT_GUARDIAN_REDACT_PII`` (off unless
+    set), mirroring the ``memory.jsonl`` default. Pass ``redact_pii=True`` /
+    ``False`` to force it regardless of the env var.
+
     The ``coverage`` block is reconstructed from the scan's on-disk
     ``memory.jsonl`` (under ``~/.agentguardian/scans/<scan_id>/`` by
     default). When no memory file exists (e.g. a hand-constructed Scan
     in a unit test) the coverage block has the canonical empty shape so
     the schema is stable.
     """
+    redact = _resolve_redact(redact_pii)
     coverage = compute_coverage_from_memory(scan, root_dir=memory_root)
     payload: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
@@ -121,7 +151,7 @@ def emit_json(
         "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
         "findings_summary": scan.findings_summary(),
         "coverage": coverage,
-        "findings": [_finding_to_dict(f, redact_pii) for f in scan.findings],
+        "findings": [_finding_to_dict(f, redact) for f in scan.findings],
         "duration_seconds": scan.duration_seconds,
         "cost_usd": scan.cost_usd,
         "tokens_total": scan.tokens_total,
@@ -181,17 +211,21 @@ def write_json(
     scan: Scan,
     path: Path,
     *,
-    redact_pii: bool = True,
+    redact_pii: bool | None = None,
     sign: bool = True,
     indent: int = 2,
     secret: str | None = None,
     keys_dir: Path | None = None,
     memory_root: Path | None = None,
 ) -> None:
-    """Render :func:`emit_json` to ``path`` (UTF-8, sorted keys)."""
+    """Render :func:`emit_json` to ``path`` (UTF-8, sorted keys).
+
+    Redaction is opt-in; see :func:`emit_json` for how ``redact_pii`` resolves.
+    """
+    redact = _resolve_redact(redact_pii)
     payload = emit_json(
         scan,
-        redact_pii=redact_pii,
+        redact_pii=redact,
         sign=sign,
         secret=secret,
         keys_dir=keys_dir,
@@ -205,7 +239,7 @@ def write_json(
         path,
         len(rendered),
         sign,
-        redact_pii,
+        redact,
     )
 
 

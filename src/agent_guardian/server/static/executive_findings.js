@@ -107,49 +107,6 @@
     }
   }
 
-  /**
-   * After the server-rendered drawer fragment is injected, hoist its
-   * ``<template data-probe-header>`` into the slide-over header chips
-   * (verdict pill / probe id / turn / timestamp / summary). This keeps
-   * the chip state in sync with the freshly-loaded probe without
-   * shipping a second copy of the metadata.
-   *
-   * @param {HTMLElement} root      — ``.exec-slideover-root`` element
-   * @param {HTMLElement} container — the drawer body container
-   */
-  function syncProbeHeader(root, container) {
-    var tpl = container.querySelector("[data-probe-header]");
-    if (!tpl) { return; }
-    var verdict = tpl.getAttribute("data-verdict") || "unknown";
-    var verdictLabel = tpl.getAttribute("data-verdict-label") || "PENDING";
-    var verdictCls = "exec-verdict-pill--unknown";
-    if (verdict === "fail") { verdictCls = "exec-verdict-pill--fail"; }
-    else if (verdict === "pass") { verdictCls = "exec-verdict-pill--pass"; }
-    else if (verdict === "inconclusive") { verdictCls = "exec-verdict-pill--inconclusive"; }
-
-    var pill = root.querySelector("[data-slideover-verdict-pill]");
-    if (pill) {
-      pill.className = "exec-verdict-pill " + verdictCls;
-      pill.setAttribute("data-slideover-verdict-pill", "");
-      pill.textContent = verdictLabel;
-    }
-    setText(root.querySelector("[data-slideover-id]"), tpl.getAttribute("data-probe-id") || "—");
-    var turn = tpl.getAttribute("data-turn") || "—";
-    setText(root.querySelector("[data-slideover-turn]"), "turn " + turn);
-    setText(
-      root.querySelector("[data-slideover-time]"),
-      tpl.getAttribute("data-timestamp") || "—",
-    );
-    setText(
-      root.querySelector("[data-slideover-summary]"),
-      tpl.getAttribute("data-summary") || "Probe details",
-    );
-
-    // The template is one-shot; remove it once consumed so the drawer
-    // body markup stays compact.
-    tpl.parentNode.removeChild(tpl);
-  }
-
   // ---- 4. Renderers (finding-mode only — probe-mode is server-rendered) -
   function renderFindingHeader(root, f) {
     var pill = root.querySelector("[data-slideover-verdict-pill]");
