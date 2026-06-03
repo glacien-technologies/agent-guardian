@@ -6,16 +6,18 @@
    ``history.replaceState``-d on activation.
 
    Sticky stack (from top to bottom, ordered for sticky-offset math):
-     1. Topbar       — brand + theme switcher dropdown (sticky layer 1)
+     1. Topbar       — brand + scan-id crumb + locality pill (sticky layer 1)
      2. Tab bar      — WAI-ARIA tablist, 4 buttons (sticky layer 2)
      3. Main content — 4 ``<section role="tabpanel">`` panes. The KPI
         strip now lives INSIDE the Overview tabpanel (not the layout shell),
         so it scrolls with the tab content and is not visible on the
         Findings / Probes / Logs tabs.
 
-   Same shared view-model contract as every other theme; the only Executive-
-   specific payload fields are ``probes_list`` and ``logs_tail`` (additive in
-   :func:`build_dashboard_context`).
+   QA-041 (theme switcher retired): Executive is the only dashboard theme
+   that ships. The view-model contract was previously shared with the
+   editorial / mission / narrative siblings; the Executive-specific
+   ``probes_list`` and ``logs_tail`` fields (additive in
+   :func:`build_dashboard_context`) are now the canonical shape.
 #}
 <!doctype html>
 <html lang="en" data-theme="executive">
