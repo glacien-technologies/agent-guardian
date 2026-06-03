@@ -56,6 +56,15 @@
      ``prefers-reduced-motion`` users fall back cleanly to the server's
      ``elapsed_label`` refresh (critic patch G20/P20). #}
   <script src="/static/elapsed-ticker.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 5 — peripheral-vision freshness dot + reconnect
+     banner. ONE shared four-state machine driven by EventSource
+     ``readyState`` and ``Date.now() - lastEventAt``; replaces the empty
+     ``onerror`` at ``layout.html:166`` (below), the CLOSED-only branch
+     at ``swarm.js:176-182``, and the identical empty pattern at
+     ``reflections.js:284``. Uses ``event: heartbeat`` (NOT the ``:``
+     keepalive comment — EventSource ``onmessage`` does not fire on
+     comments; critic patch G14/P5). #}
+  <script src="/static/freshness-dot.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
@@ -112,6 +121,13 @@
     if (typeof EventSource === 'undefined') { return; }
     var url = '/scans/' + encodeURIComponent(scanId) + '/live';
     var es = new EventSource(url);
+    // SSE Phase 1, Step 5 — share this EventSource's readyState +
+    // ``heartbeat`` arrivals with the freshness dot. Replaces the
+    // previously empty ``onerror`` at the bottom of this block.
+    if (window.AGFreshnessDot &&
+        typeof window.AGFreshnessDot.attach === 'function') {
+      window.AGFreshnessDot.attach(es, { url: url });
+    }
     function applyPatch(node, spec, data) {
       // Mode dispatch — ``text:<key>`` is the implicit default (any
       // ``data-live`` value that doesn't carry a ``attr:`` / ``pulse:``
@@ -163,7 +179,12 @@
       } catch (err) { /* swallow */ }
     });
     es.addEventListener('scan_done', function () { es.close(); });
-    es.onerror = function () { /* browser auto-reconnects */ };
+    // SSE Phase 1, Step 5 — no per-handler onerror. The shared
+    // ``window.AGFreshnessDot`` reads ``es.readyState`` on every
+    // requestAnimationFrame tick and drives the four-state
+    // LIVE/STALE/RECONNECTING/DEAD machine. EventSource will keep
+    // attempting to auto-reconnect; the freshness dot recolors to
+    // ``stale`` on CONNECTING and to ``dead`` on hard CLOSED.
   })();
   </script>
 </body>

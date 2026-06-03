@@ -57,6 +57,13 @@ _LIVE_POLL_SECONDS = 0.5
 # Soft cap on a single SSE stream lifetime so a forgotten browser tab can't
 # pin a uvicorn worker forever.
 _LIVE_MAX_SECONDS = 1800.0
+# SSE Phase 1, Step 5 — emit a ``deadline_approaching`` event this many
+# seconds before the live stream hits ``_LIVE_MAX_SECONDS`` so the
+# client's freshness dot can suppress its DEAD/red transition for the
+# clean reconnect that follows. Without this signal the dot pages
+# operators every 30 minutes on healthy long-running scans (critic
+# patch G5 / P-ScheduledReconnect of designs/sse-flow-and-live-ui.md).
+_DEADLINE_APPROACHING_LEAD_SECONDS = 30.0
 
 
 def _resolve_base_url(request: Request) -> str:
@@ -317,10 +324,30 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
 
     async def _gen() -> AsyncIterator[str]:
         deadline = time.monotonic() + _LIVE_MAX_SECONDS
+        approaching_at = deadline - _DEADLINE_APPROACHING_LEAD_SECONDS
+        approaching_fired = False
         last_snapshot: dict[str, object] | None = None
         while True:
-            if time.monotonic() > deadline:
+            now = time.monotonic()
+            if now > deadline:
                 break
+            # SSE Phase 1, Step 5 — pre-emit a ``deadline_approaching``
+            # event 30 s before the soft cap. The client's
+            # ``freshness-dot.js`` listens for this and suppresses its
+            # red/DEAD transition for 60 s while the EventSource
+            # reconnects, so the operator never sees a red dot on a
+            # healthy 30-minute scan crossing.
+            if not approaching_fired and now >= approaching_at:
+                yield (
+                    "event: deadline_approaching\n"
+                    + "data: "
+                    + json.dumps(
+                        {"deadline_in_seconds": max(0.0, deadline - now)},
+                        separators=(",", ":"),
+                    )
+                    + "\n\n"
+                )
+                approaching_fired = True
             is_running = store.is_running(scan_id)
             scan = store.load_completed(scan_id)
             scan_dir = store.scan_dir(scan_id)

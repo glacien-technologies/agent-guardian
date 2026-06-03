@@ -3452,3 +3452,143 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
     animation: none;
   }
 }
+
+/* ============================================================
+ * 15 — Freshness dot + reconnect banner (SSE Phase 1, Step 5)
+ *
+ * One peripheral-vision indicator + an above-spine reconnect banner.
+ * Driven by ``static/freshness-dot.js`` reading EventSource
+ * ``readyState`` and ``Date.now() - lastEventAt`` on every rAF tick.
+ *
+ *   .exec-freshness-dot[data-state="fresh"]        green  / "LIVE"
+ *   .exec-freshness-dot[data-state="stale"]        amber  / "STALE"
+ *   .exec-freshness-dot[data-state="reconnecting"] amber-pulse / "STALE"
+ *   .exec-freshness-dot[data-state="dead"]         red    / "OFFLINE"
+ *
+ * Accessibility: the dot is a labelled ``role="status"`` region
+ * (color paired with text — WCAG 1.4.1). The reconnect banner's retry
+ * button is at least 24x24 CSS px (WCAG 2.5.5). Reduced motion strips
+ * the amber-pulse keyframe.
+ *
+ * Palette: reuses ``--exec-sev-low`` (green), ``--exec-sev-medium``
+ * (amber), and ``--exec-sev-high`` / ``--exec-sev-critical`` (red) —
+ * no new tokens, mirrors the rule applied by the spine.
+ * ============================================================ */
+.exec-freshness-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  margin-right: 0.5rem;
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: 999px;
+  background: var(--exec-bg-elev);
+  font-family: var(--exec-font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink-muted);
+  white-space: nowrap;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+.exec-freshness-dot__swatch {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--exec-ink-subtle);
+  transition: background-color 160ms ease;
+}
+.exec-freshness-dot[data-state="fresh"] {
+  border-color: color-mix(in srgb, var(--exec-sev-low) 35%, var(--exec-border-subtle));
+  color: var(--exec-sev-low);
+}
+.exec-freshness-dot[data-state="fresh"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-low);
+}
+.exec-freshness-dot[data-state="stale"],
+.exec-freshness-dot[data-state="reconnecting"] {
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 35%, var(--exec-border-subtle));
+  color: var(--exec-sev-medium);
+}
+.exec-freshness-dot[data-state="stale"] .exec-freshness-dot__swatch,
+.exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-medium, #d97706);
+}
+.exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+  animation: exec-freshness-pulse 1.2s ease-in-out infinite;
+}
+.exec-freshness-dot[data-state="dead"] {
+  border-color: color-mix(in srgb, var(--exec-sev-high, #dc2626) 45%, var(--exec-border-subtle));
+  color: var(--exec-sev-high, #dc2626);
+}
+.exec-freshness-dot[data-state="dead"] .exec-freshness-dot__swatch {
+  background: var(--exec-sev-high, #dc2626);
+}
+
+@keyframes exec-freshness-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Banner — sits above the Phase Spine on RECONNECTING and DEAD. */
+.exec-freshness-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.375rem var(--exec-pad-x);
+  background: var(--exec-bg-sunken);
+  border-bottom: 1px solid var(--exec-border-subtle);
+  font-family: var(--exec-font-sans);
+  font-size: 0.75rem;
+  color: var(--exec-ink);
+}
+.exec-freshness-banner[hidden] {
+  display: none;
+}
+.exec-freshness-banner[data-state="reconnecting"] {
+  border-bottom-color: color-mix(in srgb, var(--exec-sev-medium) 45%, var(--exec-border-subtle));
+  color: var(--exec-sev-medium);
+}
+.exec-freshness-banner[data-state="dead"] {
+  border-bottom-color: color-mix(in srgb, var(--exec-sev-high, #dc2626) 55%, var(--exec-border-subtle));
+  color: var(--exec-sev-high, #dc2626);
+}
+.exec-freshness-banner__msg {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.exec-freshness-banner__retry {
+  /* WCAG 2.5.5 — 24x24 minimum target size for interactive controls. */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: var(--exec-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.exec-freshness-banner__retry:hover,
+.exec-freshness-banner__retry:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.exec-freshness-banner__retry[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exec-freshness-dot__swatch,
+  .exec-freshness-dot[data-state="reconnecting"] .exec-freshness-dot__swatch {
+    animation: none;
+    transition: none;
+  }
+}
