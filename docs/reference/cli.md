@@ -88,10 +88,14 @@ Start the local FastAPI dashboard at `http://127.0.0.1:7474/`.
 ### `report`
 
 ```text
-agent-guardian report
+agent-guardian report <SCAN_ID> [--output {json|sarif|junit|md|pdf}] [--output-path PATH]
 ```
 
-Regenerate a report from a stored scan in any supported output format.
+Regenerate a report from a stored scan in any supported output format. The
+positional `<SCAN_ID>` is required — it resolves under
+`~/.agentguardian/scans/<scan-id>/`. Text formats (`json` / `sarif` / `junit` /
+`md`) print to stdout by default, or to `--output-path` when given. `--output
+pdf` is binary and always requires `--output-path`.
 
 ### `verify`
 
@@ -162,9 +166,10 @@ agent-guardian contract schema
 agent-guardian contract migrate
 ```
 
-Work with target contracts. `agent-guardian contract schema` emits the
-JSON schema; `agent-guardian contract migrate` upgrades older contracts
-to the current shape.
+Work with target contracts. `agent-guardian contract schema` writes the
+contract JSON Schema to a file (or to stdout if no `--out` is given);
+`agent-guardian contract migrate` upgrades older contracts to the
+current shape.
 
 ### `agentdojo`
 
@@ -178,8 +183,12 @@ the `[agentdojo]` extra.
 ## Scan options
 
 The `scan` command exposes every knob the swarm respects. The list
-below is the authoritative set parsed by the docs-coverage test against
-`cli.py`.
+below is the documented set parsed by the docs-coverage test against
+`cli.py` (see `tests/docs/test_docs_cli_coverage.py`). A small number of
+commands and flags are intentionally excluded from that test via the
+`_SKIP_COMMAND_NAMES` and `_DOC_SKIP_FLAGS` frozensets — each entry
+carries an inline rationale (operator-internal toggles, alpha shims,
+or duplicate spellings).
 
 | Flag | Purpose |
 | --- | --- |

@@ -75,8 +75,9 @@ def test_print_scan_urls_json_mode_emits_single_ndjson_line() -> None:
     assert rec["record_type"] == "banner"
     assert rec["scan_id"] == "cli-3a4c1d9c2840"
     assert rec["payload"]["kind"] == "scan_url"
-    assert rec["payload"]["scan_url"] == "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840"
-    assert rec["payload"]["report_url"] == "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report"
+    # G3 (2026-06-03): canonical path is /scan/<id> singular.
+    assert rec["payload"]["scan_url"] == "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840"
+    assert rec["payload"]["report_url"] == "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report"
     assert rec["payload"]["dashboard_base_url"] == "http://127.0.0.1:7474"
 
 
@@ -347,4 +348,5 @@ def test_qa007_jq_filter_extracts_scan_url_as_field() -> None:
     extracted = [
         r["payload"]["scan_url"] for r in records if r["payload"].get("kind") == "scan_url"
     ]
-    assert extracted == ["http://127.0.0.1:7474/scans/cli-3a4c1d9c2840"]
+    # G3 (2026-06-03): canonical path is /scan/<id> singular.
+    assert extracted == ["http://127.0.0.1:7474/scan/cli-3a4c1d9c2840"]

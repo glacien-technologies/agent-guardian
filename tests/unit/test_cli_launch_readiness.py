@@ -282,7 +282,8 @@ def test_url_emission_runs_before_preflight_failure(runner: CliRunner, tmp_path:
     assert result.exit_code == EXIT_TARGET_UNREACHABLE
     # The URL emission line must be present (proves it ran before preflight).
     assert "▸ Scan cli-" in output
-    assert "/scans/cli-" in output
+    # G3 (2026-06-03) — canonical printed path is /scan/<id> singular.
+    assert "/scan/cli-" in output
     # And it must appear before the unreachable banner, not after.
     url_idx = output.find("▸ Scan cli-")
     err_idx = output.lower().find("target unreachable")
@@ -332,7 +333,13 @@ def test_endpoint_preflight_no_preflight_flag_skips(runner: CliRunner, tmp_path:
 def test_doctor_emits_pdf_readiness_line(runner: CliRunner) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == EXIT_OK
-    assert "pdf engine:" in result.stdout
+    # QA-G5: the doctor PDF line names each engine independently so the
+    # combined output cannot self-contradict (the earlier
+    # "pdf engine: none | reportlab X" form read as "engine: none" to
+    # operators even when reportlab was actually wired).
+    assert "pdf engines" in result.stdout
+    assert "weasyprint:" in result.stdout
+    assert "reportlab:" in result.stdout
 
 
 def test_doctor_emits_otel_readiness_line(runner: CliRunner) -> None:

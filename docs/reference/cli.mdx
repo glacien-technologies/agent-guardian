@@ -84,7 +84,7 @@ python: 3.11.13
 llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
 bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
 sandbox: importable
-pdf engine: none | reportlab 4.2 -- install 'agent-guardian[full]' to upgrade to WeasyPrint (higher-fidelity HTML→PDF).
+pdf engines — weasyprint: not installed | reportlab: reportlab 4.2  (install 'agent-guardian[full]' to add WeasyPrint for higher-fidelity HTML→PDF)
 otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
 dashboard port 7474: free
 state dir: /Users/you/.agentguardian
@@ -520,8 +520,8 @@ agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
 Outputs (truncated):
 
 ```text
-▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scans/cli-3a4c1d9c2840
-▸ Report when complete                http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report
+▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+▸ Report when complete                http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report
 no budget cap (running to completion)
 ... (Rich progress panel) ...
 AIVSS 87 (GOOD)
@@ -561,10 +561,11 @@ Work with target contracts.
 
 | Sub-command | Args / flags | Purpose |
 | --- | --- | --- |
-| `contract schema --out PATH` | `--out` (required) | Write the contract JSON Schema to a file. |
+| `contract schema [--out PATH]` | `--out` optional (stdout when omitted) | Emit the contract JSON Schema. Defaults to stdout for piping into `jq` / a schema validator; pass `--out PATH` to persist to a file. |
 | `contract migrate FILE` | `--write` to overwrite (else print to stdout) | Migrate a contract toward the current schema version. |
 
 ```bash
+agent-guardian contract schema                  # → stdout
 agent-guardian contract schema --out contract-schema.json
 agent-guardian contract migrate agentguardian.yaml --write
 ```

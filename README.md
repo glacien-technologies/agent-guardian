@@ -37,7 +37,9 @@ It is deterministic in `stub` mode (no LLM key required), reproducible by seed, 
 pip install agent-guardian
 ```
 
-Requires Python 3.10+. Apache-2.0 licensed.
+Requires Python 3.11–3.13 on Linux or macOS. Apache-2.0 licensed.
+
+> **Heads up:** default `python3` on a current macOS box is 3.14, which AgentGuardian does not yet target. If `pip install agent-guardian` errors with `No matching distribution found`, install on Python 3.13 instead: `python3.13 -m venv .venv && source .venv/bin/activate && pip install agent-guardian`. The pinned-3.11 Docker image and the `agentguardian-scan` GitHub Action are insulated from this — only ad-hoc `pip install` is affected. Tracked for 3.14 support: see [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -67,7 +69,7 @@ All 96 attack probes are distributed across the ten OWASP ASI 2026 categories be
 - **ASI09** — Trust Exploitation
 - **ASI10** — Rogue Agents (drift)
 
-Enumerate locally with `agent-guardian list-probes`; full catalogue at [agentguardian.io/attacks/overview](https://agentguardian.io/attacks/overview).
+Enumerate locally with `agent-guardian list-probes`; full catalogue lives in [`docs/attacks/overview.mdx`](./docs/attacks/overview.mdx).
 
 ---
 
@@ -159,7 +161,7 @@ The core swarm contains **11 attacker agents**, each scoped to a distinct family
 | `trust-exploit-agent` | Operator/system trust boundary abuse                 |
 | `drift-agent`         | Behavioural drift, policy erosion over conversation  |
 
-Additional specialist classes (`FuzzingAgent`, `OutputHandlingAgent`, `DenialOfWalletAgent`, `DetectionEvasionAgent`, `SecretExtractionAgent`, `IdentityLeakAgent`, `CriticAgent`) ship as building blocks for custom swarms and are documented under [`agentguardian.io/attackers`](https://agentguardian.io/attackers).
+Additional specialist classes (`FuzzingAgent`, `OutputHandlingAgent`, `DenialOfWalletAgent`, `DetectionEvasionAgent`, `SecretExtractionAgent`, `IdentityLeakAgent`, `CriticAgent`) ship as building blocks for custom swarms and are documented under [`docs/attackers/`](./docs/attackers/).
 
 ---
 
@@ -175,7 +177,7 @@ Every scan produces a timestamped bundle under `reports/<run-id>/`:
 
 A sample HTML report lives at [`docs/_assets/sample-report.html`](./docs/_assets/sample-report.html).
 
-> **Signing:** the `sign_evidence` config flag is wired but Sigstore-backed signing of the evidence bundle is **planned**, not shipped in 1.0.0. Until then the bundle ships unsigned; the SARIF / JSON / PDF are deterministic and hash-stable for external signing.
+> **Signing:** every `scan.json` already ships Ed25519 + HMAC-SHA256 signatures verifiable via `agent-guardian verify <scan.json>`. Sigstore-backed signing of the full evidence bundle is **planned for v1.1**, not shipped in 1.0.0; the `output.sign_evidence` config flag is accepted for forward compatibility but is a no-op today (a deprecation warning prints on config load if it is set). Until v1.1 the bundle ships unsigned; the SARIF / JSON / PDF are deterministic and hash-stable for external signing.
 
 ---
 
@@ -222,16 +224,17 @@ agent-guardian list-probes --by-standard mitre-atlas
 agent-guardian list-probes --by-standard csa-agentic-rt
 ```
 
-The honest, auto-generated coverage table lives at [`docs/reference/framework-coverage-matrix.md`](./docs/reference/framework-coverage-matrix.md) — it lists every ATLAS technique the shipped corpus actually cites, and marks zero-coverage CSA categories explicitly rather than hiding them. Full mapping tables also at [`agentguardian.io/standards`](https://agentguardian.io/standards).
+The honest, auto-generated coverage table lives at [`docs/reference/framework-coverage-matrix.md`](./docs/reference/framework-coverage-matrix.md) — it lists every ATLAS technique the shipped corpus actually cites, and marks zero-coverage CSA categories explicitly rather than hiding them.
 
 ---
 
 ## Docs
 
-- Quickstart: [agentguardian.io/quickstart](https://agentguardian.io/quickstart)
-- Attack catalogue: [agentguardian.io/attacks/overview](https://agentguardian.io/attacks/overview)
-- Adapter guides: [agentguardian.io/adapters](https://agentguardian.io/adapters)
-- CLI reference: [agentguardian.io/cli](https://agentguardian.io/cli)
+- Quickstart: [`docs/quickstart.mdx`](./docs/quickstart.mdx)
+- Attack catalogue: [`docs/attacks/overview.mdx`](./docs/attacks/overview.mdx)
+- Adapter guides: [`docs/build-with/`](./docs/build-with/)
+- CLI reference: [`docs/reference/cli.md`](./docs/reference/cli.md)
+- Hosted docs (preview): [agentguardian.io](https://agentguardian.io)
 
 ---
 
@@ -255,7 +258,7 @@ By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md) and th
 
 ## Community
 
-Join us on [Discord](https://discord.gg/h4FRgxvr) for real-time discussion — probe and adapter design, informal Q&A, and roadmap chat. For long-form questions, use [GitHub Discussions](https://discord.gg/h4FRgxvr); see [docs/community/support](./docs/community/support.mdx) for the full channel matrix.
+Join us on [Discord](https://discord.gg/h4FRgxvr) for real-time discussion — probe and adapter design, informal Q&A, and roadmap chat. For long-form questions, use [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions); see [docs/community/support](./docs/community/support.mdx) for the full channel matrix.
 
 ---
 

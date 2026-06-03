@@ -908,23 +908,28 @@ def _probe_pdf_readiness() -> None:
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.debug("doctor: reportlab import failed (%s: %s)", type(exc).__name__, exc)
 
+    # QA-G5 (2026-06-03): print each engine on its own labelled line so the
+    # output cannot self-contradict (the earlier single-line form rendered
+    # "pdf engine: none | reportlab 4.5.1" — operators read "engine: none"
+    # and stopped reading). Both engines are reported independently; the
+    # PDF writer prefers WeasyPrint when available and falls back to
+    # reportlab. "--output pdf" works as long as at least one row says
+    # something other than "not installed".
     weasy_part = (
         f"weasyprint {weasy_version}"
         if weasy_version
         else (
-            f"weasyprint installed but native libs missing ({weasy_native_fail})"
+            f"installed but native libs missing ({weasy_native_fail})"
             if weasy_native_fail
-            else "none"
+            else "not installed"
         )
     )
-    reportlab_part = f"reportlab {reportlab_version}" if reportlab_version else "none"
-    if weasy_version or reportlab_version:
-        typer.echo(f"pdf engine: {weasy_part} | {reportlab_part}")
-    else:
+    reportlab_part = f"reportlab {reportlab_version}" if reportlab_version else "not installed"
+    typer.echo(f"pdf engines — weasyprint: {weasy_part} | reportlab: {reportlab_part}")
+    if not (weasy_version or reportlab_version):
         typer.echo(
-            f"pdf engine: {weasy_part} | {reportlab_part} -- "
-            "pip install 'agent-guardian[full]' or 'agent-guardian[pdf-fallback]' "
-            "to enable --output pdf."
+            "  --output pdf is unavailable. Install with: "
+            "pip install 'agent-guardian[full]' or 'agent-guardian[pdf-fallback]'."
         )
 
 
@@ -1352,7 +1357,25 @@ def verify(
         expected_hmac_secret=hmac_secret,
     )
     typer.echo(f"schema:       {'OK' if result.schema_ok else 'FAIL'}")
-    typer.echo(f"HMAC-SHA256:  {'OK' if result.hmac_valid else 'FAIL'}")
+    # QA-G17 (2026-06-03) — distinguish the HMAC channel's three states so
+    # operators can read the line correctly at a glance:
+    #
+    #   * OK         — a real secret was supplied and the HMAC validates.
+    #   * FAIL       — a real secret WAS supplied but it did not match
+    #                  (tamper, wrong secret, forgery).
+    #   * NO-SECRET  — no secret was supplied; ``verify_hmac`` fails closed
+    #                  against the public default secret. Bytes-not-tampered
+    #                  is unproven on this channel, but no operator-supplied
+    #                  anchor failed either. The earlier renderer printed
+    #                  "FAIL" for this case which read as a tamper signal
+    #                  even on a clean self-produced scan.
+    if hmac_secret is None:
+        hmac_label = "NO-SECRET"
+    elif result.hmac_valid:
+        hmac_label = "OK"
+    else:
+        hmac_label = "FAIL"
+    typer.echo(f"HMAC-SHA256:  {hmac_label}")
     typer.echo(f"Ed25519:      {'OK' if result.ed25519_valid else 'FAIL'}")
     typer.echo(f"trust anchor: {'PINNED' if result.anchored else 'UNANCHORED'}")
     if not anchor_supplied:
@@ -2006,15 +2029,31 @@ def _contract_url_is_placeholder(contract_path: Path) -> bool:
 
 @contract_app.command("schema")
 def contract_schema(
-    out: Path = typer.Option(
-        ...,
+    out: Path | None = typer.Option(
+        None,
         "--out",
-        help="Where to write the contract JSON Schema.",
+        help=(
+            "Where to write the contract JSON Schema. When omitted the schema "
+            "is printed to stdout — convenient for piping into ``jq`` or a "
+            "schema validator without touching the filesystem."
+        ),
     ),
 ) -> None:
-    """Write the contract JSON Schema to a file."""
-    from agent_guardian.contract import write_contract_json_schema
+    """Emit the contract JSON Schema.
 
+    With no ``--out`` the schema is printed to stdout (the verb in the docs is
+    "emits" — stdout matches that contract). Pass ``--out PATH`` to persist it
+    to a file instead; the on-disk form is identical to the stdout form.
+    """
+    from agent_guardian.contract import (
+        contract_json_schema,
+        write_contract_json_schema,
+    )
+
+    if out is None:
+        schema = contract_json_schema()
+        typer.echo(json.dumps(schema, indent=2, sort_keys=True))
+        return
     write_contract_json_schema(out)
     typer.echo(f"contract JSON Schema written to {out}")
 
@@ -2377,8 +2416,8 @@ def agentdojo_run(
 # Every scan emits a clickable URL to the live dashboard within the first
 # two lines of stdout. The pattern is locked in DESIGN_LOCK §QA-003:
 #
-#     ▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scans/cli-3a4c1d9c2840
-#     ▸ Report when complete                   http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report
+#     ▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+#     ▸ Report when complete                   http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report
 #
 # When stdout is a TTY we wrap each URL in an ANSI OSC 8 hyperlink so
 # Warp/iTerm2/Terminal.app/VS Code render it cmd-clickable. Non-TTY callers
@@ -2550,7 +2589,7 @@ def print_dashboard_banner(
 
     Args:
         scan_id: The scan id under which the swarm ran.
-        dashboard_url: The full ``http://host:port/scans/<scan_id>``
+        dashboard_url: The full ``http://host:port/scan/<scan_id>``
             link to surface. The caller computes this from
             ``auto_serve_base_url`` / ``_resolve_dashboard_base_url``
             so both the in-process auto-serve and the external-serve
@@ -2632,8 +2671,14 @@ def print_scan_urls(
     base = base_url if base_url is not None else _resolve_dashboard_base_url()
     while base.endswith("/"):
         base = base[:-1]
-    scan_url = f"{base}/scans/{scan_id}"
-    report_url = f"{base}/scans/{scan_id}/report"
+    # G3 (2026-06-03): the canonical dashboard path is /scan/<id> (singular).
+    # The server still honours the legacy /scans/<id> path with a 307 redirect
+    # so older banner lines captured in operator logs keep working — but
+    # everything we PRINT from now on uses the singular canonical form so
+    # ``curl <url>`` (no -L) just works and scripts that regex the banner
+    # see exactly the path the server actually serves on the first hop.
+    scan_url = f"{base}/scan/{scan_id}"
+    report_url = f"{base}/scan/{scan_id}/report"
     if (debug_format or "").lower().strip() == "json":
         # QA-007 — JSON mode: fold both URLs into one NDJSON line so the
         # stream stays parseable. No OSC 8 (NDJSON consumers are never a
@@ -3523,10 +3568,13 @@ async def _run_scan(
         except Exception:  # pragma: no cover - defensive
             plan_reachable = False
         plan_latency_ms = int((_time.monotonic() - _t0) * 1000)
+    # G3 (2026-06-03): canonical path is /scan/<id> singular — matches the
+    # server's canonical handler. The legacy /scans/<id> still 307-redirects
+    # on the server side so older log lines remain clickable.
     plan_dashboard_url = (
-        f"{auto_serve_base_url}/scans/{scan_id}"
+        f"{auto_serve_base_url}/scan/{scan_id}"
         if auto_serve_base_url
-        else f"{_resolve_dashboard_base_url()}/scans/{scan_id}"
+        else f"{_resolve_dashboard_base_url()}/scan/{scan_id}"
     )
 
     json_mode = (debug_format or "").lower().strip() == "json"
@@ -4152,6 +4200,14 @@ async def _run_scan_inner(
 
     band: SeverityBand = scan_result.band
     aivss_label = str(scan_result.aivss) if authoritative else "n/a"
+    # QA-G6 (2026-06-03) — humanise the band before printing. The earlier
+    # form leaked the raw enum (``band=not_evaluated``) which violates the
+    # ``feedback_no_raw_enum_in_ui`` convention the dashboard already
+    # honours. ``humanise_band`` is the single source of truth for both
+    # surfaces (CLI + dashboard tile delegate to it).
+    from agent_guardian.models.severity import humanise_band
+
+    band_label = humanise_band(band)
     coverage_label = ""
     coverage_pct: float | None = None
     if scan_result.completeness is not None:
@@ -4159,7 +4215,7 @@ async def _run_scan_inner(
         if coverage_pct < 100.0:
             coverage_label = f" coverage={coverage_pct:.0f}%"
     typer.echo(
-        f"scan {scan_id} done: AIVSS={aivss_label} band={band.value} "
+        f"scan {scan_id} done: AIVSS={aivss_label} band={band_label} "
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )

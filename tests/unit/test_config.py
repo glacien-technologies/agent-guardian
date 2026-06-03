@@ -347,3 +347,56 @@ def test_env_api_key_unknown_provider_returns_none(
     assert env_api_key("bedrock") is None
     monkeypatch.setenv("AGENT_GUARDIAN_BEDROCK_API_KEY", "bk")
     assert env_api_key("bedrock") == "bk"
+
+
+# ---------------------------------------------------------------------------
+# QA-G23 (2026-06-03) — sign_evidence forward-compat placeholder
+# ---------------------------------------------------------------------------
+
+
+def test_load_config_warns_when_sign_evidence_is_set(tmp_path: Path) -> None:
+    """Setting ``output.sign_evidence`` emits a one-shot ``DeprecationWarning``.
+
+    The flag is a forward-compatibility placeholder — no downstream consumer
+    reads it. ``load_config`` accepts it (existing configs do not break) but
+    surfaces a deprecation warning so the operator knows the flag is a no-op
+    until v1.1 Sigstore work lands.
+    """
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text("output:\n  sign_evidence: true\n", encoding="utf-8")
+    with pytest.warns(DeprecationWarning, match="sign_evidence"):
+        cfg = load_config(yaml_path)
+    assert cfg.output.sign_evidence is True
+
+
+def test_load_config_does_not_warn_when_sign_evidence_is_absent(
+    tmp_path: Path, recwarn: pytest.WarningsRecorder
+) -> None:
+    """Configs that don't mention ``sign_evidence`` do not trigger the warning.
+
+    The deprecation surface is opt-in: operators who never set the flag never
+    see the noise. Only configs that explicitly set the flag receive the
+    one-shot guidance message.
+    """
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text("swarm:\n  max_parallel_agents: 3\n", encoding="utf-8")
+    load_config(yaml_path)
+    sign_evidence_warnings = [w for w in recwarn.list if "sign_evidence" in str(w.message)]
+    assert sign_evidence_warnings == []
+
+
+def test_load_config_accepts_sign_evidence_false_without_raising(
+    tmp_path: Path,
+) -> None:
+    """Explicit ``sign_evidence: false`` is still accepted (forward-compat).
+
+    Deprecation must never break an existing config — the warning is the
+    contract, not a refusal. ``load_config`` continues to round-trip the
+    value through the ``OutputConfig`` model so the field is still
+    introspectable from tests and downstream code.
+    """
+    yaml_path = tmp_path / "cfg.yaml"
+    yaml_path.write_text("output:\n  sign_evidence: false\n", encoding="utf-8")
+    with pytest.warns(DeprecationWarning, match="sign_evidence"):
+        cfg = load_config(yaml_path)
+    assert cfg.output.sign_evidence is False

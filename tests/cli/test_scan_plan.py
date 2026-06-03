@@ -126,7 +126,7 @@ def _minimal_ctx(**overrides: Any) -> ScanPlanContext:
             ),
         ),
         dashboard=DashboardRow(
-            url="http://127.0.0.1:7474/scans/cli-abcdef012345",
+            url="http://127.0.0.1:7474/scan/cli-abcdef012345",
             spawned=True,
             reused=False,
             suppression_reason=None,
@@ -207,7 +207,7 @@ def test_panel_shows_warning_when_pdf_engine_missing() -> None:
 def test_panel_shows_warning_when_dashboard_suppressed() -> None:
     """Suppressed auto-serve → ⚠ pill in DASHBOARD; warning aggregated."""
     dr = DashboardRow(
-        url="http://127.0.0.1:7474/scans/cli-abcdef012345",
+        url="http://127.0.0.1:7474/scan/cli-abcdef012345",
         spawned=False,
         reused=False,
         suppression_reason="--no-tui",
@@ -366,7 +366,7 @@ def test_panel_output_unknown_format_renders_as_fail() -> None:
 def test_panel_dashboard_reused_shows_reusing_text() -> None:
     """``reused=True`` renders the 'reusing existing serve' line."""
     dr = DashboardRow(
-        url="http://127.0.0.1:7474/scans/cli-abc",
+        url="http://127.0.0.1:7474/scan/cli-abc",
         spawned=False,
         reused=True,
         suppression_reason=None,
@@ -454,7 +454,7 @@ def test_build_plan_context_aggregates_pdf_missing_warning() -> None:
             )
         ],
         auto_serve_result=_spawned_auto_serve_result(),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert any("pip install agent-guardian[full]" in w for w in ctx.warnings)
@@ -476,7 +476,7 @@ def test_build_plan_context_aggregates_unreachable_warning() -> None:
         usd_cap=None,
         requested_outputs=[("json", _ok_engine_check("json"), "")],
         auto_serve_result=_spawned_auto_serve_result(),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert any("Target unreachable" in w for w in ctx.warnings)
@@ -504,7 +504,7 @@ def test_build_plan_context_aggregates_model_not_found_warning() -> None:
         usd_cap=0.10,
         requested_outputs=[("json", _ok_engine_check("json"), "")],
         auto_serve_result=_spawned_auto_serve_result(),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert any("not found" in w for w in ctx.warnings)
@@ -526,7 +526,7 @@ def test_build_plan_context_aggregates_dashboard_suppression_warning() -> None:
         usd_cap=0.10,
         requested_outputs=[("json", _ok_engine_check("json"), "")],
         auto_serve_result=_suppressed_auto_serve_result("--no-tui"),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert any("auto-serve suppressed" in w for w in ctx.warnings)
@@ -552,7 +552,7 @@ def test_build_plan_context_clean_all_ok_has_zero_warnings() -> None:
         usd_cap=0.10,
         requested_outputs=[("json", _ok_engine_check("json"), "")],
         auto_serve_result=_spawned_auto_serve_result(),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert ctx.warnings == ()
@@ -594,7 +594,7 @@ def test_build_plan_context_drops_unknown_role() -> None:
         usd_cap=0.10,
         requested_outputs=[("json", _ok_engine_check("json"), "")],
         auto_serve_result=_spawned_auto_serve_result(),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-1",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-1",
         safety=DEFAULT_SAFETY_ROW,
     )
     assert tuple(r.role for r in ctx.models) == ("attacker",)

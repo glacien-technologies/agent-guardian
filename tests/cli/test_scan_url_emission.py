@@ -71,24 +71,31 @@ def test_emits_two_lines_with_scan_id_in_first_line() -> None:
     assert "▸ Report when complete" in lines[1]
 
 
-def test_emits_canonical_scans_url_path() -> None:
+def test_emits_canonical_scan_url_path() -> None:
+    # G3 (2026-06-03): canonical printed path is /scan/<id> singular —
+    # matches the server's canonical handler so ``curl <url>`` (no -L)
+    # just works and scripted consumers don't need to follow a 307.
     output = _capture(base_url="http://127.0.0.1:7474")
-    assert "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840" in output
-    assert "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report" in output
+    assert "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840" in output
+    assert "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report" in output
+    # Defensive: never leak the legacy /scans/<id> shape from the printed
+    # banner; the server still accepts it (307-redirects) but nothing we
+    # PRINT should use it any more.
+    assert "/scans/cli-3a4c1d9c2840" not in output
 
 
 def test_emits_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_GUARDIAN_DASHBOARD_URL", "https://dash.example.com")
     output = _capture()  # uses resolved env
-    assert "https://dash.example.com/scans/cli-3a4c1d9c2840" in output
+    assert "https://dash.example.com/scan/cli-3a4c1d9c2840" in output
     assert "127.0.0.1" not in output
 
 
 def test_emits_strips_trailing_slash_from_explicit_base() -> None:
     output = _capture(base_url="http://127.0.0.1:7474/")
     # No double-slash anywhere in the path.
-    assert "//scans" not in output
-    assert "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840" in output
+    assert "//scan" not in output
+    assert "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840" in output
 
 
 def test_no_publish_suppresses_emission() -> None:
@@ -132,7 +139,7 @@ def test_tty_path_emits_osc8(monkeypatch: pytest.MonkeyPatch) -> None:
     # Do NOT inject ``write=`` — we want the default sys.stdout.write path.
     print_scan_urls("cli-3a4c1d9c2840", base_url="http://127.0.0.1:7474")
     output = buf.getvalue()
-    assert OSC8_OPEN + "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840" + OSC8_BEL in output
+    assert OSC8_OPEN + "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840" + OSC8_BEL in output
 
 
 def test_non_tty_path_emits_plain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,7 +152,7 @@ def test_non_tty_path_emits_plain(monkeypatch: pytest.MonkeyPatch) -> None:
     print_scan_urls("cli-3a4c1d9c2840", base_url="http://127.0.0.1:7474")
     output = buf.getvalue()
     assert OSC8_OPEN not in output
-    assert "http://127.0.0.1:7474/scans/cli-3a4c1d9c2840" in output
+    assert "http://127.0.0.1:7474/scan/cli-3a4c1d9c2840" in output
 
 
 def test_emission_is_first_lines_of_output() -> None:
@@ -201,7 +208,8 @@ def test_disable_env_set_to_other_value_does_not_suppress(
     """
     monkeypatch.setenv("AGENT_GUARDIAN_DISABLE_URL_EMISSION", "true")
     output = _capture(base_url="http://127.0.0.1:7474")
-    assert "scans/cli-3a4c1d9c2840" in output
+    # G3 (2026-06-03): canonical printed path is /scan/<id> singular.
+    assert "scan/cli-3a4c1d9c2840" in output
     monkeypatch.delenv("AGENT_GUARDIAN_DISABLE_URL_EMISSION", raising=False)
 
 
