@@ -1,0 +1,292 @@
+{# Executive — Shared slide-over body (QA-049 / QA-055).
+
+   ONE polymorphic Jinja template that renders the full audit-detail
+   drawer body for BOTH the Findings tab and the Probes tab. Backed by
+   two server endpoints:
+
+     * GET /scan/<scan_id>/finding/<finding_id> → ``kind="finding"``
+     * GET /scan/<scan_id>/probe?index=N|id=ID  → ``kind="probe"``
+
+   Both endpoints fetch the underlying record (Finding or ProbeRun),
+   marshal it into a uniform context, and render this fragment. The
+   slide-over chrome (backdrop, header, close button) lives in
+   ``_finding_slideover.html``; the client-side JS swaps THIS fragment
+   into ``[data-slideover-body]`` on row click.
+
+   Sections (gated by ``{% if kind == ... %}`` where they only apply
+   to one mode):
+
+     1. Header chips template — ``<template data-slideover-header>`` so
+        the JS can hoist verdict pill / id / turn / timestamp / summary
+        into the parent slide-over header without re-deriving them.
+     2. Metadata — severity / agent / ASI / CSA / ATLAS / tier_floor /
+        OWASP scenario / probe id.
+     3. Run context (probe only) — agent / turn / timestamp / seed /
+        strategy / mutator operators / attacker_refused.
+     4. Exact prompt sent — verbatim, monospaced, length stat, copy
+        button. Empty placeholder when not available.
+     5. Target response — verbatim, monospaced, length stat, copy
+        button. Empty placeholder when not available.
+     6. Judge verdict + reasoning — verdict label + confidence + panel
+        votes (when populated) + judge reasoning prose. Reasoning falls
+        back to a "(no data available)" placeholder when not populated.
+     7. Per-turn conversation thread (multi-turn findings only) —
+        composes with QA-054 ``turn_children``. Each turn is a numbered
+        subsection with prompt preview, response preview, and verdict
+        pill.
+     8. Evidence chain — link to the JSONL events for the scan, scoped
+        by probe id when known.
+     9. Reproduce CLI — copy-button monospaced snippet built from the
+        scan id + probe id + seed.
+
+   All ``ctx.*`` fields are operator-untrusted (Finding fields are
+   user-derived; ProbeRun fields come from ``memory.jsonl``). Jinja
+   autoescape applies to every emission. Never use ``|safe`` on these
+   values.
+#}
+{%- set _kind = kind | default('probe') -%}
+{%- set _verdict = ctx.verdict or 'unknown' -%}
+{%- if _verdict == 'fail' -%}
+  {%- set _verdict_label = 'EXPLOITED' -%}
+{%- elif _verdict == 'pass' -%}
+  {%- set _verdict_label = 'DEFENDED' -%}
+{%- elif _verdict == 'inconclusive' -%}
+  {%- set _verdict_label = 'INCONCLUSIVE' -%}
+{%- else -%}
+  {%- set _verdict_label = 'PENDING' -%}
+{%- endif -%}
+
+{# Header chips slot — JS hoists into ``[data-slideover-*]`` selectors
+   on the parent slide-over header. Owning the chip set here means the
+   operator sees a fresh header on every row open, regardless of which
+   row was previously open. #}
+<template data-slideover-header
+          data-kind="{{ _kind }}"
+          data-verdict="{{ _verdict }}"
+          data-verdict-label="{{ _verdict_label }}"
+          data-record-id="{{ ctx.record_id or '—' }}"
+          data-turn="{{ ctx.turn if ctx.turn is not none else '—' }}"
+          data-timestamp="{{ ctx.timestamp_label or '—' }}"
+          data-summary="{{ ctx.summary or (_kind|capitalize ~ ' details') }}"
+          data-severity-class="{{ ctx.severity_class or '' }}"
+          data-severity-label="{{ ctx.severity_label or '' }}"></template>
+
+<div class="exec-slideover-sheet" data-slideover-sheet data-slideover-kind="{{ _kind }}">
+
+  {# ----- 1. Metadata ----- #}
+  <p class="exec-probe__label">{% if _kind == 'finding' %}Finding metadata{% else %}Probe metadata{% endif %}</p>
+  <dl class="exec-probe__meta">
+    {% if _kind == 'finding' %}
+      <dt class="exec-probe__meta-dt">Finding ID</dt>
+      <dd class="exec-probe__meta-dd"><code>{{ ctx.record_id or '—' }}</code></dd>
+      <dt class="exec-probe__meta-dt">Severity</dt>
+      <dd class="exec-probe__meta-dd">
+        {% if ctx.severity_label %}
+          <code>{{ ctx.severity_label }}</code>
+        {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+      </dd>
+    {% endif %}
+
+    <dt class="exec-probe__meta-dt">Probe ID</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.probe_id or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Agent</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if ctx.agent %}<code>{{ ctx.agent }}</code>
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">ASI category</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.asi_category or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">CSA category</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.csa_category or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">MITRE ATLAS</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if ctx.mitre_atlas %}
+        {% for t in ctx.mitre_atlas %}<code class="exec-probe__meta-chip">{{ t }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+
+    {% if _kind == 'probe' %}
+      <dt class="exec-probe__meta-dt">Severity</dt>
+      <dd class="exec-probe__meta-dd">
+        {%- if ctx.severity_label or ctx.severity -%}
+          <code>{{ ctx.severity_label or ctx.severity }}</code>
+        {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+      </dd>
+    {% endif %}
+
+    <dt class="exec-probe__meta-dt">Tier floor</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.tier_floor -%}<code>{{ ctx.tier_floor }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">OWASP scenario</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.owasp_scenario -%}<code>{{ ctx.owasp_scenario }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Source YAML</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.source_yaml or ctx.source_path -%}
+        <code>{{ ctx.source_yaml or ctx.source_path }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+  </dl>
+
+  {# ----- 2. Run context (probe-only — for findings the per-turn thread
+       below carries the run context per child row). ----- #}
+  {% if _kind == 'probe' %}
+  <p class="exec-probe__label">Run context</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Turn</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.turn if ctx.turn is not none else '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Timestamp</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.timestamp_label or '—' }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Seed</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.seed or ctx.rng_seed -%}<code>{{ ctx.seed or ctx.rng_seed }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Strategy</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.strategy -%}<code>{{ ctx.strategy }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Mutator operators</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if ctx.mutator_operators %}
+        {% for m in ctx.mutator_operators %}<code class="exec-probe__meta-chip">{{ m }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Attacker refused</dt>
+    <dd class="exec-probe__meta-dd">
+      <code>{% if ctx.attacker_refused %}yes{% else %}no{% endif %}</code>
+    </dd>
+  </dl>
+  {% endif %}
+
+  {# ----- 3. Exact prompt sent ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Exact prompt sent</p>
+    <span class="exec-probe__stats">{{ (ctx.prompt or '') | length }} chars</span>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-slideover-prompt"
+            aria-label="Copy exact prompt sent">Copy</button>
+  </div>
+  {% if ctx.prompt %}
+    <pre class="exec-probe__prompt" id="exec-slideover-prompt">{{ ctx.prompt }}</pre>
+  {% else %}
+    <pre class="exec-probe__prompt exec-probe__prompt--empty"
+         id="exec-slideover-prompt">(no data available)</pre>
+  {% endif %}
+
+  {# ----- 4. Target response ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Target response</p>
+    <span class="exec-probe__stats">{{ (ctx.target_response or '') | length }} chars</span>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-slideover-response"
+            aria-label="Copy target response">Copy</button>
+  </div>
+  {% if ctx.target_response %}
+    <pre class="exec-probe__response" id="exec-slideover-response">{{ ctx.target_response }}</pre>
+  {% else %}
+    <pre class="exec-probe__response exec-probe__response--empty"
+         id="exec-slideover-response">(no data available)</pre>
+  {% endif %}
+
+  {# ----- 5. Judge verdict ----- #}
+  <p class="exec-probe__label">Judge verdict</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Verdict</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ _verdict_label }}</code></dd>
+
+    <dt class="exec-probe__meta-dt">Confidence</dt>
+    <dd class="exec-probe__meta-dd">
+      {%- if ctx.confidence is not none and ctx.confidence > 0 -%}
+        <code>{{ '%.2f' | format(ctx.confidence) }}</code>
+      {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
+    </dd>
+
+    <dt class="exec-probe__meta-dt">Panel votes</dt>
+    <dd class="exec-probe__meta-dd">
+      {% if ctx.panel_votes %}
+        {% for v in ctx.panel_votes %}<code class="exec-probe__meta-chip">{{ v }}</code>{% endfor %}
+      {% else %}<span class="exec-probe__meta-empty">—</span>{% endif %}
+    </dd>
+  </dl>
+
+  <p class="exec-probe__label">Judge reasoning</p>
+  {% if ctx.reasoning %}
+    <blockquote class="exec-probe__reason">{{ ctx.reasoning }}</blockquote>
+  {% else %}
+    <p class="exec-probe__reason exec-probe__reason--empty">
+      (no data available)
+    </p>
+  {% endif %}
+
+  {# ----- 6. Per-turn conversation thread (multi-turn findings) ----- #}
+  {% if _kind == 'finding' and ctx.turn_children %}
+    <p class="exec-probe__label">Per-turn conversation thread</p>
+    <ol class="exec-slideover-thread">
+      {% for child in ctx.turn_children %}
+        <li class="exec-slideover-thread__item" data-turn="{{ child.turn_no }}">
+          <header class="exec-slideover-thread__head">
+            <span class="exec-slideover-thread__turn">turn {{ child.turn_no }}</span>
+            <span class="exec-verdict-pill exec-verdict-pill--{{ child.verdict }}">{{ child.verdict_label }}</span>
+            {% if child.confidence_pct %}
+              <span class="exec-slideover-thread__conf">{{ child.confidence_pct }}</span>
+            {% endif %}
+          </header>
+          <p class="exec-slideover-thread__label">Prompt</p>
+          <pre class="exec-slideover-thread__prompt">{{ child.prompt_preview or '(no data available)' }}</pre>
+          <p class="exec-slideover-thread__label">Response</p>
+          <pre class="exec-slideover-thread__response">{{ child.response_preview or '(no data available)' }}</pre>
+        </li>
+      {% endfor %}
+    </ol>
+  {% endif %}
+
+  {# ----- 7. Evidence chain ----- #}
+  <p class="exec-probe__label">Evidence chain</p>
+  <p class="exec-probe__evidence">
+    <a class="exec-probe__evidence-link"
+       href="/scan/{{ scan_id }}/events{% if ctx.probe_id %}?probe={{ ctx.probe_id }}{% endif %}"
+       target="_blank"
+       rel="noopener">View JSONL events for this {{ _kind }}</a>
+  </p>
+
+  {# ----- 8. Linked remediation (placeholder) — Insights layer not yet
+       wired; surface a placeholder so the section is discoverable. ----- #}
+  <p class="exec-probe__label">Linked remediation</p>
+  <p class="exec-probe__reason exec-probe__reason--empty">
+    (no data available)
+  </p>
+
+  {# ----- 9. Reproduce CLI command ----- #}
+  <div class="exec-probe__label-row">
+    <p class="exec-probe__label">Reproduce</p>
+    <button type="button"
+            class="exec-probe__copy"
+            data-copy-source="exec-slideover-repro"
+            aria-label="Copy reproduce command">Copy</button>
+  </div>
+  <pre class="exec-probe__repro" id="exec-slideover-repro">uv run agent-guardian probe \
+{%- if ctx.probe_id %}
+  --probe {{ ctx.probe_id }}{% endif %}{% if ctx.seed or ctx.rng_seed %} \
+  --seed {{ ctx.seed or ctx.rng_seed }}{% endif %} \
+  --scan {{ scan_id }}</pre>
+
+</div>

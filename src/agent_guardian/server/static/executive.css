@@ -3166,3 +3166,80 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
     transition: none !important;
   }
 }
+
+/* ----- Shared slide-over body (QA-049, QA-055) -----
+ *
+ * The polymorphic ``_slideover.html`` template wraps its body in
+ * ``.exec-slideover-sheet`` (sibling of the legacy
+ * ``.exec-probe-detail-sheet`` used by the still-locked probe-drawer
+ * route). Reuses the ``.exec-probe__*`` selectors above for metadata /
+ * prompt / response / reasoning, and adds the per-turn conversation
+ * thread + empty-state placeholders below.
+ */
+.exec-slideover-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.exec-probe__prompt--empty,
+.exec-probe__response--empty {
+  color: var(--exec-ink-subtle);
+  font-style: italic;
+}
+
+.exec-slideover-thread {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.exec-slideover-thread__item {
+  background: var(--exec-bg-sunken);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  padding: 10px 12px;
+}
+.exec-slideover-thread__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.exec-slideover-thread__turn {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.exec-slideover-thread__conf {
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  color: var(--exec-ink-subtle);
+}
+.exec-slideover-thread__label {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--exec-ink-subtle);
+  margin: 6px 0 2px 0;
+}
+.exec-slideover-thread__prompt,
+.exec-slideover-thread__response {
+  background: var(--exec-code-bg);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  padding: 8px 10px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--exec-ink);
+  max-height: 10rem;
+  overflow: auto;
+}

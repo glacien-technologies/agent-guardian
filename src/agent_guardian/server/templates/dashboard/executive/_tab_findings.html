@@ -210,6 +210,7 @@
                 <tr class="exec-findings-table__row{% if f.is_multi_turn %} exec-findings-table__row--has-children{% endif %}"
                     data-source="finding"
                     data-finding-id="{{ f.id }}"
+                    data-finding-href="/scan/{{ scan_id }}/finding/{{ f.id }}"
                     data-severity="{{ f.severity_class }}"
                     data-asi="{{ f.asi_code }}"
                     data-agent="{{ f.agent_name or '' }}"

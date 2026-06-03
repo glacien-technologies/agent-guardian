@@ -215,6 +215,20 @@
   }
 
   /**
+   * Safe-URL guard for the finding slide-over ``fetch()`` (QA-055).
+   *
+   * Mirrors :func:`isSafeProbeHref`. Allow-listed shape is
+   * ``/scan/<id>/finding/<id>`` — the new shared slide-over endpoint
+   * sibling to the probe drawer.
+   */
+  function isSafeFindingHref(href) {
+    if (typeof href !== "string" || href.length === 0) { return false; }
+    if (/^[a-z]+:/i.test(href) || href.indexOf("//") === 0) { return false; }
+    if (href.charAt(0) !== "/") { return false; }
+    return /^\/scan\/[^/]+\/finding\/[^/?#]+$/.test(href);
+  }
+
+  /**
    * Fetch the server-rendered probe-detail-sheet for a row and inject
    * it into the drawer body. BUG-1 — initial page HTML carries no
    * per-probe payload; this ``fetch()`` is the only path the verbatim
@@ -280,6 +294,118 @@
       });
   }
 
+  /**
+   * Fetch the server-rendered finding slide-over body and inject it
+   * into the drawer body (QA-055).
+   *
+   * Polymorphic sibling of :func:`loadProbeSheet` — both call the same
+   * server-rendered shared ``_slideover.html`` template; this variant
+   * hits the ``/scan/<id>/finding/<id>`` endpoint and uses the same
+   * post-load hooks (header sync + copy-button wiring) so the
+   * operator gets identical UX whether they opened from the Findings
+   * tab or the Probes tab.
+   */
+  function loadFindingSheet(root, bodyNode, href) {
+    bodyNode.textContent = "";
+    var pending = el("p", "exec-probe__reason exec-probe__reason--empty", "Loading…");
+    bodyNode.appendChild(pending);
+    if (typeof fetch !== "function") { return; }
+    if (!isSafeFindingHref(href)) {
+      bodyNode.textContent = "";
+      bodyNode.appendChild(
+        el(
+          "p",
+          "exec-probe__reason exec-probe__reason--empty",
+          "Cannot open this finding — invalid drawer URL.",
+        ),
+      );
+      return;
+    }
+    fetch(href, { credentials: "same-origin", headers: { Accept: "text/html" } })
+      .then(function (resp) {
+        if (!resp.ok) { throw new Error("finding fetch failed: " + resp.status); }
+        var ct = resp.headers.get("Content-Type") || "";
+        if (ct.indexOf("text/html") === -1) {
+          throw new Error("unexpected content-type: " + ct);
+        }
+        return resp.text();
+      })
+      .then(function (html) {
+        bodyNode.innerHTML = html;
+        syncSlideoverHeader(root, bodyNode);
+        wireCopyButtons(bodyNode);
+      })
+      .catch(function (err) {
+        bodyNode.textContent = "";
+        bodyNode.appendChild(
+          el(
+            "p",
+            "exec-probe__reason exec-probe__reason--empty",
+            "Could not load finding details (" + err.message + ").",
+          ),
+        );
+      });
+  }
+
+  /**
+   * Hoist the ``<template data-slideover-header>`` emitted by the
+   * shared ``_slideover.html`` fragment into the slide-over header
+   * chips. Polymorphic over both kinds — the template carries a
+   * ``data-kind`` attribute so the verdict pill picks the right
+   * label / colour for findings (severity-based) vs probes (verdict-
+   * based).
+   */
+  function syncSlideoverHeader(root, container) {
+    var tpl = container.querySelector("[data-slideover-header]");
+    if (!tpl) { return; }
+    var kind = tpl.getAttribute("data-kind") || "probe";
+    var verdict = tpl.getAttribute("data-verdict") || "unknown";
+    var verdictLabel = tpl.getAttribute("data-verdict-label") || "PENDING";
+    var verdictCls = "exec-verdict-pill--unknown";
+
+    if (kind === "finding") {
+      // Finding-mode pill colour follows severity, not verdict — the
+      // operator opens a finding row to see the rolled-up severity, so
+      // the chip surfaces that signal even if the underlying probe-run
+      // verdict says EXPLOITED. Severity → pill colour mapping mirrors
+      // :func:`renderFindingHeader` (kept in sync with that function).
+      var sev = tpl.getAttribute("data-severity-class") || "";
+      var sevLabel = tpl.getAttribute("data-severity-label") || verdictLabel;
+      if (sev === "critical" || sev === "high") { verdictCls = "exec-verdict-pill--fail"; }
+      else if (sev === "low") { verdictCls = "exec-verdict-pill--pass"; }
+      else if (sev === "medium") { verdictCls = "exec-verdict-pill--inconclusive"; }
+      verdictLabel = sevLabel.toUpperCase();
+    } else {
+      if (verdict === "fail") { verdictCls = "exec-verdict-pill--fail"; }
+      else if (verdict === "pass") { verdictCls = "exec-verdict-pill--pass"; }
+      else if (verdict === "inconclusive") { verdictCls = "exec-verdict-pill--inconclusive"; }
+    }
+
+    var pill = root.querySelector("[data-slideover-verdict-pill]");
+    if (pill) {
+      pill.className = "exec-verdict-pill " + verdictCls;
+      pill.setAttribute("data-slideover-verdict-pill", "");
+      pill.textContent = verdictLabel;
+    }
+    setText(root.querySelector("[data-slideover-id]"), tpl.getAttribute("data-record-id") || "—");
+    var turn = tpl.getAttribute("data-turn") || "—";
+    setText(
+      root.querySelector("[data-slideover-turn]"),
+      kind === "probe" ? "turn " + turn : (tpl.getAttribute("data-record-id") || "—"),
+    );
+    setText(
+      root.querySelector("[data-slideover-time]"),
+      tpl.getAttribute("data-timestamp") || "—",
+    );
+    setText(
+      root.querySelector("[data-slideover-summary]"),
+      tpl.getAttribute("data-summary") || (kind === "finding" ? "Finding details" : "Probe details"),
+    );
+
+    // One-shot template — remove once consumed.
+    if (tpl.parentNode) { tpl.parentNode.removeChild(tpl); }
+  }
+
   // ---- 5. Slide-over controller ----------------------------------------
   /**
    * Bind a single slide-over root to its surrounding tabpanel's row set.
@@ -326,10 +452,26 @@
         }
         loadProbeSheet(root, bodyNode, row.getAttribute("data-probe-href"));
       } else if (source === "finding") {
-        var f = payloads.finding[row.getAttribute("data-finding-id")];
-        if (!f) { return; }
-        renderFindingHeader(root, f);
-        renderFindingBody(bodyNode, f);
+        var findingHref = row.getAttribute("data-finding-href");
+        if (findingHref) {
+          // QA-049 / QA-055 polymorphic loader — fetch the shared
+          // ``_slideover.html`` body from the finding endpoint. Falls
+          // through to the legacy JSON-island renderer below when the
+          // server route is unreachable (defensive — keeps the row
+          // clickable on a dashboard build that hasn't shipped the
+          // route yet).
+          var fpill = root.querySelector("[data-slideover-verdict-pill]");
+          if (fpill) {
+            fpill.className = "exec-verdict-pill exec-verdict-pill--unknown";
+            fpill.textContent = "…";
+          }
+          loadFindingSheet(root, bodyNode, findingHref);
+        } else {
+          var f = payloads.finding[row.getAttribute("data-finding-id")];
+          if (!f) { return; }
+          renderFindingHeader(root, f);
+          renderFindingBody(bodyNode, f);
+        }
       } else {
         return;
       }
