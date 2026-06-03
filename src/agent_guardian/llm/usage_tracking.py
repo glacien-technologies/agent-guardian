@@ -83,15 +83,15 @@ class UsageTrackingLLM(BaseLLM):
     """
 
     def __init__(self, inner: BaseLLM, *, counter: UsageCounter | None = None) -> None:
-        # Intentionally skip ``super().__init__`` — we own no httpx client,
-        # no semaphore, no api_key. All transport happens via ``inner``.
+        # Pass ``owns_client=False`` so BaseLLM skips httpx setup; transport
+        # happens via ``inner``. The base initialiser still wires up the
+        # semaphore and other plumbing so isinstance(self, BaseLLM) holds.
+        super().__init__(owns_client=False)
         self._inner = inner
         self.counter = counter if counter is not None else UsageCounter()
         self._lock = asyncio.Lock()
         # Mirror the inner provider so downstream code doesn't need to peek.
         self.provider = inner.provider
-        # The wrapper itself owns no client.
-        self._owns_client = False
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         response = await self._inner.complete(request)

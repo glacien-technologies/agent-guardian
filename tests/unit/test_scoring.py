@@ -363,9 +363,10 @@ def test_tier_weights_cover_every_asi_for_every_tier() -> None:
 
 
 def test_sub_score_map_uses_only_known_asi_categories() -> None:
+    known_asi = set(AsiCategory)
     for weights in SUB_SCORE_MAP.values():
         for asi in weights:
-            assert asi in AsiCategory
+            assert asi in known_asi
 
 
 # --- undertested (#46) ---------------------------------------------------

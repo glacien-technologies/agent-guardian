@@ -19,13 +19,10 @@ Then point AgentGuardian at it with the contract in this directory:
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-
-_LOG = logging.getLogger(__name__)
 
 app = FastAPI(title="agent-guardian MCP demo server")
 

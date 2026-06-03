@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -559,4 +560,6 @@ def test_redact_normalises_non_json_scalar() -> None:
 
     out = redact(AnyUrl("https://example.com/path"))
     assert isinstance(out, str)
-    assert out.startswith("https://example.com")
+    _parsed = urlparse(out)
+    assert _parsed.scheme == "https"
+    assert _parsed.hostname == "example.com"

@@ -43,7 +43,6 @@ inputs. It is safe to invoke from the hot path of every turn.
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -58,8 +57,6 @@ __all__ = [
     "HeuristicJudge",
     "HeuristicVerdict",
 ]
-
-_LOG = logging.getLogger(__name__)
 
 # Destructive tool-name prefixes. A target offering — or *calling* — a
 # tool whose name starts with any of these is treated as an excessive-

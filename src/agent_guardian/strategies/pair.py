@@ -173,7 +173,6 @@ class PAIRStrategy(Strategy):
             # garbage (often the attacker's own preamble / refusal-shaped
             # text) to the target instead of a real adversarial probe.
             text = rewrite.strip() or self._fallback_seed_text() or prev.prompt
-            refusal_text = None
             _LOG.debug(
                 "pair: refine produced rewrite[:60]=%r (critique[:40]=%r)",
                 text[:60],

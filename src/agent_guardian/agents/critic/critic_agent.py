@@ -67,7 +67,6 @@ class CriticAgent:
     ) -> CriticVerdict:
         # Layer 1 — PoV rerun (skipped only when no reproducer is available,
         # in which case reliability is unknown -> treated as 0 and rejected).
-        reliability = 0.0
         if script is not None and target is not None:
             result = await self._pov.run(script, target, n=n, judge=judge)
             reliability = result.reliability

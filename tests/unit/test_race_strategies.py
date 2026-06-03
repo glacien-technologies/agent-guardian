@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 import pytest
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
-from agent_guardian.strategies.base import NextPrompt, Strategy, StrategyDone, Turn
+from agent_guardian.strategies.base import (
+    NextPrompt,
+    Strategy,
+    StrategyContext,
+    StrategyDone,
+    Turn,
+)
 from agent_guardian.strategies.race_strategies import race_strategies_to_finding
 
 
@@ -15,11 +22,12 @@ class _CannedStrategy(Strategy):
     """Emits a fixed prompt each turn, or stops after ``stop_after`` turns."""
 
     def __init__(self, prompt: str, *, delay: float = 0.0, stop_after: int | None = None) -> None:
+        # The race-strategies harness never reads ctx — pass a typed-None so the
+        # base class still wires the per-turn counters.
+        super().__init__(cast(StrategyContext, None))
         self._prompt = prompt
         self._delay = delay
         self._stop_after = stop_after
-        self._turn_count = 0
-        self.ctx = None  # type: ignore[assignment]
 
     async def generate_next(self, history: list[Turn], target_response: str | None):
         if self._stop_after is not None and self._turn_count >= self._stop_after:

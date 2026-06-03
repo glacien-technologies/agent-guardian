@@ -52,15 +52,12 @@ class Prompter(Protocol):
 
     def ask(self, message: str, *, default: str | None = None) -> str:
         """Prompt for a free-text answer (returning ``default`` on empty input)."""
-        ...
 
     def confirm(self, message: str, *, default: bool = False) -> bool:
         """Prompt for a yes/no answer."""
-        ...
 
     def echo(self, message: str) -> None:
         """Print an informational line."""
-        ...
 
 
 class TyperPrompter:
@@ -340,7 +337,6 @@ def _interactive_gather(
         default=base.session_mode,
     )
 
-    authorization_ref = base.authorization_ref
     if environment == "prod":
         authorization_ref = (
             p.ask("Authorization reference (REQUIRED for prod, e.g. a ticket id)", default="")

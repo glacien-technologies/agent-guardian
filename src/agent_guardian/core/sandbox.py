@@ -91,6 +91,39 @@ class _Patches:
     handles: list[Any] = field(default_factory=list)
 
 
+def _is_vertex_regional_host(host: str) -> bool:
+    """``True`` iff ``host`` is exactly ``<region>-aiplatform.googleapis.com``.
+
+    Substring / ``endswith`` checks alone (e.g. ``host.endswith("-aiplatform.googleapis.com")``)
+    are flagged by CodeQL as ``py/incomplete-url-substring-sanitization`` because they
+    permit an attacker-controlled multi-label prefix. We tighten the rule: the part
+    before ``-aiplatform.googleapis.com`` must be a single region label (alphanumerics
+    + dashes, no dots) — e.g. ``us-central1`` — and the suffix must match exactly.
+    """
+    suffix = "-aiplatform.googleapis.com"
+    if not host.endswith(suffix):
+        return False
+    prefix = host[: -len(suffix)]
+    if not prefix or "." in prefix:
+        return False
+    # Region labels are alphanumeric + dashes (RFC 1123-ish).
+    return all(ch.isalnum() or ch == "-" for ch in prefix)
+
+
+def _is_bedrock_runtime_host(host: str) -> bool:
+    """``True`` iff ``host`` is a Bedrock ``*.amazonaws.com`` regional endpoint.
+
+    Equivalent to the previous ``host.endswith(".amazonaws.com") and "bedrock" in host``
+    rule but expressed via per-label parsing so CodeQL can prove the suffix is
+    anchored to the AWS apex domain.
+    """
+    suffix = ".amazonaws.com"
+    if not host.endswith(suffix):
+        return False
+    labels = host[: -len(suffix)].split(".")
+    return any("bedrock" in label for label in labels)
+
+
 class Sandbox:
     """Async context manager that enforces :class:`SandboxPolicy`.
 
@@ -119,13 +152,9 @@ class Sandbox:
             return True
         if policy.allow_ollama_local_only and host in {"localhost", "127.0.0.1", "::1"}:
             return True
-        if (
-            policy.allow_aws_bedrock_regions
-            and host.endswith(".amazonaws.com")
-            and "bedrock" in host
-        ):
+        if policy.allow_aws_bedrock_regions and _is_bedrock_runtime_host(host):
             return True
-        return bool(policy.allow_vertex_regions and host.endswith("-aiplatform.googleapis.com"))
+        return bool(policy.allow_vertex_regions and _is_vertex_regional_host(host))
 
     def _record(self, message: str, *, host: str | None, port: int | None) -> SandboxViolation:
         viol = SandboxViolation(message, host=host, port=port)

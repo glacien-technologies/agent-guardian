@@ -29,6 +29,7 @@ from fastapi.responses import HTMLResponse
 
 from agent_guardian.core.coverage import compute_coverage_from_memory, default_memory_path
 from agent_guardian.core.redact import redact_finding
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
@@ -537,9 +538,9 @@ def _filter_findings(
             target = Severity(severity.lower())
             out = [f for f in out if f.severity is target]
         except ValueError as exc:
-            _LOG.debug(
+            _LOG.debug(  # noqa: py/log-injection  -- severity sanitized via sanitize_for_log
                 "coverage filter: ignoring invalid severity %r (%s) — showing all severities",
-                severity,
+                sanitize_for_log(severity),
                 exc,
             )
     if asi:
@@ -547,9 +548,9 @@ def _filter_findings(
             asi_target = AsiCategory(asi)
             out = [f for f in out if f.asi is asi_target]
         except ValueError as exc:
-            _LOG.debug(
+            _LOG.debug(  # noqa: py/log-injection  -- asi sanitized via sanitize_for_log
                 "coverage filter: ignoring invalid ASI %r (%s) — showing all categories",
-                asi,
+                sanitize_for_log(asi),
                 exc,
             )
     if q:
@@ -701,17 +702,17 @@ async def coverage_view(
         plv = scan.probe_library_version
         probe_library_label = PROBE_CORPUS_VERSION if "placeholder" in plv else plv
 
-    _LOG.debug(
+    _LOG.debug(  # noqa: py/log-injection  -- scan_id/sort/sev_active/asi all sanitized via sanitize_for_log
         "coverage view: scan_id=%s aivss=%d findings=%d/%d page=%d/%d sort=%s sev=%s asi=%s",
-        scan_id,
+        sanitize_for_log(scan_id),
         aivss,
         total_filtered,
         findings_total,
         page,
         total_pages,
-        sort,
-        sev_active,
-        asi or "-",
+        sanitize_for_log(sort),
+        sanitize_for_log(sev_active),
+        sanitize_for_log(asi or "-"),
     )
 
     return templates.TemplateResponse(

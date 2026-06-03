@@ -537,10 +537,10 @@ class _FakeADKStreamingRunner:
         parts = list(self._parts)
 
         class _Stream:
-            def __aiter__(self_inner: Any) -> Any:
-                return self_inner
+            def __aiter__(self) -> Any:
+                return self
 
-            async def __anext__(self_inner: Any) -> Any:
+            async def __anext__(self) -> Any:
                 if not parts:
                     raise StopAsyncIteration
                 return {"text": parts.pop(0)}

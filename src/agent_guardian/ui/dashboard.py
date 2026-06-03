@@ -30,61 +30,40 @@ without forking the logic.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
-
 from rich.console import Group, RenderableType
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-if TYPE_CHECKING:
-    from agent_guardian.ui.findings_panel import FindingRow
-    from agent_guardian.ui.recon_panel import ReconSummary
+# ``_render_agent_table`` and ``_render_progress`` live in a neutral leaf
+# module so :mod:`agent_guardian.ui.red_team_panel` can consume them without
+# importing back into ``dashboard`` — that back-edge is what CodeQL flagged
+# as a static import cycle. The names are re-exported here for back-compat
+# with callers that historically imported them from ``ui.dashboard``.
+from agent_guardian.ui._panel_render import _render_agent_table, _render_progress
+
+# Shared types live in ``ui/state.py`` (a leaf module) so the dashboard and
+# the per-phase panels can import the same ``DashboardState`` without forming
+# an import cycle. The names are re-exported here for back-compat with callers
+# that historically imported them from ``ui.dashboard``.
+from agent_guardian.ui.state import (
+    AGENT_ROWS,
+    AgentStatus,
+    CurrentPhase,
+    DashboardState,
+    FindingRow,
+    ReconSummary,
+)
 
 __all__ = [
     "AGENT_ROWS",
+    "AgentStatus",
+    "CurrentPhase",
     "DashboardState",
+    "FindingRow",
+    "ReconSummary",
     "make_dashboard",
 ]
-
-
-# Stable presentation order — recon row first, then ASI01..ASI10.
-# This is the v1.0 single-tier slate; richer per-agent metadata
-# (current_turn/max_turns) is not yet on SwarmEvent so we keep the
-# row set static and rely on status pills + findings counts.
-AGENT_ROWS: tuple[tuple[str, str], ...] = (
-    ("recon-agent", "n/a"),
-    ("goal-hijack-agent", "ASI01"),
-    ("tool-abuse-agent", "ASI02"),
-    ("privilege-agent", "ASI03"),
-    ("supply-chain-agent", "ASI04"),
-    ("code-exec-agent", "ASI05"),
-    ("memory-poison-agent", "ASI06"),
-    ("a2a-agent", "ASI07"),
-    ("cascade-agent", "ASI08"),
-    ("trust-exploit-agent", "ASI09"),
-    ("drift-agent", "ASI10"),
-)
-
-
-AgentStatus = Literal["pending", "running", "done", "error", "skipped"]
-
-
-# QA-012 — phase tracker. ``plan`` is the QA-011 prelude (before swarm
-# start); ``recon`` / ``decompose`` / ``parallel`` / ``finalise`` mirror
-# the engine phases; ``done`` is post-scan_done.
-CurrentPhase = Literal["plan", "recon", "decompose", "parallel", "finalise", "done"]
-
-
-_STATUS_STYLE: dict[AgentStatus, str] = {
-    "pending": "status.pending",
-    "running": "status.running",
-    "done": "status.done",
-    "error": "status.error",
-    "skipped": "status.skipped",
-}
 
 
 def _aivss_style(provisional: int | None) -> str:
@@ -98,59 +77,6 @@ def _aivss_style(provisional: int | None) -> str:
     return "aivss.low"
 
 
-@dataclass
-class DashboardState:
-    """Single source-of-truth for the swarm board renderable (QA-002).
-
-    Mutated by the swarm observer; consumed read-only by
-    :func:`make_dashboard`. All numeric fields default to safe zeros
-    so a fresh ``DashboardState(scan_id=..., target_ref=..., tier=...)``
-    renders an immediately-valid empty board.
-
-    QA-012 — additive fields for phase composition:
-
-    * ``current_phase`` — drives panel collapse/expand decisions.
-    * ``phase_durations`` — phase name → seconds; populated from
-      ``phase_done`` events.
-    * ``recon_summary`` — frozen recon snapshot; populated from
-      ``phase_done("recon")``.
-    * ``findings_streaming`` — append-only tuple of
-      :class:`FindingRow`; the Findings panel rebuilds from it on
-      each tick.
-    """
-
-    scan_id: str
-    target_ref: str
-    tier: str
-    elapsed_seconds: float = 0.0
-    agent_status: dict[str, AgentStatus] = field(default_factory=dict)
-    agent_findings: dict[str, int] = field(default_factory=dict)
-    agent_turns: dict[str, tuple[int, int]] = field(default_factory=dict)
-    provisional_aivss: int | None = None
-    decision: str = "—"
-    budget_tokens_spent: int = 0
-    budget_tokens_cap: int | None = None
-    budget_usd_spent: float = 0.0
-    budget_usd_cap: float | None = None
-    # QA-012 — phase composition additions.
-    current_phase: CurrentPhase = "plan"
-    phase_durations: dict[str, float] = field(default_factory=dict)
-    recon_summary: ReconSummary | None = None
-    findings_streaming: tuple[FindingRow, ...] = ()
-    # PhaseC — multi-turn plan label + attachment count per agent. Both
-    # additive; absent keys render the legacy cell unchanged.
-    agent_plan_label: dict[str, str] = field(default_factory=dict)
-    agent_attachment_counts: dict[str, int] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        # Seed every known agent row with a "pending" status so the
-        # initial render shows the full slate immediately. Subsequent
-        # swarm events flip rows to running/done/error/skipped.
-        for name, _ in AGENT_ROWS:
-            self.agent_status.setdefault(name, "pending")
-            self.agent_findings.setdefault(name, 0)
-
-
 def _render_header(state: DashboardState) -> Panel:
     """Top panel: scan_id, target_ref, tier, elapsed."""
     grid = Table.grid(padding=(0, 1), expand=True)
@@ -161,69 +87,6 @@ def _render_header(state: DashboardState) -> Panel:
     grid.add_row(Text("tier", style="brand.dim"), Text(state.tier))
     grid.add_row(Text("elapsed", style="brand.dim"), Text(f"{state.elapsed_seconds:0.1f}s"))
     return Panel(grid, title="AgentGuardian — swarm board", border_style="brand")
-
-
-def _render_agent_table(state: DashboardState) -> Table:
-    """Agent rows: name, ASI, status pill, findings count, turn progress."""
-    table = Table(expand=True, show_lines=False, padding=(0, 1))
-    table.add_column("Agent", no_wrap=True)
-    table.add_column("ASI", justify="center", no_wrap=True)
-    table.add_column("Status", justify="left", no_wrap=True)
-    table.add_column("Turns", justify="right", no_wrap=True)
-    table.add_column("Findings", justify="right", no_wrap=True)
-
-    for name, asi in AGENT_ROWS:
-        status: AgentStatus = state.agent_status.get(name, "pending")
-        status_style = _STATUS_STYLE[status]
-        asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"
-        turn_pair = state.agent_turns.get(name)
-        turn_str = f"{turn_pair[0]}/{turn_pair[1]}" if turn_pair else "—"
-        # PhaseC — append plan badge + attachment glyph when present.
-        plan_label = state.agent_plan_label.get(name, "")
-        if plan_label:
-            turn_str = f"{turn_str} (plan: {plan_label})"
-        att_count = state.agent_attachment_counts.get(name, 0)
-        if att_count > 0:
-            turn_str = f"{turn_str} [+{att_count} att]"
-        table.add_row(
-            Text(name, style=status_style),
-            Text(asi, style=asi_style),
-            Text(status, style=status_style),
-            Text(turn_str, style="status.pending"),
-            Text(str(state.agent_findings.get(name, 0))),
-        )
-    return table
-
-
-def _render_progress(state: DashboardState) -> Progress | None:
-    """Token + USD progress bars. ``None`` when both caps are unset."""
-    if state.budget_tokens_cap is None and state.budget_usd_cap is None:
-        return None
-    progress = Progress(
-        TextColumn("[brand.dim]{task.description}"),
-        BarColumn(complete_style="brand", finished_style="brand"),
-        TextColumn("[brand.dim]{task.fields[suffix]}"),
-        expand=True,
-        transient=False,
-        disable=False,
-    )
-    if state.budget_tokens_cap is not None:
-        task_id_tokens = progress.add_task(
-            "tokens",
-            total=float(state.budget_tokens_cap),
-            suffix=f"{state.budget_tokens_spent:,} / {state.budget_tokens_cap:,}",
-        )
-        # Use ``update`` for fractional completion (the Progress ``add_task``
-        # ``completed`` arg is typed ``int``; ``update`` accepts float).
-        progress.update(task_id_tokens, completed=float(state.budget_tokens_spent))
-    if state.budget_usd_cap is not None:
-        task_id_usd = progress.add_task(
-            "usd",
-            total=state.budget_usd_cap,
-            suffix=f"${state.budget_usd_spent:.4f} / ${state.budget_usd_cap:.4f}",
-        )
-        progress.update(task_id_usd, completed=state.budget_usd_spent)
-    return progress
 
 
 def _render_footer(state: DashboardState) -> Panel:

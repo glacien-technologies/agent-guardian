@@ -58,10 +58,10 @@ class _SequenceLLM(BaseLLM):
     provider = "stub"
 
     def __init__(self, responses: list[str], fallback: str = "DONE") -> None:
+        super().__init__(owns_client=False)
         self._responses = list(responses)
         self._fallback = fallback
         self._i = 0
-        self._semaphore = asyncio.Semaphore(1000)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         text = self._responses[self._i] if self._i < len(self._responses) else self._fallback

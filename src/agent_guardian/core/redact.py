@@ -423,9 +423,11 @@ class _FindingLike(Protocol):
 
     summary: str
 
-    def model_copy(self, *, update: dict[str, Any]) -> Any: ...
+    def model_copy(self, *, update: dict[str, Any]) -> Any:
+        """Pydantic ``model_copy(update=...)``: return a copy with overrides."""
 
-    def model_dump(self, *, mode: str = ...) -> dict[str, Any]: ...
+    def model_dump(self, *, mode: str = ...) -> dict[str, Any]:
+        """Pydantic ``model_dump(mode=...)``: serialise to a plain dict."""
 
 
 def _redact_text(text: Any) -> Any:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 from pydantic import ValidationError
@@ -448,7 +449,9 @@ def test_transport_azure_foundry_agent() -> None:
     )
     assert isinstance(c.target.transport, AzureFoundryAgentTransport)
     assert c.target.transport.agent_id == "agt-1"
-    assert str(c.target.transport.endpoint).startswith("https://foundry.example.com")
+    _endpoint = urlparse(str(c.target.transport.endpoint))
+    assert _endpoint.scheme == "https"
+    assert _endpoint.hostname == "foundry.example.com"
 
 
 @pytest.mark.parametrize(

@@ -59,16 +59,14 @@ class StubLLM(BaseLLM):
         *,
         token_count_estimator: Callable[[str], int] | None = None,
     ) -> None:
-        # We deliberately skip `BaseLLM.__init__`'s httpx client; stub does no I/O.
-        # But we still need the semaphore and provider plumbing.
-        import asyncio
-
-        self.api_key = None
-        self.base_url = None
-        self.timeout_seconds = 0.0
-        self._owns_client = False
-        self._client = None  # type: ignore[assignment]
-        self._semaphore = asyncio.Semaphore(self.default_max_concurrency)
+        # Stub does no I/O — pass ``owns_client=False`` so BaseLLM skips the
+        # httpx.AsyncClient construction but still sets up the semaphore and
+        # ``provider`` plumbing for us.
+        super().__init__(
+            timeout_seconds=0.0,
+            max_concurrency=self.default_max_concurrency,
+            owns_client=False,
+        )
 
         self._default = default
         self._estimator = token_count_estimator or _default_token_estimator

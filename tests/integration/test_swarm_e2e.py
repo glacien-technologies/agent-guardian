@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -536,7 +534,3 @@ async def test_swarm_cost_usd_reflects_real_token_spend(
     scan = await swarm.run()
     assert scan.tokens_total > 0
     assert scan.cost_usd > 0.0, "cost_usd must reflect non-stub model rates"
-
-
-# Mypy sanity — referenced via AsyncIterator type alias to keep imports live.
-_AsyncIterAlias = AsyncIterator[Any]

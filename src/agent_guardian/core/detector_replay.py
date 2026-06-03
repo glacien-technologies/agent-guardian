@@ -36,7 +36,8 @@ class Detector(Protocol):
 
     name: str
 
-    async def flags(self, request: str, response: str) -> bool: ...
+    async def flags(self, request: str, response: str) -> bool:
+        """Return True iff this detector caught the request/response pair."""
 
 
 @dataclass(frozen=True)

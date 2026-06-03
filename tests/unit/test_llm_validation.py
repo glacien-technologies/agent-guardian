@@ -13,6 +13,7 @@ Covers the acceptance matrix in DESIGN_LOCK §QA-001:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -27,6 +28,15 @@ from agent_guardian.llm.validation import (
     clear_cache,
     split_spec,
 )
+
+# Anchored regex matching the exact Vertex AI host: either the global
+# ``aiplatform.googleapis.com`` or a regional ``<region>-aiplatform.googleapis.com``
+# label (e.g. ``us-central1-aiplatform.googleapis.com``,
+# ``europe-west4-aiplatform.googleapis.com``). The leading ``^`` and trailing
+# ``$`` make a suffix-attack like ``evil-aiplatform.googleapis.com`` impossible.
+# The region segment is one-or-more hyphen-separated lowercase-alnum labels,
+# each ending the run with ``-`` before the literal ``aiplatform`` token.
+_VERTEX_HOST_RE = re.compile(r"^(?:[a-z0-9]+-)*aiplatform\.googleapis\.com$")
 
 # ---------------------------------------------------------------------------
 # Fixtures + helpers
@@ -128,7 +138,9 @@ def test_unknown_gemini_with_vertex_available_suggests_vertex_prefix() -> None:
                     }
                 },
             )
-        if "aiplatform.googleapis.com" in host:
+        # Match Vertex AI regional endpoints — exactly `<region>-aiplatform.googleapis.com`
+        # — without permitting an arbitrary-prefix substring match.
+        if _VERTEX_HOST_RE.match(host):  # noqa: py/incomplete-url-substring-sanitization  -- anchored regex on `httpx.Request.url.host`, full-string match
             return httpx.Response(200, json={"name": "publishers/google/models/gemini-3.1-flash"})
         return httpx.Response(500)  # pragma: no cover
 

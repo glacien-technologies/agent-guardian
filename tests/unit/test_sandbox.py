@@ -254,7 +254,9 @@ def test_sandbox_sync_httpx_blocked() -> None:
         with contextlib.suppress(httpx.HTTPError, OSError, SandboxViolation):
             client.get("https://evil.example.com", timeout=0.001)
         recorded = {v.host for v in sb.violations}
-        assert "evil.example.com" in recorded
+        # `recorded` is a set of host strings — `in` is set-membership equality,
+        # not URL substring matching, so this is safe.
+        assert "evil.example.com" in recorded  # noqa: py/incomplete-url-substring-sanitization  -- set-membership equality on host strings, not URL substring match
 
 
 def test_sandbox_sync_httpx_allowed_via_respx() -> None:

@@ -187,7 +187,7 @@ def test_renderer_does_not_create_competing_live_region() -> None:
     module symbols to confirm — defensive guardrail."""
     import inspect
 
-    import agent_guardian.ui.attack_feed as mod
+    from agent_guardian.ui import attack_feed as mod
 
     # We accept ``rich.live.Live`` as an *import* nowhere in the module.
     # Static check: read the source file and assert no Live() call.

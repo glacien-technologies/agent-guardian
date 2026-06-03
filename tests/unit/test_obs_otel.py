@@ -267,7 +267,7 @@ def in_memory_tracer(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untype
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-    import agent_guardian.obs.otel as _otel
+    from agent_guardian.obs import otel as _otel
 
     monkeypatch.setenv(_OPT_IN_ENV, _OPT_IN_TOKEN)
 
@@ -459,7 +459,7 @@ class TestConfigureOtelActive:
         # provider carrying a span processor (i.e. the exporter was attached).
         from opentelemetry.sdk.trace import TracerProvider
 
-        import agent_guardian.obs.otel as otel_mod
+        from agent_guardian.obs import otel as otel_mod
 
         captured: dict[str, object] = {}
 
@@ -587,7 +587,7 @@ class TestConfigureOtelEnvIntegration:
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
 
-        import agent_guardian.obs.otel as otel_mod
+        from agent_guardian.obs import otel as otel_mod
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
@@ -602,7 +602,7 @@ class TestConfigureOtelEnvIntegration:
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
 
-        import agent_guardian.obs.otel as otel_mod
+        from agent_guardian.obs import otel as otel_mod
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
@@ -619,7 +619,7 @@ class TestConfigureOtelEnvIntegration:
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
 
-        import agent_guardian.obs.otel as otel_mod
+        from agent_guardian.obs import otel as otel_mod
 
         captured: dict[str, object] = {}
         monkeypatch.setattr(
@@ -636,7 +636,7 @@ class TestConfigureOtelEnvIntegration:
 
         from opentelemetry import trace
 
-        import agent_guardian.obs.otel as otel_mod
+        from agent_guardian.obs import otel as otel_mod
 
         captured: dict[str, object] = {}
 
@@ -979,11 +979,13 @@ class TestMcpBlockedToolDoesNotOpenSpan:
             """
 
             def __init__(self) -> None:
-                # Skip the real __init__ (it would open an HTTP session). The
-                # adapter only reads ``.endpoint`` (a property over
-                # ``_endpoint``) and ``._tool_gate``.
-                self._endpoint = "https://mcp.example/rpc"
-                self._tool_gate = roe.record_tool_call
+                # Drive McpTransport's real __init__ so ``super`` is satisfied;
+                # the spawned httpx client is closed in ``test`` via the
+                # transport stub never being send()-driven from network.
+                super().__init__(
+                    endpoint="https://mcp.example/rpc",
+                    tool_gate=roe.record_tool_call,
+                )
 
             async def send(self, request: Request) -> Response:  # type: ignore[override]
                 # Drive the gate (records the block in RoE) before returning.
@@ -995,7 +997,10 @@ class TestMcpBlockedToolDoesNotOpenSpan:
                 )
 
             async def aclose(self) -> None:  # type: ignore[override]
-                return None
+                # Close the httpx client the base __init__ created so the
+                # event loop doesn't surface a "Unclosed client session" warning.
+                if self._owns_client and self._client is not None:
+                    await self._client.aclose()
 
         transport = _FakeMcp()
         adapter = ContractTargetAdapter(transport=transport, roe=roe)

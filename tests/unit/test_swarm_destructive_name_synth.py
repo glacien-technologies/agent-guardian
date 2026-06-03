@@ -31,7 +31,7 @@ class _FakeRealLLM(BaseLLM):
     provider = "openai"
 
     def __init__(self) -> None:
-        pass
+        super().__init__(owns_client=False)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:  # pragma: no cover
         return LLMResponse(

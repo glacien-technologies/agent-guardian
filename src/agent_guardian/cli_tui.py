@@ -74,6 +74,7 @@ def _next_phase_after(phase: str) -> CurrentPhase:
     try:
         idx = _PHASE_ORDER.index(phase)
     except ValueError:
+        _LOG.debug("cli_tui: unknown phase %r — falling back to 'done'", phase)
         return "done"
     if idx + 1 >= len(_PHASE_ORDER):
         return "done"

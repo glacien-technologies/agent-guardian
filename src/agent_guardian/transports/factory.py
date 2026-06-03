@@ -158,7 +158,10 @@ def _resolve(
     try:
         return refs[ref]
     except KeyError as exc:  # pragma: no cover - defensive: refs are pre-walked
-        _LOG.debug("secret ref %r missing from resolved mapping", ref)
+        # NOTE: ``ref`` is a SecretRef pointer of the form ``${backend:key}`` —
+        # never the resolved plaintext — but to be defensive we log only the
+        # backend name so the diagnostic can't leak even a key name.
+        _LOG.debug("secret ref missing from resolved mapping (backend=%s)", ref.backend)
         raise KeyError(f"secret ref {ref!r} was not resolved from the contract") from exc
 
 

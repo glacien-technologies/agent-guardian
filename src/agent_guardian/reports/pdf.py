@@ -22,7 +22,7 @@ import importlib.util
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory, asi_description
@@ -40,8 +40,6 @@ __all__ = [
 ]
 
 PDF_ENV_VAR = "AGENT_GUARDIAN_PDF_ENGINE"
-
-PdfEngine = Literal["weasyprint", "reportlab"]
 
 
 class PdfFeatureUnavailable(RuntimeError):

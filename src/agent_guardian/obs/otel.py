@@ -143,9 +143,11 @@ def set_conversation_id(conversation_id: str | None) -> Any:
 # not. The no-op span below satisfies it; so does opentelemetry's ``Span``.
 @runtime_checkable
 class _SpanLike(Protocol):
-    def set_attribute(self, key: str, value: Any) -> Any: ...
+    def set_attribute(self, key: str, value: Any) -> Any:
+        """Attach a key/value pair to the current span."""
 
-    def add_event(self, name: str, attributes: dict[str, Any] | None = ...) -> Any: ...
+    def add_event(self, name: str, attributes: dict[str, Any] | None = ...) -> Any:
+        """Record a named event with optional attributes on the current span."""
 
 
 class _NoOpSpan:
@@ -170,7 +172,8 @@ class _NoOpSpan:
 @runtime_checkable
 class _TracerLike(Protocol):
     @contextmanager
-    def start_as_current_span(self, name: str, **kwargs: Any) -> Iterator[_SpanLike]: ...
+    def start_as_current_span(self, name: str, **kwargs: Any) -> Iterator[_SpanLike]:
+        """Open a span as the current span for the duration of the with-block."""
 
 
 class _NoOpTracer:

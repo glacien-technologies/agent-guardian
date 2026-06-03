@@ -24,7 +24,6 @@ turn.
 
 from __future__ import annotations
 
-import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -45,8 +44,6 @@ from agent_guardian.models.severity import Severity
 from agent_guardian.strategies.base import ProbeSeed
 
 __all__ = ["OutputHandlingAgent"]
-
-_LOG = logging.getLogger(__name__)
 
 
 # The deterministic canary tokens this agent seeds into every probe. Any
