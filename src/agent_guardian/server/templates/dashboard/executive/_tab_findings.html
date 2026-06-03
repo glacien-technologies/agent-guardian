@@ -334,7 +334,7 @@
         <div class="exec-pager__buttons">
           {% for p in pagination.pages %}
             <a class="exec-pager__btn{% if p == pagination.current %} exec-pager__btn--active{% endif %}"
-               href="?theme=executive&amp;page={{ p }}#tab=findings">{{ p }}</a>
+               href="?page={{ p }}#tab=findings">{{ p }}</a>
           {% endfor %}
         </div>
       </nav>
