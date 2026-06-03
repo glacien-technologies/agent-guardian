@@ -42,6 +42,7 @@ the paginated ``/home`` cold path doesn't deserialise every
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -190,6 +191,14 @@ class ScanStore:
         # real duration on scan_done even when the SwarmCommander doesn't
         # surface one (e.g. unit-stub tests).
         self._scan_started_at: dict[str, float] = {}
+        # Phase 2 Step 2.1 — per-scan monotonic ``seq`` counter. The
+        # observer stamps every :class:`SwarmEvent` with the current value
+        # (starting at 0 for the first event of a scan) and increments.
+        # Persisted top-level into ``events.jsonl`` and emitted on the SSE
+        # wire as an ``id:`` line so the browser EventSource client can
+        # resume via ``Last-Event-ID`` after a transient disconnect.
+        # See designs/sse-flow-and-live-ui.md "Phase 2 decisions (2026-06-03)".
+        self._seq_counters: dict[str, int] = {}
         # Optional metrics sink (set by the app factory). Decoupled so the
         # store stays usable in library / test mode without /metrics wired.
         self._metrics: Any | None = None
@@ -232,6 +241,15 @@ class ScanStore:
         self._index_upsert(scan_id, is_running=True)
 
         def _observer(event: SwarmEvent) -> None:
+            # Phase 2 Step 2.1 — stamp a per-scan monotonic ``seq`` on the
+            # event BEFORE buffering / enqueue / JSONL write so every
+            # consumer (in-memory deque, asyncio.Queue, on-disk JSONL) sees
+            # the same value. First event of a scan gets seq=0. The
+            # producer never sets seq; the observer overwrites whatever's
+            # there via ``dataclasses.replace`` (SwarmEvent is frozen).
+            seq = self._seq_counters.get(scan_id, 0)
+            event = dataclasses.replace(event, seq=seq)
+            self._seq_counters[scan_id] = seq + 1
             # Buffer the event in memory. The deque auto-evicts the oldest
             # entry once the buffer hits MAX_BUFFERED_EVENTS_PER_SCAN so a
             # long-running scan can't push the in-memory state unboundedly.
@@ -876,8 +894,13 @@ def event_to_payload(event: SwarmEvent) -> dict[str, Any]:
     Used by both the on-disk JSONL writer and the SSE wire format so
     the dashboard sees identical shapes whether it's replaying from
     disk or streaming live.
+
+    Phase 2 Step 2.1 — when the event has been stamped by the observer,
+    ``seq`` is emitted as a top-level field (NOT nested inside payload)
+    so a cross-process replay can filter by it via simple line-prefix
+    matching. Legacy events without ``seq`` omit the field entirely.
     """
-    return {
+    out: dict[str, Any] = {
         "kind": event.kind,
         "agent": event.agent,
         "asi": event.asi.value if event.asi is not None else None,
@@ -886,6 +909,9 @@ def event_to_payload(event: SwarmEvent) -> dict[str, Any]:
         "timestamp": event.timestamp.isoformat(),
         "payload": _coerce_payload(event.payload),
     }
+    if event.seq is not None:
+        out["seq"] = event.seq
+    return out
 
 
 def _coerce_payload(payload: Iterable[tuple[str, Any]] | dict[str, Any]) -> dict[str, Any]:
