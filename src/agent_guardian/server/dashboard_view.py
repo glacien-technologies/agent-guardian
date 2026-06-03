@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from agent_guardian.models.asi import AsiCategory, asi_description
+from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
 
@@ -101,6 +102,8 @@ __all__ = [
     "DASHBOARD_TEMPLATE",
     "DashboardContext",
     "build_dashboard_context",
+    "build_finding_slideover_ctx",
+    "build_probe_slideover_ctx",
     "resolve_locality",
 ]
 
@@ -395,6 +398,16 @@ def _findings_page(
                 # the Findings table can render an em-dash when no probe
                 # correlation exists (static / recon-derived findings).
                 "agent_name": "",
+                # QA-054 — turn-aggregation defaults. Populated in-place by
+                # ``_attach_evidence_to_findings`` once the matched evidence
+                # list is known. Callers that skip the attach step (e.g.
+                # narrow unit tests on _findings_page in isolation) still
+                # see safe empty defaults.
+                "turn_children": [],
+                "turn_total": 0,
+                "turn_failed": 0,
+                "is_multi_turn": False,
+                "turn_progress_label": "",
             }
         )
     pagination: dict[str, Any] = {
@@ -414,6 +427,60 @@ def _findings_page(
 # finding and surface ``evidence_truncated`` so the template can say
 # "10 of N evidence event(s) shown".
 _FINDING_EVIDENCE_CAP: Final[int] = 10
+
+# QA-054 — preview cap for the per-turn child rows. Each child row shows the
+# leading characters of the prompt and target_response so the operator can
+# eyeball which turn flipped the verdict without opening the slide-over. The
+# full text is still available via the slide-over (which fetches the verbatim
+# probe sheet from ``/scan/<id>/probe``).
+_FINDING_CHILD_PREVIEW_CHARS: Final[int] = 140
+
+
+def _truncate_for_preview(value: Any) -> str:
+    """Return a single-line preview prefix of ``value`` for child-row display.
+
+    Collapses whitespace runs to single spaces (so a multi-line prompt fits
+    one table row), trims to :data:`_FINDING_CHILD_PREVIEW_CHARS`, and appends
+    a ``…`` ellipsis when truncation occurred. Non-string inputs are coerced
+    via ``str()`` so the helper never raises on unexpected types.
+    """
+    if value is None:
+        return ""
+    text = " ".join(str(value).split())
+    if len(text) <= _FINDING_CHILD_PREVIEW_CHARS:
+        return text
+    return text[:_FINDING_CHILD_PREVIEW_CHARS].rstrip() + "…"
+
+
+def _verdict_label(verdict: str) -> str:
+    """Map an internal verdict enum value to its operator-facing label.
+
+    Honours ``feedback_no_raw_enum_in_ui`` — the table never shows
+    ``fail`` / ``pass`` / ``inconclusive`` verbatim; the operator sees
+    ``EXPLOITED`` / ``DEFENDED`` / ``INCONCLUSIVE`` / ``PENDING``.
+    """
+    if verdict == "fail":
+        return "EXPLOITED"
+    if verdict == "pass":
+        return "DEFENDED"
+    if verdict == "inconclusive":
+        return "INCONCLUSIVE"
+    return "PENDING"
+
+
+def _confidence_pct(value: Any) -> str:
+    """Format a 0.0-1.0 confidence score as a ``73%`` string for child rows.
+
+    Returns an empty string when the value is missing or unparseable so the
+    template can render an em-dash via its standard fallback.
+    """
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if pct <= 0.0:
+        return ""
+    return f"{round(pct * 100)}%"
 
 
 def _attach_evidence_to_findings(
@@ -457,6 +524,13 @@ def _attach_evidence_to_findings(
             # ``_findings_page``) so callers / templates can rely on the
             # key existing even when no probes correlate.
             item.setdefault("agent_name", "")
+            # QA-054 — turn-aggregation defaults so the template can branch
+            # on ``is_multi_turn`` without worrying about KeyError.
+            item.setdefault("turn_children", [])
+            item.setdefault("turn_total", 0)
+            item.setdefault("turn_failed", 0)
+            item.setdefault("is_multi_turn", False)
+            item.setdefault("turn_progress_label", "")
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -513,6 +587,182 @@ def _attach_evidence_to_findings(
             first_agent = str(capped[0].get("agent") or "").strip()
             if first_agent:
                 item["agent_name"] = first_agent
+        # QA-054 — multi-turn aggregation. The Finding row already represents
+        # one rolled-up attack thread (one probe_id / agent / scenario); its
+        # per-turn detail is the matched evidence list we just attached. We
+        # surface that detail as inline child rows so the operator can scan
+        # which turn flipped the verdict without opening the slide-over.
+        #
+        # ``turn_children`` is the canonical child-row payload (prompt /
+        # response previews + verdict + confidence + turn number). The
+        # template renders one ``<tr class="…__child">`` per entry below
+        # the parent row, hidden by default and revealed by chevron click.
+        # ``turn_total`` and ``turn_failed`` drive the "N of M turns failed"
+        # progress label so a critical 3-turn run reads ``1 of 3 turns
+        # failed`` at a glance. ``is_multi_turn`` is the back-compat flag —
+        # single-turn probes render exactly as before (no chevron, no
+        # children) so the existing QA-031 / QA-051 / QA-053 tests stay
+        # green without per-test snapshot updates.
+        children: list[dict[str, Any]] = []
+        for ev in capped:
+            verdict = str(ev.get("verdict") or "")
+            verdict_label = _verdict_label(verdict)
+            children.append(
+                {
+                    "turn_no": int(ev.get("turn", 0) or 0),
+                    "prompt_preview": _truncate_for_preview(ev.get("prompt")),
+                    "response_preview": _truncate_for_preview(ev.get("target_response")),
+                    "verdict": verdict or "unknown",
+                    "verdict_label": verdict_label,
+                    "confidence_pct": _confidence_pct(ev.get("confidence")),
+                }
+            )
+        turn_total = len(children)
+        turn_failed = sum(1 for c in children if c["verdict"] == "fail")
+        item["turn_children"] = children
+        item["turn_total"] = turn_total
+        item["turn_failed"] = turn_failed
+        item["is_multi_turn"] = turn_total > 1
+        item["turn_progress_label"] = (
+            f"{turn_failed} of {turn_total} turns failed" if turn_total > 1 else ""
+        )
+
+
+def build_finding_slideover_ctx(
+    finding: Finding,
+    *,
+    scan_dir: Path | None,
+) -> dict[str, Any]:
+    """Build the uniform ``ctx`` dict for the shared ``_slideover.html`` template.
+
+    QA-049 / QA-055 — one polymorphic loader: the Finding-mode endpoint
+    marshals the :class:`Finding` model + any correlated probe attempts
+    from ``memory.jsonl`` into the SAME ctx shape the probe-mode
+    endpoint uses, so the shared template renders the same audit
+    detail (prompt + response + judge reasoning + per-turn thread +
+    reproduce-CLI) for both row sources.
+
+    Correlation rule mirrors :func:`_attach_evidence_to_findings`:
+    primary match on ``probe_id``; fallback on ``agent + asi_category``
+    (broader). The first correlated probe attempt fills the verbatim
+    prompt + target_response + judge reasoning fields; subsequent
+    attempts surface as the per-turn conversation thread.
+
+    Genuinely-missing data renders as ``(no data available)`` in the
+    template — the Finding model carries no ``judge_reasoning`` field
+    of its own (verdicts are turn-scoped), so a finding with no
+    correlated probe attempts gets a placeholder for those fields. The
+    operator can iterate on data plumbing in a follow-up.
+    """
+    probes = _assemble_probes_list(scan_dir)
+    matched: list[dict[str, Any]] = []
+    if finding.probe_id:
+        for p in probes:
+            if str(p.get("probe_id") or "") == finding.probe_id:
+                matched.append(p)
+    if not matched:
+        asi_value = finding.asi.value
+        for p in probes:
+            if str(p.get("asi_category") or "") == asi_value:
+                matched.append(p)
+    capped = matched[:_FINDING_EVIDENCE_CAP]
+    first = capped[0] if capped else {}
+
+    children: list[dict[str, Any]] = []
+    for ev in capped:
+        verdict = str(ev.get("verdict") or "")
+        children.append(
+            {
+                "turn_no": int(ev.get("turn", 0) or 0),
+                "prompt_preview": _truncate_for_preview(ev.get("prompt")),
+                "response_preview": _truncate_for_preview(ev.get("target_response")),
+                "verdict": verdict or "unknown",
+                "verdict_label": _verdict_label(verdict),
+                "confidence_pct": _confidence_pct(ev.get("confidence")),
+            }
+        )
+
+    # Roll up the finding-level verdict: a finding that succeeded
+    # (``success=True``) is the "EXPLOITED" verdict regardless of which
+    # specific turn flipped it. ``inconclusive`` and ``pass`` cases follow
+    # the same enum the slide-over template translates to a label.
+    if finding.success:
+        verdict = "fail"
+    elif capped and all(str(c.get("verdict")) == "pass" for c in capped):
+        verdict = "pass"
+    else:
+        verdict = "inconclusive"
+
+    return {
+        "record_id": finding.id,
+        "probe_id": finding.probe_id,
+        "agent": str(first.get("agent") or ""),
+        "asi_category": finding.asi.value,
+        "csa_category": finding.csa_category.value,
+        "mitre_atlas": [t for t in finding.mitre_atlas],
+        "severity": finding.severity.value,
+        "severity_label": finding.severity.value.upper(),
+        "severity_class": finding.severity.value.lower(),
+        "tier_floor": "",
+        "owasp_scenario": "",
+        "source_yaml": "",
+        "source_path": "",
+        "turn": first.get("turn") if first else None,
+        "timestamp_label": str(first.get("timestamp_label") or "")
+        or finding.created_at.strftime("%H:%M:%S"),
+        "seed": "",
+        "rng_seed": "",
+        "strategy": str(first.get("strategy") or ""),
+        "mutator_operators": [],
+        "attacker_refused": bool(first.get("attacker_refused") or False),
+        "prompt": str(first.get("prompt") or finding.trigger_prompt or ""),
+        "target_response": str(first.get("target_response") or ""),
+        "verdict": verdict,
+        "confidence": finding.confidence,
+        "panel_votes": [],
+        "reasoning": str(first.get("reasoning") or ""),
+        "turn_children": children if len(children) > 1 else [],
+        "summary": finding.summary,
+    }
+
+
+def build_probe_slideover_ctx(probe: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a ``_assemble_probes_list`` row into the shared ctx shape.
+
+    The probes_list row already carries the locked Executive-tab fields;
+    this rename layer is a pure remap so the shared ``_slideover.html``
+    template can address the same keys for both kinds.
+    """
+    return {
+        "record_id": probe.get("probe_id") or "",
+        "probe_id": probe.get("probe_id") or "",
+        "agent": probe.get("agent") or "",
+        "asi_category": probe.get("asi_category") or "",
+        "csa_category": probe.get("csa_category") or "",
+        "mitre_atlas": probe.get("mitre_atlas") or [],
+        "severity": probe.get("severity") or "",
+        "severity_label": probe.get("severity_label") or "",
+        "severity_class": "",
+        "tier_floor": probe.get("tier_floor") or "",
+        "owasp_scenario": probe.get("owasp_scenario") or "",
+        "source_yaml": probe.get("source_yaml") or "",
+        "source_path": probe.get("source_path") or "",
+        "turn": probe.get("turn"),
+        "timestamp_label": probe.get("timestamp_label") or "",
+        "seed": probe.get("seed") or "",
+        "rng_seed": probe.get("rng_seed") or "",
+        "strategy": probe.get("strategy") or "",
+        "mutator_operators": probe.get("mutator_operators") or [],
+        "attacker_refused": bool(probe.get("attacker_refused") or False),
+        "prompt": probe.get("prompt") or "",
+        "target_response": probe.get("target_response") or "",
+        "verdict": probe.get("verdict") or "",
+        "confidence": probe.get("confidence"),
+        "panel_votes": probe.get("panel_votes") or [],
+        "reasoning": probe.get("reasoning") or "",
+        "turn_children": [],
+        "summary": f"Probe {probe.get('probe_id')}" if probe.get("probe_id") else "Probe details",
+    }
 
 
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:

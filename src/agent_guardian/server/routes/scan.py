@@ -37,6 +37,7 @@ from agent_guardian.server.dashboard_view import (
     DASHBOARD_TEMPLATE,
     _assemble_probes_list,
     build_dashboard_context,
+    build_finding_slideover_ctx,
     live_snapshot,
 )
 from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
@@ -190,6 +191,57 @@ async def probe_drawer(
         request,
         "dashboard/executive/_probe_drawer_body.html",
         {"probe": probe, "scan_id": scan_id},
+    )
+
+
+@router.get("/scan/{scan_id}/finding/{finding_id}", response_class=HTMLResponse)
+async def finding_slideover(
+    request: Request,
+    scan_id: str,
+    finding_id: str,
+) -> HTMLResponse:
+    """Render the finding slide-over body fragment for one Finding (QA-055).
+
+    Sibling of :func:`probe_drawer` — together they form the QA-049 /
+    QA-055 polymorphic loader contract: row click in either the
+    Findings tab or the Probes tab triggers a ``fetch()`` against the
+    matching ``/scan/<id>/{finding|probe}/<id>`` URL; the response is a
+    server-rendered HTML fragment from the SHARED
+    ``_slideover.html`` template (``kind="finding"`` here). The shared
+    template carries the full audit detail (prompt + response +
+    judge reasoning + per-turn thread + reproduce-CLI), so the
+    operator sees the same level of detail regardless of which tab
+    they opened the slide-over from.
+
+    The Finding model itself doesn't carry verbatim prompt / response
+    text — :func:`build_finding_slideover_ctx` joins against the
+    correlated probe attempts in ``memory.jsonl`` to surface them. A
+    finding with no correlated probe attempts renders the prompt /
+    response / reasoning sections as ``(no data available)``
+    placeholders.
+
+    Returns 404 when the scan exists but the finding id can't be
+    located; returns 404 when the scan itself is unknown.
+    """
+    store = get_scan_store(request)
+    templates = get_templates(request)
+    scan = store.load_completed(scan_id)
+    if scan is None and not store.is_running(scan_id) and not store.scan_dir(scan_id).is_dir():
+        raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
+    if scan is None:
+        # Scan dir exists but no terminal report yet — findings are
+        # only addressable post-finalize.
+        raise HTTPException(status_code=404, detail=f"unknown finding: {finding_id}")
+
+    finding = next((f for f in scan.findings if f.id == finding_id), None)
+    if finding is None:
+        raise HTTPException(status_code=404, detail=f"unknown finding: {finding_id}")
+
+    ctx = build_finding_slideover_ctx(finding, scan_dir=store.scan_dir(scan_id))
+    return templates.TemplateResponse(
+        request,
+        "dashboard/executive/_slideover.html",
+        {"ctx": ctx, "scan_id": scan_id, "kind": "finding"},
     )
 
 
