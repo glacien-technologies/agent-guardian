@@ -1118,24 +1118,6 @@ _MODE_COST_USD: Final[dict[str, tuple[float, float]]] = {
 }
 
 
-def _humanise_wall_cap(seconds: float | None) -> str:
-    """Render a wall-clock cap the way the CLI scan-plan board does.
-
-    ``None`` (no cap recorded on the persisted scan) renders as an em dash;
-    a recorded cap renders as ``"15 min"`` / ``"90 s"`` / ``"2 min 30 s"``.
-    """
-    if seconds is None or seconds <= 0:
-        return "—"
-    total = int(seconds)
-    minutes = total // 60
-    secs = total % 60
-    if minutes and secs:
-        return f"{minutes} min {secs} s"
-    if minutes:
-        return f"{minutes} min"
-    return f"{secs} s"
-
-
 def _build_scan_plan(
     scan: Scan | None,
     *,

@@ -73,7 +73,9 @@ def test_target_config_defaults_to_prompt_mode() -> None:
 def test_output_config_defaults_to_json() -> None:
     o = OutputConfig()
     assert o.formats == ["json"]
-    assert o.redact_pii is True
+    # Redaction is opt-in (off by default) — mirrors the memory.jsonl and
+    # report-emitter defaults. Operators asked to see verbatim target output.
+    assert o.redact_pii is False
     assert o.sign_evidence is True
 
 

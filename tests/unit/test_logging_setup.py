@@ -324,3 +324,18 @@ def test_json_renderer_redacts_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     parsed = json.loads(raw)
     assert "AIzaSyA1234567890ABCDEF" not in parsed["event"]
     assert "***REDACTED***" in parsed["event"]
+
+
+def test_structured_logging_enabled_tracks_json_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # QA-068 — ``structured_logging_enabled()`` is the call-site gate the
+    # agent loop uses to decide whether to emit full per-turn bodies. It is a
+    # thin alias over the JSON/structured log path (``AGENT_GUARDIAN_LOG_JSON``,
+    # which the CLI maps from ``--debug-format json``).
+    monkeypatch.delenv(logging_setup.JSON_ENV_VAR, raising=False)
+    assert logging_setup.structured_logging_enabled() is False
+    monkeypatch.setenv(logging_setup.JSON_ENV_VAR, "1")
+    assert logging_setup.structured_logging_enabled() is True
+    monkeypatch.setenv(logging_setup.JSON_ENV_VAR, "false")
+    assert logging_setup.structured_logging_enabled() is False

@@ -187,7 +187,12 @@
       Coverage
       {{ kpi_info('coverage') }}
     </span>
-    <span class="exec-kpi__value">{{ asi_covered }}/10</span>
+    {# SSE Phase 2 follow-up — COVERAGE tile is now live. ``data-live="asi-covered"``
+       matches the key in ``live_snapshot`` (dashboard_view.py), so the snapshot
+       patcher updates it like the AIVSS / FINDINGS tiles as new ASI categories
+       gain findings mid-scan. The rendered text matches the snapshot's
+       ``"N / 10"`` shape exactly so the first patch is a no-op (no flicker). #}
+    <span class="exec-kpi__value" data-live="asi-covered">{{ asi_covered }} / 10</span>
     {# Mini-chart: 10-segment pip row, filled cells = covered ASI categories. #}
     {% set _covered = kpi_chart_data.coverage_covered | int %}
     <span class="exec-kpi__chart exec-kpi__chart--coverage" data-component="kpi-chart-coverage" aria-hidden="true">

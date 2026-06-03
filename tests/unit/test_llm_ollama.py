@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 
+import httpx
 import pytest
 import respx
 from httpx import Response
@@ -12,6 +14,7 @@ from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.llm.errors import (
     LLMPermanentError,
     LLMResponseFormatError,
+    LLMTransientError,
 )
 from agent_guardian.llm.ollama import OllamaClient
 
@@ -154,6 +157,58 @@ async def test_ollama_invalid_json() -> None:
     llm = OllamaClient()
     with pytest.raises(LLMResponseFormatError):
         await llm.complete(_req())
+    await llm.aclose()
+
+
+@respx.mock
+async def test_ollama_failed_call_logs_via_helper_error_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A transport failure surfaces via the shared ``log_model_response`` error
+    path — one WARNING ``model call failed:`` line carrying the cause — rather
+    than an ad-hoc per-provider ``ollama network error`` line."""
+    respx.post("http://localhost:11434/api/chat").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    llm = OllamaClient()
+    with (
+        caplog.at_level(logging.WARNING, logger="agent_guardian.llm.ollama"),
+        pytest.raises(LLMTransientError),
+    ):
+        await llm.complete(_req())
+    failed = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.getMessage().startswith("model call failed:")
+    ]
+    assert failed, [r.getMessage() for r in caplog.records]
+    # The cause (exception type + message) is spelled out in the unified line.
+    assert "ConnectError" in failed[0].getMessage()
+    # The old ad-hoc per-provider line is gone.
+    assert not [r for r in caplog.records if "ollama network error" in r.getMessage()]
+    await llm.aclose()
+
+
+@respx.mock
+async def test_ollama_invalid_json_logs_via_helper_error_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An invalid-JSON 2xx body also routes through the helper's error path."""
+    respx.post("http://localhost:11434/api/chat").mock(
+        return_value=Response(200, content=b"not-json")
+    )
+    llm = OllamaClient()
+    with (
+        caplog.at_level(logging.WARNING, logger="agent_guardian.llm.ollama"),
+        pytest.raises(LLMResponseFormatError),
+    ):
+        await llm.complete(_req())
+    failed = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.getMessage().startswith("model call failed:")
+    ]
+    assert failed, [r.getMessage() for r in caplog.records]
     await llm.aclose()
 
 

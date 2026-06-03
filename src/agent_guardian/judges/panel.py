@@ -24,8 +24,6 @@ Cross-family enforcement (default ON):
 * The agent layer catches the ValueError and falls back to a single
   judge, logging a WARNING — it never crashes the scan because the
   panel was misconfigured.
-
-Logs are tagged ``PhaseB.B4``.
 """
 
 from __future__ import annotations
