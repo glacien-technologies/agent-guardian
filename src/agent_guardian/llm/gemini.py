@@ -28,6 +28,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+from agent_guardian.logging_setup import log_model_request, log_model_response
 
 __all__ = ["GeminiClient"]
 
@@ -125,32 +126,24 @@ class GeminiClient(BaseLLM):
         params: dict[str, str] = {}
         if self.api_key:
             params["key"] = self.api_key
-        # QA-068 — structured INFO one-liner for the operator's swarm-board
-        # narration. Full kwargs (temperature / seed / system / tool defs)
-        # stay at DEBUG, and only render when the operator opted into the
-        # JSON log format — keeps structured-text DEBUG scannable.
-        _LOG.info(
-            "model call: gemini-%s (msgs=%d, max_tok=%s)",
-            request.model,
-            len(request.messages),
-            request.max_tokens,
+        payload = self._build_payload(request)
+        # One coherent block per call (provider+model stamped once on the INFO
+        # narration line emitted here); the full request out lands at DEBUG.
+        log_model_request(
+            _LOG,
+            provider="gemini",
+            model=request.model,
+            n_messages=len(request.messages),
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            seed=request.seed,
+            request_body=payload,
         )
-        from agent_guardian.logging_setup import _json_logging_enabled
-
-        if _json_logging_enabled():
-            _LOG.debug(
-                "gemini call detail: model=%s n_messages=%d max_tokens=%s temperature=%s seed=%s",
-                request.model,
-                len(request.messages),
-                request.max_tokens,
-                request.temperature,
-                request.seed,
-            )
         req = self._client.build_request(
             "POST",
             url,
             params=params,
-            json=self._build_payload(request),
+            json=payload,
             headers={"content-type": "application/json"},
         )
         try:
@@ -168,13 +161,13 @@ class GeminiClient(BaseLLM):
             _LOG.warning("gemini invalid JSON in 2xx response: %s", exc)
             raise LLMResponseFormatError(f"gemini: invalid JSON: {exc}") from exc
         parsed = self._parse_response(request.model, data)
-        _LOG.debug(
-            "gemini response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
-            parsed.text[:80],
-            parsed.usage.prompt_tokens,
-            parsed.usage.completion_tokens,
-            parsed.usage.total_tokens,
-            parsed.finish_reason,
+        # Response in — full text + usage + finish; a content_filter finish is
+        # surfaced at WARNING by the helper rather than swallowed.
+        log_model_response(
+            _LOG,
+            response_text=parsed.text,
+            usage=parsed.usage,
+            finish_reason=parsed.finish_reason,
         )
         return parsed
 

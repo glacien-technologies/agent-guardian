@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 import pytest
+import respx
 
 from agent_guardian import preflight as pf
+
+# A non-placeholder host (``*.example.com/org/net`` are skipped as scaffold
+# hosts), so target.ping actually runs the probe.
+_LIVE_ENDPOINT = "https://finbot.acme-test.dev/chat"
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +94,82 @@ async def test_preflight_target_ping_skipped_for_placeholder(
         outcome = await pf.preflight_target_ping("https://api.example.com/chat")
     assert outcome.ok is True
     assert outcome.detail == "placeholder"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_preflight_target_ping_healthy_200_validated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 2xx is reported as a *validated* response, with the status + latency."""
+    respx.post(_LIVE_ENDPOINT).mock(return_value=httpx.Response(200, json={"output": "pong"}))
+    with caplog.at_level(logging.INFO, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_target_ping(_LIVE_ENDPOINT)
+    assert outcome.ok is True
+    assert "HTTP 200" in outcome.detail
+    line = next(r.message for r in caplog.records if "preflight target.ping" in r.message)
+    assert "validated" in line
+    assert "HTTP 200" in line
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_preflight_target_ping_auth_failure_calls_out_authorization(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 403 must be flagged as an authorization problem, NOT a dead box."""
+    respx.post(_LIVE_ENDPOINT).mock(return_value=httpx.Response(403, text="forbidden"))
+    with caplog.at_level(logging.WARNING, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_target_ping(_LIVE_ENDPOINT)
+    assert outcome.ok is False
+    assert outcome.detail.startswith("auth_failed")
+    assert "authorization" in outcome.remediation.lower()
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings
+    msg = warnings[-1].message
+    assert "HTTP 403" in msg
+    assert "authorization" in msg.lower()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_preflight_target_ping_client_error_4xx(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A non-auth 4xx (404) is reachable-but-rejected, distinct from unreachable."""
+    respx.post(_LIVE_ENDPOINT).mock(return_value=httpx.Response(404, text="nope"))
+    with caplog.at_level(logging.WARNING, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_target_ping(_LIVE_ENDPOINT)
+    assert outcome.ok is False
+    assert outcome.detail.startswith("client_error")
+    assert "HTTP 404" in caplog.records[-1].message
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_preflight_target_ping_server_error_5xx(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 5xx is reachable-but-erroring, distinct from a 2xx 'validated'."""
+    respx.post(_LIVE_ENDPOINT).mock(return_value=httpx.Response(503, text="down"))
+    with caplog.at_level(logging.WARNING, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_target_ping(_LIVE_ENDPOINT)
+    assert outcome.ok is False
+    assert outcome.detail.startswith("server_error")
+    assert "HTTP 503" in caplog.records[-1].message
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_preflight_target_ping_unreachable_transport(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A connect failure across all attempts is the only true 'unreachable'."""
+    respx.post(_LIVE_ENDPOINT).mock(side_effect=httpx.ConnectError("refused"))
+    with caplog.at_level(logging.WARNING, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_target_ping(_LIVE_ENDPOINT)
+    assert outcome.ok is False
+    assert outcome.detail == "unreachable"
 
 
 # --------------------------------------------------------------------------- #
