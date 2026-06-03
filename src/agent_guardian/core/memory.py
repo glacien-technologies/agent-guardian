@@ -527,12 +527,9 @@ class SharedMemory:
                 self._vector_meta.append((content, agent, "reflection"))
                 self._add_to_faiss(vec)
             await asyncio.to_thread(self._write_stats_snapshot_sync)
-        _LOG.debug(
-            "memory write: reflection agent=%s payload_size=%d embed=%s",
-            agent,
-            len(content),
-            embed,
-        )
+        # Per-write reflection bookkeeping is intentionally not logged: it
+        # fires on every turn and floods the operator log with no actionable
+        # signal. Reflection volume is already visible in the stats snapshot.
 
     async def write_attempted_seed(self, asi: AsiCategory, seed_id: str) -> None:
         """Record that an ASI agent tried a particular probe seed.

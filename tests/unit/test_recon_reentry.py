@@ -236,7 +236,7 @@ async def test_reentry_swallows_refresh_failure_without_breaking_scan(
 async def test_reentry_log_message_is_emitted(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The PhaseC.C5 trigger log must fire at the decision site (per spec)."""
+    """The re-entry trigger log must fire at the decision site (per spec)."""
     import logging
 
     memory = await _make_memory(tmp_path, baseline=["existing_tool"])
@@ -258,6 +258,6 @@ async def test_reentry_log_message_is_emitted(
         await hook.wait_for_pending_refresh()
 
     messages = [r.message for r in caplog.records]
-    assert any("PhaseC.C5 recon_reentry: trigger=" in m and "new_tools=" in m for m in messages), (
-        f"PhaseC.C5 trigger log missing; saw: {messages!r}"
+    assert any("recon_reentry: trigger=" in m and "new_tools=" in m for m in messages), (
+        f"re-entry trigger log missing; saw: {messages!r}"
     )

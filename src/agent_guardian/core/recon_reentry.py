@@ -156,7 +156,7 @@ class ReconReentryHook:
         )
         self._fired = False
         _LOG.debug(
-            "PhaseC.C5 recon_reentry.bind: baseline_tools=%s",
+            "recon_reentry.bind: baseline_tools=%s",
             sorted(self._baseline_tools),
         )
 
@@ -167,7 +167,9 @@ class ReconReentryHook:
         observer cannot kill the scan.
         """
         if self._memory is None:
-            _LOG.debug("PhaseC.C5 recon_reentry.on_reflection: hook not bound — ignoring")
+            # Hook not bound yet — a normal degraded no-op (e.g. a reflection
+            # arrives before Phase 1 completes). Silently ignore; logging this
+            # per-reflection floods the operator log with no actionable signal.
             return
         if self._fired:
             return
@@ -175,7 +177,7 @@ class ReconReentryHook:
             observed = extract_declared_tools(payload)
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.debug(
-                "PhaseC.C5 recon_reentry.on_reflection: extract failed (%s) — skip",
+                "recon_reentry.on_reflection: extract failed (%s) — skip",
                 exc,
             )
             return
@@ -189,11 +191,11 @@ class ReconReentryHook:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            _LOG.debug("PhaseC.C5 recon_reentry.on_reflection: no running loop — skip")
+            _LOG.debug("recon_reentry.on_reflection: no running loop — skip")
             return
         trigger = payload.get("agent") or "<unknown>"
         _LOG.info(
-            "PhaseC.C5 recon_reentry: trigger=%s new_tools=%s",
+            "recon_reentry: trigger=%s new_tools=%s",
             trigger,
             new_tools,
         )
@@ -212,20 +214,19 @@ class ReconReentryHook:
                     refined = await self._refresh_fn(new_tools)
             except TimeoutError:
                 _LOG.warning(
-                    "PhaseC.C5 recon_reentry: refresh timed out after %.1fs — "
-                    "fingerprint unchanged",
+                    "recon_reentry: refresh timed out after %.1fs — fingerprint unchanged",
                     self._call_budget_seconds or 0.0,
                 )
                 return
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.warning(
-                    "PhaseC.C5 recon_reentry: refresh raised %s: %s — fingerprint unchanged",
+                    "recon_reentry: refresh raised %s: %s — fingerprint unchanged",
                     type(exc).__name__,
                     exc,
                 )
                 return
             if refined is None:
-                _LOG.debug("PhaseC.C5 recon_reentry: refresh returned None — fingerprint unchanged")
+                _LOG.debug("recon_reentry: refresh returned None — fingerprint unchanged")
                 return
             memory = self._memory
             if memory is None:  # pragma: no cover -- defensive, bind sets it
@@ -234,7 +235,7 @@ class ReconReentryHook:
                 await memory.set_target_fingerprint(refined)
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.warning(
-                    "PhaseC.C5 recon_reentry: set_target_fingerprint raised "
+                    "recon_reentry: set_target_fingerprint raised "
                     "%s: %s — fingerprint not persisted",
                     type(exc).__name__,
                     exc,
@@ -248,7 +249,7 @@ class ReconReentryHook:
                 n.lower() for n in _normalize_tool_names(refined.declared_tools)
             )
             _LOG.debug(
-                "PhaseC.C5 recon_reentry: refresh complete declared_tools=%s",
+                "recon_reentry: refresh complete declared_tools=%s",
                 refined.declared_tools,
             )
 
@@ -265,6 +266,6 @@ class ReconReentryHook:
             await task
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.debug(
-                "PhaseC.C5 recon_reentry.wait_for_pending_refresh: task raised %s",
+                "recon_reentry.wait_for_pending_refresh: task raised %s",
                 exc,
             )

@@ -434,19 +434,21 @@ class AsiAgent(ABC):
         # construction time) is caught by the caller; if a non-None panel
         # is wired here the agent loop uses it.
         self.panel_judge = panel_judge
-        if panel_judge is not None:
-            _LOG.debug(
-                "PhaseB.B4 AsiAgent.__init__: panel_judge configured — "
-                "single Judge will be bypassed for verdict calls",
-            )
         # Phase B.B6 — optional cross-scan winning-seed persistence. When
         # provided AND enabled, every verdict='fail' turn writes a record
         # into the store after PII scrubbing.
         self.winning_seed_store = winning_seed_store
-        if winning_seed_store is not None:
+        # Both of the above are construction details. Collapse to a single
+        # concise DEBUG line (only when something non-default is wired) rather
+        # than two lines per agent — at ~10 agents the old logging repeated
+        # ~20 lines in a row with no operator-actionable signal.
+        if panel_judge is not None or winning_seed_store is not None:
             _LOG.debug(
-                "PhaseB.B6 AsiAgent.__init__: winning_seed_store configured (enabled=%s)",
-                getattr(winning_seed_store, "enabled", "unknown"),
+                "AsiAgent configured: panel_judge=%s winning_seed_store=%s",
+                panel_judge is not None,
+                getattr(winning_seed_store, "enabled", False)
+                if winning_seed_store is not None
+                else False,
             )
         # Spec §6 — optional per-agent brief attached by SwarmCommander
         # after Commander goal-decomposition. None means the standard
