@@ -365,7 +365,8 @@ def test_manager_suppressed_returns_no_spawn() -> None:
 def test_manager_reuses_existing_serve_on_preferred_port(
     healthz_server: int,
 ) -> None:
-    mgr = AutoServeManager(preferred_port=healthz_server)
+    # Reuse is opt-in now (default is own-dashboard-per-scan).
+    mgr = AutoServeManager(preferred_port=healthz_server, reuse_existing=True)
     with mgr as result:
         assert result.reused is True
         assert result.spawned is False
@@ -464,6 +465,50 @@ def test_manager_falls_back_when_preferred_port_is_foreign(
         assert result.spawned is True
         assert result.port == 7480
         assert result.base_url == "http://127.0.0.1:7480"
+
+
+def test_manager_default_spawns_own_dashboard_even_when_serve_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """Default (reuse_existing=False): an AG serve already on 7474 is NOT
+    reused — each scan spawns its own scan-scoped dashboard on a free port."""
+
+    class _FakePopen:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.pid = 77777
+            self._polled = False
+
+        def poll(self) -> int | None:
+            return None if not self._polled else 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            self._polled = True
+            return 0
+
+        def send_signal(self, sig: int) -> None:
+            self._polled = True
+
+        def terminate(self) -> None:
+            self._polled = True
+
+        def kill(self) -> None:
+            self._polled = True
+
+    from agent_guardian.ui import auto_serve as auto_serve_mod
+
+    # An AG serve IS present on 7474 (probe oracle True) and the port is in use,
+    # but with reuse off the manager must spawn its own on a fallback port.
+    monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: True)
+    monkeypatch.setattr(auto_serve_mod, "_port_is_in_use", lambda host, port: True)
+    monkeypatch.setattr(auto_serve_mod, "find_free_port", lambda **kw: 7481)
+    monkeypatch.setattr(auto_serve_mod, "wait_until_ready", lambda *a, **kw: True)
+    monkeypatch.setattr(auto_serve_mod.subprocess, "Popen", _FakePopen)
+
+    mgr = AutoServeManager(stderr_log_path=tmp_path / "auto_serve.log", grace_seconds=0)
+    with mgr as result:
+        assert result.reused is False  # did NOT attach to the existing serve
+        assert result.spawned is True
+        assert result.port == 7481
 
 
 def test_manager_degrades_when_spawn_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
@@ -839,7 +884,8 @@ def test_manager_reuse_via_probe_oracle(
     from agent_guardian.ui import auto_serve as auto_serve_mod
 
     monkeypatch.setattr(auto_serve_mod, "probe_is_our_serve", lambda *a, **kw: True)
-    mgr = AutoServeManager(preferred_port=7474, grace_seconds=0)
+    # Reuse is opt-in now (default is own-dashboard-per-scan).
+    mgr = AutoServeManager(preferred_port=7474, grace_seconds=0, reuse_existing=True)
     with mgr as result:
         assert result.reused is True
         assert result.spawned is False

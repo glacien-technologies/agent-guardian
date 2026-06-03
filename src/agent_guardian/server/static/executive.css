@@ -1420,24 +1420,39 @@ body.exec-body {
   color: var(--exec-sev-critical);
   border-color: color-mix(in srgb, var(--exec-sev-critical) 28%, transparent);
 }
-.exec-recon__tools-more {
-  display: inline-block;
-  margin-left: 4px;
+/* Discovered-tools expander (no-JS checkbox toggle). The checkbox, the extra
+   tool chips, and the toggle label are all flex children of
+   ``.exec-recon__tools`` alongside the sample chips. The toggle is pushed to
+   the END of the flow via ``order`` so it never lands BETWEEN the sample row
+   and the extra chips. */
+.exec-recon__tools-cb {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
-.exec-recon__tools-more > summary {
+/* Extra chips are present in the DOM but hidden until the toggle is checked. */
+.exec-recon__tool-chip--extra { display: none; }
+.exec-recon__tools-cb:checked ~ .exec-recon__tool-chip--extra { display: inline-flex; }
+.exec-recon__tools-toggle {
+  order: 1; /* always trails the chips */
   cursor: pointer;
   font-family: var(--exec-font-mono);
   font-size: 11px;
   color: var(--exec-ink-muted);
-  list-style: none;
+  white-space: nowrap;
 }
-.exec-recon__tools-more > summary::-webkit-details-marker { display: none; }
-.exec-recon__tools-all {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
+.exec-recon__tools-toggle:hover { color: var(--exec-ink); }
+.exec-recon__tools-cb:focus-visible ~ .exec-recon__tools-toggle {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
+/* Label swap: "+ N more" when collapsed, "Show less" when expanded. */
+.exec-recon__more-close { display: none; }
+.exec-recon__tools-cb:checked ~ .exec-recon__tools-toggle .exec-recon__more-open { display: none; }
+.exec-recon__tools-cb:checked ~ .exec-recon__tools-toggle .exec-recon__more-close { display: inline; }
 
 /* Declared guardrails — small bulleted list of what the agent
    stated it won't do. */
@@ -2401,6 +2416,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   color: var(--exec-ink-subtle);
   margin: 12px 0 4px 0;
 }
+.exec-probe__recon-note {
+  margin: 0 0 12px 0;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--exec-ink-muted);
+  max-width: 64ch;
+}
 .exec-probe__prompt,
 .exec-probe__response {
   background: var(--exec-code-bg);
@@ -2897,10 +2920,38 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   font-weight: 600;
   color: var(--exec-ink);
 }
+.exec-plan__url-row {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  margin: 0 0 16px 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--exec-border-subtle);
+}
+.exec-plan__url-row dt {
+  margin: 0;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+.exec-plan__url-row dd {
+  margin: 0;
+  min-width: 0;
+  /* Full panel width is available here, so the URL lays out on one line and
+     only wraps at a path boundary if it ever exceeds the panel — never the
+     character-by-character stacking of the old narrow column. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
 .exec-plan__sections {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 18px 32px;
+  /* Two readable columns rather than an auto-fit row of 5-6 narrow columns
+     (which scattered the groups and wrapped values like the dashboard URL). */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 56px;
 }
 .exec-plan__group {
   min-width: 0;
@@ -3044,6 +3095,12 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   vertical-align: middle;
 }
 .exec-probes-table__asi {
+  display: inline-block;
+  /* Fixed width so the agent name starts at the same x-position whether the
+     ASI badge is "ASI05" or the recon "—" placeholder (keeps the column aligned). */
+  min-width: 3.4rem;
+  box-sizing: border-box;
+  text-align: center;
   font-family: var(--exec-font-mono);
   font-size: 11px;
   color: var(--exec-ink-muted);
@@ -3116,6 +3173,12 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-probe__verdict--unknown {
   background: var(--exec-bg-sunken);
   color: var(--exec-ink-subtle);
+}
+/* Recon is capability probing, not pass/fail — neutral, non-alarming pill. */
+.exec-verdict-pill--recon {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  border-color: var(--exec-border-subtle);
 }
 
 /* ============================================================
@@ -3383,6 +3446,7 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   color: var(--exec-ink-subtle);
 }
 .exec-chat__bubble {
+  position: relative; /* anchors the top-right render pill */
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -3417,6 +3481,67 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   line-height: 1.6;
   color: var(--exec-ink);
 }
+/* Rendered chat body (chat-render.js): Markdown / pretty-JSON view + a pill
+   that toggles back to the raw text. */
+.exec-chat__render-bar {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  margin: 0;
+  z-index: 1;
+}
+.exec-chat__render-pill {
+  cursor: pointer;
+  border: 1px solid var(--exec-border-subtle);
+  background: var(--exec-bg-elev, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--exec-ink-subtle);
+}
+.exec-chat__render-pill:hover { color: var(--exec-ink); }
+.exec-chat__raw-view {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--exec-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--exec-ink);
+}
+/* Markdown view — sans body, tightened block spacing to fit a chat bubble. */
+.exec-md { font-family: var(--exec-font-sans); font-size: 13px; line-height: 1.55; color: var(--exec-ink); }
+.exec-md__p { margin: 0 0 8px 0; white-space: pre-wrap; }
+.exec-md__p:last-child { margin-bottom: 0; }
+.exec-md__h { margin: 6px 0 4px 0; font-size: 13px; font-weight: 600; }
+.exec-md__list { margin: 4px 0 8px 1.1rem; padding: 0; }
+.exec-md__list li { margin: 2px 0; }
+.exec-md__icode,
+.exec-md__code code {
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+}
+.exec-md__icode {
+  background: var(--exec-code-bg);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.exec-md__code,
+.exec-md__json {
+  margin: 4px 0 8px 0;
+  padding: 10px 12px;
+  background: var(--exec-code-bg);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius-sm);
+  overflow: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.exec-md__link { color: var(--exec-brand); text-decoration: underline; }
 .exec-chat__judge {
   display: flex;
   flex-direction: column;

@@ -33,10 +33,12 @@ Design notes
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
 import sys
+from collections.abc import Sequence
 from typing import IO, Any
 
 from rich.console import Console
@@ -205,6 +207,45 @@ def sanitize_for_log(value: object, *, max_len: int = 256) -> str:
 # write megabytes per call into the log.
 MODEL_EXCHANGE_LOG_CAP = 4000
 
+# Per-call preview cap for the conversation half of "request out". Smaller than
+# MODEL_EXCHANGE_LOG_CAP on purpose: stateless strategies (e.g. recon) resend the
+# entire growing transcript every turn, so dumping the whole thing each call just
+# repeats near-identical text. We show the TAIL — where the freshly-appended turn
+# and the actual instruction live — instead.
+MODEL_REQUEST_PREVIEW_CAP = 800
+
+# System prompts are static but resent on every call. Track which ones we've
+# already logged in full so they're shown once instead of dumped per call.
+# Bounded so a long-lived `serve` process can't grow it without limit.
+_LOGGED_SYSTEM_PROMPTS: set[str] = set()
+_LOGGED_SYSTEM_PROMPTS_CAP = 512
+
+
+def _model_log_full_prompts() -> bool:
+    """Whether to dump the entire request payload per call (deep-debug opt-in).
+
+    Off by default — the per-call view shows the system prompt once plus the
+    newest conversation tail. Set ``AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`` to get
+    the full raw payload on every call instead.
+    """
+    return os.getenv("AGENT_GUARDIAN_LOG_FULL_PROMPTS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _tail_preview(text: str, cap: int) -> str:
+    """Return the last *cap* chars of *text* (where appended turns accrue).
+
+    Prefixes an ``…[+N chars earlier]…`` marker when content was dropped so the
+    reader knows the head was elided rather than the message being short.
+    """
+    if len(text) <= cap:
+        return text
+    return f"…[+{len(text) - cap} chars earlier]… {text[-cap:]}"
+
 
 def log_model_request(
     logger: logging.Logger,
@@ -216,15 +257,22 @@ def log_model_request(
     temperature: float | None = None,
     seed: int | None = None,
     request_body: object | None = None,
+    messages: Sequence[Any] | None = None,
 ) -> None:
     """Log the start of one model call (the "request out" half), shared by all providers.
 
     Emits the single INFO narration line that feeds the operator's swarm-board
     — the ONLY place the provider + model name is stamped, so the paired
-    :func:`log_model_response` line does not repeat it. At DEBUG it then dumps
-    the full request that was actually sent (capped at
-    :data:`MODEL_EXCHANGE_LOG_CAP` and run through :func:`sanitize_for_log` so
-    API keys / control chars stay safe) — not the old ``[:80]`` truncation.
+    :func:`log_model_response` line does not repeat it.
+
+    At DEBUG it then shows the request *readably* rather than dumping the whole
+    payload every call: the (static) system prompt is logged once by hash, and
+    the conversation is shown as its newest tail (capped at
+    :data:`MODEL_REQUEST_PREVIEW_CAP`). Stateless strategies resend the entire
+    growing transcript each turn, so the full dump was near-identical noise on
+    every call. Set ``AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`` to restore the full
+    per-call payload dump for deep debugging. Everything is run through
+    :func:`sanitize_for_log` so API keys / control chars stay safe.
 
     Args:
       logger: the provider's module logger.
@@ -234,15 +282,70 @@ def log_model_request(
       max_tokens: requested completion cap, if any.
       temperature: sampling temperature, if known (DEBUG only).
       seed: deterministic-replay seed, if any (DEBUG only).
-      request_body: the actual payload sent to the provider (dict / str).
+      request_body: the raw payload sent to the provider (dict / str); only
+        dumped when ``AGENT_GUARDIAN_LOG_FULL_PROMPTS`` is set, or as a fallback
+        when ``messages`` is not supplied.
+      messages: the canonical request messages (each with ``role`` / ``content``)
+        used to render the readable per-call preview.
     """
     logger.info("model call: %s-%s (msgs=%d, max_tok=%s)", provider, model, n_messages, max_tokens)
-    if request_body is not None and logger.isEnabledFor(logging.DEBUG):
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    # Deep-debug escape hatch: dump the entire raw payload exactly as sent.
+    if _model_log_full_prompts() and request_body is not None:
+        logger.debug(
+            "request out (full) (temperature=%s seed=%s): %s",
+            temperature,
+            seed,
+            sanitize_for_log(request_body, max_len=MODEL_EXCHANGE_LOG_CAP),
+        )
+        return
+
+    if messages:
+        # Log each distinct system prompt once (it is static but resent every
+        # call); show the conversation as its newest tail.
+        system_text = "\n".join(
+            m.content for m in messages if getattr(m, "role", "") == "system" and m.content
+        )
+        if system_text:
+            digest = hashlib.sha256(system_text.encode("utf-8", "replace")).hexdigest()[:8]
+            if digest not in _LOGGED_SYSTEM_PROMPTS:
+                if len(_LOGGED_SYSTEM_PROMPTS) >= _LOGGED_SYSTEM_PROMPTS_CAP:
+                    _LOGGED_SYSTEM_PROMPTS.clear()
+                _LOGGED_SYSTEM_PROMPTS.add(digest)
+                logger.debug(
+                    "system prompt (sha=%s, %d chars): %s",
+                    digest,
+                    len(system_text),
+                    sanitize_for_log(system_text, max_len=MODEL_EXCHANGE_LOG_CAP),
+                )
+        convo = [m for m in messages if getattr(m, "role", "") != "system"]
+        if convo:
+            newest = convo[-1].content or ""
+            earlier = len(convo) - 1
+            prefix = f"(+{earlier} earlier msg{'s' if earlier != 1 else ''}) " if earlier else ""
+            logger.debug(
+                "request out (temperature=%s seed=%s, %d chars): %s%s",
+                temperature,
+                seed,
+                len(newest),
+                prefix,
+                sanitize_for_log(
+                    _tail_preview(newest, MODEL_REQUEST_PREVIEW_CAP),
+                    max_len=MODEL_EXCHANGE_LOG_CAP,
+                ),
+            )
+        return
+
+    # Fallback when no structured messages are supplied: a bounded preview of
+    # the raw payload (still smaller than the old full dump).
+    if request_body is not None:
         logger.debug(
             "request out (temperature=%s seed=%s): %s",
             temperature,
             seed,
-            sanitize_for_log(request_body, max_len=MODEL_EXCHANGE_LOG_CAP),
+            sanitize_for_log(request_body, max_len=MODEL_REQUEST_PREVIEW_CAP),
         )
 
 

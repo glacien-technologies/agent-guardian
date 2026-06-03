@@ -52,13 +52,11 @@ _LOG = logging.getLogger("agent_guardian.judges.panel")
 
 # QA-050 — distilled headline length for the Finding summary column. The
 # panel verdict's ``reasoning`` text flows straight into ``Finding.summary``
-# (see ``Agent._build_finding`` in ``agents/base.py``), so a tight cap keeps
-# the Findings tab from showing the same boilerplate on every row.
-_HEADLINE_MAX_CHARS = 80
+# (see ``Agent._build_finding`` in ``agents/base.py``).
 
 # Reasoning strings the LLM judges fall back to when their output is
-# unparseable. Treat them as "no real reasoning" so the headline distiller
-# does not surface stub text as if it were judge analysis.
+# unparseable. Treat them as "no real reasoning" so we don't surface stub text
+# as if it were judge analysis.
 _HEADLINE_STUB_PREFIXES: tuple[str, ...] = (
     "heuristic:",
     "no reasoning provided",
@@ -117,40 +115,24 @@ JudgePanel = JudgePanelConfig
 # --------------------------------------------------------------------------- #
 
 
-def _distill_headline(reasonings: Sequence[str], max_chars: int = _HEADLINE_MAX_CHARS) -> str:
-    """Return the first meaningful sentence from a list of judge reasonings.
+def _first_substantive_reasoning(reasonings: Sequence[str]) -> str:
+    """Return the first non-stub judge reasoning IN FULL (no truncation).
 
-    QA-050 — the panel's verdict ``reasoning`` text flows into the
-    ``Finding.summary`` field rendered in the executive Findings tab. The
-    pre-QA-050 boilerplate ("panel unanimous: fail") was identical on every
-    row; this helper picks the first non-stub reasoning string, takes its
-    leading sentence, and truncates with an ellipsis so the Summary column
-    actually says something about why the judges decided as they did.
+    The panel's verdict ``reasoning`` flows into both the per-turn "Judge
+    reasoning" shown in the detail modal AND the ``Finding.summary``. Operators
+    asked to see the WHOLE reasoning in the modal, so this no longer trims to a
+    single sentence or an 80-char headline — the Findings-tab Summary column
+    truncates with a CSS ellipsis at display time instead. Stub fallbacks
+    (heuristic / unparseable) are skipped so they never masquerade as analysis.
 
-    The function never raises: an empty / all-stub input yields ``""`` and
-    the caller falls back to the structural blurb.
+    Never raises: an empty / all-stub input yields ``""``.
     """
     for raw in reasonings:
         text = (raw or "").strip()
         if not text:
             continue
-        lowered = text.lower()
-        if any(lowered.startswith(stub) for stub in _HEADLINE_STUB_PREFIXES):
+        if any(text.lower().startswith(stub) for stub in _HEADLINE_STUB_PREFIXES):
             continue
-        # First sentence — split on the earliest of ``. `` / ``; `` / newline.
-        # ``str.split`` with maxsplit=1 keeps the rest intact so we don't lose
-        # data if the reasoning carries trailing detail we later want to log.
-        for sep in (". ", "; ", "\n"):
-            if sep in text:
-                text = text.split(sep, 1)[0]
-                break
-        text = text.strip().rstrip(".;,")
-        if not text:
-            continue
-        if len(text) > max_chars:
-            # Reserve one char for the ellipsis so the visible length stays
-            # within ``max_chars``.
-            text = text[: max_chars - 1].rstrip() + "…"
         return text
     return ""
 
@@ -315,18 +297,13 @@ class PanelJudge:
         # reasoning so the Findings tab Summary column reads as analysis,
         # not "panel unanimous: fail" on every row. Iterate in seat order so
         # the choice is deterministic across runs with the same inputs.
+        # The verdict (exploited / defended) is surfaced as a coloured pill /
+        # severity badge in the UI, so the reasoning text is JUST the judges'
+        # raw analysis — no "panel unanimous {pass|fail}" jargon and no "the
+        # judges found the target was exploited" prose prepended (operators
+        # asked for the flag to carry the verdict, not the summary text).
         majority_reasonings = [v.reasoning for v in verdicts if v.verdict == majority]
-        headline = _distill_headline(majority_reasonings)
-
-        if disagreement:
-            split_blurb = f"panel split: {dict(counts)} — final via majority+uncertainty mapping"
-            reasoning_blurb = f"{split_blurb} | {headline}" if headline else split_blurb
-        else:
-            reasoning_blurb = (
-                f"panel unanimous {majority}: {headline}"
-                if headline
-                else f"panel unanimous: {majority}"
-            )
+        reasoning_blurb = _first_substantive_reasoning(majority_reasonings)
 
         # QA-068 — structured one-line majority shape.
         _LOG.debug(

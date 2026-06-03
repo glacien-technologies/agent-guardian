@@ -637,10 +637,14 @@ def _conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     exchange rather than the rolled-up finding verdict.
     """
     out: list[dict[str, Any]] = []
-    for rec in _sort_turns_in_order(records):
+    # 1-based position in the ordered thread. Recon turns all carry turn=0
+    # (each probe is an iteration, not an attack turn), so the template numbers
+    # them by ``iteration`` instead of repeating "turn 0".
+    for idx, rec in enumerate(_sort_turns_in_order(records), start=1):
         verdict = str(rec.get("verdict") or "")
         out.append(
             {
+                "iteration": idx,
                 "turn_no": int(rec.get("turn", 0) or 0),
                 "max_turns": int(rec.get("max_turns", 0) or 0),
                 "agent": str(rec.get("agent") or ""),
@@ -916,13 +920,18 @@ def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, 
             ),
             "",
         )
+        # Recon is capability probing, not a pass/fail attack — its turns carry
+        # no verdict, so the worst-case rollup is empty and would render as a
+        # misleading "PENDING". Mark it "recon" so the table shows a neutral
+        # completed state instead.
+        verdict = "recon" if agent == "recon-agent" else _rollup_verdict(turns)
         groups.append(
             {
                 "group_key": key,
                 "agent": agent,
                 "asi_category": asi,
                 "probe_id": probe_id,
-                "verdict": _rollup_verdict(turns),
+                "verdict": verdict,
                 "turn_count": len(turns),
                 "timestamp_label": timestamp_label,
                 "turns": turns,
@@ -960,7 +969,13 @@ def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, An
         if agent
         else "Probe conversation"
     )
+    # Recon is black-box capability probing, not an ASI attack: its turns carry
+    # no probe_id / ASI / CSA / severity / strategy, so the finding-shaped
+    # metadata + run-context blocks render all-"—". Flag it so the slide-over
+    # collapses those empty sections and frames the modal as capability recon.
+    is_recon = agent == "recon-agent"
     return {
+        "is_recon": is_recon,
         "record_id": probe_id or agent,
         "probe_id": probe_id,
         "agent": agent,
@@ -974,7 +989,9 @@ def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, An
         "owasp_scenario": rep.get("owasp_scenario") or "",
         "source_yaml": rep.get("source_yaml") or "",
         "source_path": rep.get("source_path") or "",
-        "turn": rep.get("turn"),
+        # Recon turns all carry turn=0; the header title already says "N turns",
+        # so suppress the redundant/misleading "turn 0" header chip for recon.
+        "turn": None if is_recon else rep.get("turn"),
         "timestamp_label": str(rep.get("timestamp_label") or ""),
         "seed": rep.get("seed") or "",
         "rng_seed": rep.get("rng_seed") or "",
@@ -1161,8 +1178,9 @@ def _build_scan_plan(
             usd_cap = f"${scan.budget.cap_usd:.4f}"
         else:
             usd_cap = "uncapped"
-        # Wall-clock cap is not persisted on the terminal Scan record today.
-        wall_cap = EM_DASH
+        # No wall-clock cap field is persisted on the terminal Scan; an
+        # absent cap means the run was uncapped (matches the CLI scan-plan).
+        wall_cap = "uncapped"
         lo_hi = _MODE_COST_USD.get(scan.mode)
         if lo_hi is not None:
             est_cost = f"${lo_hi[0]:.4f} - ${lo_hi[1]:.4f} (typical for {scan.mode} mode)"
@@ -1182,8 +1200,14 @@ def _build_scan_plan(
         egress = "unrestricted" if not audit else audit.get("egress_label", "unrestricted")
 
     # ``Reachable`` is a live preflight signal not retained on the terminal
-    # Scan; we honestly mark it as not-preflighted rather than guess.
-    reachable = EM_DASH
+    # Scan — but a scan that ran to completion necessarily reached the target,
+    # so for a persisted scan we report it as reachable rather than "—".
+    reachable = "✓ reachable" if scan is not None else EM_DASH
+    # Likewise, the models were preflight-validated before the run started; a
+    # persisted scan implies that passed.
+    models_validated = "✓ validated" if scan is not None else EM_DASH
+    # ``--output json`` is always written (report.json); surface it for a run.
+    output_label = "json" if scan is not None else EM_DASH
     # ``Multi-agent`` comes from the recon fingerprint (memory.jsonl) — the
     # terminal Scan record does not carry it, so the caller threads through
     # the recon-derived flag. ``None`` ⇒ recon hasn't reported yet.
@@ -1203,9 +1227,7 @@ def _build_scan_plan(
             "attacker": attacker_model,
             "evaluator": evaluator_model,
             "commander": commander_model,
-            # Per-model preflight verdicts are not retained on the terminal
-            # Scan; the engine map only records which spec drove each role.
-            "validated": EM_DASH,
+            "validated": models_validated,
         },
         "budget": {
             "mode": mode,
@@ -1214,9 +1236,7 @@ def _build_scan_plan(
             "estimated_cost": est_cost,
         },
         "outputs": {
-            # ``--output`` formats are a CLI-invocation detail not persisted
-            # on the Scan; the dashboard cannot reconstruct them honestly.
-            "output": EM_DASH,
+            "output": output_label,
         },
         "dashboard": {
             "url": base_url or EM_DASH,

@@ -158,14 +158,20 @@
                 <code class="exec-recon__tool-chip">{{ tool }}</code>
               {% endfor %}
               {% if recon_summary.tool_count > recon_summary.tool_sample|length %}
-                <details class="exec-recon__tools-more">
-                  <summary>+ {{ recon_summary.tool_count - recon_summary.tool_sample|length }} more</summary>
-                  <span class="exec-recon__tools-all">
-                    {% for tool in recon_summary.discovered_tools %}
-                      <code class="exec-recon__tool-chip">{{ tool }}</code>
-                    {% endfor %}
-                  </span>
-                </details>
+                {# No-JS expander. The checkbox + extra chips + toggle label are
+                   flex siblings of the sample chips above; the label is ordered
+                   LAST in CSS so it trails the whole chip flow instead of
+                   sitting between the sample row and the extra chips. Only the
+                   tools NOT already in the sample are listed (no duplicates). #}
+                <input type="checkbox" id="exec-recon-tools-toggle"
+                       class="exec-recon__tools-cb" aria-label="Show all discovered tools">
+                {% for tool in recon_summary.discovered_tools if tool not in recon_summary.tool_sample %}
+                  <code class="exec-recon__tool-chip exec-recon__tool-chip--extra">{{ tool }}</code>
+                {% endfor %}
+                <label for="exec-recon-tools-toggle" class="exec-recon__tools-toggle">
+                  <span class="exec-recon__more-open">+ {{ recon_summary.tool_count - recon_summary.tool_sample|length }} more</span>
+                  <span class="exec-recon__more-close">Show less</span>
+                </label>
               {% endif %}
             </span>
           </dd>

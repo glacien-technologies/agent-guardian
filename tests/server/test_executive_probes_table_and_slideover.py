@@ -348,16 +348,15 @@ def test_probe_drawer_route_renders_locked_fields(client: TestClient, store: Sca
         "Judge verdict",
         "Judge reasoning",
         "Evidence chain",
-        "Reproduce",
     ):
         assert label in body, f"drawer missing section {label!r}"
+    # Reproduce CLI block was removed from the detail view (operator request).
+    assert "Reproduce" not in body
     # The verbatim prompt + response + reasoning text only appears here
     # (never in the initial page HTML).
     assert turns[0]["prompt"] in body
     assert turns[0]["target_response"] in body
     assert turns[0]["reasoning"] in body
-    # Reproduce CLI command uses the same scan id as the row.
-    assert f"--scan {scan.id}" in body
 
 
 def test_probe_drawer_route_supports_id_lookup(client: TestClient, store: ScanStore) -> None:

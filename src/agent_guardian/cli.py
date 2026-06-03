@@ -3137,12 +3137,12 @@ def scan(
         ),
     ),
     serve_grace_seconds: int = typer.Option(
-        300,
+        3600,
         "--serve-grace-seconds",
         help=(
             "Keep the auto-spawned dashboard alive for N seconds after the "
             "scan completes so you can click the URL and review the report. "
-            "Defaults to 300 (5 minutes). Pass 0 to shut down immediately "
+            "Defaults to 3600 (60 minutes). Pass 0 to shut down immediately "
             "on scan completion. Pass -1 to keep the dashboard alive until "
             "you Ctrl-C the command (ngrok-style)."
         ),
@@ -3576,6 +3576,16 @@ async def _run_scan(
         if auto_serve_base_url
         else f"{_resolve_dashboard_base_url()}/scan/{scan_id}"
     )
+
+    # Open the dashboard NOW (scan start), not at completion — the auto-served
+    # child is already ready (spawned in __enter__ above), so the operator can
+    # watch the scan stream live. Only when we actually spawned a serve in-band
+    # (otherwise the URL would 404 until the operator starts one).
+    if auto_serve_result.spawned:
+        try:
+            _maybe_open_browser(plan_dashboard_url, requested=open_browser)
+        except Exception as _exc:  # pragma: no cover -- never block the scan
+            _LOG.debug("dashboard browser-open (scan-start) suppressed (%s)", _exc)
 
     json_mode = (debug_format or "").lower().strip() == "json"
     # QA-027: wall_seconds_cap is None (uncapped) when --budget-seconds
@@ -4237,14 +4247,9 @@ async def _run_scan_inner(
         except Exception as _exc:  # pragma: no cover -- never block scan exit
             _LOG.debug("dashboard banner suppressed (%s)", _exc)
 
-        # Fix L — auto-open the scan-specific dashboard URL once the scan is
-        # complete (only if a serve was actually spawned in-band; otherwise
-        # the URL would 404 until the operator started one themselves).
-        if auto_serve_spawned:
-            try:
-                _maybe_open_browser(dashboard_url, requested=open_browser)
-            except Exception as _exc:  # pragma: no cover -- never block exit
-                _LOG.debug("dashboard browser-open suppressed (%s)", _exc)
+        # NOTE: the dashboard is opened at scan START now (see scan_command,
+        # right after the auto-serve child is ready) so operators can watch the
+        # run live — no longer opened here at scan completion.
 
     # Coverage warning: when a scan launched less than the authoritative-mode
     # floor, surface it on stderr so a CI gate downstream knows the scan was

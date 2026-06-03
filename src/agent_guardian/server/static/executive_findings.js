@@ -286,6 +286,7 @@
         bodyNode.innerHTML = html;
         syncSlideoverHeader(root, bodyNode);
         wireCopyButtons(bodyNode);
+        if (window.AGChatRender) window.AGChatRender.enhance(bodyNode);
       })
       .catch(function (err) {
         bodyNode.textContent = "";
@@ -339,6 +340,7 @@
         bodyNode.innerHTML = html;
         syncSlideoverHeader(root, bodyNode);
         wireCopyButtons(bodyNode);
+        if (window.AGChatRender) window.AGChatRender.enhance(bodyNode);
       })
       .catch(function (err) {
         bodyNode.textContent = "";
@@ -394,9 +396,12 @@
     }
     setText(root.querySelector("[data-slideover-id]"), tpl.getAttribute("data-record-id") || "—");
     var turn = tpl.getAttribute("data-turn") || "—";
+    // Probe rows get a "turn N" chip; findings have no single turn, so leave the
+    // chip empty rather than repeating the finding id (it already shows in the
+    // id chip + the Finding ID metadata row).
     setText(
       root.querySelector("[data-slideover-turn]"),
-      kind === "probe" ? "turn " + turn : (tpl.getAttribute("data-record-id") || "—"),
+      kind === "probe" ? "turn " + turn : "",
     );
     setText(
       root.querySelector("[data-slideover-time]"),

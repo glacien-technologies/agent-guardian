@@ -1617,14 +1617,15 @@ class AsiAgent(ABC):
                     seed_probe_id,
                     seed.csa_category,
                 )
-        summary = (verdict.reasoning or "target compromised").strip()
-        if len(summary) > 240:
-            summary = summary[:237] + "..."
+        # The finding title is the judges' plain-language reasoning. We do NOT
+        # append the raw attack prompt here — a title like "... | prompt:
+        # <extended_thinking>Trace: ..." is noise, and the verbatim prompt is
+        # already shown in the modal's "Exact prompt sent" section. The Findings
+        # tab Summary column truncates with a CSS ellipsis at display time, so
+        # the stored summary can carry the full sentence.
+        summary = (verdict.reasoning or "").strip()
         if not summary:
             summary = f"{self.asi_category.value} attack succeeded"
-        # Echo the prompt snippet into the summary for triage clarity.
-        prompt_snippet = prompt[:80].replace("\n", " ")
-        summary = f"{summary} | prompt: {prompt_snippet}"
         _ = response  # response is captured in transcripts elsewhere
         # Phase A.A3 — log the MITRE ATLAS techniques stamped on the finding
         # at construction time, so the audit trail shows the backfilled IDs

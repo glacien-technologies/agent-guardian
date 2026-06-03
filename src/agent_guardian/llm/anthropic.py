@@ -130,6 +130,7 @@ class AnthropicClient(BaseLLM):
             max_tokens=request.max_tokens,
             temperature=request.temperature,
             request_body=payload,
+            messages=request.messages,
         )
         req = self._client.build_request(
             "POST",

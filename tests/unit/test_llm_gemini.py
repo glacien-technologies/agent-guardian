@@ -311,13 +311,16 @@ async def test_gemini_emits_structured_info_call_line(caplog: pytest.LogCaptureF
 
 
 @respx.mock
-async def test_gemini_logs_full_request_and_response_at_debug(
+async def test_gemini_logs_readable_request_and_full_response_at_debug(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """At DEBUG we log the ACTUAL request sent and the ACTUAL full response.
+    """At DEBUG we log the ACTUAL prompt content (readably) and the ACTUAL full response.
 
     Replaces the old ``text[:80]`` truncation: a real prompt and a real
-    response must both be readable in the log, not clipped to 80 chars.
+    response must both be readable in the log, not clipped to 80 chars. The
+    request is shown as the message content (the newest conversation tail), not
+    the raw provider payload dict — the full payload dump is opt-in (see the
+    AGENT_GUARDIAN_LOG_FULL_PROMPTS test below).
     """
     import logging
 
@@ -329,14 +332,38 @@ async def test_gemini_logs_full_request_and_response_at_debug(
     with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.gemini"):
         await llm.complete(_req())
     messages = [r.message for r in caplog.records]
-    # Request out: the actual payload (contents / generationConfig) is logged.
-    assert any("request out" in m and "generationConfig" in m for m in messages), messages
+    # Request out: the actual prompt content is logged readably (the _req() user
+    # message is "hi"), NOT the raw payload dict.
+    req_lines = [m for m in messages if m.startswith("request out")]
+    assert req_lines, messages
+    assert "hi" in req_lines[-1]
+    assert "generationConfig" not in req_lines[-1]  # raw payload is not dumped by default
     # Response in: the FULL text is present, plus token usage + finish reason.
     resp_lines = [m for m in messages if m.startswith("response in:")]
     assert resp_lines, messages
     assert long_text.strip() in resp_lines[-1]
     assert "tokens=" in resp_lines[-1]
     assert "finish=" in resp_lines[-1]
+    await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_full_prompts_env_dumps_raw_payload(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENT_GUARDIAN_LOG_FULL_PROMPTS=1 restores the full raw-payload dump."""
+    import logging
+
+    monkeypatch.setenv("AGENT_GUARDIAN_LOG_FULL_PROMPTS", "1")
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=_happy_body()))
+    llm = GeminiClient(api_key="k")
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.llm.gemini"):
+        await llm.complete(_req())
+    req_lines = [r.message for r in caplog.records if r.message.startswith("request out")]
+    assert req_lines, [r.message for r in caplog.records]
+    # The full dump includes the raw provider payload keys.
+    assert any("generationConfig" in m for m in req_lines), req_lines
     await llm.aclose()
 
 
