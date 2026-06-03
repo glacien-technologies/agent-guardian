@@ -415,11 +415,19 @@ class AsiAgent(ABC):
         self.evaluator_model = evaluator_model
         self.budget = budget if budget is not None else AgentBudget()
         self.rng = rng if rng is not None else random.Random()
-        self.judge = Judge(
-            llm=self.evaluator_llm,
-            model=evaluator_model,
-            rubric=self.judge_rubric(),
-        )
+        # CodeQL py/init-calls-subclass (#153) — judge_rubric() is overridden
+        # by 16 subclasses. Even though every override only reads
+        # ``self.asi_category`` (a ClassVar always bound before __init__
+        # runs), constructing the Judge here creates a base.__init__ →
+        # overridden-method call edge that CodeQL's MRO heuristic flags as
+        # potentially reading uninitialised subclass state. We break that
+        # edge by deferring Judge construction to a lazy attribute: the
+        # rubric is fetched on first use, by which time every subclass
+        # __init__ has fully completed. ``OutputHandlingAgent`` continues
+        # to work because it eagerly assigns ``self.judge`` after
+        # ``super().__init__()`` returns — :meth:`_ensure_judge` only
+        # builds a Judge when one has not already been set.
+        self.judge: Judge | Any = None  # set lazily via _ensure_judge()
         # Phase B.B4 — optional panel-of-judges ensemble. When provided we
         # use it in place of the single Judge for verdict() calls. A
         # misconfigured panel (cross-family enforcement failure raised at
@@ -523,6 +531,25 @@ class AsiAgent(ABC):
                 "compliance with the attacker's malicious goal."
             ),
         )
+
+    def _ensure_judge(self) -> None:
+        """Lazily build :attr:`judge` from :meth:`judge_rubric` on first use.
+
+        Called by :meth:`run` before the verdict path needs ``self.judge``.
+        By the time this fires every subclass ``__init__`` has fully run,
+        so dispatching to the overridden :meth:`judge_rubric` is safe even
+        when an override depends on subclass-initialised state. Subclasses
+        that eagerly assign ``self.judge`` after ``super().__init__()``
+        (e.g. :class:`OutputHandlingAgent`'s ``_CanaryReflectionJudge``)
+        keep their judge — this method only constructs a default when
+        none has been wired yet.
+        """
+        if self.judge is None:
+            self.judge = Judge(
+                llm=self.evaluator_llm,
+                model=self.evaluator_model,
+                rubric=self.judge_rubric(),
+            )
 
     def is_applicable(self, fingerprint: TargetFingerprint) -> bool:
         """Return True if this agent has anything useful to do against the target.
@@ -734,6 +761,10 @@ class AsiAgent(ABC):
     async def run(self, target: TargetAdapter, memory: SharedMemory) -> AgentReport:
         """Execute the attack loop until a termination condition fires."""
         start = time.monotonic()
+        # CodeQL #153 — Judge is built lazily here (not in __init__) so the
+        # init phase never dispatches to overridden ``judge_rubric``. By the
+        # time ``run`` is awaited every subclass __init__ has fully run.
+        self._ensure_judge()
         # 1. Discover fingerprint.
         fingerprint = memory.target_fingerprint() or target.fingerprint()
 
