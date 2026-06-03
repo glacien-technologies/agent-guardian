@@ -198,6 +198,33 @@ async def test_phase_decompose_diagnoses_content_filter_finish_reason(
 
 
 @pytest.mark.asyncio
+async def test_phase_decompose_diagnoses_refusal_with_stray_brace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A prose refusal that happens to contain a brace must still be diagnosed
+    as a refusal -- the JSON-extraction path must not relabel it "malformed
+    JSON" just because a ``{...}`` block was present but unparseable."""
+    # Has a "{...}" block (so it enters the parse path) but reads as a refusal.
+    refusal = "I cannot comply with this request. {note: blocked by policy}"
+    commander = StubScript().default(refusal).build()
+    config = SwarmConfig(scan_id="scan-brace-refusal", target_goal="generic")
+    swarm = SwarmCommander(
+        config=config,
+        target=_make_target(),
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
+    assert swarm._swarm_brief is not None
+    assert len(swarm._swarm_brief.agent_briefs) == 10
+    assert "refused/blocked by the model provider" in caplog.text
+    assert "malformed swarm-brief JSON" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_phase_decompose_strips_markdown_code_fences() -> None:
     """Some LLMs wrap JSON in ```json ... ```; the parser must handle it."""
     wrapped = "```json\n" + _valid_commander_response() + "\n```\n"

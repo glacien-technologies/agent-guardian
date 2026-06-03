@@ -3076,18 +3076,26 @@ def _parse_swarm_brief(text: str, *, scan_id: str) -> tuple[SwarmBrief | None, B
             # it declined to. Classify as a refusal so the operator sees the
             # real cause rather than a "malformed JSON" red herring.
             return None, "refusal"
+
+    # A JSON object was present but broke at parse/validate time. It may still be
+    # a refusal the model wrapped in (or followed with) braces -- prefer the
+    # refusal classification when the response reads as one, so the operator sees
+    # the real cause instead of a "malformed JSON" red herring.
+    def _failure() -> BriefFailure:
+        return "refusal" if _looks_like_refusal(text) else "malformed_json"
+
     try:
         payload = json.loads(stripped)
     except (json.JSONDecodeError, ValueError):
-        return None, "malformed_json"
+        return None, _failure()
     if not isinstance(payload, dict):
-        return None, "malformed_json"
+        return None, _failure()
     # Force the scan_id to match this run even if the LLM hallucinated one.
     payload["scan_id"] = scan_id
     try:
         return SwarmBrief.model_validate(payload), None
     except ValidationError:
-        return None, "malformed_json"
+        return None, _failure()
 
 
 # Silence unused-import warnings: these are part of the public re-export surface.
