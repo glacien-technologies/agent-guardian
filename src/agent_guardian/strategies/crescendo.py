@@ -241,7 +241,7 @@ class CrescendoStrategy(Strategy):
         ctx_reasoning = self.ctx.last_verdict_reasoning
         meta_verdict = history[-1].metadata.get("judge_verdict", "") if history else ""
         _LOG.debug(
-            "PhaseA.A1 Crescendo reading verdict surfaces: ctx_verdict=%r "
+            "Crescendo reading verdict surfaces: ctx_verdict=%r "
             "ctx_reasoning_len=%d history_meta_verdict=%r level=%d",
             ctx_verdict,
             len(ctx_reasoning or ""),
@@ -261,7 +261,7 @@ class CrescendoStrategy(Strategy):
         # turn succeeded.
         if ctx_verdict == "fail" and ctx_confidence >= 0.7:
             _LOG.debug(
-                "PhaseA.A1 Crescendo high-confidence fail observed: "
+                "Crescendo high-confidence fail observed: "
                 "confidence=%.2f — appending judge reasoning hint to escalate prompt",
                 ctx_confidence,
             )

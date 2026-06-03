@@ -99,7 +99,7 @@ class PiiScrubber:
             scrubbed, n = pattern.subn(replacement, scrubbed)
             if n:
                 _LOG.debug(
-                    "PhaseB.B6 scrubber.redaction: kind=%s count=%d",
+                    "scrubber.redaction: kind=%s count=%d",
                     kind,
                     n,
                 )

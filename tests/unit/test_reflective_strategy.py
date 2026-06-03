@@ -134,9 +134,9 @@ async def test_reflective_strategy_pivot_after_two_consecutive_defended(
 
     # The REFLECT pivot log must have fired.
     pivot_records = [
-        rec.getMessage() for rec in caplog.records if "PhaseA.A2 REFLECT pivot" in rec.getMessage()
+        rec.getMessage() for rec in caplog.records if "REFLECT pivot" in rec.getMessage()
     ]
-    assert pivot_records, "expected the PhaseA.A2 REFLECT pivot log to fire"
+    assert pivot_records, "expected the REFLECT pivot log to fire"
 
 
 async def test_reflective_scratchpad_bounded_at_k3(tmp_path: Path) -> None:
@@ -239,5 +239,5 @@ async def test_reflective_think_act_observe_phases_log(
     # First turn (no history) — THINK + OBSERVE logs (no scratchpad append).
     await r.generate_next([], None)
     messages = [rec.getMessage() for rec in caplog.records]
-    assert any("PhaseA.A2 THINK" in m for m in messages)
-    assert any("PhaseA.A2 OBSERVE" in m for m in messages)
+    assert any("THINK" in m for m in messages)
+    assert any("OBSERVE" in m for m in messages)

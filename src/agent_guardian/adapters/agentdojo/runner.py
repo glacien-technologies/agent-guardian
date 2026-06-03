@@ -212,7 +212,7 @@ async def _run_one_task(
             error: str | None = None
         except Exception as exc:  # pragma: no cover -- defensive transport guard
             _LOG.warning(
-                "PhaseC.C3 agentdojo task=%s adapter raised: %s",
+                "agentdojo task=%s adapter raised: %s",
                 task.task_id,
                 exc,
             )
@@ -232,7 +232,7 @@ async def _run_one_task(
             attack = bool(task.security_check(reply))
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.debug(
-                "PhaseC.C3 agentdojo upstream evaluator raised on task=%s: %s -- falling back to heuristic",
+                "agentdojo upstream evaluator raised on task=%s: %s -- falling back to heuristic",
                 task.task_id,
                 exc,
             )
@@ -324,7 +324,7 @@ async def run_agentdojo_suite(
         raise ValueError("max_concurrency must be >= 1")
     suite: AgentDojoSuite = load_suite(suite_name, allow_vendored=allow_vendored)
     _LOG.debug(
-        "PhaseC.C3 agentdojo runner starting suite=%s source=%s tasks=%d concurrency=%d",
+        "agentdojo runner starting suite=%s source=%s tasks=%d concurrency=%d",
         suite.name,
         suite.source,
         len(suite.tasks),
@@ -347,7 +347,7 @@ async def run_agentdojo_suite(
     per_strat = _aggregate_per_strategy(results, suite.attacker_strategies)
 
     _LOG.debug(
-        "PhaseC.C3 agentdojo runner finished suite=%s total=%d utility=%d attack=%d "
+        "agentdojo runner finished suite=%s total=%d utility=%d attack=%d "
         "utility_attack=%d errors=%d duration_s=%.3f",
         suite.name,
         len(results),

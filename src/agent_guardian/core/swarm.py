@@ -644,7 +644,7 @@ class SwarmCommander:
             )
         except Exception as e:
             _LOG.debug(
-                "PhaseB.B4 panel construction skipped: %s (degrade to single Judge)",
+                "panel construction skipped: %s (degrade to single Judge)",
                 e,
             )
         try:
@@ -660,7 +660,7 @@ class SwarmCommander:
             self._winning_seed_store = store
         except Exception as e:
             _LOG.debug(
-                "PhaseB.B6 winning_seed_store construction skipped: %s",
+                "winning_seed_store construction skipped: %s",
                 e,
             )
         # PhaseC.C5 — recon-loop re-entry hook. Bound to a real fingerprint by
@@ -2830,7 +2830,7 @@ class SwarmCommander:
                 reentry.on_reflection(payload)
             except Exception as exc:  # pragma: no cover -- defensive
                 _LOG.debug(
-                    "PhaseC.C5 recon_reentry sink dispatch raised %s — continuing",
+                    "recon_reentry sink dispatch raised %s — continuing",
                     exc,
                 )
 

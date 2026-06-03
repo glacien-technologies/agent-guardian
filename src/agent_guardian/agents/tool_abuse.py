@@ -76,7 +76,7 @@ Specifically:
             inner = super().strategy_stack(ctx)
             wrapped = ReflectiveStrategy(inner, sibling=None, asi_category=AsiCategory.ASI02)
             _LOG.debug(
-                "PhaseA.A2 ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
+                "ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
                 "over 2 ReflectiveStrategy children for ASI02 (has_tools=%s)",
                 bool(ctx.declared_tools),
             )
@@ -112,14 +112,14 @@ Specifically:
             children.append(ReflectiveStrategy(sib, sibling=None, asi_category=AsiCategory.ASI02))
         result = MadMaxStrategy(ctx, children=children)
         _LOG.debug(
-            "PhaseB.B2 ToolAbuseAgent.strategy_stack: asi=ASI02 "
+            "ToolAbuseAgent.strategy_stack: asi=ASI02 "
             "operators=%s n_siblings_added=%d total_children=%d",
             SIBLING_MAP[AsiCategory.ASI02],
             len(bw_siblings),
             len(children),
         )
         _LOG.debug(
-            "PhaseA.A2 ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
+            "ToolAbuseAgent.strategy_stack: constructed MadMaxStrategy "
             "over 2 ReflectiveStrategy children for ASI02 (has_tools=%s)",
             bool(ctx.declared_tools),
         )

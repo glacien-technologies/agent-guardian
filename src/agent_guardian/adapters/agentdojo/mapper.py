@@ -107,7 +107,7 @@ def _asi_for_suite(suite: str) -> AsiCategory:
         # suite is significant enough to merit its own ASI mapping the
         # operator will see the WARN in their scan log and file an issue.
         _LOG.warning(
-            "PhaseC.C3 agentdojo unknown suite=%s -- falling back to %s",
+            "agentdojo unknown suite=%s -- falling back to %s",
             suite,
             _FALLBACK_ASI.value,
         )
@@ -123,7 +123,7 @@ def _strategy_name_for_attacker(attacker_strategy: str) -> str:
     # Forward-compat: surface the upstream name verbatim with a prefix so
     # the dashboard doesn't silently fold "future strategy" into "other".
     _LOG.debug(
-        "PhaseC.C3 agentdojo unknown attacker_strategy=%s -- prefixing as agentdojo:%s",
+        "agentdojo unknown attacker_strategy=%s -- prefixing as agentdojo:%s",
         attacker_strategy,
         name,
     )
@@ -140,7 +140,7 @@ def map_agentdojo_to_guardian(task: AgentDojoTask) -> GuardianProbeMapping:
         attacker_strategy=task.attacker_strategy,
     )
     _LOG.debug(
-        "PhaseC.C3 mapper task_id=%s suite=%s attacker=%s -> probe_id=%s asi=%s strategy=%s",
+        "mapper task_id=%s suite=%s attacker=%s -> probe_id=%s asi=%s strategy=%s",
         task.task_id,
         task.suite,
         task.attacker_strategy,

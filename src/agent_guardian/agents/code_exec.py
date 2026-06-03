@@ -77,8 +77,7 @@ Specific techniques:
         siblings = build_sibling_strategy(AsiCategory.ASI05, ctx, primary)
         first_sibling = siblings[0] if siblings else None
         _LOG.debug(
-            "PhaseB.B2 CodeExecAgent.strategy_stack: asi=ASI05 "
-            "operators=%s n_siblings=%d primary=%s",
+            "CodeExecAgent.strategy_stack: asi=ASI05 operators=%s n_siblings=%d primary=%s",
             SIBLING_MAP[AsiCategory.ASI05],
             len(siblings),
             type(primary).__name__,
