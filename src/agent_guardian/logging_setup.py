@@ -294,7 +294,7 @@ def log_model_response(
         prompt_tokens = getattr(usage, "prompt_tokens", 0)
         completion_tokens = getattr(usage, "completion_tokens", 0)
         total_tokens = getattr(usage, "total_tokens", 0)
-        logger.debug(
+        logger.debug(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — operator-requested DEBUG echo of the real model response; text passes through sanitize_for_log() (redact_secrets() masks API keys + control-char strip + length cap) and is scrubbed again by _RedactingFilter before emit
             "response in: tokens={i:%s o:%s t:%s} finish=%s text=%s",
             prompt_tokens,
             completion_tokens,
