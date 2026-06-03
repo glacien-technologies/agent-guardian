@@ -1,10 +1,23 @@
 {# Executive — Logs tab panel.
 
-   Static snapshot of ``events.jsonl`` for the scan, read at request time by
-   the shared view-model (``logs_tail``). Each row carries
-   timestamp / level / kind / agent / asi / summary. Snapshot-only — no
-   websocket / SSE on this pane; operator presses F5 to refresh.
+   SSE Phase 2, Step 2.4 — LIVE-APPEND contract.
+   ------------------------------------------------
+   This tab is NO LONGER snapshot-only. The initial server-side render
+   from ``logs_tail`` is the first paint; ``static/live-append.js``
+   subscribes to ``/scan/<id>/events`` and APPENDS a new ``<li>`` to the
+   ``<ol class="exec-logs">`` on every ``reflection`` event. The
+   ``<template data-row-template data-kind="log">`` block below is the
+   canonical row shape — JS clones, fills, applies level-chip + search
+   filters, and appends. Hover-freeze applies: while the cursor is over
+   ``.exec-logs`` arrivals queue and flush on ``mouseleave``. Operator
+   no longer needs F5 (acceptance: new log row visible within 200ms of
+   producer emit — design doc "Phase 2 decisions (resolved 2026-06-03)").
+   The Logs tail cap ``_LOGS_TAIL_CAP`` still gates the SERVER-RENDERED
+   snapshot only — live-append rows accumulate beyond that cap for the
+   tab's lifetime.
 
+   Each row carries timestamp / level / kind / agent / asi / summary
+   from ``events.jsonl`` via the shared view-model (``logs_tail``).
    Empty-state copy preserves the ``clean_control`` sentry.
 #}
 <section id="tabpanel-logs"
@@ -14,7 +27,7 @@
          hidden>
   <h2 class="exec-section-title">Scan log tail.</h2>
   <p class="exec-section-lede">
-    {{ logs_tail | length }} events &middot; press <kbd>F5</kbd> to refresh.
+    <span data-live="logs-count">{{ logs_tail | length }}</span> events &middot; updating live.
   </p>
   {% if logs_tail | length > 0 %}
     {# Filter toolbar — level chips (multi-select, default all on) + free-form
@@ -182,4 +195,23 @@
     })();
     </script>
   {% endif %}
+
+  {# SSE Phase 2, Step 2.4 — live-append row template. ``live-append.js``
+     clones this ``<li>`` skeleton for every ``reflection`` event
+     arrival. Element shape mirrors the server-side row exactly so a
+     live row is visually indistinguishable from a snapshot row. Always
+     present (including when ``logs_tail`` is empty) so the first
+     arriving event has a clone target. #}
+  <template data-row-template data-kind="log">
+    <li class="exec-log" data-level="" data-agent="" data-kind="">
+      <time class="exec-log__time" data-slot="timestamp"></time>
+      <span class="exec-log__level" data-slot="level"></span>
+      <span class="exec-log__meta">
+        <span class="exec-log__kind" data-slot="kind"></span>
+        <span class="exec-log__agent" data-slot="agent"></span>
+        <span class="exec-log__asi" data-slot="asi"></span>
+      </span>
+      <span class="exec-log__msg" data-slot="summary"></span>
+    </li>
+  </template>
 </section>

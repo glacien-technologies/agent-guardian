@@ -162,8 +162,15 @@ def test_event_queue_isolated_per_scan(tmp_path: Path) -> None:
         q1 = store.event_queue("a")
         q2 = store.event_queue("b")
         assert q1 is not q2
-        # event_queue is idempotent.
-        assert store.event_queue("a") is q1
+        # Phase 2 Step 2.2 — ``event_queue`` is no longer idempotent: each
+        # call materialises a NEW subscriber queue so multi-tab fan-out is
+        # safe. Two calls for the same scan id return two distinct queues
+        # and the observer fans out to both.
+        q1b = store.event_queue("a")
+        assert q1b is not q1
+        # And both queues are tracked as live subscribers until removed.
+        assert q1 in store._subscribers["a"]
+        assert q1b in store._subscribers["a"]
 
     asyncio.run(_run())
 

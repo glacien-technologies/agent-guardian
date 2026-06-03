@@ -75,6 +75,13 @@
      (logs). No severity logic here — the caller passes
      ``opts.severity`` and the bus paints the matching CSS class. #}
   <script src="/static/tab-badge-bus.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 2, Step 2.4 — live-append. Subscribes to the per-scan
+     ``/scan/<id>/events`` stream and APPENDS rows into the Findings /
+     Probes / Logs tabs in real time. Reverses the snapshot-only-by-
+     design contract that previously gated those three tabs on F5.
+     Module exposes ``window.AGLiveAppend.attach(eventSource)``; the
+     attach call below wires per-event handlers exactly once. #}
+  <script src="/static/live-append.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
@@ -195,6 +202,33 @@
     // LIVE/STALE/RECONNECTING/DEAD machine. EventSource will keep
     // attempting to auto-reconnect; the freshness dot recolors to
     // ``stale`` on CONNECTING and to ``dead`` on hard CLOSED.
+  })();
+  </script>
+
+  {# SSE Phase 2, Step 2.4 — open the per-scan event stream and wire
+     live-append. The ``/scans/<id>/live`` stream above carries
+     snapshot-only patches (KPIs); the ``/scan/<id>/events`` stream
+     carries the per-emit events (finding / agent_* / reflection) that
+     live-append turns into row inserts. Two streams keep the snapshot
+     vs. event-log split that's been the architecture since Phase 1.
+
+     Skip on terminal scans (no producer left) and when the
+     ``AGLiveAppend`` module hasn't loaded (defensive — defer order is
+     guaranteed but the module guards anyway). #}
+  <script>
+  (function () {
+    var body = document.body;
+    var scanId = body.getAttribute('data-scan-id');
+    if (!scanId) { return; }
+    if (body.getAttribute('data-is-terminal') === 'true') { return; }
+    if (typeof EventSource === 'undefined') { return; }
+    if (!window.AGLiveAppend || typeof window.AGLiveAppend.attach !== 'function') {
+      return;
+    }
+    var url = '/scan/' + encodeURIComponent(scanId) + '/events';
+    var es = new EventSource(url);
+    window.AGLiveAppend.attach(es);
+    es.addEventListener('scan_done', function () { es.close(); });
   })();
   </script>
 </body>

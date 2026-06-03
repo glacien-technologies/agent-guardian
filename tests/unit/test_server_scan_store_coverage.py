@@ -329,13 +329,15 @@ def test_observer_logs_when_sse_queue_full(
         store = ScanStore(root_dir=tmp_path)
         fake = _FakeSwarm()
         store.register("qfull", fake)  # type: ignore[arg-type]
-        # Materialise + cap the queue at 1; fill it so the next put_nowait raises.
+        # Phase 2 Step 2.2 — observer fans out to per-subscriber queues.
+        # Register a cap-1 subscriber and fill it so the next put_nowait
+        # raises ``QueueFull``, exercising the per-subscriber drop path.
         q: asyncio.Queue[SwarmEvent] = asyncio.Queue(maxsize=1)
-        store._queues["qfull"] = q
+        store._subscribers.setdefault("qfull", []).append(q)
         q.put_nowait(_event("agent_start", agent="seed"))
         with caplog.at_level(logging.WARNING, logger="agent_guardian.server.scan_store"):
             fake.observer(_event("agent_progress", agent="b"))  # type: ignore[misc]
-        assert any("SSE queue full" in rec.message for rec in caplog.records)
+        assert any("SSE subscriber queue full" in rec.message for rec in caplog.records)
 
     asyncio.run(_run())
 
@@ -689,16 +691,13 @@ def test_event_queue_replay_logs_when_queue_full(
         store = ScanStore(root_dir=tmp_path)
         fake = _FakeSwarm()
         store.register("replay-full", fake)  # type: ignore[arg-type]
-        # Stuff the buffer with more events than asyncio.Queue can hold.
+        # Stuff the buffer with more events than the subscriber queue can hold.
         for i in range(3):
             fake.observer(_event("agent_start", agent=f"a-{i}"))  # type: ignore[misc]
-        # Replace the create-on-first-access queue with a cap-1 queue.
-        # event_queue is idempotent on _queues, so we need to construct
-        # the queue manually and pre-fill so the buffered replay loop
-        # hits QueueFull.
-        store._queues.pop("replay-full", None)
-        # Monkey-patch the in-method asyncio.Queue() call by binding to
-        # a small queue before calling event_queue.
+        # Phase 2 Step 2.2 — each ``event_queue`` call materialises a NEW
+        # cap-unbounded queue and replays buffered events onto it. Force
+        # a cap-1 queue via the asyncio.Queue monkeypatch so the buffered
+        # replay loop hits QueueFull on the 2nd buffered event.
         with (
             patch(
                 "agent_guardian.server.scan_store.asyncio.Queue",

@@ -33,8 +33,13 @@ async def events_stream(request: Request, scan_id: str) -> StreamingResponse:
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+    # Phase 2 Step 2.1 — W3C EventSource resume protocol. The browser
+    # sends the last ``id:`` it saw via the ``Last-Event-ID`` header on
+    # reconnect; we filter out any event with ``seq <= last_event_id`` in
+    # ``stream_scan_events`` so the client never sees a duplicate.
+    last_event_id = request.headers.get("last-event-id")
     return StreamingResponse(
-        stream_scan_events(scan_id, store),
+        stream_scan_events(scan_id, store, last_event_id=last_event_id),
         media_type="text/event-stream",
         headers=headers,
     )

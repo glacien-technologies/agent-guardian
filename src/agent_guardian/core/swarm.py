@@ -426,6 +426,18 @@ class SwarmEvent:
     M12 consumes these to drive live dashboard SSE; the M10 CLI uses them
     for terminal progress rendering. The callback is invoked synchronously
     -- it must not block.
+
+    The ``seq`` field is a per-scan monotonic sequence number assigned by
+    the :class:`agent_guardian.server.scan_store.ScanStore` observer (the
+    producer must NOT populate it; the observer overwrites whatever is
+    there via ``dataclasses.replace``). The first event of a scan gets
+    ``seq=0``; subsequent events increment by 1. Persisted as a top-level
+    field in ``events.jsonl`` and emitted on the SSE wire as a standard
+    ``id: <seq>`` line so the browser EventSource client can resume after
+    disconnect via the ``Last-Event-ID`` header. Legacy events (those
+    constructed before the observer assigns) carry ``seq=None`` and are
+    treated as unsequenced (no ``id:`` line, no resume filter). Phase 2
+    Step 2.1 — see designs/sse-flow-and-live-ui.md "Phase 2 decisions".
     """
 
     kind: EventKind
@@ -435,6 +447,9 @@ class SwarmEvent:
     provisional_aivss: int | None = None
     decision: CheckpointDecision | None = None
     payload: dict[str, object] = field(default_factory=dict)
+    # Populated by the ScanStore observer (Phase 2 Step 2.1) -- DO NOT set
+    # at the producer side. See class docstring above.
+    seq: int | None = None
 
 
 SwarmObserver = Callable[[SwarmEvent], None]
@@ -1446,6 +1461,13 @@ class SwarmCommander:
                 # Using attribute injection to match the existing ``_brief``
                 # pattern so we don't widen the public ``run()`` signature.
                 agent._cancel_event = self._cancel_event
+                # SSE Phase 2 Step 2.3 — wire the per-turn ``agent_progress``
+                # producer back to ``SwarmCommander._emit`` so the event
+                # threads through the same observer fan-out (and the
+                # scan_store ``seq`` stamper) as every other SwarmEvent.
+                # Attribute injection mirrors the ``_cancel_event`` pattern
+                # above for the same public-API-stability reason.
+                agent._observer = self._emit
                 report = await agent.run(self.target, self.memory)
         except Exception as exc:
             _LOG.warning("agent %s raised %s: %s", name, type(exc).__name__, exc)

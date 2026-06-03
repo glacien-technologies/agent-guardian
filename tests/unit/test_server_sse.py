@@ -133,9 +133,12 @@ def test_stream_live_terminates_on_scan_done(tmp_path: Path) -> None:
         return out
 
     chunks = asyncio.run(_run())
-    assert any(c.startswith("event: agent_start") for c in chunks)
-    assert any(c.startswith("event: finding") for c in chunks)
-    assert any(c.startswith("event: scan_done") for c in chunks)
+    # Phase 2 Step 2.1 — observer stamps seq so each live chunk is now
+    # prefixed with ``id: <seq>\n``. Match the event line anywhere in
+    # the chunk rather than only at byte 0.
+    assert any("event: agent_start" in c for c in chunks)
+    assert any("event: finding" in c for c in chunks)
+    assert any("event: scan_done" in c for c in chunks)
 
 
 # ---------------------------------------------------------------------------

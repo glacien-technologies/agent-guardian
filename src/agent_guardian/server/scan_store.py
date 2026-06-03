@@ -42,6 +42,7 @@ the paginated ``/home`` cold path doesn't deserialise every
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -169,7 +170,15 @@ class ScanStore:
     def __init__(self, root_dir: Path | None = None) -> None:
         self._root = root_dir or _default_root_dir()
         self._running: dict[str, SwarmCommander] = {}
-        self._queues: dict[str, asyncio.Queue[SwarmEvent]] = {}
+        # Phase 2 Step 2.2 — per-subscriber fan-out. Each call to
+        # :meth:`event_queue` materialises a NEW :class:`asyncio.Queue` and
+        # appends it to ``_subscribers[scan_id]``. The observer fans every
+        # event out to every live subscriber so two browser tabs on the
+        # same scan each receive their own independent copy. The SSE
+        # generator MUST call :meth:`remove_subscriber` on close so a
+        # crashed/closed tab doesn't leak a queue forever.
+        # See designs/sse-flow-and-live-ui.md "Phase 2 decisions" item 1.
+        self._subscribers: dict[str, list[asyncio.Queue[SwarmEvent]]] = {}
         # ``_events`` buffers the most recent events per scan so a late SSE
         # subscriber can replay what it missed without re-reading the JSONL
         # file. The buffer is a ring (``deque(maxlen=...)``) so a long-running
@@ -190,6 +199,14 @@ class ScanStore:
         # real duration on scan_done even when the SwarmCommander doesn't
         # surface one (e.g. unit-stub tests).
         self._scan_started_at: dict[str, float] = {}
+        # Phase 2 Step 2.1 — per-scan monotonic ``seq`` counter. The
+        # observer stamps every :class:`SwarmEvent` with the current value
+        # (starting at 0 for the first event of a scan) and increments.
+        # Persisted top-level into ``events.jsonl`` and emitted on the SSE
+        # wire as an ``id:`` line so the browser EventSource client can
+        # resume via ``Last-Event-ID`` after a transient disconnect.
+        # See designs/sse-flow-and-live-ui.md "Phase 2 decisions (2026-06-03)".
+        self._seq_counters: dict[str, int] = {}
         # Optional metrics sink (set by the app factory). Decoupled so the
         # store stays usable in library / test mode without /metrics wired.
         self._metrics: Any | None = None
@@ -232,23 +249,39 @@ class ScanStore:
         self._index_upsert(scan_id, is_running=True)
 
         def _observer(event: SwarmEvent) -> None:
+            # Phase 2 Step 2.1 — stamp a per-scan monotonic ``seq`` on the
+            # event BEFORE buffering / enqueue / JSONL write so every
+            # consumer (in-memory deque, asyncio.Queue, on-disk JSONL) sees
+            # the same value. First event of a scan gets seq=0. The
+            # producer never sets seq; the observer overwrites whatever's
+            # there via ``dataclasses.replace`` (SwarmEvent is frozen).
+            seq = self._seq_counters.get(scan_id, 0)
+            event = dataclasses.replace(event, seq=seq)
+            self._seq_counters[scan_id] = seq + 1
             # Buffer the event in memory. The deque auto-evicts the oldest
             # entry once the buffer hits MAX_BUFFERED_EVENTS_PER_SCAN so a
             # long-running scan can't push the in-memory state unboundedly.
             buffer = self._events.setdefault(scan_id, deque(maxlen=MAX_BUFFERED_EVENTS_PER_SCAN))
             buffer.append(event)
-            # Best-effort enqueue to the asyncio queue if it has been
-            # materialised (i.e. someone is listening over SSE).
-            queue = self._queues.get(scan_id)
-            if queue is not None:
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    _LOG.warning(
-                        "scan_store: SSE queue full for %s — dropping %s event",
-                        scan_id,
-                        event.kind,
-                    )
+            # Phase 2 Step 2.2 — per-subscriber fan-out. Iterate every
+            # live subscriber queue and put the event to each independently.
+            # Per-subscriber backpressure: if ONE subscriber's queue is
+            # full we drop for THAT subscriber and continue to the next,
+            # so a stalled tab cannot starve a healthy one. Iterate over a
+            # snapshot (``list(...)``) so a remove_subscriber call from a
+            # concurrently-closing stream cannot mutate the list mid-loop.
+            subscribers = self._subscribers.get(scan_id)
+            if subscribers:
+                for queue in list(subscribers):
+                    try:
+                        queue.put_nowait(event)
+                    except asyncio.QueueFull:
+                        _LOG.warning(
+                            "scan_store: SSE subscriber queue full for %s — dropping %s event for slow consumer",
+                            scan_id,
+                            event.kind,
+                        )
+                        continue
             # Best-effort append to the on-disk JSONL via a per-scan persistent
             # handle. The handle is opened lazily and cached in the LRU; the
             # legacy open()+close()-per-event path was a measurable bottleneck
@@ -727,18 +760,35 @@ class ScanStore:
     # ------------------------------------------------------------------
 
     def event_queue(self, scan_id: str) -> asyncio.Queue[SwarmEvent]:
-        """Return (or create) the per-scan SSE queue.
+        """Materialise a NEW subscriber queue for ``scan_id``.
 
-        Buffered events (those observed before the queue was created)
-        are immediately enqueued so a late subscriber sees the full
-        history.
+        Phase 2 Step 2.2 — semantics changed from "one shared queue per
+        scan" to "one queue per subscriber". Every call returns a fresh
+        :class:`asyncio.Queue` and registers it in ``_subscribers`` so the
+        observer's fan-out loop will deliver future events to it. Buffered
+        events (those observed before the subscriber attached) are
+        replayed onto the new queue first so a late subscriber sees the
+        deque history before the live stream begins.
+
+        Callers (the SSE generator) MUST invoke
+        :meth:`remove_subscriber` on stream close so the queue does not
+        leak after the consumer goes away. The fan-out skips closed
+        consumers only when they have been explicitly removed.
+
+        Backwards compatibility: existing callers of ``event_queue``
+        continue to receive a working :class:`asyncio.Queue` that drains
+        live events; the visible difference is that two calls now return
+        TWO independent queues (multi-tab fan-out), not the same shared
+        instance. The buffered-replay-on-first-attach behaviour is
+        preserved per call so each subscriber starts from the deque
+        head.
         """
-        queue = self._queues.get(scan_id)
-        if queue is not None:
-            return queue
-        queue = asyncio.Queue()
-        self._queues[scan_id] = queue
-        # Replay buffered events.
+        queue: asyncio.Queue[SwarmEvent] = asyncio.Queue()
+        self._subscribers.setdefault(scan_id, []).append(queue)
+        # Replay buffered events into this subscriber's queue. Each
+        # subscriber gets an independent replay so its starting cursor is
+        # the head of the in-memory deque (filtering by Last-Event-ID
+        # happens downstream in ``stream_scan_events``).
         for event in list(self._events.get(scan_id, [])):
             try:
                 queue.put_nowait(event)
@@ -749,6 +799,29 @@ class ScanStore:
                     event.kind,
                 )
         return queue
+
+    def remove_subscriber(self, scan_id: str, queue: asyncio.Queue[SwarmEvent]) -> None:
+        """Detach a subscriber queue previously returned by :meth:`event_queue`.
+
+        Called from the SSE stream's ``try/finally`` so a closed/aborted
+        consumer does not leak its queue into the observer's fan-out
+        loop. Idempotent — removing the same queue twice (or removing
+        from a scan_id with no subscribers) is a no-op. The empty list
+        is left in place; the next ``event_queue`` call reuses it.
+        """
+        subscribers = self._subscribers.get(scan_id)
+        if not subscribers:
+            return
+        try:
+            subscribers.remove(queue)
+        except ValueError:
+            # Already removed (e.g. observer raced with stream close)
+            # — idempotent contract preserved.
+            return
+        if not subscribers:
+            # Drop the empty bucket so a long-lived store doesn't accumulate
+            # one-key-per-historical-scan in ``_subscribers``.
+            self._subscribers.pop(scan_id, None)
 
     def replay_events(self, scan_id: str) -> list[SwarmEvent]:
         """Return the buffered events for a scan (in-memory only)."""
@@ -876,8 +949,13 @@ def event_to_payload(event: SwarmEvent) -> dict[str, Any]:
     Used by both the on-disk JSONL writer and the SSE wire format so
     the dashboard sees identical shapes whether it's replaying from
     disk or streaming live.
+
+    Phase 2 Step 2.1 — when the event has been stamped by the observer,
+    ``seq`` is emitted as a top-level field (NOT nested inside payload)
+    so a cross-process replay can filter by it via simple line-prefix
+    matching. Legacy events without ``seq`` omit the field entirely.
     """
-    return {
+    out: dict[str, Any] = {
         "kind": event.kind,
         "agent": event.agent,
         "asi": event.asi.value if event.asi is not None else None,
@@ -886,6 +964,9 @@ def event_to_payload(event: SwarmEvent) -> dict[str, Any]:
         "timestamp": event.timestamp.isoformat(),
         "payload": _coerce_payload(event.payload),
     }
+    if event.seq is not None:
+        out["seq"] = event.seq
+    return out
 
 
 def _coerce_payload(payload: Iterable[tuple[str, Any]] | dict[str, Any]) -> dict[str, Any]:
