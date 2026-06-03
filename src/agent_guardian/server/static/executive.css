@@ -3243,3 +3243,176 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   max-height: 10rem;
   overflow: auto;
 }
+
+/* ============================================================
+ * Phase Spine (SSE Phase 1, Step 3)
+ *
+ * Four-pill heartbeat described in
+ * designs/sse-flow-and-live-ui.md ("Proposal C — Phase Spine").
+ * Lives in the layout shell ABOVE ``<main>``, between the topbar
+ * (sticky layer 1) and the tab bar (sticky layer 3). Universal
+ * across all four tabs — must NOT be placed inside any
+ * ``tabpanel-*`` (critic patch G10/P10).
+ *
+ * Tokens reused: ``--exec-bg-elev`` (pill body), ``--exec-bg-sunken``
+ * (sub-bar track), ``--exec-brand`` (running), ``--exec-sev-low``
+ * (done — green/success), ``--exec-ink-subtle`` (pending /
+ * skipped). No new ``--exec-*`` tokens are introduced; per the
+ * "match the Executive theme" rule the spine borrows the same
+ * palette the ASI compact-status pills already use
+ * (``.exec-asi-compact__status--{done|running|queued}``).
+ * ============================================================ */
+.exec-spine {
+  background: var(--exec-bg-elev);
+  border-bottom: 1px solid var(--exec-border-subtle);
+  padding: 0.625rem var(--exec-pad-x);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+.exec-spine__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  max-width: var(--exec-shell-max);
+}
+.exec-spine__pill {
+  background: var(--exec-bg-elev);
+  border: 1px solid var(--exec-border-subtle);
+  border-radius: var(--exec-radius);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.exec-spine__pill[data-active="true"] {
+  border-color: var(--exec-brand);
+  background: var(--exec-brand-tint);
+}
+.exec-spine__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.exec-spine__name {
+  font-family: var(--exec-font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.exec-spine__elapsed {
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.exec-spine__sub {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--exec-bg-sunken);
+  overflow: hidden;
+}
+.exec-spine__sub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: var(--exec-ink-subtle);
+  border-radius: 2px;
+  transition: width 220ms ease-out, background-color 160ms ease;
+}
+.exec-spine__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--exec-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--exec-ink-muted);
+  min-width: 0;
+}
+.exec-spine__count {
+  font-variant-numeric: tabular-nums;
+}
+.exec-spine__state {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--exec-ink-subtle);
+}
+
+/* Per-state coloring — mirrors the .exec-asi-compact__status--*
+ * palette (lines 1180-1191) so the spine reads with the same visual
+ * grammar as the ASI compact-status pills below the fold. */
+.exec-spine__pill[data-state="pending"] .exec-spine__state {
+  color: var(--exec-ink-subtle);
+}
+.exec-spine__pill[data-state="running"] {
+  border-color: color-mix(in srgb, var(--exec-brand) 35%, var(--exec-border-subtle));
+}
+.exec-spine__pill[data-state="running"] .exec-spine__sub-fill {
+  background: var(--exec-brand);
+}
+.exec-spine__pill[data-state="running"] .exec-spine__state {
+  color: var(--exec-brand-strong);
+}
+.exec-spine__pill[data-state="done"] {
+  border-color: color-mix(in srgb, var(--exec-sev-low) 35%, var(--exec-border-subtle));
+}
+.exec-spine__pill[data-state="done"] .exec-spine__sub-fill {
+  background: var(--exec-sev-low);
+  width: 100%;
+}
+.exec-spine__pill[data-state="done"] .exec-spine__state {
+  color: var(--exec-sev-low);
+}
+.exec-spine__pill[data-state="skipped"] .exec-spine__sub-fill {
+  background: var(--exec-ink-subtle);
+  width: 100%;
+  opacity: 0.4;
+}
+.exec-spine__pill[data-state="skipped"] .exec-spine__state {
+  color: var(--exec-ink-subtle);
+}
+
+/* Reduced-motion: strip the width / color transitions on the sub-bar
+ * so a snapshot reconciliation does not visibly slide. The class /
+ * attribute toggles still fire; only the animation is gone (critic
+ * patch G20/P20 mirrors the same setTimeout-driven posture in the
+ * ElapsedTicker for Step 4). */
+@media (prefers-reduced-motion: reduce) {
+  .exec-spine__pill,
+  .exec-spine__sub-fill {
+    transition: none;
+  }
+}
+
+/* Narrow layouts — stack the four pills two-up under ~720 px so the
+ * captions stay readable. The grid template flips from 4 columns to
+ * 2; on very narrow viewports (<= 480 px) we collapse to a single
+ * column, matching the ``_kpi_strip`` responsive ladder. */
+@media (max-width: 720px) {
+  .exec-spine__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .exec-spine__list {
+    grid-template-columns: 1fr;
+  }
+}

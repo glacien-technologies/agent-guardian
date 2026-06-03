@@ -43,6 +43,11 @@
   {# QA-039 + QA-044 (2026-06-02) — owns the KPI tile ⓘ click affordance
      (toggles the prose info popover); the hover data-table is pure CSS. #}
   <script src="/static/executive_kpi.js?v={{ package_version }}" defer></script>
+  {# SSE Phase 1, Step 3 — drives the four-pill Phase Spine. Subscribes
+     to ``/scan/<id>/events`` for live transitions and to
+     ``/scans/<id>/live`` for snapshot reconciliation (multi-tab safe,
+     critic patch G11/P11). No-ops on terminal scans. #}
+  <script src="/static/phase-spine.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
@@ -50,6 +55,12 @@
       data-is-terminal="{{ 'true' if is_terminal else 'false' }}">
 
   {% include "dashboard/executive/_topbar.html" %}
+  {# SSE Phase 1, Step 3 — Phase Spine lives in the layout shell, ABOVE
+     ``<main>`` and between the topbar and the tab bar (critic patch
+     G10/P10). Universal across all four tabs; NEVER placed inside
+     ``tabpanel-overview`` (would hide the heartbeat on Findings /
+     Probes / Logs and fire pulses against an ``hidden`` element). #}
+  {% include "dashboard/executive/_phase_spine.html" %}
   {% include "dashboard/executive/_tab_bar.html" %}
 
   <main class="exec-main" role="main">
