@@ -63,6 +63,30 @@ __all__ = [
 _LOG = logging.getLogger(__name__)
 
 
+# Phase 2 Step 2.1 — per-scan monotonic ``seq`` counter shared across
+# the SwarmEvent writer (:func:`make_events_writer`) and the Python
+# logging bridge (:class:`JsonlLogHandler`) so every JSONL line in a
+# given scan directory has a strictly-monotonic top-level ``seq``,
+# regardless of which sink wrote it. Keyed by the resolved scan_dir
+# string. Thread-safe via the lock — log records emit on worker
+# threads (httpx, asyncio executors) while SwarmEvents emit on the
+# scan-driver thread.
+_SEQ_COUNTERS: dict[str, int] = {}
+_SEQ_LOCK = threading.Lock()
+
+
+def _next_seq(scan_dir: Path) -> int:
+    """Return the next monotonic seq for the given scan directory.
+
+    First call for a fresh scan_dir returns 0. Thread-safe.
+    """
+    key = str(scan_dir.resolve())
+    with _SEQ_LOCK:
+        seq = _SEQ_COUNTERS.get(key, 0)
+        _SEQ_COUNTERS[key] = seq + 1
+        return seq
+
+
 # On-disk filename for the in-flight partial scan snapshot. Distinct from the
 # terminal ``scan.raw.json`` / ``scan.json`` filenames so a partial snapshot
 # can't be mistaken for a completed scan by any caller that hasn't been
@@ -331,7 +355,7 @@ def _event_to_jsonable(event: SwarmEvent) -> dict[str, object]:
             safe_payload[key] = v
     # ``EventKind`` is a ``Literal[...]`` string union, not an Enum — the
     # value is already a plain ``str`` at this point.
-    return {
+    out: dict[str, object] = {
         "kind": str(event.kind),
         "timestamp": event.timestamp.isoformat(),
         "agent": event.agent,
@@ -340,6 +364,14 @@ def _event_to_jsonable(event: SwarmEvent) -> dict[str, object]:
         "decision": decision_val,
         "payload": safe_payload,
     }
+    # Phase 2 Step 2.1 — emit ``seq`` as a top-level field (NOT nested
+    # inside payload) so a cross-process replay can filter by it via
+    # simple line-prefix matching. Mirrors the contract in
+    # ``scan_store.event_to_payload``. Legacy events without ``seq``
+    # omit the field entirely so the on-disk shape is back-compatible.
+    if event.seq is not None:
+        out["seq"] = event.seq
+    return out
 
 
 def make_events_writer(
@@ -366,6 +398,8 @@ def make_events_writer(
     is logged but never re-raised, so a full disk or a permissions blip
     can't break the swarm.
     """
+    import dataclasses as _dataclasses
+
     prior_observer = swarm.observer
     events_path = scan_dir / "events.jsonl"
     # Touch the file so the dashboard sees an empty (but present) log even
@@ -392,6 +426,14 @@ def make_events_writer(
                     type(exc).__name__,
                     exc,
                 )
+        # Phase 2 Step 2.1 — stamp ``seq`` BEFORE serialisation so the
+        # on-disk shape matches the server-write path. If the event
+        # already has a seq (defensive: e.g. observer chain double-stamp
+        # via a future code path), preserve it. Counter is module-level
+        # and shared with :class:`JsonlLogHandler` so SwarmEvents and
+        # log records interleave with a strictly monotonic seq.
+        if event.seq is None:
+            event = _dataclasses.replace(event, seq=_next_seq(scan_dir))
         try:
             line = json.dumps(_event_to_jsonable(event), ensure_ascii=False)
         except (TypeError, ValueError) as exc:  # pragma: no cover
@@ -524,7 +566,7 @@ class JsonlLogHandler(logging.Handler):
         # Timestamp from the record (when the log call happened), not from
         # emit() (when we serialise it) — matches SwarmEvent semantics.
         ts = datetime.fromtimestamp(record.created, tz=UTC).isoformat()
-        wire = {
+        wire: dict[str, object] = {
             "kind": "log",
             "timestamp": ts,
             "agent": None,
@@ -533,6 +575,14 @@ class JsonlLogHandler(logging.Handler):
             "decision": None,
             "payload": payload,
         }
+        # Phase 2 Step 2.1 — stamp ``seq`` so log records share the same
+        # per-scan monotonic numbering as SwarmEvents (the counter is
+        # module-level + lock-guarded; see ``_next_seq``). Without this
+        # the on-disk file would have a mix of ``seq: <int>`` (events)
+        # and ``seq: null`` (logs), breaking the resume-by-id contract.
+        # Never let seq stamping break a log emit — defensive suppress.
+        with contextlib.suppress(Exception):
+            wire["seq"] = _next_seq(self._events_path.parent)
         try:
             line = json.dumps(wire, ensure_ascii=False)
         except (TypeError, ValueError):
