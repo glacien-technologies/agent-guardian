@@ -28,6 +28,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -272,8 +273,13 @@ async def scans_redirect(request: Request, scan_id: str) -> RedirectResponse:
         # Don't redirect into a known-404. Surface it now so curl doesn't
         # have to follow the bounce just to see the error.
         raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
-    qs = request.url.query
-    target = f"/scan/{scan_id}" + (f"?{qs}" if qs else "")
+    # Rebuild the redirect target from server-validated components only.
+    # ``scan_id`` is constrained by ``_SCAN_ID_RE`` above, and the query
+    # string is re-encoded from parsed key/value pairs rather than spliced
+    # verbatim from the request — closing the open-redirect vector that
+    # CodeQL flags here (CWE-601).
+    safe_qs = urlencode(list(request.query_params.multi_items()), doseq=True)
+    target = f"/scan/{scan_id}" + (f"?{safe_qs}" if safe_qs else "")
     return RedirectResponse(url=target, status_code=307)
 
 

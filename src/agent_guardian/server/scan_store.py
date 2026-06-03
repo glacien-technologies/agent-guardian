@@ -793,7 +793,7 @@ class ScanStore:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                _LOG.warning(  # noqa: py/log-injection  -- sanitize_for_log sanitizes scan_id; event.kind is a server-controlled enum
+                _LOG.warning(  # noqa: py/log-injection  -- sanitize_for_log strips control chars + caps length; event.kind is a server-controlled enum
                     "scan_store: SSE replay queue full for %s — dropping %s event",
                     sanitize_for_log(scan_id),
                     event.kind,
