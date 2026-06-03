@@ -161,7 +161,7 @@ The core swarm contains **11 attacker agents**, each scoped to a distinct family
 | `trust-exploit-agent` | Operator/system trust boundary abuse                 |
 | `drift-agent`         | Behavioural drift, policy erosion over conversation  |
 
-Additional specialist classes (`FuzzingAgent`, `OutputHandlingAgent`, `DenialOfWalletAgent`, `DetectionEvasionAgent`, `SecretExtractionAgent`, `IdentityLeakAgent`, `CriticAgent`) ship as building blocks for custom swarms and are documented under [`docs/attackers/`](./docs/attackers/).
+Additional specialist classes (`FuzzingAgent`, `OutputHandlingAgent`, `DenialOfWalletAgent`, `DetectionEvasionAgent`, `SecretExtractionAgent`, `IdentityLeakAgent`, `CriticAgent`) ship as building blocks for custom swarms and are documented under [`docs/concepts/adversarial-swarm.mdx`](./docs/concepts/adversarial-swarm.mdx).
 
 ---
 
@@ -258,7 +258,7 @@ By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md) and th
 
 ## Community
 
-Join us on [Discord](https://discord.gg/h4FRgxvr) for real-time discussion — probe and adapter design, informal Q&A, and roadmap chat. For long-form questions, use [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions); see [docs/community/support](./docs/community/support.mdx) for the full channel matrix.
+Join us on [Discord](https://discord.gg/h4FRgxvr) for real-time discussion — probe and adapter design, informal Q&A, and roadmap chat. For long-form questions, the full channel matrix lives at [`docs/community/support`](./docs/community/support.mdx) (GitHub Discussions is not enabled on this repo today).
 
 ---
 
