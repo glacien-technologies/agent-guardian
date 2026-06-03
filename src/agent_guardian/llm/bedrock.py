@@ -38,6 +38,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+from agent_guardian.logging_setup import log_model_request, log_model_response
 
 _LOG = logging.getLogger(__name__)
 
@@ -367,39 +368,46 @@ class BedrockClient(BaseLLM):
             bedrock_model_id = bedrock_model_id[len("bedrock:") :]
         url = f"{(self.base_url or '').rstrip('/')}/model/{bedrock_model_id}/converse"
         headers = self._build_signed_headers(url, body_json)
-        _LOG.debug(
-            "bedrock call: model=%s region=%s n_messages=%d max_tokens=%s",
-            bedrock_model_id,
-            self.region,
-            len(request.messages),
-            request.max_tokens,
+        # One coherent block per call (provider+model stamped once on the INFO
+        # narration line emitted here); the full request out lands at DEBUG.
+        # ``seed`` is not forwarded by this provider (see _maybe_warn_seed_ignored)
+        # so we don't log it as if it were honoured.
+        log_model_request(
+            _LOG,
+            provider="bedrock",
+            model=bedrock_model_id,
+            n_messages=len(request.messages),
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            request_body=body,
+            messages=request.messages,
         )
         try:
             resp = await self._client.post(url, content=body_json, headers=headers)
         except httpx.TimeoutException as exc:
-            _LOG.warning("bedrock timeout: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTimeoutError(f"bedrock: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
-            _LOG.warning("bedrock network error: %s: %s", type(exc).__name__, exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTransientError(f"bedrock: network error: {exc}") from exc
         _raise_for_bedrock_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
-            _LOG.warning("bedrock invalid JSON in 2xx response: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMResponseFormatError(f"bedrock: invalid JSON: {exc}") from exc
         # Pass the unprefixed Bedrock model id (without the optional
         # ``bedrock:`` provider tag) so the resulting LLMResponse.model
         # matches what Bedrock itself reports — downstream cost lookup
         # and receipts key off the bare id, not the spec string.
         response = map_bedrock_response(bedrock_model_id, data)
-        _LOG.debug(
-            "bedrock response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
-            response.text[:80],
-            response.usage.prompt_tokens,
-            response.usage.completion_tokens,
-            response.usage.total_tokens,
-            response.finish_reason,
+        # Response in — full text + usage + finish; a content_filter finish is
+        # surfaced at WARNING by the helper rather than swallowed.
+        log_model_response(
+            _LOG,
+            response_text=response.text,
+            usage=response.usage,
+            finish_reason=response.finish_reason,
         )
         return response
 

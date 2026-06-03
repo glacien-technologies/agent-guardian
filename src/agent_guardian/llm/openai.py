@@ -112,16 +112,16 @@ class OpenAIClient(BaseLLM):
         try:
             resp = await self._client.send(req)
         except httpx.TimeoutException as exc:
-            _LOG.warning("openai timeout: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTimeoutError(f"openai: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
-            _LOG.warning("openai network error: %s: %s", type(exc).__name__, exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTransientError(f"openai: network error: {exc}") from exc
         _raise_for_openai_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
-            _LOG.warning("openai invalid JSON in 2xx response: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMResponseFormatError(f"openai: invalid JSON: {exc}") from exc
         parsed = self._parse_response(request.model, data)
         # Response in — full text + usage + finish; a content_filter finish is

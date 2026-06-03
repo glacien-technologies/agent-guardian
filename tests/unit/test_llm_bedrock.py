@@ -25,6 +25,7 @@ import pytest
 # when botocore is missing, which would otherwise red-fail every test here).
 pytest.importorskip("botocore", reason="Bedrock tests require the [aws] extra (botocore)")
 
+import httpx
 import respx
 from httpx import Response
 
@@ -670,6 +671,72 @@ async def test_bedrock_seed_ignored_logs_once_per_process(
         assert len(seed_warnings) == 1, (
             f"expected exactly one seed-ignored debug warning, got {len(seed_warnings)}"
         )
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_failed_call_logs_via_helper_error_path(
+    _fake_aws_env: None, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A transport failure surfaces via the shared ``log_model_response`` error
+    path — one WARNING ``model call failed:`` line carrying the cause — rather
+    than an ad-hoc per-provider ``bedrock network error`` line."""
+    # httpx.HTTPError maps to LLMTransientError which the retry loop treats as
+    # transient — patch compute_delay so the test doesn't pay the backoff.
+    from agent_guardian.llm import retry as retry_mod
+
+    monkeypatch.setattr(retry_mod, "compute_delay", lambda *_args, **_kwargs: 0.0)
+    respx.post(_converse_url_re()).mock(side_effect=httpx.ConnectError("connection refused"))
+    client = BedrockClient(region="us-east-1")
+    try:
+        with (
+            caplog.at_level(logging.WARNING, logger="agent_guardian.llm.bedrock"),
+            pytest.raises(LLMTransientError),
+        ):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and r.getMessage().startswith("model call failed:")
+        ]
+        assert failed, [r.getMessage() for r in caplog.records]
+        assert "ConnectError" in failed[0].getMessage()
+        # The old ad-hoc per-provider line is gone.
+        assert not [r for r in caplog.records if "bedrock network error" in r.getMessage()]
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_bedrock_invalid_json_logs_via_helper_error_path(
+    _fake_aws_env: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An invalid-JSON 2xx body also routes through the helper's error path."""
+    respx.post(_converse_url_re()).mock(return_value=Response(200, content=b"not json"))
+    client = BedrockClient(region="us-east-1")
+    try:
+        with (
+            caplog.at_level(logging.WARNING, logger="agent_guardian.llm.bedrock"),
+            pytest.raises(LLMResponseFormatError),
+        ):
+            await client.complete(
+                LLMRequest(
+                    messages=[LLMMessage(role="user", content="hi")],
+                    model="anthropic.claude-haiku-4-5-v1:0",
+                )
+            )
+        failed = [
+            r
+            for r in caplog.records
+            if r.levelno == logging.WARNING and r.getMessage().startswith("model call failed:")
+        ]
+        assert failed, [r.getMessage() for r in caplog.records]
     finally:
         await client.aclose()
 

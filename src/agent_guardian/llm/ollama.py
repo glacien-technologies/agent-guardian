@@ -19,6 +19,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
+from agent_guardian.logging_setup import log_model_request, log_model_response
 
 __all__ = ["OllamaClient"]
 
@@ -79,41 +80,48 @@ class OllamaClient(BaseLLM):
 
     async def _send(self, request: LLMRequest) -> LLMResponse:
         url = f"{(self.base_url or _DEFAULT_BASE_URL).rstrip('/')}/api/chat"
-        _LOG.debug(
-            "ollama call: model=%s n_messages=%d max_tokens=%s temperature=%s",
-            request.model,
-            len(request.messages),
-            request.max_tokens,
-            request.temperature,
+        payload = self._build_payload(request)
+        # One coherent block per call (provider+model stamped once on the INFO
+        # narration line emitted here); the full request out lands at DEBUG.
+        log_model_request(
+            _LOG,
+            provider="ollama",
+            model=request.model,
+            n_messages=len(request.messages),
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            seed=request.seed,
+            request_body=payload,
+            messages=request.messages,
         )
         req = self._client.build_request(
             "POST",
             url,
-            json=self._build_payload(request),
+            json=payload,
             headers={"content-type": "application/json"},
         )
         try:
             resp = await self._client.send(req)
         except httpx.TimeoutException as exc:
-            _LOG.warning("ollama timeout: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTimeoutError(f"ollama: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
-            _LOG.warning("ollama network error: %s: %s", type(exc).__name__, exc)
+            log_model_response(_LOG, error=exc)
             raise LLMTransientError(f"ollama: network error: {exc}") from exc
         _raise_for_ollama_status(resp)
         try:
             data = resp.json()
         except ValueError as exc:
-            _LOG.warning("ollama invalid JSON in 2xx response: %s", exc)
+            log_model_response(_LOG, error=exc)
             raise LLMResponseFormatError(f"ollama: invalid JSON: {exc}") from exc
         parsed = self._parse_response(request.model, data)
-        _LOG.debug(
-            "ollama response: text[:80]=%r tokens={i:%d o:%d t:%d} finish=%s",
-            parsed.text[:80],
-            parsed.usage.prompt_tokens,
-            parsed.usage.completion_tokens,
-            parsed.usage.total_tokens,
-            parsed.finish_reason,
+        # Response in — full text + usage + finish; a content_filter finish is
+        # surfaced at WARNING by the helper rather than swallowed.
+        log_model_response(
+            _LOG,
+            response_text=parsed.text,
+            usage=parsed.usage,
+            finish_reason=parsed.finish_reason,
         )
         return parsed
 
