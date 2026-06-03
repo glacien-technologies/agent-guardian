@@ -1,5 +1,22 @@
 {# Executive — Findings tab panel (QA-048 / QA-051 / QA-052 / QA-053).
 
+   SSE Phase 2, Step 2.4 — LIVE-APPEND contract.
+   ------------------------------------------------
+   This tab is NO LONGER snapshot-only. The server-rendered ``<tbody>``
+   contents are the initial paint; ``static/live-append.js`` subscribes
+   to ``/scan/<id>/events`` and APPENDS a freshly built ``<tr>`` into the
+   matching severity ``<tbody>`` on every ``finding`` event arrival. The
+   per-tab ``<template data-row-template data-kind="finding">`` block
+   below is the canonical row shape — the JS clones it, fills text +
+   data-attrs from the event payload, applies any active filter chip
+   gate, and appends. The "Showing N of M findings" counter ticks. The
+   operator NEVER presses F5 to see a new finding. Hover-freeze: while
+   the cursor is over ``.exec-findings-table-wrap`` new arrivals queue
+   and flush on ``mouseleave`` so rows don't jump under the cursor
+   mid-triage. Acceptance: new finding visible in this tab within 200ms
+   of the producer emit (design doc: "Phase 2 decisions (resolved
+   2026-06-03)" — Findings/Probes/Logs live-append).
+
    QA-048 (semantic table) — single ``<table class="exec-findings-table">``
    with ONE ``<thead>`` and per-severity ``<tbody>`` buckets. Rows are
    pre-sorted server-side (severity DESC then ASI ASC; see
@@ -340,6 +357,57 @@
       </nav>
     {% endif %}
   {% endif %}
+
+  {# SSE Phase 2, Step 2.4 — live-append row template. ``live-append.js``
+     clones this ``<tr>`` skeleton for every ``finding`` event arrival.
+     Element shape mirrors the server-side single-turn row above
+     (multi-turn aggregation is server-only — the live-append path always
+     produces a single ``data-source="finding"`` row).
+
+     The template MUST live inside ``#tabpanel-findings`` so the JS can
+     scope lookup with ``document.querySelector("#tabpanel-findings
+     template[data-row-template][data-kind='finding']")``. Browsers
+     don't render ``<template>`` content, so a server-rendered empty
+     scaffolding has no visual effect on the initial paint. #}
+  <template data-row-template data-kind="finding">
+    <tr class="exec-findings-table__row"
+        data-source="finding"
+        data-finding-id=""
+        data-finding-href=""
+        data-severity=""
+        data-asi=""
+        data-agent=""
+        data-probe=""
+        tabindex="0"
+        role="button"
+        aria-controls="exec-finding-slideover">
+      <td class="exec-findings-table__cell exec-findings-table__cell--toggle"></td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--sev">
+        <span class="exec-sev-pill" data-slot="sev-pill">
+          <span class="exec-sev-pill__dot" aria-hidden="true"></span>
+          <span data-slot="sev-label"></span>
+        </span>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--asi">
+        <code class="exec-findings-table__asi-code" data-slot="asi"></code>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--category">
+        <span class="exec-findings-table__category-name" data-slot="category"></span>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--agent">
+        <code class="exec-findings-table__agent-name" data-slot="agent"></code>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--probe">
+        <code data-slot="probe"></code>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--summary">
+        <span class="exec-findings-table__summary-text" data-slot="summary"></span>
+      </td>
+      <td class="exec-findings-table__cell exec-findings-table__cell--turn">
+        <code data-slot="turn"></code>
+      </td>
+    </tr>
+  </template>
 
   {# Hidden JSON island — finding payloads for the slide-over. The
      slide-over JS reads ``data-finding-id`` off the clicked row and
