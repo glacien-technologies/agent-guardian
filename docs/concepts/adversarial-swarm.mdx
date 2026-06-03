@@ -15,7 +15,7 @@ flow it sits inside, see [How AgentGuardian works](/concepts/how-agentguardian-w
 
 | Role | What it does | Source-of-truth |
 |---|---|---|
-| **Commander** | Reads `--target-goal`, emits a `SwarmBrief` (per-agent sub-goals, hypotheses, priorities). Skipped when no goal is supplied. | `src/agent_guardian/core/swarm.py` |
+| **Commander** | Reads `--goal`, emits a `SwarmBrief` (per-agent sub-goals, hypotheses, priorities). Skipped when no goal is supplied. | `src/agent_guardian/core/swarm.py` |
 | **Attacker** | Each specialist agent owns one OWASP ASI category and synthesises category-specific attack prompts. | `src/agent_guardian/agents/base.py::AsiAgent` |
 | **Evaluator** | A separate LLM-as-judge labels each `(prompt, response)` pair against a category-specific rubric. | `src/agent_guardian/agents/base.py::Judge` |
 

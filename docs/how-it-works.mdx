@@ -72,10 +72,10 @@ ASI02 (Tool Abuse). A memory-less target skips ASI06 (Memory
 Poisoning). The global token budget is sliced across whichever
 agents survive the filter.
 
-When an operator passes `--target-goal "exfiltrate PII"`, a Commander
+When an operator passes `--goal "exfiltrate PII"`, a Commander
 LLM additionally emits a `SwarmBrief` JSON object — per-agent
 sub-goals, hypotheses, and priority weights — that downstream agents
-synthesise goal-specific scenarios from. Without `--target-goal` the
+synthesise goal-specific scenarios from. Without `--goal` the
 Commander step is skipped and agents use their bundled probe corpus.
 
 ### Phase 3 — Parallel attack

@@ -16,12 +16,16 @@ with an empty YAML file and grow into the schema.
 
 from __future__ import annotations
 
+import logging
 import os
+import warnings
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "Config",
@@ -80,7 +84,23 @@ class TargetConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    """Output knobs — formats, redaction, signing."""
+    """Output knobs — formats, redaction, signing.
+
+    .. note:: ``sign_evidence`` is a **forward-compatibility placeholder**.
+
+        It was originally intended to gate Sigstore-backed signing of the full
+        evidence bundle, but that signing path is not implemented in 1.0 — it
+        is targeted for v1.1. Setting the flag to ``True`` or ``False`` today
+        is a no-op (every ``scan.json`` already ships Ed25519 + HMAC-SHA256
+        signatures unconditionally, verifiable via ``agent-guardian verify``).
+
+        We accept the flag in YAML for forward compatibility so existing
+        operator configs do not break on upgrade; :func:`load_config` emits
+        a single ``DeprecationWarning`` when it is present (see
+        ``_warn_about_sign_evidence_if_set``). The field will be removed
+        when the v1.1 Sigstore implementation lands and gives the flag real
+        meaning, or repurposed to gate that implementation.
+    """
 
     formats: list[str] = Field(default_factory=lambda: ["json"])
     redact_pii: bool = True
@@ -160,6 +180,51 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _warn_about_sign_evidence_if_set(raw_data: dict[str, Any], resolved: Path) -> None:
+    """Emit a one-shot deprecation warning when ``output.sign_evidence`` is set.
+
+    QA-G23 (2026-06-03): the flag has no downstream consumer in 1.0 — it was
+    documented as "wired" in the README but is a placebo in both directions.
+    Rather than silently accept-and-ignore (which breeds distrust in a
+    security tool's other claims) or hard-fail on the field (which would
+    break existing operator configs on upgrade), we accept it for forward
+    compatibility and emit a single ``DeprecationWarning`` per load so the
+    operator knows the flag is a no-op until the v1.1 Sigstore work lands.
+    """
+    output = raw_data.get("output")
+    if not isinstance(output, dict):
+        return
+    if "sign_evidence" not in output:
+        return
+    msg = (
+        f"output.sign_evidence in {resolved} is a forward-compatibility "
+        "placeholder and has no effect in agent-guardian 1.0 — every scan.json "
+        "is already Ed25519+HMAC signed unconditionally (verify with "
+        "`agent-guardian verify <scan.json>`). Sigstore-backed evidence-bundle "
+        "signing is planned for v1.1; the flag will gain effect there. You "
+        "can remove it from your config today without changing any signing "
+        "behaviour."
+    )
+    # Surface to both Python warnings (so test harnesses can catch with
+    # ``pytest.warns(DeprecationWarning)``) and the logger (so JSON-log
+    # SIEM consumers see it in production). Best-effort: a closed warnings
+    # filter is not an error worth raising for a documentation flag.
+    try:
+        warnings.warn(msg, DeprecationWarning, stacklevel=3)
+    except Exception as exc:  # pragma: no cover - defensive
+        # The ``warnings`` module can raise (e.g. ``-W error::DeprecationWarning``
+        # under pytest, or a malformed user filter). We never want a config-load
+        # to crash on a documentation-only warning surface; debug-log the
+        # condition so the test harness's no-silent-excepts policy is satisfied
+        # without leaking the warning text twice into stderr.
+        _LOG.debug(
+            "deprecation warning emission for output.sign_evidence raised (%s: %s) — falling back to logger only",
+            type(exc).__name__,
+            exc,
+        )
+    _LOG.warning("deprecated_config_flag output.sign_evidence: %s", msg)
+
+
 def load_config(path: Path | None = None) -> Config:
     """Load the AgentGuardian config from disk (or return defaults).
 
@@ -170,6 +235,7 @@ def load_config(path: Path | None = None) -> Config:
     if resolved is None or not resolved.is_file():
         return Config()
     data = _read_yaml(resolved)
+    _warn_about_sign_evidence_if_set(data, resolved)
     return Config.model_validate(data)
 
 

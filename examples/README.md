@@ -74,16 +74,18 @@ land in a follow-up milestone. The placeholder commands will look
 roughly like:
 
 ```bash
-# Mode B (CodeAdapter)
-agent-guardian scan --target examples.langgraph.simple_chatbot:run --mode code
+# Mode B (CodeAdapter) — target is a positional argument, not a flag.
+agent-guardian scan examples.langgraph.simple_chatbot:run --mode code
 
-# Mode D (LangGraphAdapter)
-agent-guardian scan --target examples.langgraph.support_with_tool:graph \
-    --mode framework --framework langgraph
+# Mode D (LangGraphAdapter) — framework-native object via --framework-ref MODULE:ATTR.
+agent-guardian scan \
+    --mode framework --framework langgraph \
+    --framework-ref examples.langgraph.support_with_tool:graph
 
 # Mode D (OpenAIAgentsAdapter)
-agent-guardian scan --target examples.openai_agents.support_with_tool:agent \
-    --mode framework --framework openai_agents
+agent-guardian scan \
+    --mode framework --framework openai_agents \
+    --framework-ref examples.openai_agents.support_with_tool:agent
 ```
 
 ## Notes

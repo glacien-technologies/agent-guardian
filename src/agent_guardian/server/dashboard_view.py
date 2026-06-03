@@ -57,6 +57,14 @@ _LOG = logging.getLogger(__name__)
 # in the ~9rem KPI column; the longer "didn't reach 95% coverage; raw AIVSS
 # preserved for trend tracking" prose belongs in the tile's ⓘ tooltip
 # (QA-028 sub-ask 1) — never in the label itself.
+#
+# QA-G6 (2026-06-03) — the CLI scan-end summary uses ``models.severity.
+# humanise_band`` directly. Both surfaces ultimately share
+# :class:`SeverityBand` as the single source of truth; the tile uses the
+# shorter form below because the BAND KPI column is layout-constrained,
+# the CLI uses the verbose ``Not Evaluated (stub mode)`` form because a
+# terminal line has plenty of room. Any future band added to the enum
+# must be added to BOTH maps simultaneously.
 _BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
     SeverityBand.EXCELLENT: "Excellent",
     SeverityBand.GOOD: "Good",
@@ -68,7 +76,13 @@ _BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
 
 
 def _humanise_band(band: SeverityBand | None) -> str:
-    """Return a humanised, user-facing label for an AIVSS band.
+    """Return a humanised, user-facing label for an AIVSS band (dashboard tile).
+
+    Uses the short ``NA`` short-code for :attr:`SeverityBand.NOT_EVALUATED` so
+    the BAND KPI tile fits one line in the layout-constrained column. The CLI
+    scan-end summary uses ``agent_guardian.models.severity.humanise_band``
+    instead, which renders the verbose ``Not Evaluated (stub mode)`` form
+    appropriate for a terminal line.
 
     Falls back to a title-cased best-effort rendering if a future band slips
     past the mapping — never returns the raw underscore-bearing enum value

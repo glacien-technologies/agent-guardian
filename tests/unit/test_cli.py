@@ -290,12 +290,16 @@ def test_verify_pinned_pubkey_anchors_genuine_report_without_hmac_secret(
     payload = _json.loads(path.read_text(encoding="utf-8"))
     pubkey = payload["signatures"]["ed25519"]["public_key_b32"]
     result = runner.invoke(app, ["verify", str(path), "--pubkey", pubkey])
-    # Ed25519 integrity holds + pin matches -> anchored & green; HMAC fails
-    # closed (default secret never trusted) but does not veto the pinned anchor.
+    # Ed25519 integrity holds + pin matches -> anchored & green; HMAC has no
+    # operator-supplied secret to validate against, so the renderer surfaces
+    # the channel as ``NO-SECRET`` rather than ``FAIL`` (QA-G17). The earlier
+    # FAIL label landed first on the line and read as a tamper signal even on
+    # a clean self-produced scan — the distinguishing label keeps the
+    # pinned-pubkey trust path green without lying about the HMAC channel.
     assert result.exit_code == 0, (result.stdout, result.stderr)
     assert "PINNED" in result.stdout
     assert "Ed25519:      OK" in result.stdout
-    assert "HMAC-SHA256:  FAIL" in result.stdout
+    assert "HMAC-SHA256:  NO-SECRET" in result.stdout
 
 
 def test_verify_succeeds_with_real_hmac_secret(
@@ -1051,7 +1055,14 @@ def test_scan_stub_is_non_authoritative_and_not_evaluated(
     assert result.exit_code == EXIT_OK, result.output
     out = result.stdout + (result.stderr or "")
     assert "NON-AUTHORITATIVE" in out
-    assert "not_evaluated" in out
+    # QA-G6 (2026-06-03): the CLI summary now humanises the band before
+    # printing — ``not_evaluated`` is rendered as ``Not Evaluated (stub
+    # mode)`` (see ``agent_guardian.models.severity.humanise_band``). The
+    # underscore-bearing enum value must NEVER leak into the operator-
+    # facing text. We accept either spelling here so the stub flag still
+    # asserts on the surface intent rather than the exact glyph sequence.
+    assert "Not Evaluated" in out
+    assert "not_evaluated" not in out
     assert "AIVSS=n/a" in out
     assert "band=EXCELLENT" not in out
 

@@ -137,7 +137,7 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
-Always run all four checks (`pytest`, `ruff`, `mypy`, `pre-commit`) locally before opening a PR. CI runs the same set on Python 3.10, 3.11, 3.12, and 3.13 — make sure your change works on all four.
+Always run all four checks (`pytest`, `ruff`, `mypy`, `pre-commit`) locally before opening a PR. CI runs the same set on Python 3.11, 3.12, and 3.13 (Python 3.14 is not yet supported — `pyproject.toml` pins `requires-python = ">=3.11,<3.14"`) — make sure your change works on all three.
 
 ## Reporting security issues
 

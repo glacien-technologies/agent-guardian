@@ -142,7 +142,7 @@ def _minimal_plan_ctx_uncapped():  # type: ignore[no-untyped-def]
             reused=False,
             suppression_reason=None,
         ),
-        dashboard_url="http://127.0.0.1:7474/scans/cli-test",
+        dashboard_url="http://127.0.0.1:7474/scan/cli-test",
         safety=default_safety_row(target_url="https://example.test"),
     )
 
