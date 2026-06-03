@@ -39,5 +39,5 @@ c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:ge
 c884812785097d1353de11bf5f7fd475b9ee0be4:tests/unit/test_logging_redaction.py:generic-api-key:68
 cfad796936d788cdd7b58a3cc08a0c55a5605daa:src/agent_guardian/crypto/ed25519_sig.py:generic-api-key:62
 f16714a4663fdebd37705d1b68b7ea8c64e03b8f:tests/unit/test_obs_otel.py:generic-api-key:728
-f79901b58eedacc9bd3018d0092f5671d4bb7fc3:tests/unit/test_report_json.py:github-pat:332
-f79901b58eedacc9bd3018d0092f5671d4bb7fc3:tests/unit/test_report_json.py:github-pat:343
+77c521516afe4e972d13512a04703e7b60079574:tests/unit/test_report_json.py:github-pat:332
+77c521516afe4e972d13512a04703e7b60079574:tests/unit/test_report_json.py:github-pat:343
