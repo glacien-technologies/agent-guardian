@@ -25,15 +25,18 @@
          role="group"
          aria-labelledby="exec-scan-plan-label">
   <p class="exec-plan__heading" id="exec-scan-plan-label">Scan plan</p>
+  {# Target URL gets its own full-width row — it's the longest value and would
+     wrap character-by-character if squeezed into one of the side-by-side
+     columns below. #}
+  <dl class="exec-plan__url-row" aria-label="Target URL">
+    <dt>URL</dt>
+    <dd><span class="exec-mono-inline">{{ scan_plan.target.url }}</span></dd>
+  </dl>
   <div class="exec-plan__sections">
     {# TARGET #}
     <section class="exec-plan__group" aria-label="Target">
       <p class="exec-plan__eyebrow">TARGET</p>
       <dl class="exec-plan__grid">
-        <div class="exec-plan__row">
-          <dt>URL</dt>
-          <dd><span class="exec-mono-inline">{{ scan_plan.target.url }}</span></dd>
-        </div>
         <div class="exec-plan__row">
           <dt>Mode</dt>
           <dd><span class="exec-mono-inline">{{ scan_plan.target.mode }}</span></dd>

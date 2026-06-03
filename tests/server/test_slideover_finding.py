@@ -163,9 +163,10 @@ def test_finding_slideover_renders_locked_sections(client: TestClient, store: Sc
         "Judge verdict",
         "Judge reasoning",
         "Evidence chain",
-        "Reproduce",
     ):
         assert label in body, f"finding slide-over missing section {label!r}"
+    # Reproduce is intentionally probe-only now (removed from findings).
+    assert "Reproduce" not in body
 
 
 def test_finding_slideover_uses_shared_sheet_class(client: TestClient, store: ScanStore) -> None:
@@ -194,16 +195,19 @@ def test_finding_slideover_surfaces_correlated_prompt_and_response(
     assert turns[0]["reasoning"] in body
 
 
-def test_finding_slideover_reproduce_cli_includes_scan_and_probe(
+def test_finding_slideover_omits_reproduce_and_linked_remediation(
     client: TestClient, store: ScanStore
 ) -> None:
+    """Findings no longer carry the Reproduce CLI block or the empty
+    'Linked remediation' placeholder — the finding view is for triage."""
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl(scan_dir)
     resp = client.get(f"/scan/{scan.id}/finding/f-crit-1")
     body = resp.text
-    assert f"--scan {scan.id}" in body
-    assert "--probe PROBE-001" in body
+    assert "Reproduce" not in body
+    assert "agent-guardian probe" not in body
+    assert "Linked remediation" not in body
 
 
 def test_finding_slideover_header_template_emitted(client: TestClient, store: ScanStore) -> None:

@@ -73,6 +73,7 @@
             {%- if _verdict == 'fail' -%}EXPLOITED
             {%- elif _verdict == 'pass' -%}DEFENDED
             {%- elif _verdict == 'inconclusive' -%}INCONCLUSIVE
+            {%- elif _verdict == 'recon' -%}RECON
             {%- else -%}PENDING
             {%- endif -%}
           </span>

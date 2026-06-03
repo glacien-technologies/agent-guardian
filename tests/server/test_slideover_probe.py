@@ -124,9 +124,10 @@ def test_probe_slideover_endpoint_returns_locked_section_labels(
         "Judge verdict",
         "Judge reasoning",
         "Evidence chain",
-        "Reproduce",
     ):
         assert label in body, f"probe slide-over missing section {label!r}"
+    # Reproduce was removed from the detail view (operator request).
+    assert "Reproduce" not in body
 
 
 def test_probe_row_carries_drawer_href_for_polymorphic_loader(
@@ -144,13 +145,12 @@ def test_probe_row_carries_drawer_href_for_polymorphic_loader(
     assert f'data-probe-href="/scan/{scan.id}/probe?group=goal-hijack-agent"' in body
 
 
-def test_probe_drawer_html_renders_reproduce_with_scan_and_probe(
-    client: TestClient, store: ScanStore
-) -> None:
+def test_probe_drawer_html_omits_reproduce_block(client: TestClient, store: ScanStore) -> None:
+    """Reproduce CLI block was removed from the detail view (operator request)."""
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl(scan_dir)
     resp = client.get(f"/scan/{scan.id}/probe?index=0")
     body = resp.text
-    assert f"--scan {scan.id}" in body
-    assert "--probe PROBE-001" in body
+    assert "Reproduce" not in body
+    assert "agent-guardian probe" not in body

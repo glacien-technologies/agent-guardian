@@ -57,6 +57,9 @@
 {%- else -%}
   {%- set _verdict_label = 'PENDING' -%}
 {%- endif -%}
+{# Recon is capability probing, not an ASI attack — the ctx builder flags it so
+   we collapse the all-"—" finding metadata / run-context blocks below. #}
+{%- set _is_recon = ctx.is_recon -%}
 
 {# Header chips slot — JS hoists into ``[data-slideover-*]`` selectors
    on the parent slide-over header. Owning the chip set here means the
@@ -75,6 +78,24 @@
 
 <div class="exec-slideover-sheet" data-slideover-sheet data-slideover-kind="{{ _kind }}">
 
+  {% if _is_recon %}
+  {# ----- 1r. Recon header (capability probing — no ASI/finding metadata) ----- #}
+  <p class="exec-probe__label">Recon probe</p>
+  <p class="exec-probe__recon-note">
+    Black-box capability recon — probing the agent's tools, memory, and surface
+    to understand what it can do. This is reconnaissance, not an ASI attack, so
+    finding metadata (severity, ASI / CSA category, MITRE ATLAS) and attack
+    run-context do not apply.
+  </p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Agent</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.agent or 'recon-agent' }}</code></dd>
+    <dt class="exec-probe__meta-dt">Turns</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.conversation | length }}</code></dd>
+    <dt class="exec-probe__meta-dt">Timestamp</dt>
+    <dd class="exec-probe__meta-dd"><code>{{ ctx.timestamp_label or '—' }}</code></dd>
+  </dl>
+  {% else %}
   {# ----- 1. Metadata ----- #}
   <p class="exec-probe__label">{% if _kind == 'finding' %}Finding metadata{% else %}Probe metadata{% endif %}</p>
   <dl class="exec-probe__meta">
@@ -120,6 +141,10 @@
       </dd>
     {% endif %}
 
+    {# Tier floor / OWASP scenario / Source YAML are probe-corpus provenance
+       fields that a Finding never carries (always "—"), so they're hidden on
+       the finding detail. Kept for probes, where a corpus seed may supply them. #}
+    {% if _kind != 'finding' %}
     <dt class="exec-probe__meta-dt">Tier floor</dt>
     <dd class="exec-probe__meta-dd">
       {%- if ctx.tier_floor -%}<code>{{ ctx.tier_floor }}</code>
@@ -138,11 +163,14 @@
         <code>{{ ctx.source_yaml or ctx.source_path }}</code>
       {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
     </dd>
+    {% endif %}
   </dl>
+  {% endif %}
 
-  {# ----- 2. Run context (probe-only — for findings the per-turn thread
-       below carries the run context per child row). ----- #}
-  {% if _kind == 'probe' %}
+  {# ----- 2. Run context (probe-only, non-recon — for findings the per-turn
+       thread below carries the run context per child row; recon has no attack
+       run-context). ----- #}
+  {% if _kind == 'probe' and not _is_recon %}
   <p class="exec-probe__label">Run context</p>
   <dl class="exec-probe__meta">
     <dt class="exec-probe__meta-dt">Turn</dt>
@@ -179,29 +207,40 @@
 
   {% if ctx.conversation %}
   {# ----- 3a. Multi-turn chat conversation -----
-       A multi-turn attack is rendered as a chat thread: per turn, an
-       outgoing "attacker prompt" bubble followed by an incoming "target
-       response" bubble, in turn order. The judge verdict + reasoning for
-       the whole attack close the thread. This replaces the flat
-       prompt/response/judge sections for multi-turn records. #}
-  <p class="exec-probe__label">Attack conversation</p>
-  <ol class="exec-chat" aria-label="Multi-turn attack conversation">
+       Rendered as a chat thread: per turn, an outgoing prompt bubble followed
+       by an incoming response bubble, in turn order. For attacks the whole
+       thread is closed by the rolled-up judge verdict; recon (capability
+       probing) has no verdict, so that block is suppressed and the bubbles use
+       recon-neutral roles. The response bubbles are progressively enhanced by
+       chat-render.js into Markdown (default) or pretty JSON. #}
+  {%- set _out_role = 'Probe sent' if _is_recon else 'Attacker prompt' -%}
+  {%- set _in_role = 'Agent response' if _is_recon else 'Target response' -%}
+  <p class="exec-probe__label">{% if _is_recon %}Recon conversation{% else %}Attack conversation{% endif %}</p>
+  <ol class="exec-chat" aria-label="{% if _is_recon %}Recon probe conversation{% else %}Multi-turn attack conversation{% endif %}">
     {% for turn in ctx.conversation %}
       <li class="exec-chat__turn" data-turn="{{ turn.turn_no }}">
         <div class="exec-chat__turn-head">
-          <span class="exec-chat__turn-no">turn {{ turn.turn_no }}{% if turn.max_turns %} / {{ turn.max_turns }}{% endif %}</span>
-          <span class="exec-verdict-pill exec-verdict-pill--{{ turn.verdict }}">{{ turn.verdict_label }}</span>
-          {% if turn.confidence_pct %}
-            <span class="exec-chat__turn-conf">{{ turn.confidence_pct }}</span>
+          {% if _is_recon %}
+            <span class="exec-chat__turn-no">iteration {{ turn.iteration }}</span>
+          {% else %}
+            <span class="exec-chat__turn-no">turn {{ turn.turn_no or turn.iteration }}{% if turn.max_turns %} / {{ turn.max_turns }}{% endif %}</span>
+          {% endif %}
+          {% if not _is_recon %}
+            <span class="exec-verdict-pill exec-verdict-pill--{{ turn.verdict }}">{{ turn.verdict_label }}</span>
+            {% if turn.confidence_pct %}
+              <span class="exec-chat__turn-conf">{{ turn.confidence_pct }}</span>
+            {% endif %}
           {% endif %}
         </div>
         <div class="exec-chat__bubble exec-chat__bubble--out">
-          <span class="exec-chat__role">Attacker prompt</span>
+          <span class="exec-chat__role">{{ _out_role }}</span>
+          {# Attacker prompt stays verbatim — no Markdown/JSON rendering. #}
           <pre class="exec-chat__text">{{ turn.prompt or '(no data available)' }}</pre>
         </div>
         <div class="exec-chat__bubble exec-chat__bubble--in">
-          <span class="exec-chat__role">Target response</span>
-          <pre class="exec-chat__text">{{ turn.target_response or '(no data available)' }}</pre>
+          <span class="exec-chat__role">{{ _in_role }}</span>
+          {# Only the response is rendered (Markdown default / pretty JSON). #}
+          <pre class="exec-chat__text" data-chat-render="auto">{{ turn.target_response or '(no data available)' }}</pre>
         </div>
         {% if turn.reasoning %}
           <div class="exec-chat__judge">
@@ -213,7 +252,8 @@
     {% endfor %}
   </ol>
 
-  {# Rolled-up verdict for the whole multi-turn attack. #}
+  {% if not _is_recon %}
+  {# Rolled-up verdict for the whole multi-turn attack (recon has no verdict). #}
   <p class="exec-probe__label">Judge verdict</p>
   <dl class="exec-probe__meta">
     <dt class="exec-probe__meta-dt">Verdict</dt>
@@ -226,6 +266,7 @@
       {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
     </dd>
   </dl>
+  {% endif %}
 
   {% else %}
   {# ----- 3. Exact prompt sent (single-turn layout) ----- #}
@@ -300,25 +341,5 @@
        rel="noopener">View JSONL events for this {{ _kind }}</a>
   </p>
 
-  {# ----- 8. Linked remediation (placeholder) — Insights layer not yet
-       wired; surface a placeholder so the section is discoverable. ----- #}
-  <p class="exec-probe__label">Linked remediation</p>
-  <p class="exec-probe__reason exec-probe__reason--empty">
-    (no data available)
-  </p>
-
-  {# ----- 9. Reproduce CLI command ----- #}
-  <div class="exec-probe__label-row">
-    <p class="exec-probe__label">Reproduce</p>
-    <button type="button"
-            class="exec-probe__copy"
-            data-copy-source="exec-slideover-repro"
-            aria-label="Copy reproduce command">Copy</button>
-  </div>
-  <pre class="exec-probe__repro" id="exec-slideover-repro">uv run agent-guardian probe \
-{%- if ctx.probe_id %}
-  --probe {{ ctx.probe_id }}{% endif %}{% if ctx.seed or ctx.rng_seed %} \
-  --seed {{ ctx.seed or ctx.rng_seed }}{% endif %} \
-  --scan {{ scan_id }}</pre>
 
 </div>

@@ -79,6 +79,10 @@
      Module exposes ``window.AGLiveAppend.attach(eventSource)``; the
      attach call below wires per-event handlers exactly once. #}
   <script src="/static/live-append.js?v={{ package_version }}" defer></script>
+  {# Chat-bubble renderer: Markdown (default) / pretty JSON for the slide-over
+     conversation. Exposes ``window.AGChatRender.enhance(node)``; the slide-over
+     loaders call it after injecting the body. #}
+  <script src="/static/chat-render.js?v={{ package_version }}" defer></script>
 </head>
 <body class="exec-body"
       data-scan-id="{{ scan_id }}"
