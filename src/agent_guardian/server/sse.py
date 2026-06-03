@@ -133,80 +133,92 @@ async def stream_scan_events(
     """
     _LOG.debug("sse: opening event stream for scan_id=%s", sanitize_for_log(scan_id))  # noqa: py/log-injection  -- sanitize_for_log strips control chars + caps length
     resume_from = _parse_last_event_id(last_event_id)
+    # Phase 2 Step 2.2 — per-subscriber queue. ``event_queue`` now
+    # materialises a NEW queue on every call (multi-tab multicast). The
+    # generator MUST detach the queue on close (try/finally below) so a
+    # dropped consumer doesn't leak its queue into the observer fan-out.
     queue = store.event_queue(scan_id)
     # Hot-replay of the running scan's history is already enqueued by the
     # ``event_queue`` call above; nothing extra to do for the live case.
     # If the scan is no longer running and we have no buffered events
     # either, fall back to the on-disk JSONL. We yield each event then a
     # synthetic terminator if the disk replay didn't include one.
-    if not store.is_running(scan_id) and queue.empty():
-        on_disk = store.replay_events_from_disk(scan_id)
-        seen_done = False
-        for payload in on_disk:
-            # Phase 2 Step 2.1 — Last-Event-ID resume filter. Skip any
-            # JSONL line whose top-level ``seq`` is <= the resume cursor.
-            if resume_from is not None:
-                seq_val = payload.get("seq")
-                if isinstance(seq_val, int) and seq_val <= resume_from:
-                    if payload.get("kind") == "scan_done":
-                        seen_done = True
-                    continue
-            yield format_sse_event(payload.get("kind", "agent_progress"), payload)
-            if payload.get("kind") == "scan_done":
-                seen_done = True
-        if not seen_done:
-            yield format_sse_event(
-                "scan_done",
-                {
-                    "kind": "scan_done",
-                    "agent": None,
-                    "asi": None,
-                    "provisional_aivss": None,
-                    "decision": None,
-                    "timestamp": "",
-                    "payload": {"replay": True},
-                },
-            )
-        return
+    try:
+        if not store.is_running(scan_id) and queue.empty():
+            on_disk = store.replay_events_from_disk(scan_id)
+            seen_done = False
+            for payload in on_disk:
+                # Phase 2 Step 2.1 — Last-Event-ID resume filter. Skip any
+                # JSONL line whose top-level ``seq`` is <= the resume cursor.
+                if resume_from is not None:
+                    seq_val = payload.get("seq")
+                    if isinstance(seq_val, int) and seq_val <= resume_from:
+                        if payload.get("kind") == "scan_done":
+                            seen_done = True
+                        continue
+                yield format_sse_event(payload.get("kind", "agent_progress"), payload)
+                if payload.get("kind") == "scan_done":
+                    seen_done = True
+            if not seen_done:
+                yield format_sse_event(
+                    "scan_done",
+                    {
+                        "kind": "scan_done",
+                        "agent": None,
+                        "asi": None,
+                        "provisional_aivss": None,
+                        "decision": None,
+                        "timestamp": "",
+                        "payload": {"replay": True},
+                    },
+                )
+            return
 
-    seconds_since_event = 0.0
-    seconds_since_heartbeat = 0.0
-    while True:
-        try:
-            event: SwarmEvent = await asyncio.wait_for(
-                queue.get(), timeout=_QUEUE_POLL_INTERVAL_SECONDS
-            )
-        except TimeoutError:
-            seconds_since_event += _QUEUE_POLL_INTERVAL_SECONDS
-            seconds_since_heartbeat += _QUEUE_POLL_INTERVAL_SECONDS
-            if seconds_since_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
-                # SSE data heartbeat — EventSource ``onmessage`` (or a
-                # typed ``heartbeat`` listener) fires on this so the
-                # client freshness dot can refresh ``lastEventAt`` on
-                # healthy quiet phases. Critic patch G14/P5.
-                yield format_sse_event("heartbeat", {"now": time.time()})
-                seconds_since_heartbeat = 0.0
-            if seconds_since_event >= _KEEPALIVE_INTERVAL_SECONDS:
-                # SSE comment-only keepalive (line starting with ``:``).
-                # Kept for HTTP intermediaries that drop idle connections;
-                # the browser EventSource does NOT fire ``onmessage`` on
-                # these so it cannot drive the freshness clock.
-                yield ": keepalive\n\n"
-                seconds_since_event = 0.0
-            continue
         seconds_since_event = 0.0
         seconds_since_heartbeat = 0.0
-        # Phase 2 Step 2.1 — Last-Event-ID resume filter on the live
-        # queue drain. The buffered-replay path in ``event_queue`` does
-        # NOT pre-filter (it's a generic queue plumber), so we filter
-        # here so a reconnecting client never sees a duplicate event.
-        if resume_from is not None and event.seq is not None and event.seq <= resume_from:
-            # Still respect the terminal — a scan_done filtered out
-            # would otherwise leave the generator looping forever.
+        while True:
+            try:
+                event: SwarmEvent = await asyncio.wait_for(
+                    queue.get(), timeout=_QUEUE_POLL_INTERVAL_SECONDS
+                )
+            except TimeoutError:
+                seconds_since_event += _QUEUE_POLL_INTERVAL_SECONDS
+                seconds_since_heartbeat += _QUEUE_POLL_INTERVAL_SECONDS
+                if seconds_since_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                    # SSE data heartbeat — EventSource ``onmessage`` (or a
+                    # typed ``heartbeat`` listener) fires on this so the
+                    # client freshness dot can refresh ``lastEventAt`` on
+                    # healthy quiet phases. Critic patch G14/P5.
+                    yield format_sse_event("heartbeat", {"now": time.time()})
+                    seconds_since_heartbeat = 0.0
+                if seconds_since_event >= _KEEPALIVE_INTERVAL_SECONDS:
+                    # SSE comment-only keepalive (line starting with ``:``).
+                    # Kept for HTTP intermediaries that drop idle connections;
+                    # the browser EventSource does NOT fire ``onmessage`` on
+                    # these so it cannot drive the freshness clock.
+                    yield ": keepalive\n\n"
+                    seconds_since_event = 0.0
+                continue
+            seconds_since_event = 0.0
+            seconds_since_heartbeat = 0.0
+            # Phase 2 Step 2.1 — Last-Event-ID resume filter on the live
+            # queue drain. The buffered-replay path in ``event_queue`` does
+            # NOT pre-filter (it's a generic queue plumber), so we filter
+            # here so a reconnecting client never sees a duplicate event.
+            if resume_from is not None and event.seq is not None and event.seq <= resume_from:
+                # Still respect the terminal — a scan_done filtered out
+                # would otherwise leave the generator looping forever.
+                if event.kind == "scan_done":
+                    return
+                continue
+            payload = event_to_payload(event)
+            yield format_sse_event(event.kind, payload)
             if event.kind == "scan_done":
                 return
-            continue
-        payload = event_to_payload(event)
-        yield format_sse_event(event.kind, payload)
-        if event.kind == "scan_done":
-            return
+    finally:
+        # Phase 2 Step 2.2 — explicit cleanup: detach our queue from the
+        # store's subscriber list so the observer fan-out doesn't keep
+        # feeding events into an abandoned queue (memory leak prevention).
+        # Idempotent on the store side; safe even if the stream never
+        # ran (e.g. early-return via the disk-replay path above).
+        store.remove_subscriber(scan_id, queue)
