@@ -395,6 +395,16 @@ def _findings_page(
                 # the Findings table can render an em-dash when no probe
                 # correlation exists (static / recon-derived findings).
                 "agent_name": "",
+                # QA-054 — turn-aggregation defaults. Populated in-place by
+                # ``_attach_evidence_to_findings`` once the matched evidence
+                # list is known. Callers that skip the attach step (e.g.
+                # narrow unit tests on _findings_page in isolation) still
+                # see safe empty defaults.
+                "turn_children": [],
+                "turn_total": 0,
+                "turn_failed": 0,
+                "is_multi_turn": False,
+                "turn_progress_label": "",
             }
         )
     pagination: dict[str, Any] = {
@@ -414,6 +424,60 @@ def _findings_page(
 # finding and surface ``evidence_truncated`` so the template can say
 # "10 of N evidence event(s) shown".
 _FINDING_EVIDENCE_CAP: Final[int] = 10
+
+# QA-054 — preview cap for the per-turn child rows. Each child row shows the
+# leading characters of the prompt and target_response so the operator can
+# eyeball which turn flipped the verdict without opening the slide-over. The
+# full text is still available via the slide-over (which fetches the verbatim
+# probe sheet from ``/scan/<id>/probe``).
+_FINDING_CHILD_PREVIEW_CHARS: Final[int] = 140
+
+
+def _truncate_for_preview(value: Any) -> str:
+    """Return a single-line preview prefix of ``value`` for child-row display.
+
+    Collapses whitespace runs to single spaces (so a multi-line prompt fits
+    one table row), trims to :data:`_FINDING_CHILD_PREVIEW_CHARS`, and appends
+    a ``…`` ellipsis when truncation occurred. Non-string inputs are coerced
+    via ``str()`` so the helper never raises on unexpected types.
+    """
+    if value is None:
+        return ""
+    text = " ".join(str(value).split())
+    if len(text) <= _FINDING_CHILD_PREVIEW_CHARS:
+        return text
+    return text[:_FINDING_CHILD_PREVIEW_CHARS].rstrip() + "…"
+
+
+def _verdict_label(verdict: str) -> str:
+    """Map an internal verdict enum value to its operator-facing label.
+
+    Honours ``feedback_no_raw_enum_in_ui`` — the table never shows
+    ``fail`` / ``pass`` / ``inconclusive`` verbatim; the operator sees
+    ``EXPLOITED`` / ``DEFENDED`` / ``INCONCLUSIVE`` / ``PENDING``.
+    """
+    if verdict == "fail":
+        return "EXPLOITED"
+    if verdict == "pass":
+        return "DEFENDED"
+    if verdict == "inconclusive":
+        return "INCONCLUSIVE"
+    return "PENDING"
+
+
+def _confidence_pct(value: Any) -> str:
+    """Format a 0.0-1.0 confidence score as a ``73%`` string for child rows.
+
+    Returns an empty string when the value is missing or unparseable so the
+    template can render an em-dash via its standard fallback.
+    """
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if pct <= 0.0:
+        return ""
+    return f"{round(pct * 100)}%"
 
 
 def _attach_evidence_to_findings(
@@ -457,6 +521,13 @@ def _attach_evidence_to_findings(
             # ``_findings_page``) so callers / templates can rely on the
             # key existing even when no probes correlate.
             item.setdefault("agent_name", "")
+            # QA-054 — turn-aggregation defaults so the template can branch
+            # on ``is_multi_turn`` without worrying about KeyError.
+            item.setdefault("turn_children", [])
+            item.setdefault("turn_total", 0)
+            item.setdefault("turn_failed", 0)
+            item.setdefault("is_multi_turn", False)
+            item.setdefault("turn_progress_label", "")
         return
     # Pre-index probes_list by probe_id and by (agent, asi_category) so each
     # finding is O(1) lookup instead of an O(P) scan. probes_list is already
@@ -513,6 +584,45 @@ def _attach_evidence_to_findings(
             first_agent = str(capped[0].get("agent") or "").strip()
             if first_agent:
                 item["agent_name"] = first_agent
+        # QA-054 — multi-turn aggregation. The Finding row already represents
+        # one rolled-up attack thread (one probe_id / agent / scenario); its
+        # per-turn detail is the matched evidence list we just attached. We
+        # surface that detail as inline child rows so the operator can scan
+        # which turn flipped the verdict without opening the slide-over.
+        #
+        # ``turn_children`` is the canonical child-row payload (prompt /
+        # response previews + verdict + confidence + turn number). The
+        # template renders one ``<tr class="…__child">`` per entry below
+        # the parent row, hidden by default and revealed by chevron click.
+        # ``turn_total`` and ``turn_failed`` drive the "N of M turns failed"
+        # progress label so a critical 3-turn run reads ``1 of 3 turns
+        # failed`` at a glance. ``is_multi_turn`` is the back-compat flag —
+        # single-turn probes render exactly as before (no chevron, no
+        # children) so the existing QA-031 / QA-051 / QA-053 tests stay
+        # green without per-test snapshot updates.
+        children: list[dict[str, Any]] = []
+        for ev in capped:
+            verdict = str(ev.get("verdict") or "")
+            verdict_label = _verdict_label(verdict)
+            children.append(
+                {
+                    "turn_no": int(ev.get("turn", 0) or 0),
+                    "prompt_preview": _truncate_for_preview(ev.get("prompt")),
+                    "response_preview": _truncate_for_preview(ev.get("target_response")),
+                    "verdict": verdict or "unknown",
+                    "verdict_label": verdict_label,
+                    "confidence_pct": _confidence_pct(ev.get("confidence")),
+                }
+            )
+        turn_total = len(children)
+        turn_failed = sum(1 for c in children if c["verdict"] == "fail")
+        item["turn_children"] = children
+        item["turn_total"] = turn_total
+        item["turn_failed"] = turn_failed
+        item["is_multi_turn"] = turn_total > 1
+        item["turn_progress_label"] = (
+            f"{turn_failed} of {turn_total} turns failed" if turn_total > 1 else ""
+        )
 
 
 def _asi_dot_states(scan: Scan | None, findings_by_asi: dict[str, dict[str, int]]) -> list[str]:

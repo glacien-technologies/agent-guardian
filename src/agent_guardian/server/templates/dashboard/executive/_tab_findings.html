@@ -156,6 +156,12 @@
              aria-label="Findings — sorted by severity then ASI">
         <thead class="exec-findings-table__head">
           <tr>
+            {# QA-054 — chevron toggle column. Holds the expand/collapse
+               control for multi-turn rows; single-turn rows leave the
+               cell empty so the table reads identically to the QA-031
+               4-column layout. Empty TH avoids a screen-reader ghost
+               header — ``aria-label`` is set in the row cells below. #}
+            <th scope="col" class="exec-findings-table__col--toggle" aria-label="Expand turns"></th>
             <th scope="col" class="exec-findings-table__col--sev">Severity</th>
             <th scope="col" class="exec-findings-table__col--asi">ASI</th>
             <th scope="col" class="exec-findings-table__col--category">Category</th>
@@ -190,20 +196,49 @@
                    Fall back to em-dash when no probe correlation exists
                    (e.g. static findings). QA-052 dropped the Timestamp
                    column — the slide-over surfaces the exact time
-                   inline when an operator clicks through. #}
+                   inline when an operator clicks through.
+
+                   QA-054 — when ``f.is_multi_turn`` is true the parent
+                   row gets a chevron toggle and ``data-parent="<id>"``
+                   attribute; per-turn ``<tr class="…__child">`` rows
+                   follow, marked ``data-child-of="<id>"`` and hidden by
+                   default. Single-turn findings render exactly as
+                   before so the existing QA-031 / QA-051 / QA-053
+                   markup contracts and snapshot tests stay green. #}
                 {% set _ev_first = (f.evidence | first) if f.evidence else None %}
                 {% set _turn_label = (_ev_first.turn if _ev_first and _ev_first.turn else None) %}
-                <tr class="exec-findings-table__row"
+                <tr class="exec-findings-table__row{% if f.is_multi_turn %} exec-findings-table__row--has-children{% endif %}"
                     data-source="finding"
                     data-finding-id="{{ f.id }}"
                     data-severity="{{ f.severity_class }}"
                     data-asi="{{ f.asi_code }}"
                     data-agent="{{ f.agent_name or '' }}"
                     data-probe="{{ f.probe_id or '' }}"
+                    {% if f.is_multi_turn %}data-parent="{{ f.id }}"
+                    data-turn-total="{{ f.turn_total }}"
+                    data-turn-failed="{{ f.turn_failed }}"{% endif %}
                     tabindex="0"
                     role="button"
                     aria-controls="exec-finding-slideover"
-                    aria-label="Open finding {{ f.id }} ({{ f.severity_label }} severity)">
+                    aria-label="Open finding {{ f.id }} ({{ f.severity_label }} severity){% if f.is_multi_turn %} — {{ f.turn_progress_label }}{% endif %}">
+                  <td class="exec-findings-table__cell exec-findings-table__cell--toggle">
+                    {% if f.is_multi_turn %}
+                      {# Chevron toggle. Pure-CSS rotation via the
+                         ``aria-expanded`` attribute (JS flips it on
+                         click); ``data-action="toggle-turns"`` lets the
+                         event handler stop propagation so the chevron
+                         click doesn't also open the slide-over. #}
+                      <button type="button"
+                              class="exec-findings-table__toggle"
+                              data-action="toggle-turns"
+                              data-target="{{ f.id }}"
+                              aria-expanded="false"
+                              aria-controls="exec-finding-turns-{{ f.id }}"
+                              aria-label="Show {{ f.turn_total }} turns for finding {{ f.id }}">
+                        <span class="exec-findings-table__chevron" aria-hidden="true">&#9656;</span>
+                      </button>
+                    {% endif %}
+                  </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--sev">
                     <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
                           aria-label="{{ f.severity_label }} severity">
@@ -230,11 +265,60 @@
                   <td class="exec-findings-table__cell exec-findings-table__cell--summary"
                       title="{{ f.summary }}">
                     <span class="exec-findings-table__summary-text">{{ f.summary }}</span>
+                    {% if f.is_multi_turn %}
+                      <span class="exec-findings-table__turn-progress"
+                            data-turn-progress
+                            aria-label="Turn progress">{{ f.turn_progress_label }}</span>
+                    {% endif %}
                   </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--turn">
-                    {% if _turn_label %}<code>{{ _turn_label }}</code>{% else %}<span class="exec-findings-table__muted">&mdash;</span>{% endif %}
+                    {% if f.is_multi_turn %}
+                      <code>{{ f.turn_failed }}/{{ f.turn_total }}</code>
+                    {% elif _turn_label %}
+                      <code>{{ _turn_label }}</code>
+                    {% else %}
+                      <span class="exec-findings-table__muted">&mdash;</span>
+                    {% endif %}
                   </td>
                 </tr>
+                {% if f.is_multi_turn %}
+                  {% for _child in f.turn_children %}
+                    <tr class="exec-findings-table__row exec-findings-table__row--child is-collapsed"
+                        id="{% if loop.first %}exec-finding-turns-{{ f.id }}{% endif %}"
+                        data-source="finding-child"
+                        data-child-of="{{ f.id }}"
+                        data-severity="{{ f.severity_class }}"
+                        data-asi="{{ f.asi_code }}"
+                        data-agent="{{ f.agent_name or '' }}"
+                        data-probe="{{ f.probe_id or '' }}"
+                        data-verdict="{{ _child.verdict }}"
+                        hidden>
+                      <td class="exec-findings-table__cell exec-findings-table__cell--toggle"></td>
+                      <td class="exec-findings-table__cell exec-findings-table__cell--child-turn"
+                          colspan="2">
+                        <span class="exec-findings-table__child-turn-label">turn {{ _child.turn_no }}</span>
+                      </td>
+                      <td class="exec-findings-table__cell exec-findings-table__cell--child-prompt"
+                          colspan="2"
+                          title="{{ _child.prompt_preview }}">
+                        <span class="exec-findings-table__child-label">prompt</span>
+                        <span class="exec-findings-table__child-text">{{ _child.prompt_preview or '—' }}</span>
+                      </td>
+                      <td class="exec-findings-table__cell exec-findings-table__cell--child-response"
+                          colspan="2"
+                          title="{{ _child.response_preview }}">
+                        <span class="exec-findings-table__child-label">response</span>
+                        <span class="exec-findings-table__child-text">{{ _child.response_preview or '—' }}</span>
+                      </td>
+                      <td class="exec-findings-table__cell exec-findings-table__cell--child-verdict">
+                        <span class="exec-verdict-pill exec-verdict-pill--{{ _child.verdict }}">{{ _child.verdict_label }}</span>
+                        {% if _child.confidence_pct %}
+                          <span class="exec-findings-table__child-conf">{{ _child.confidence_pct }}</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% endif %}
               {% endfor %}
             </tbody>
           {% endif %}

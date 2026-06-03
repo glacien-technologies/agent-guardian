@@ -422,7 +422,20 @@
     var table = document.getElementById("exec-findings-table");
     if (!toolbar || !table) { return; }
     var chips = toolbar.querySelectorAll(".exec-findings-filter__chip");
-    var rows = table.querySelectorAll(".exec-findings-table__row");
+    // QA-054 — only PARENT rows count toward the Showing-N-of-M counter and
+    // are subject to chip filtering. Child rows always inherit their
+    // parent's visibility; we re-apply child visibility from the parent's
+    // current ``aria-expanded`` state at the end of ``applyFilters``.
+    var allRowNodes = table.querySelectorAll(".exec-findings-table__row");
+    var rows = [];
+    var childRows = [];
+    for (var ri = 0; ri < allRowNodes.length; ri++) {
+      if (allRowNodes[ri].classList.contains("exec-findings-table__row--child")) {
+        childRows.push(allRowNodes[ri]);
+      } else {
+        rows.push(allRowNodes[ri]);
+      }
+    }
     var counter = document.getElementById("exec-findings-filter-counter");
     var visibleSlot = counter
       ? counter.querySelector("[data-counter-visible]")
@@ -464,6 +477,34 @@
           row.classList.add("is-filtered-out");
         }
       }
+      // QA-054 — propagate parent filter state to children. A filtered-out
+      // parent always hides its children. An expanded, visible parent
+      // reveals its children; a collapsed, visible parent keeps them
+      // hidden. This keeps the expand/collapse state independent of the
+      // filter chips — toggling a chip never collapses an already-open
+      // parent.
+      for (var ci = 0; ci < childRows.length; ci++) {
+        var child = childRows[ci];
+        var parentId = child.getAttribute("data-child-of");
+        var parent = parentId
+          ? table.querySelector(
+            '.exec-findings-table__row[data-finding-id="' + parentId + '"]'
+          )
+          : null;
+        if (!parent || parent.classList.contains("is-filtered-out")) {
+          child.classList.add("is-filtered-out");
+          child.hidden = true;
+          continue;
+        }
+        child.classList.remove("is-filtered-out");
+        var expanded = parent.getAttribute("data-expanded") === "true";
+        child.hidden = !expanded;
+        if (expanded) {
+          child.classList.remove("is-collapsed");
+        } else {
+          child.classList.add("is-collapsed");
+        }
+      }
       if (visibleSlot) { visibleSlot.textContent = String(visible); }
       if (totalSlot) { totalSlot.textContent = String(rows.length); }
     }
@@ -482,10 +523,68 @@
 
     if (typeof window !== "undefined") {
       window.__ag_executive_findings_filters = "ag.dashboard.executive.findings.filters";
+      // Expose ``applyFilters`` for the QA-054 chevron toggle handler so a
+      // child reveal triggered by chevron click re-runs the parent-visible
+      // gate (otherwise the child would un-hide even when a chip filter
+      // currently hides the parent).
+      window.__ag_executive_findings_apply = applyFilters;
     }
   }
 
-  // ---- 7. Boot ---------------------------------------------------------
+  // ---- 7. Multi-turn expand/collapse chevrons (QA-054) ------------------
+  /**
+   * Wire chevron toggles on multi-turn finding rows. Click flips
+   * ``aria-expanded`` on the toggle button and ``data-expanded`` on the
+   * parent ``<tr>``; child rows below the parent are revealed via the
+   * filter pipeline (so a parent hidden by a chip filter never reveals
+   * its children, even when previously expanded).
+   *
+   * Pure client-side — no server round-trip. ``stopPropagation`` on the
+   * click event prevents the chevron from also opening the slide-over.
+   *
+   * Marker symbol: ``ag.dashboard.executive.findings.turn_toggle``.
+   */
+  function bootTurnToggles() {
+    var table = document.getElementById("exec-findings-table");
+    if (!table) { return; }
+    var toggles = table.querySelectorAll('[data-action="toggle-turns"]');
+    for (var i = 0; i < toggles.length; i++) {
+      (function (btn) {
+        btn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          var parentId = btn.getAttribute("data-target");
+          if (!parentId) { return; }
+          var parent = table.querySelector(
+            '.exec-findings-table__row[data-finding-id="' + parentId + '"]'
+          );
+          if (!parent) { return; }
+          var isOpen = btn.getAttribute("aria-expanded") === "true";
+          btn.setAttribute("aria-expanded", isOpen ? "false" : "true");
+          parent.setAttribute("data-expanded", isOpen ? "false" : "true");
+          // Re-run the filter pipeline; it owns child visibility so the
+          // expand state composes correctly with any active chip filters.
+          if (typeof window !== "undefined" &&
+              typeof window.__ag_executive_findings_apply === "function") {
+            window.__ag_executive_findings_apply();
+          }
+        });
+        btn.addEventListener("keydown", function (ev) {
+          // ``Enter`` / ``Space`` already trigger the native button click,
+          // but we suppress propagation here too so the row's
+          // Enter-to-open-slide-over handler doesn't double-fire.
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.stopPropagation();
+          }
+        });
+      })(toggles[i]);
+    }
+    if (typeof window !== "undefined") {
+      window.__ag_executive_findings_turn_toggle =
+        "ag.dashboard.executive.findings.turn_toggle";
+    }
+  }
+
+  // ---- 8. Boot ---------------------------------------------------------
   function boot() {
     var payloads = {
       finding: indexBy(loadPayload("exec-findings-payload"), "id"),
@@ -497,6 +596,7 @@
       attach(roots[i], payloads);
     }
     bootFindingsFilters();
+    bootTurnToggles();
   }
 
   if (document.readyState === "loading") {
