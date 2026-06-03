@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from agent_guardian.contract.jsonschema_export import (
     CONTRACT_SCHEMA_ID,
@@ -26,7 +27,7 @@ def test_schema_has_id() -> None:
 
 def test_schema_declares_dialect_and_title() -> None:
     schema = contract_json_schema()
-    assert "json-schema.org" in schema["$schema"]
+    assert urlparse(schema["$schema"]).hostname == "json-schema.org"
     assert schema["title"]
 
 

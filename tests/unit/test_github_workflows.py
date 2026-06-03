@@ -94,7 +94,10 @@ def test_docker_publish_uses_buildx_multi_arch() -> None:
 def test_docker_publish_tags_ref_and_latest() -> None:
     data = _load_workflow("docker-publish.yml")
     steps_yaml = yaml.safe_dump(data["jobs"]["publish"]["steps"])
-    assert "ghcr.io/" in steps_yaml
+    # `steps_yaml` is a YAML text dump of GitHub-Actions step definitions, not
+    # a URL — these assertions are deliberate substring/fragment matches against
+    # workflow content, not host-sanitisation checks.
+    assert "ghcr.io/" in steps_yaml  # lgtm[py/incomplete-url-substring-sanitization]
     assert "github.ref_name" in steps_yaml
     assert ":latest" in steps_yaml
 

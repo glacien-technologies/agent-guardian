@@ -128,7 +128,9 @@ def test_unknown_gemini_with_vertex_available_suggests_vertex_prefix() -> None:
                     }
                 },
             )
-        if "aiplatform.googleapis.com" in host:
+        # Match Vertex AI regional endpoints — exactly `<region>-aiplatform.googleapis.com`
+        # — without permitting an arbitrary-prefix substring match.
+        if host.endswith("-aiplatform.googleapis.com") or host == "aiplatform.googleapis.com":
             return httpx.Response(200, json={"name": "publishers/google/models/gemini-3.1-flash"})
         return httpx.Response(500)  # pragma: no cover
 
