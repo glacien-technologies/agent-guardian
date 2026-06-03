@@ -61,7 +61,7 @@ AgentGuardian is an open red-teaming framework for LLM agents. There are six on-
     ```
   </Step>
   <Step title="Run the full local gate" icon="check">
-    Mirrors the CI gate that runs on every PR across Python 3.10, 3.11, 3.12, and 3.13.
+    Mirrors the CI gate that runs on every PR across Python 3.11, 3.12, and 3.13 (3.14 not yet supported).
 
     ```bash
     uv run pytest
@@ -246,8 +246,8 @@ Every PR must clear these gates before merge:
 | **Branch name** | Uses the matching prefix (`feat/...`, `fix/...`, `docs/...`, etc.) | Convention; reviewers enforce |
 | **Lint** | `uv run ruff check .` exits zero | `pre-commit` hook + CI |
 | **Format** | `uv run ruff format --check .` exits zero | `pre-commit` ruff-format hook |
-| **Types** | `uv run mypy src/` exits zero | `pre-commit` mypy hook + CI on Py 3.10–3.13 |
-| **Tests** | `uv run pytest` exits zero | CI on Py 3.10, 3.11, 3.12, 3.13 |
+| **Types** | `uv run mypy src/` exits zero | `pre-commit` mypy hook + CI on Py 3.11–3.13 |
+| **Tests** | `uv run pytest` exits zero | CI on Py 3.11, 3.12, 3.13 |
 | **No secrets / large files** | `detect-private-key` + `check-added-large-files` (≤ 500 KB) pass | `pre-commit` hooks |
 
 ### DCO sign-off

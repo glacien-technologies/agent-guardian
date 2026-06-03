@@ -23,8 +23,27 @@ transports, bundled demo agents) are opt-in below.
 | `git clone && uv sync --all-extras`        | You're contributing — every extra installed, dev tooling, pre-commit hooks.      |
 
 <Note>
-  Python **3.10, 3.11, 3.12, 3.13** are supported. The wheel is pure Python;
-  no compilation step is required for the base install.
+  Python **3.11, 3.12, 3.13** are supported (Python 3.14 is not yet supported —
+  `pyproject.toml` pins `requires-python = ">=3.11,<3.14"`). The wheel is pure
+  Python; no compilation step is required for the base install.
+</Note>
+
+<Note>
+  **If your default `python3` is 3.14+** (true on a current macOS box), the
+  plain `pip install agent-guardian` will fail with `No matching distribution
+  found`. Install Python 3.13 first with [pyenv](https://github.com/pyenv/pyenv)
+  and pin it for this directory:
+
+  ```bash
+  pyenv install 3.13
+  pyenv local 3.13
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install agent-guardian
+  ```
+
+  The pinned-3.11 Docker image and the `agentguardian-scan` GitHub Action
+  (default 3.12) consumer paths are insulated from this — only ad-hoc
+  `pip install` against the system Python is affected.
 </Note>
 
 ## Install

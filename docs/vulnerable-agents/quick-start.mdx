@@ -6,7 +6,7 @@ description: "docker compose up, then scan. Expect a real finding in under five 
 ## Prerequisites
 
 - Docker 20.10+ and Docker Compose v2.
-- Python 3.11+ for `agent-guardian` (or use the docker image — see below).
+- Python 3.11–3.13 for `agent-guardian` (3.14 not yet supported) — or use the docker image, see below.
 
 You do **not** need a Gemini key. The repo ships with a stub adapter that returns deterministic vulnerable responses when `GEMINI_API_KEY` is unset.
 
