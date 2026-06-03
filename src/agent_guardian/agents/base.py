@@ -471,6 +471,18 @@ class AsiAgent(ABC):
         # the attack loop. ``None`` (the default) keeps legacy callers
         # silent.
         self.on_reflection: Callable[[Mapping[str, Any]], None] | None = on_reflection
+        # SSE Phase 2 Step 2.3 — per-turn ``agent_progress`` sink. Injected
+        # by SwarmCommander via attribute assignment right before
+        # ``agent.run(...)`` (mirrors the ``_cancel_event`` pattern so the
+        # public constructor signature stays stable). Receives a single
+        # :class:`SwarmEvent` of kind ``agent_progress`` at the TOP of
+        # each turn, BEFORE the strategy LLM call, so the dashboard's
+        # phase-spine sub-bar reflects "now starting turn N" rather than
+        # "completed turn N". ``None`` (the default) keeps legacy callers
+        # silent — failures are swallowed so a sick observer never breaks
+        # the attack loop. See designs/sse-flow-and-live-ui.md "Phase 2
+        # decisions (resolved 2026-06-03)" item 3.
+        self._observer: Callable[[Any], None] | None = None
 
     @property
     def effective_target_findings(self) -> int:
@@ -869,6 +881,11 @@ class AsiAgent(ABC):
         # for this run so we don't churn JSONL when a strategy revisits the
         # same seed.
         seeds_announced: set[str] = set()
+        # SSE Phase 2 Step 2.3 — current probe id for the agent_progress
+        # producer. Starts as ``None`` (first turn has no prior probe);
+        # updated after each ``strategy.generate_next`` result so the next
+        # turn's progress event names the probe the previous turn fired.
+        current_probe_id: str | None = None
 
         while True:
             # Budget / wall-time pre-check before the strategy LLM call.
@@ -907,6 +924,17 @@ class AsiAgent(ABC):
                 )
                 break
 
+            # SSE Phase 2 Step 2.3 — emit ``agent_progress`` at the TOP of
+            # the turn (BEFORE the strategy LLM call) so the dashboard's
+            # phase-spine sub-bar reflects "now starting turn N" not
+            # "completed turn N". ``probe_id`` carries the last observed
+            # seed id (None on the first turn) — the renderer fills the
+            # next id when the strategy result lands.
+            self._emit_progress(
+                turn=turns + 1,
+                max_turns=self.budget.max_turns,
+                probe_id=current_probe_id,
+            )
             _LOG.debug(
                 "agent %s turn %d/%d: invoking strategy.generate_next (tokens_left=%d)",
                 agent_name,
@@ -938,6 +966,14 @@ class AsiAgent(ABC):
                 break
 
             assert isinstance(result, NextPrompt)
+            # SSE Phase 2 Step 2.3 — update the rolling probe id so the
+            # NEXT turn's ``agent_progress`` event names the probe THIS
+            # turn dispatched. The seed id is the canonical probe-corpus
+            # provenance the consolidated per-turn INFO log also reads
+            # from ``result.metadata`` below.
+            _seed_id = result.metadata.get("seed_id", "") if result.metadata else ""
+            if _seed_id:
+                current_probe_id = str(_seed_id)
             # Cheap token accounting — ~4 chars per token, both directions.
             est_tokens = max(1, len(result.text) // 4)
             if not self.budget.deduct_tokens(est_tokens):
@@ -1382,6 +1418,65 @@ class AsiAgent(ABC):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _emit_progress(
+        self,
+        *,
+        turn: int,
+        max_turns: int,
+        probe_id: str | None,
+    ) -> None:
+        """Emit one ``agent_progress`` :class:`SwarmEvent` for the current turn.
+
+        SSE Phase 2 Step 2.3 — turns the existing ``"agent_progress"``
+        :data:`agent_guardian.core.swarm.EventKind` literal (declared at
+        ``core/swarm.py:190``) into a real producer. Called from the top
+        of the per-turn loop in :meth:`run`, BEFORE
+        ``strategy.generate_next`` and the target call, so the dashboard's
+        phase-spine sub-bar can advance the moment turn N begins rather
+        than waiting for the ``agent_done`` arrival at the end of the
+        agent's full run.
+
+        The payload contract is locked at four fields per the Phase-2
+        decision in ``designs/sse-flow-and-live-ui.md`` "Phase 2 decisions
+        (resolved 2026-06-03)": ``{agent_name, turn, max_turns, probe_id}``.
+        ``probe_id`` is the LAST observed seed id (i.e. the probe the
+        previous turn dispatched), or ``None`` for the very first turn —
+        the spine renderer treats ``None`` as "starting fresh" and the
+        next bump fills in the id.
+
+        Observer failures are swallowed: a sick observer must never break
+        the attack loop (mirrors :meth:`SwarmCommander._emit` semantics).
+        """
+        observer = self._observer
+        if observer is None:
+            return
+        # Import lazily to avoid a circular dependency at module load
+        # time (swarm.py imports from agents.base via the agent registry).
+        from agent_guardian.core.swarm import SwarmEvent
+
+        try:
+            observer(
+                SwarmEvent(
+                    kind="agent_progress",
+                    timestamp=datetime.now(tz=UTC),
+                    agent=self.name or type(self).__name__,
+                    asi=self.asi_category,
+                    payload={
+                        "agent_name": self.name or type(self).__name__,
+                        "turn": int(turn),
+                        "max_turns": int(max_turns),
+                        "probe_id": probe_id,
+                    },
+                )
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            _LOG.debug(
+                "agent %s: _emit_progress observer raised %s: %s — continuing",
+                self.name or type(self).__name__,
+                type(exc).__name__,
+                exc,
+            )
 
     def _snapshot_tokens(self) -> dict[str, int]:
         """Snapshot per-role token totals for the :class:`AgentReport`.

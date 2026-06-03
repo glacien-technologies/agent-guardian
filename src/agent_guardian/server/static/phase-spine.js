@@ -219,6 +219,87 @@
     advanceSubBar(current, nextCompleted, nextTotal);
   }
 
+  // SSE Phase 2 Step 2.3 — ``agent_progress`` smoothing.
+  //
+  // Producer (agents/base.py) emits one ``agent_progress`` event at the
+  // TOP of every turn, BEFORE the strategy LLM call. The dashboard's
+  // sub-bar otherwise jumps from ``agent_done`` to ``agent_done`` with
+  // long quiet stretches in between (each agent runs multi-turn). We
+  // interpolate the bar BETWEEN those done-arrivals using a fractional
+  // ``turn / max_turns`` ratio, so the operator sees forward motion
+  // every turn rather than a stalled bar followed by a sudden hop.
+  //
+  // The advance is a fraction of ONE agent slot:
+  //
+  //     fractional = agents_completed + (turn / max_turns)
+  //
+  // We feed that into ``advanceSubBar`` with a per-pill flag that
+  // permits fractional widths (the integer count + denominator are
+  // still authoritative for the ``count`` caption — only the fill
+  // width gets the smooth interpolation). The smoothing is CSS-driven
+  // — ``.exec-spine__sub-fill`` carries a width transition, so each
+  // width update animates over ~300ms without us scheduling rAF here.
+  function applyAgentProgress(payload) {
+    if (!payload || typeof payload !== "object") {
+      return;
+    }
+    var spine = $spine();
+    if (!spine) {
+      return;
+    }
+    var current = spine.getAttribute("data-current-phase") || "recon";
+    if (PHASES.indexOf(current) < 0) {
+      return;
+    }
+    var pill = pillFor(current);
+    if (!pill) {
+      return;
+    }
+    var bar = pill.querySelector(".exec-spine__sub");
+    if (!bar) {
+      return;
+    }
+    var turn = Number(payload.turn) || 0;
+    var maxTurns = Number(payload.max_turns) || 0;
+    if (maxTurns <= 0 || turn <= 0) {
+      return;
+    }
+    var localCompleted = readInt(bar, "data-completed");
+    var localTotal = readInt(bar, "data-total");
+    if (localTotal <= 0) {
+      return;
+    }
+    // Fractional slot share: each agent contributes 1/localTotal to the
+    // sub-bar, and within an agent the turn ratio contributes
+    // (turn-1)/maxTurns (the -1 keeps the bar from already showing
+    // "done" at turn 1; the agent_done arrival is what claims the full
+    // slot).
+    var perSlot = 1 / localTotal;
+    var withinSlot = Math.max(0, Math.min(1, (turn - 1) / maxTurns));
+    var fractional = localCompleted / localTotal + perSlot * withinSlot;
+    // Cap at the next full slot — never pre-claim the agent_done bump
+    // (which is integer-only and idempotent against this fractional
+    // width via ``Math.max`` below).
+    var ceiling = (localCompleted + 1) / localTotal;
+    if (fractional > ceiling) {
+      fractional = ceiling;
+    }
+    var pct = Math.min(100, Math.max(0, 100 * fractional));
+    var fill = bar.querySelector(".exec-spine__sub-fill");
+    if (fill) {
+      // Compare against the current width so we never animate the bar
+      // backward (matches the idempotence rule in advanceSubBar).
+      var currentPct = parseFloat(fill.style.width) || 0;
+      if (pct > currentPct) {
+        fill.style.width = pct + "%";
+      }
+    }
+    // The integer ``data-completed`` / count caption are NOT touched —
+    // those remain authoritative for screen readers and the snapshot
+    // reconciler (a fractional aria-valuenow would lie about agent
+    // count). Only the fill width gets the smooth interpolation.
+  }
+
   function reconcileFromSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== "object") {
       return;
@@ -328,6 +409,18 @@
       // agent_start arrival so an operator on a different tab sees
       // probe activity. Severity ``notice`` (informational, not alert).
       bumpBadge("probes", 1, "notice");
+    });
+    // SSE Phase 2 Step 2.3 — smooth sub-bar progress between
+    // agent_done arrivals using per-turn ``agent_progress`` events
+    // (one per turn, emitted at the top of the agent loop before the
+    // strategy LLM call). See ``applyAgentProgress`` above for the
+    // fractional-slot interpolation logic.
+    es.addEventListener("agent_progress", function (evt) {
+      var data = parsePayload(evt);
+      if (!data) {
+        return;
+      }
+      applyAgentProgress(data.payload || data);
     });
     es.addEventListener("agent_done", function (evt) {
       var data = parsePayload(evt);

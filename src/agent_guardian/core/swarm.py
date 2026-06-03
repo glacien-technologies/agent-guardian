@@ -1461,6 +1461,13 @@ class SwarmCommander:
                 # Using attribute injection to match the existing ``_brief``
                 # pattern so we don't widen the public ``run()`` signature.
                 agent._cancel_event = self._cancel_event
+                # SSE Phase 2 Step 2.3 — wire the per-turn ``agent_progress``
+                # producer back to ``SwarmCommander._emit`` so the event
+                # threads through the same observer fan-out (and the
+                # scan_store ``seq`` stamper) as every other SwarmEvent.
+                # Attribute injection mirrors the ``_cancel_event`` pattern
+                # above for the same public-API-stability reason.
+                agent._observer = self._emit
                 report = await agent.run(self.target, self.memory)
         except Exception as exc:
             _LOG.warning("agent %s raised %s: %s", name, type(exc).__name__, exc)
