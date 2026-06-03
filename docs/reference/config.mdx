@@ -69,7 +69,7 @@ target:
 output:
   formats: ["json"]                     # default; list of formats to emit
   redact_pii: true                      # default
-  sign_evidence: true                   # default
+  sign_evidence: true                   # DEPRECATED (no-op) — see note below
   output_dir: null                      # optional; default is alongside the scan
 
 server:
@@ -124,8 +124,27 @@ Default report shape.
 | --- | --- | --- |
 | `formats` | `["json"]` | List of formats to emit. Each must be one of `json`, `sarif`, `junit`, `md`, `pdf`. |
 | `redact_pii` | `true` | Run findings through `PiiRedactor` before emit. |
-| `sign_evidence` | `true` | Attach HMAC-SHA256 + Ed25519 signatures to JSON reports. |
+| `sign_evidence` | `true` | **DEPRECATED in 1.0 — no-op forward-compat placeholder.** See note below. |
 | `output_dir` | `null` | Where reports land. `null` = alongside the scan dir. |
+
+> **As of 1.0:** scan-bundle integrity signing keyed by `output.sign_evidence`
+> is **not yet wired**. The flag is accepted for forward compatibility so
+> existing operator configs don't break on upgrade, but setting it has no
+> effect today — `agent-guardian` emits a `DeprecationWarning` on config load
+> if the field is present.
+>
+> What *is* signed today, unconditionally:
+>
+> - Every `scan.json` ships with Ed25519 + HMAC-SHA256 signatures, verifiable
+>   via `agent-guardian verify <scan.json>`. This happens regardless of the
+>   `sign_evidence` value.
+> - Release artifacts (PyPI wheel / sdist, GitHub release tarball) are signed
+>   via Sigstore + verified-publisher OIDC in CI.
+>
+> Bundle-level Sigstore signing — the path the `sign_evidence` flag was
+> originally intended to gate — is roadmapped for **1.1.0**. The flag will
+> gain effect there, or be removed if the implementation lands without
+> needing operator opt-in.
 
 ## `server`
 
@@ -214,7 +233,7 @@ target:
 output:
   formats: ["sarif", "md"]
   redact_pii: true
-  sign_evidence: true
+  # sign_evidence: true  # omitted — DEPRECATED in 1.0 (no-op); see `output` table above
 ```
 
 Validate it loads cleanly:
