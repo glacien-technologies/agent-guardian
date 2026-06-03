@@ -256,7 +256,7 @@ def test_sandbox_sync_httpx_blocked() -> None:
         recorded = {v.host for v in sb.violations}
         # `recorded` is a set of host strings — `in` is set-membership equality,
         # not URL substring matching, so this is safe.
-        assert "evil.example.com" in recorded  # lgtm[py/incomplete-url-substring-sanitization]
+        assert "evil.example.com" in recorded  # noqa: py/incomplete-url-substring-sanitization  -- set-membership equality on host strings, not URL substring match
 
 
 def test_sandbox_sync_httpx_allowed_via_respx() -> None:

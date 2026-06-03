@@ -97,7 +97,7 @@ def test_docker_publish_tags_ref_and_latest() -> None:
     # `steps_yaml` is a YAML text dump of GitHub-Actions step definitions, not
     # a URL — these assertions are deliberate substring/fragment matches against
     # workflow content, not host-sanitisation checks.
-    assert "ghcr.io/" in steps_yaml  # lgtm[py/incomplete-url-substring-sanitization]
+    assert "ghcr.io/" in steps_yaml  # noqa: py/incomplete-url-substring-sanitization  -- substring assertion on YAML text, not URL host check
     assert "github.ref_name" in steps_yaml
     assert ":latest" in steps_yaml
 

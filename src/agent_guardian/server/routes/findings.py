@@ -33,7 +33,7 @@ async def findings_view(request: Request, scan_id: str, asi: str | None = None) 
         try:
             asi_filter = AsiCategory(asi)
         except ValueError as exc:
-            _LOG.warning("findings view: invalid ASI filter %r (%s)", sanitize_for_log(asi), exc)
+            _LOG.warning("findings view: invalid ASI filter %r (%s)", sanitize_for_log(asi), exc)  # noqa: py/log-injection  -- asi sanitized via sanitize_for_log
             raise HTTPException(status_code=400, detail=f"unknown ASI: {asi}") from exc
 
     findings = []

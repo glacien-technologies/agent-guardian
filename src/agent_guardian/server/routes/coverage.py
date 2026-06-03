@@ -538,7 +538,7 @@ def _filter_findings(
             target = Severity(severity.lower())
             out = [f for f in out if f.severity is target]
         except ValueError as exc:
-            _LOG.debug(
+            _LOG.debug(  # noqa: py/log-injection  -- severity sanitized via sanitize_for_log
                 "coverage filter: ignoring invalid severity %r (%s) — showing all severities",
                 sanitize_for_log(severity),
                 exc,
@@ -548,7 +548,7 @@ def _filter_findings(
             asi_target = AsiCategory(asi)
             out = [f for f in out if f.asi is asi_target]
         except ValueError as exc:
-            _LOG.debug(
+            _LOG.debug(  # noqa: py/log-injection  -- asi sanitized via sanitize_for_log
                 "coverage filter: ignoring invalid ASI %r (%s) — showing all categories",
                 sanitize_for_log(asi),
                 exc,
@@ -702,7 +702,7 @@ async def coverage_view(
         plv = scan.probe_library_version
         probe_library_label = PROBE_CORPUS_VERSION if "placeholder" in plv else plv
 
-    _LOG.debug(
+    _LOG.debug(  # noqa: py/log-injection  -- scan_id/sort/sev_active/asi all sanitized via sanitize_for_log
         "coverage view: scan_id=%s aivss=%d findings=%d/%d page=%d/%d sort=%s sev=%s asi=%s",
         sanitize_for_log(scan_id),
         aivss,

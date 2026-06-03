@@ -743,7 +743,7 @@ class ScanStore:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                _LOG.warning(
+                _LOG.warning(  # noqa: py/log-injection  -- sanitize_for_log sanitizes scan_id; event.kind is a server-controlled enum
                     "scan_store: SSE replay queue full for %s — dropping %s event",
                     sanitize_for_log(scan_id),
                     event.kind,
@@ -773,7 +773,7 @@ class ScanStore:
                 try:
                     out.append(json.loads(line))
                 except json.JSONDecodeError as exc:
-                    _LOG.warning(
+                    _LOG.warning(  # noqa: py/log-injection  -- sanitize_for_log strips control chars from scan_id; line_no is int; exc is server-internal
                         "scan_store: malformed events.jsonl line %d for scan %s (%s)",
                         line_no,
                         sanitize_for_log(scan_id),

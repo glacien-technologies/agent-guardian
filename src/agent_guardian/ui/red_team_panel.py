@@ -26,6 +26,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+# Pulled from a neutral leaf module (``ui._panel_render``) rather than
+# ``ui.dashboard`` so the static import graph stays acyclic — see the
+# module docstring on ``_panel_render`` for the CodeQL background.
+from agent_guardian.ui._panel_render import _render_agent_table, _render_progress
 from agent_guardian.ui.state import AGENT_ROWS
 
 if TYPE_CHECKING:
@@ -112,11 +116,9 @@ def _active_panel(state: DashboardState) -> Panel:
         ("never produce findings by design", "brand.dim"),
         (".", "brand.dim"),
     )
-    # Lazy import of the dashboard's private render helpers — keeps
-    # ``ui.red_team_panel`` decoupled from ``ui.dashboard`` at module load
-    # time, which is what breaks the import cycle CodeQL used to flag.
-    from agent_guardian.ui.dashboard import _render_agent_table, _render_progress
-
+    # Render helpers come from the neutral ``_panel_render`` leaf module,
+    # so this module no longer has any static or runtime dependency on
+    # ``ui.dashboard`` — the CodeQL-flagged static import cycle is gone.
     parts: list[RenderableType] = [legend, _render_agent_table(state)]
     progress = _render_progress(state)
     if progress is not None:

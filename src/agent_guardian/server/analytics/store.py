@@ -111,7 +111,7 @@ class EventStore:
         rejected by the clock-skew filter."""
         event = envelope.event
         if not isinstance(event, ScanCompletedEvent):
-            _LOG.debug(
+            _LOG.debug(  # noqa: py/log-injection  -- event_type sanitized via sanitize_for_log
                 "analytics store: ignoring event_type=%s (v1.0 only persists scan_completed)",
                 sanitize_for_log(event.event_type),
             )

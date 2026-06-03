@@ -77,7 +77,7 @@ async def stream_scan_events(
     :meth:`fastapi.Request.is_disconnected`. The tests pass ``None``
     and rely on the ``scan_done`` event to terminate the stream.
     """
-    _LOG.debug("sse: opening event stream for scan_id=%s", sanitize_for_log(scan_id))
+    _LOG.debug("sse: opening event stream for scan_id=%s", sanitize_for_log(scan_id))  # noqa: py/log-injection  -- sanitize_for_log strips control chars + caps length
     queue = store.event_queue(scan_id)
     # Hot-replay of the running scan's history is already enqueued by the
     # ``event_queue`` call above; nothing extra to do for the live case.

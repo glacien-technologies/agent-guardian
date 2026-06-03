@@ -297,7 +297,7 @@ async def scans_report(request: Request, scan_id: str) -> JSONResponse:
                     payload = json.loads(path.read_text(encoding="utf-8"))
                     return JSONResponse(payload)
                 except (OSError, json.JSONDecodeError) as exc:
-                    _LOG.warning(
+                    _LOG.warning(  # noqa: py/log-injection  -- scan_id passed through sanitize_for_log; path is server-constructed
                         "scans_report: cannot read %s for %s (%s)",
                         path,
                         sanitize_for_log(scan_id),

@@ -279,7 +279,7 @@ async def ingest_event(request: Request, envelope: EventEnvelope) -> dict[str, s
     _, store = _agg()
     ok = store.ingest(envelope)
     if not ok:
-        _LOG.info(
+        _LOG.info(  # noqa: py/log-injection  -- event_type sanitized via sanitize_for_log
             "analytics ingest: rejecting envelope event_type=%s (clock-skew or unsupported type)",
             sanitize_for_log(envelope.event.event_type),
         )
