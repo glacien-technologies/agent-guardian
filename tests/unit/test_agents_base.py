@@ -583,3 +583,108 @@ async def test_per_turn_emits_one_consolidated_info_line(
     assert not legacy_sending, "QA-068 demoted 'sending probe' to DEBUG"
     assert not legacy_response, "QA-068 demoted 'target response' to DEBUG"
     assert not legacy_verdict, "QA-068 replaced 'judge verdict' with consolidated line"
+
+
+async def _run_one_turn_capturing_debug(
+    tmp_path: Any,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    long_response: str,
+) -> list[Any]:
+    """Drive a single agent turn at DEBUG and return the captured records.
+
+    Shared harness for the QA-068 full-body gating tests below.
+    """
+    import logging
+
+    from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.goal_hijack import GoalHijackAgent
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.llm.stub import StubScript
+
+    class _StaticTarget(TargetAdapter):
+        def fingerprint(self) -> TargetFingerprint:
+            return TargetFingerprint(
+                mode="code",
+                ref="static",
+                has_tools=False,
+                has_memory=False,
+                touches_pii=False,
+                is_multi_agent=False,
+                framework=None,
+                declared_tools=[],
+                declared_memory_keys=[],
+                notes="",
+            )
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            return long_response
+
+        async def aclose(self) -> None:
+            return None
+
+    attacker = StubScript().default("ok").build()
+    judge = (
+        StubScript()
+        .default(json.dumps({"verdict": "pass", "confidence": 0.5, "reasoning": "fine"}))
+        .build()
+    )
+    budget = AgentBudget(tokens_remaining=50_000, max_turns=1)
+    agent = GoalHijackAgent(
+        attacker_llm=attacker,
+        evaluator_llm=judge,
+        attacker_model="stub-model",
+        evaluator_model="stub-model",
+        budget=budget,
+    )
+    memory = SharedMemory("qa068-fullbody", root_dir=tmp_path)
+    target = _StaticTarget()
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.agents.base"):
+        await agent.run(target, memory)
+    return list(caplog.records)
+
+
+async def test_debug_text_path_truncates_target_response_body(
+    tmp_path: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA-068 — plain DEBUG-text shows only a bounded preview of the body.
+
+    The structured/JSON path is OFF, so the full target-response body must be
+    elided behind the ``…[+N chars]`` preview marker and the raw long body must
+    NOT appear verbatim in the DEBUG-text records.
+    """
+    import agent_guardian.agents.base as base_mod
+
+    monkeypatch.setattr(base_mod, "structured_logging_enabled", lambda: False)
+    long_response = "LEAKYSECRET " * 100  # well over the preview cap
+    records = await _run_one_turn_capturing_debug(tmp_path, caplog, long_response=long_response)
+    resp_lines = [r.message for r in records if "target response:" in r.message]
+    assert resp_lines, "expected a DEBUG target-response line"
+    joined = "\n".join(resp_lines)
+    assert "…[+" in joined, f"expected truncation marker, got: {resp_lines}"
+    assert long_response.strip() not in joined, "full body must NOT appear on the DEBUG-text path"
+
+
+async def test_structured_path_emits_full_target_response_body(
+    tmp_path: Any,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA-068 — the structured/JSON path (``--debug-format json``) keeps full bodies.
+
+    When ``structured_logging_enabled()`` is True the full target-response body
+    is logged verbatim for machine consumers / forensic replay.
+    """
+    import agent_guardian.agents.base as base_mod
+
+    monkeypatch.setattr(base_mod, "structured_logging_enabled", lambda: True)
+    long_response = "FULLBODYTOKEN " * 100
+    records = await _run_one_turn_capturing_debug(tmp_path, caplog, long_response=long_response)
+    resp_lines = [r.message for r in records if "target response:" in r.message]
+    assert resp_lines, "expected a DEBUG target-response line"
+    joined = "\n".join(resp_lines)
+    assert long_response.strip() in joined, "structured path must carry the full body"
+    assert "…[+" not in joined, "structured path must not truncate the body"

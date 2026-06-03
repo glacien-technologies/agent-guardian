@@ -49,6 +49,7 @@ from agent_guardian.core.memory import SharedMemory
 from agent_guardian.core.roe import EgressRefused
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+from agent_guardian.logging_setup import structured_logging_enabled
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -339,6 +340,27 @@ def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
 
 def _utcnow() -> datetime:
     return datetime.now(tz=UTC)
+
+
+# QA-068 — bounded single-line preview for the per-turn DEBUG-text path. The
+# FULL prompt / response bodies are reserved for the structured/JSON path
+# (``--debug-format json`` → :func:`structured_logging_enabled`); plain
+# human DEBUG-text shows only this preview so the swarm-board scrollback
+# stays scannable.
+_LOG_PREVIEW_CAP = 200
+
+
+def _log_preview(text: str | None, cap: int = _LOG_PREVIEW_CAP) -> str:
+    """Return a single-line, length-capped preview of ``text`` for DEBUG-text.
+
+    Newlines are flattened to spaces and the result is clamped to ``cap``
+    characters with a ``…[+N chars]`` marker so the reader knows the body was
+    elided (the full body lives on the structured/JSON path).
+    """
+    flat = (text or "").replace("\n", " ")
+    if len(flat) <= cap:
+        return flat
+    return f"{flat[:cap]}…[+{len(flat) - cap} chars]"
 
 
 class AsiAgent(ABC):
@@ -1021,15 +1043,20 @@ class AsiAgent(ABC):
             # QA-068 — per-turn narration is consolidated into a SINGLE INFO
             # line emitted AFTER the judge verdict lands (see below). The
             # legacy "sending probe" line is demoted to DEBUG so the operator
-            # sees one structured event per turn instead of three. The full
-            # prompt body remains accessible at DEBUG for forensic replay.
+            # sees one structured event per turn instead of three. The FULL
+            # prompt body is reserved for the structured/JSON path
+            # (``--debug-format json``) so plain DEBUG-text stays scannable;
+            # the human DEBUG-text line carries only a bounded preview.
+            _prompt_body = (
+                result.text if structured_logging_enabled() else _log_preview(result.text)
+            )
             _LOG.debug(
                 "agent %s turn %d sending probe (strategy=%s est_tokens=%d): %s",
                 agent_name,
                 turns + 1,
                 strategy_name,
                 est_tokens,
-                result.text,
+                _prompt_body,
             )
 
             try:
@@ -1090,12 +1117,18 @@ class AsiAgent(ABC):
                 )
                 break
             # QA-068 — target-response is part of the consolidated per-turn
-            # INFO line; raw body stays at DEBUG for forensic replay.
+            # INFO line. The FULL raw body is reserved for the
+            # structured/JSON path (``--debug-format json``); the human
+            # DEBUG-text line carries only a bounded preview so the operator's
+            # scrollback stays scannable.
+            _resp_body = (
+                target_response if structured_logging_enabled() else _log_preview(target_response)
+            )
             _LOG.debug(
                 "agent %s turn %d target response: %s",
                 agent_name,
                 turns + 1,
-                target_response,
+                _resp_body,
             )
 
             response_tokens = max(1, len(target_response) // 4)
@@ -1376,6 +1409,12 @@ class AsiAgent(ABC):
                     verdict.confidence,
                     turns,
                 )
+                # SSE follow-up (2026-06-04) — emit a per-finding live event so
+                # the dashboard's Findings tab appends the row in real time
+                # (probes already live-append; findings previously needed an
+                # F5). Best-effort: a sick observer never halts the attack
+                # loop. See ``_emit_finding``.
+                self._emit_finding(finding=finding, agent_name=agent_name, turn=turns)
                 # Phase B.B6 — persist this winning seed (the prompt that
                 # tripped a verdict=='fail') into the cross-scan store so
                 # future scans against the same fingerprint can warm-start
@@ -1505,6 +1544,69 @@ class AsiAgent(ABC):
             _LOG.debug(
                 "agent %s: _emit_progress observer raised %s: %s — continuing",
                 self.name or type(self).__name__,
+                type(exc).__name__,
+                exc,
+            )
+
+    def _emit_finding(self, *, finding: Finding, agent_name: str, turn: int) -> None:
+        """Emit one ``finding`` :class:`SwarmEvent` for a freshly recorded finding.
+
+        SSE follow-up (2026-06-04) — turns the ``"finding"``
+        :data:`agent_guardian.core.swarm.EventKind` literal into a real
+        producer. Called from the per-turn loop in :meth:`run` immediately
+        after ``memory.write_finding`` accepts a ``verdict=='fail'`` finding,
+        so the dashboard's ``static/live-append.js`` ``finding`` handler can
+        clone the Findings row template and insert the row into the matching
+        severity ``<tbody>`` without an F5 — mirroring the probe live-append
+        path that ``_emit_progress`` already drives.
+
+        The event threads through ``self._observer`` (wired by
+        :meth:`SwarmCommander._run_agent_with_observer` to
+        ``SwarmCommander._emit``), so it picks up a ``seq`` id from the
+        ScanStore observer, is buffered + persisted to ``events.jsonl`` for
+        replay, and fans out to every SSE subscriber exactly like every other
+        :class:`SwarmEvent`.
+
+        Payload contract (mirrors the client-side ``buildFindingRow`` reader
+        in ``live-append.js``): ``{finding_id, id, severity, asi, category,
+        agent, probe_id, summary, turn}``. ``asi`` is also surfaced at the
+        :class:`SwarmEvent` top level (via the standard ``event.asi`` field)
+        so disk replay / the SSE wire carry it both places.
+
+        Observer failures are swallowed: a sick observer must never break the
+        attack loop (mirrors :meth:`_emit_progress` / ``SwarmCommander._emit``).
+        """
+        observer = self._observer
+        if observer is None:
+            return
+        # Import lazily to avoid a circular dependency at module load time
+        # (swarm.py imports from agents.base via the agent registry).
+        from agent_guardian.core.swarm import SwarmEvent
+
+        try:
+            observer(
+                SwarmEvent(
+                    kind="finding",
+                    timestamp=datetime.now(tz=UTC),
+                    agent=agent_name,
+                    asi=finding.asi,
+                    payload={
+                        "finding_id": finding.id,
+                        "id": finding.id,
+                        "severity": finding.severity.value,
+                        "asi": finding.asi.value,
+                        "category": finding.csa_category.value,
+                        "agent": agent_name,
+                        "probe_id": finding.probe_id,
+                        "summary": finding.summary,
+                        "turn": int(turn),
+                    },
+                )
+            )
+        except Exception as exc:  # pragma: no cover — defensive
+            _LOG.debug(
+                "agent %s: _emit_finding observer raised %s: %s — continuing",
+                agent_name,
                 type(exc).__name__,
                 exc,
             )

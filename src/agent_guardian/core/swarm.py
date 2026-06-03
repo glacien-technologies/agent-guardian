@@ -192,6 +192,21 @@ EventKind = Literal[
     "agent_skipped",
     "checkpoint",
     "scan_done",
+    # SSE follow-up (2026-06-04) — per-finding live event. Emitted from
+    # the agent loop (``agents/base.py``) immediately after
+    # ``memory.write_finding`` accepts a finding, BEFORE the agent's own
+    # ``agent_done`` rollup. Threaded through ``agent._observer`` ->
+    # ``SwarmCommander._emit`` -> the ScanStore observer (so it gets a
+    # ``seq`` id, buffers, persists to ``events.jsonl`` for replay, and
+    # fans out to every SSE subscriber). The dashboard's
+    # ``static/live-append.js`` ``finding`` handler clones the Findings
+    # row template and inserts it into the matching severity tbody —
+    # closing the gap where findings rows previously needed an F5 while
+    # probes already live-appended. Payload contract (mirrors the
+    # client-side ``buildFindingRow`` reader):
+    #   {finding_id, id, severity, asi, category, agent, probe_id,
+    #    summary, turn}
+    "finding",
     # QA-005 — per-agent attack transparency. Emitted from each agent
     # immediately after ``memory.write_reflection`` so the CLI's
     # :class:`AttackFeedRenderer` and the dashboard's ``/scans/{id}
