@@ -83,16 +83,35 @@ _HASH_EMBED_DIM = 128
 # shared :class:`PiiRedactor` instance before being persisted to JSONL so a
 # memory dump never re-emits captured secrets.
 _FORENSIC_ENV = "AGENT_GUARDIAN_FORENSIC_MODE"
+# Opt-IN PII redaction of memory.jsonl writes. Redaction is now OFF by default
+# so the dashboard shows the verbatim target output (account ids, transaction
+# ids, dollar amounts were being mangled into "[REDACTED:PHONE_NUMBER]"). Set
+# AGENT_GUARDIAN_REDACT_PII=1 to re-enable scrubbing for shareable artifacts.
+_REDACT_ENV = "AGENT_GUARDIAN_REDACT_PII"
+
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 def _forensic_mode_enabled() -> bool:
     """Read ``AGENT_GUARDIAN_FORENSIC_MODE`` and return a bool.
 
-    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive). All
-    other values (including unset) keep the secure default. Evaluated on
-    every write so unit tests can flip the env var mid-process.
+    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive). Kept
+    for back-compat; it force-disables redaction even if redaction is opted in.
     """
-    return os.environ.get(_FORENSIC_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get(_FORENSIC_ENV, "").strip().lower() in _TRUTHY
+
+
+def _redaction_enabled() -> bool:
+    """Whether to scrub PII before persisting a memory record.
+
+    OFF by default (operators asked to see the verbatim target output, which
+    the PII regexes were corrupting). Opt in with ``AGENT_GUARDIAN_REDACT_PII=1``.
+    Forensic mode always wins (no redaction). Evaluated on every write so unit
+    tests can flip the env var mid-process.
+    """
+    if _forensic_mode_enabled():
+        return False
+    return os.environ.get(_REDACT_ENV, "").strip().lower() in _TRUTHY
 
 
 # Module-level :class:`PiiRedactor` reused for every memory write so the
@@ -451,12 +470,12 @@ class SharedMemory:
         # pass for off-line replays where the operator needs the raw turn
         # text. The forensic switch is read on every write so a unit test
         # can flip it mid-process.
-        if _forensic_mode_enabled():
-            line = record.model_dump_json()
-        else:
+        if _redaction_enabled():
             redacted_payload = _redact_payload(record.record_type, record.payload)
             redacted = record.model_copy(update={"payload": redacted_payload})
             line = redacted.model_dump_json()
+        else:
+            line = record.model_dump_json()
         await asyncio.to_thread(self._append_line_sync, line)
 
     def _write_stats_snapshot_sync(self) -> None:

@@ -177,6 +177,7 @@ def test_reuse_detects_existing_serve_no_second_spawn(
         preferred_port=port,
         grace_seconds=0,
         stderr_log_path=stderr_log,
+        reuse_existing=True,  # reuse is opt-in now (default: own dashboard per scan)
     )
     with mgr as result:
         assert result.reused is True
@@ -349,11 +350,12 @@ def test_back_to_back_managers_share_one_serve(
 ) -> None:
     _, port = manual_serve
 
-    # First scan reuses.
+    # First scan reuses (reuse is opt-in now).
     with AutoServeManager(
         preferred_port=port,
         grace_seconds=0,
         stderr_log_path=stderr_log,
+        reuse_existing=True,
     ) as r1:
         assert r1.reused is True
 
@@ -362,6 +364,7 @@ def test_back_to_back_managers_share_one_serve(
         preferred_port=port,
         grace_seconds=0,
         stderr_log_path=stderr_log,
+        reuse_existing=True,
     ) as r2:
         assert r2.reused is True
         assert r2.spawned is False

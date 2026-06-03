@@ -56,7 +56,11 @@ def _finding_with_secrets() -> Finding:
 
 
 @pytest.mark.asyncio
-async def test_finding_jsonl_scrubs_aws_key(tmp_path: Path) -> None:
+async def test_finding_jsonl_scrubs_aws_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Redaction is opt-in now (off by default); enable it for this test.
+    monkeypatch.setenv("AGENT_GUARDIAN_REDACT_PII", "1")
     mem = SharedMemory("scan-redact-1", root_dir=tmp_path)
     await mem.write_finding(_finding_with_secrets())
     line = mem.jsonl_path.read_text(encoding="utf-8").strip()
@@ -81,8 +85,11 @@ async def test_finding_in_memory_index_keeps_raw(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reflection_jsonl_scrubs_turn_record(tmp_path: Path) -> None:
+async def test_reflection_jsonl_scrubs_turn_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Reflections embed a JSON turn record; credentials inside are scrubbed."""
+    monkeypatch.setenv("AGENT_GUARDIAN_REDACT_PII", "1")
     mem = SharedMemory("scan-redact-3", root_dir=tmp_path)
     turn = {
         "agent": "memory-poison-agent",
@@ -100,7 +107,10 @@ async def test_reflection_jsonl_scrubs_turn_record(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_jsonl_scrubs_notes(tmp_path: Path) -> None:
+async def test_fingerprint_jsonl_scrubs_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENT_GUARDIAN_REDACT_PII", "1")
     mem = SharedMemory("scan-redact-4", root_dir=tmp_path)
     fp = TargetFingerprint(
         mode="prompt",
@@ -128,15 +138,17 @@ async def test_forensic_mode_disables_redaction(
 
 
 @pytest.mark.asyncio
-async def test_default_mode_redacts_when_env_set_to_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Only the explicit truthy values enable forensic mode."""
-    monkeypatch.setenv("AGENT_GUARDIAN_FORENSIC_MODE", "0")
+async def test_redaction_is_off_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redaction is OFF by default (operators asked to see verbatim target
+    output); the raw value is persisted unless AGENT_GUARDIAN_REDACT_PII is set."""
+    monkeypatch.delenv("AGENT_GUARDIAN_REDACT_PII", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_FORENSIC_MODE", raising=False)
     mem = SharedMemory("scan-redact-default", root_dir=tmp_path)
     await mem.write_finding(_finding_with_secrets())
     line = mem.jsonl_path.read_text(encoding="utf-8").strip()
-    assert "AKIAIOSFODNN7EXAMPLE" not in line
+    # No redaction by default → the raw value is on disk.
+    assert "AKIAIOSFODNN7EXAMPLE" in line
+    assert "[REDACTED:" not in line
 
 
 def test_redact_payload_finding_scrubs_documented_fields() -> None:

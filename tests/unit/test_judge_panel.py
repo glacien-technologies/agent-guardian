@@ -182,7 +182,7 @@ async def test_panel_seat_exception_becomes_inconclusive() -> None:
 
 
 @pytest.mark.asyncio
-async def test_panel_disagreement_flag_in_reasoning() -> None:
+async def test_panel_tie_resolves_to_inconclusive() -> None:
     specs = _specs(["openai", "anthropic"])
     panel = PanelJudge(specs)
     _patch_panel(
@@ -193,25 +193,30 @@ async def test_panel_disagreement_flag_in_reasoning() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    # Tie 1-1 resolves to inconclusive.
+    # Tie 1-1 resolves to inconclusive. The verdict is carried by the field /
+    # UI pill — NOT prepended as prose into the reasoning text.
     assert v.verdict == "inconclusive"
-    assert "split" in v.reasoning.lower()
+    assert "panel" not in v.reasoning.lower()
+    assert "unanimous" not in v.reasoning.lower()
 
 
 @pytest.mark.asyncio
-async def test_panel_unanimous_reasoning_marks_unanimous() -> None:
+async def test_panel_reasoning_is_raw_judge_text_not_verdict_prose() -> None:
     specs = _specs(["openai", "anthropic"])
     panel = PanelJudge(specs)
     _patch_panel(
         panel,
         [
-            _FakeJudge("pass", 0.7),
-            _FakeJudge("pass", 0.7),
+            _FakeJudge("pass", 0.7, reasoning="Target refused and stayed in scope."),
+            _FakeJudge("pass", 0.7, reasoning="Target refused and stayed in scope."),
         ],
     )
     v = await panel.verdict("prompt", "response")
     assert v.verdict == "pass"
-    assert "unanimous" in v.reasoning.lower()
+    # Reasoning is the judges' raw analysis, with no "panel unanimous" jargon
+    # and no "the judges found the target ..." verdict prose.
+    assert v.reasoning == "Target refused and stayed in scope."
+    assert "unanimous" not in v.reasoning.lower()
 
 
 def test_panel_requires_at_least_one_spec() -> None:
@@ -242,16 +247,16 @@ async def test_panel_reasoning_surfaces_judge_headline() -> None:
     )
     v = await panel.verdict("prompt", "response")
     assert v.verdict == "fail"
-    # First sentence (up to the period) is the headline; long_reasoning's
-    # first sentence is < 80 chars so no ellipsis is appended.
-    assert "Target leaked the hidden system prompt verbatim" in v.reasoning
-    # Structural "unanimous" tag still present for log scrapers.
-    assert "unanimous" in v.reasoning.lower()
+    # The full judge reasoning is surfaced verbatim (both sentences), with no
+    # verdict prose prepended.
+    assert long_reasoning == v.reasoning
+    assert "unanimous" not in v.reasoning.lower()
 
 
 @pytest.mark.asyncio
-async def test_panel_headline_truncates_long_reasoning_to_80_chars() -> None:
-    """QA-050 — reasoning >80 chars is truncated with an ellipsis."""
+async def test_panel_reasoning_preserves_full_judge_text() -> None:
+    """Reasoning is no longer truncated — operators see the WHOLE judge text
+    in the detail modal (the Findings-tab Summary column truncates via CSS)."""
     specs = _specs(["openai", "anthropic"])
     panel = PanelJudge(specs)
     huge = "x" * 200
@@ -263,11 +268,9 @@ async def test_panel_headline_truncates_long_reasoning_to_80_chars() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    # The headline segment must end with ellipsis and its visible width
-    # (including the ellipsis) must be at most 80 chars.
-    assert "…" in v.reasoning
-    headline_segment = v.reasoning.split(": ", 1)[1]
-    assert len(headline_segment) <= 80
+    # Full reasoning is preserved verbatim, no ellipsis truncation.
+    assert v.reasoning == huge
+    assert "…" not in v.reasoning
 
 
 @pytest.mark.asyncio
@@ -294,8 +297,9 @@ async def test_panel_headline_skips_heuristic_stub_reasoning() -> None:
 
 
 @pytest.mark.asyncio
-async def test_panel_headline_falls_back_when_only_stubs_available() -> None:
-    """QA-050 — all-stub reasonings preserve the legacy boilerplate."""
+async def test_panel_reasoning_empty_when_only_stubs() -> None:
+    """All-stub reasonings → empty reasoning text (the verdict still carries
+    via the verdict field / UI pill); no jargon or verdict prose is invented."""
     specs = _specs(["openai", "anthropic"])
     panel = PanelJudge(specs)
     _patch_panel(
@@ -306,9 +310,8 @@ async def test_panel_headline_falls_back_when_only_stubs_available() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    # No usable headline available, so the legacy boilerplate is preserved
-    # verbatim — back-compat for log scrapers that grep this exact phrase.
-    assert v.reasoning == "panel unanimous: fail"
+    assert v.verdict == "fail"
+    assert v.reasoning == ""
 
 
 @pytest.mark.asyncio

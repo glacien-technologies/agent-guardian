@@ -1714,14 +1714,21 @@ class SwarmCommander:
                 self.config.mode.value if self.config.mode else "unset",
             )
             return CheckpointDecision.EARLY_STOP
-        _LOG.info(  # pragma: no cover -- continue-with-data branch exercised in live runs only
-            "checkpoint: aivss=%d decision=continue (variance=%.2f, "
-            "no_recent_findings=%s, findings=%d)",
-            provisional,
-            variance,
-            no_recent_findings,
-            current_findings,
-        )
+        # De-duplicate the steady-state "continue" line: the supervisor polls
+        # every couple of seconds, so logging this on every tick floods the log
+        # with identical lines. Emit only when the checkpoint state actually
+        # changes (score / findings / recency).
+        sig = (provisional, bool(no_recent_findings), current_findings)
+        if sig != getattr(self, "_last_checkpoint_sig", None):
+            self._last_checkpoint_sig = sig
+            _LOG.info(  # pragma: no cover -- continue-with-data branch exercised in live runs only
+                "checkpoint: aivss=%d decision=continue (variance=%.2f, "
+                "no_recent_findings=%s, findings=%d)",
+                provisional,
+                variance,
+                no_recent_findings,
+                current_findings,
+            )
         return CheckpointDecision.CONTINUE
 
     def _compute_provisional_aivss(self) -> int:

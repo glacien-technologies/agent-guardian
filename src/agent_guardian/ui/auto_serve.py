@@ -55,7 +55,7 @@ _LOG = logging.getLogger(__name__)
 DEFAULT_HOST: Final[str] = "127.0.0.1"
 DEFAULT_PORT: Final[int] = 7474
 DEFAULT_FALLBACK_RANGE: Final[range] = range(7475, 7500)
-DEFAULT_GRACE_SECONDS: Final[int] = 300
+DEFAULT_GRACE_SECONDS: Final[int] = 3600
 DEFAULT_READY_TIMEOUT: Final[float] = 5.0
 DEFAULT_SHUTDOWN_WAIT: Final[float] = 3.0
 DEFAULT_KILL_WAIT: Final[float] = 1.0
@@ -328,11 +328,18 @@ class AutoServeManager:
         on_banner: Callable[[str], None] | None = None,
         environ: dict[str, str] | None = None,
         spawn_command: list[str] | None = None,
+        reuse_existing: bool = False,
     ) -> None:
         self._host = host
         self._preferred_port = preferred_port
         self._fallback_range = fallback_range
         self._grace_seconds = grace_seconds
+        # Each scan gets its OWN scan-scoped dashboard by default: if the
+        # preferred port is taken (e.g. another scan's dashboard is still up in
+        # its grace window), we spawn on a free fallback port rather than
+        # reusing a shared server. Set reuse_existing=True to opt back into
+        # attaching to an already-running AG dashboard on the preferred port.
+        self._reuse_existing = reuse_existing
         self._token = token
         self._initial_suppression = suppression_reason
         self._stderr_log_path = (
@@ -444,10 +451,14 @@ class AutoServeManager:
     # ------------------------------------------------------------------
 
     def _decide(self) -> tuple[int, bool, bool]:
-        """Run the DECIDE state. Returns ``(port, spawned, reused)``."""
-        if probe_is_our_serve(self._host, self._preferred_port):
+        """Run the DECIDE state. Returns ``(port, spawned, reused)``.
+
+        Default: every scan spawns its OWN scan-scoped dashboard (no reuse of a
+        shared server). Reuse is opt-in via ``reuse_existing=True``.
+        """
+        if self._reuse_existing and probe_is_our_serve(self._host, self._preferred_port):
             _LOG.debug(
-                "auto_serve: existing AG serve detected on %s:%d — reusing",
+                "auto_serve: existing AG serve detected on %s:%d — reusing (opt-in)",
                 self._host,
                 self._preferred_port,
             )

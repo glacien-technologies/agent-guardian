@@ -138,6 +138,7 @@ class GeminiClient(BaseLLM):
             temperature=request.temperature,
             seed=request.seed,
             request_body=payload,
+            messages=request.messages,
         )
         req = self._client.build_request(
             "POST",
