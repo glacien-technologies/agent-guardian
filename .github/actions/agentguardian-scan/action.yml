@@ -68,6 +68,35 @@ inputs:
       fails (after SARIF upload). Set to empty string to skip the gate.
     required: false
     default: "70"
+  max-critical:
+    description: >-
+      CRITICAL-finding ceiling passed to `--max-critical`. Exceeding it exits 1
+      (AND-combined with `fail-under`). Set to empty string to skip this ceiling.
+    required: false
+    default: "0"
+  max-high:
+    description: >-
+      HIGH-finding ceiling passed to `--max-high`. Empty disables this ceiling.
+    required: false
+    default: ""
+  max-medium:
+    description: >-
+      MEDIUM-finding ceiling passed to `--max-medium`. Empty disables this ceiling.
+    required: false
+    default: ""
+  max-low:
+    description: >-
+      LOW-finding ceiling passed to `--max-low`. Empty disables this ceiling.
+    required: false
+    default: ""
+  comment:
+    description: >-
+      When `true` (default) and the triggering event is a `pull_request`, upsert
+      a sticky AgentGuardian summary comment on the PR via `agent-guardian
+      comment`. Requires `pull-requests: write` on the calling workflow. Set
+      `false` to skip.
+    required: false
+    default: "true"
   output-path:
     description: Path the SARIF report is written to.
     required: false
@@ -145,6 +174,10 @@ runs:
         AG_MODE: ${{ inputs.mode }}
         AG_BUDGET_USD: ${{ inputs.budget-usd }}
         AG_FAIL_UNDER: ${{ inputs.fail-under }}
+        AG_MAX_CRITICAL: ${{ inputs.max-critical }}
+        AG_MAX_HIGH: ${{ inputs.max-high }}
+        AG_MAX_MEDIUM: ${{ inputs.max-medium }}
+        AG_MAX_LOW: ${{ inputs.max-low }}
         AG_OUTPUT_PATH: ${{ inputs.output-path }}
         AG_EXTRA_ARGS: ${{ inputs.extra-args }}
       run: |
@@ -171,6 +204,18 @@ runs:
         fi
         if [ -n "$AG_FAIL_UNDER" ]; then
           args+=(--fail-under "$AG_FAIL_UNDER")
+        fi
+        if [ -n "$AG_MAX_CRITICAL" ]; then
+          args+=(--max-critical "$AG_MAX_CRITICAL")
+        fi
+        if [ -n "$AG_MAX_HIGH" ]; then
+          args+=(--max-high "$AG_MAX_HIGH")
+        fi
+        if [ -n "$AG_MAX_MEDIUM" ]; then
+          args+=(--max-medium "$AG_MAX_MEDIUM")
+        fi
+        if [ -n "$AG_MAX_LOW" ]; then
+          args+=(--max-low "$AG_MAX_LOW")
         fi
         args+=(--output sarif --output-path "$AG_OUTPUT_PATH")
         if [ -n "$AG_EXTRA_ARGS" ]; then
@@ -206,6 +251,42 @@ runs:
         name: agentguardian-sarif
         path: ${{ steps.scan.outputs.sarif-path }}
         if-no-files-found: warn
+
+    - name: Upsert sticky PR comment
+      if: ${{ always() && inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        AG_FAIL_UNDER: ${{ inputs.fail-under }}
+        AG_MAX_CRITICAL: ${{ inputs.max-critical }}
+        AG_MAX_HIGH: ${{ inputs.max-high }}
+        AG_MAX_MEDIUM: ${{ inputs.max-medium }}
+        AG_MAX_LOW: ${{ inputs.max-low }}
+      run: |
+        set -uo pipefail
+        args=(comment --platform github)
+        if [ -n "$AG_FAIL_UNDER" ]; then
+          args+=(--fail-under "$AG_FAIL_UNDER")
+        fi
+        if [ -n "$AG_MAX_CRITICAL" ]; then
+          args+=(--max-critical "$AG_MAX_CRITICAL")
+        fi
+        if [ -n "$AG_MAX_HIGH" ]; then
+          args+=(--max-high "$AG_MAX_HIGH")
+        fi
+        if [ -n "$AG_MAX_MEDIUM" ]; then
+          args+=(--max-medium "$AG_MAX_MEDIUM")
+        fi
+        if [ -n "$AG_MAX_LOW" ]; then
+          args+=(--max-low "$AG_MAX_LOW")
+        fi
+        echo "::group::agent-guardian ${args[*]}"
+        # The comment is advisory — never fail the job just because the comment
+        # could not be posted (e.g. a fork PR without write-scoped GITHUB_TOKEN).
+        agent-guardian "${args[@]}" || echo "::warning::could not upsert PR comment (continuing)"
+        echo "::endgroup::"
 
     - name: Surface scan exit code
       if: ${{ always() }}

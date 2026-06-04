@@ -1,0 +1,44 @@
+# AgentGuardian — MINIMAL preset (fast, advisory-only smoke check).
+#
+# Copy this to `.github/workflows/agent-guardian.yml`. TEMPLATE only — not
+# wired into AgentGuardian's own CI.
+#
+# Use this on early-adoption repos where you want signal without blocking
+# merges. `mode: fast` is a non-authoritative iteration check: it ALWAYS
+# returns exit 1 (so do not treat its exit code as a release gate), but the
+# sticky PR comment still surfaces what the swarm found.
+#
+# Trigger: pull_request (never pull_request_target).
+
+name: AgentGuardian (minimal)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # Advisory only: never block the merge on this job.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: glacien-technologies/agent-guardian/.github/actions/agentguardian-scan@v1
+        with:
+          framework: langgraph
+          framework-ref: my_app.graph:graph
+          # Fork-without-secrets fallback: stub when no provider key is present.
+          model: ${{ secrets.GEMINI_API_KEY != '' && 'gemini:gemini-2.5-flash' || 'stub' }}
+          mode: fast
+          budget-usd: "0.05"
+          # No gate — let every PR through; rely on the comment for signal.
+          fail-under: ""
+          max-critical: ""
+          comment: "true"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

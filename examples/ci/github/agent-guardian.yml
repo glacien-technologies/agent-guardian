@@ -1,0 +1,57 @@
+# AgentGuardian — canonical GitHub Actions workflow (STANDARD preset).
+#
+# Copy this file to `.github/workflows/agent-guardian.yml` in your own
+# repository. It is a TEMPLATE — it is not wired into AgentGuardian's own CI.
+#
+# This is the STANDARD preset. Two siblings live next to this file:
+#   * agent-guardian-minimal.yml  — fastest, advisory-only smoke check.
+#   * agent-guardian-thorough.yml — hardened release-branch gate.
+#
+# ---------------------------------------------------------------------------
+# Trigger: pull_request (NOT pull_request_target).
+#   `pull_request` runs with the *base* repo's GITHUB_TOKEN scoped to the PR,
+#   which is exactly what the sticky comment step needs. Never switch this to
+#   `pull_request_target` for a security scanner — that would run untrusted PR
+#   code with write-scoped secrets.
+#
+# Permissions (least-privilege, declared by the CALLER — composite actions
+# cannot grant repo permissions):
+#   contents: read          — checkout.
+#   security-events: write  — github/codeql-action/upload-sarif.
+#   pull-requests: write    — the sticky AgentGuardian PR comment.
+# ---------------------------------------------------------------------------
+
+name: AgentGuardian
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: glacien-technologies/agent-guardian/.github/actions/agentguardian-scan@v1
+        with:
+          framework: langgraph
+          framework-ref: my_app.graph:graph
+          # Fork PRs do not receive repository secrets. When GEMINI_API_KEY is
+          # empty (a fork), fall back to `--model stub` so the scan still runs
+          # an offline, non-authoritative smoke check (stub always fails
+          # `fail-under`, so the gate stays red until a maintainer re-runs the
+          # scan from a trusted branch with a real provider key).
+          model: ${{ secrets.GEMINI_API_KEY != '' && 'gemini:gemini-2.5-flash' || 'stub' }}
+          mode: full
+          budget-usd: "0.25"
+          fail-under: "70"
+          max-critical: "0"
+          max-high: "0"
+          comment: "true"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

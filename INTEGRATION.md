@@ -6,13 +6,18 @@ AgentGuardian ships three distribution channels and two integration shims. Use t
 |---------|--------------|----------|
 | **PyPI wheel** (`pip install agent-guardian`) | The CLI + Python SDK. | Local dev, custom CI runners, notebook use. |
 | **Docker image** (`ghcr.io/glacien-technologies/agent-guardian:latest`) | Pre-built multi-arch image with the CLI as entrypoint. | Air-gapped runners, hermetic CI, one-shot `docker run`. |
-| **GitHub Action** (`.github/actions/agentguardian-scan`) | Composite action that installs the wheel, runs `scan`, uploads SARIF. | Any GitHub Actions workflow. |
+| **GitHub Action** (`.github/actions/agentguardian-scan`) | Composite action that installs the wheel, runs `scan`, uploads SARIF, and posts a sticky PR comment. | Any GitHub Actions workflow. |
+| **CI templates** (`examples/ci/{github,gitlab,bitbucket}/`) | Copy-pasteable workflow / pipeline files for all three forges. | Dropping AgentGuardian into GitHub Actions, GitLab CI, or Bitbucket Pipelines. |
 | **Pre-commit hook** (`.pre-commit-hooks.yaml`) | Local pre-commit entries for `scan` and `doctor`. | Catching regressions before the commit lands. |
 | **SARIF 2.1.0** (`--output sarif`) | Standard schema consumed by GitHub Code Scanning, Sonar, DefectDojo, Sarif Web Viewer. | Wiring findings into the security tooling you already run. |
 
+AgentGuardian is a merge gate on all three major forges — **GitHub Actions**, **GitLab CI**, and **Bitbucket Pipelines** — driven by one CLI. Each forge gets a SARIF / Code Quality report, inline annotations, and a single sticky PR/MR comment (upserted in place on every push). The full, consolidated CI/CD documentation lives under [`docs/ci-cd/`](docs/ci-cd/overview.mdx) — start with the [overview](docs/ci-cd/overview.mdx), then the per-forge pages: [GitHub Actions](docs/ci-cd/github-actions.mdx), [GitLab CI](docs/ci-cd/gitlab-ci.mdx), [Bitbucket](docs/ci-cd/bitbucket.mdx). See also [security gates](docs/ci-cd/security-gates.mdx) (the `--fail-under` / `--max-*` flags) and [PR comments](docs/ci-cd/pr-comments.mdx).
+
+> **Stateless gate, no baseline.** The OSS gate judges every scan on its own — it has no memory of a prior scan, so a pre-existing finding can fail the gate and every finding counts. Baseline-diff (failing only on findings a PR *introduces*) is a hosted (SaaS) feature. See the [CI/CD overview](docs/ci-cd/overview.mdx).
+
 ## GitHub Actions
 
-Pin the composite action by tag and supply `security-events: write` on the calling workflow:
+Pin the composite action by tag and supply `security-events: write` (SARIF upload) and `pull-requests: write` (sticky comment) on the calling workflow:
 
 ```yaml
 permissions:

@@ -180,6 +180,32 @@ agent-guardian agentdojo run
 Run the optional AgentDojo benchmark pack against a target. Requires
 the `[agentdojo]` extra.
 
+### `comment`
+
+```text
+agent-guardian comment --platform github --fail-under 70
+```
+
+Upsert a single AgentGuardian summary comment on the current pull /
+merge request. The comment is keyed by a hidden HTML marker so repeated
+runs update the same comment in place instead of spamming a new one on
+every push. `--platform` is `github` | `gitlab` | `bitbucket`; the
+embedded gate verdict reuses the same `--fail-under` / `--max-critical`
+/ `--max-high` / `--max-medium` / `--max-low` thresholds as the `scan`
+gate, so the comment's green/red verdict matches the CI exit code. Pass
+`--dry-run` to print the rendered body instead of posting it.
+
+### `code-insights`
+
+```text
+agent-guardian code-insights --platform bitbucket
+```
+
+Publish a Bitbucket Code Insights report (a quality report plus inline
+annotations) for a scan. Defaults to the newest scan under
+`~/.agentguardian/scans`; pass `--scan` to target a specific scan id or
+`scan.json` path, and `--dry-run` to render without posting.
+
 ## Scan options
 
 The `scan` command exposes every knob the swarm respects. The list
@@ -204,6 +230,10 @@ or duplicate spellings).
 | `--budget-seconds` | Hard ceiling on wall-clock per scan. |
 | `--recon-budget-seconds` | Per-recon-phase wall-clock budget. |
 | `--fail-under` | Exit non-zero when the AIVSS sits below this threshold. |
+| `--max-critical` | Fail the gate when the CRITICAL-finding count exceeds this ceiling (AND-combined with `--fail-under`). |
+| `--max-high` | Fail the gate when the HIGH-finding count exceeds this ceiling. |
+| `--max-medium` | Fail the gate when the MEDIUM-finding count exceeds this ceiling. |
+| `--max-low` | Fail the gate when the LOW-finding count exceeds this ceiling. |
 | `--output` | One or more output formats (`json`, `sarif`, `junit`, `md`, `pdf`). |
 | `--output-path` | Directory to write report artefacts to. |
 | `--no-tui` | Disable the interactive TUI; emit plain logs only. |
