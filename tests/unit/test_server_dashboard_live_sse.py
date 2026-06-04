@@ -145,9 +145,12 @@ def test_live_sse_keeps_streaming_for_running_scan(client: TestClient, store: Sc
         )
         snap = live_snapshot(ctx)
         # Running snapshot still carries the data-live keys even with no
-        # finalised scan; band is unknown/pending.
+        # finalised scan; band is unknown/pending. QA-065 (2026-06-04) — the
+        # standalone BAND tile was removed, so the band rides on the AIVSS
+        # tile's sub-caption keyed ``band-sub`` (the bare ``band`` key is gone).
         assert snap["aivss"] == "—"
         assert snap["findings"] == 0
-        assert "band" in snap
+        assert "band-sub" in snap
+        assert "band" not in snap
     finally:
         store._running.pop(scan_id, None)

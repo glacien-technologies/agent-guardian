@@ -523,7 +523,8 @@ def test_rendered_executive_dashboard_never_leaks_not_evaluated_token(
 
     The literal token may still legitimately appear as a CSS modifier class
     (``exec-kpi__value--not_evaluated``) — we check for the *visible* string
-    inside the BAND tile's value element instead.
+    instead. QA-065 (2026-06-04) — the band now renders on the AIVSS tile's
+    sub-caption (``data-live="band-sub"``) rather than a standalone BAND tile.
     """
     store = ScanStore(root_dir=tmp_path)
     scan = _make_scan_with_band(SeverityBand.NOT_EVALUATED, scan_id="exec-band-not-eval")

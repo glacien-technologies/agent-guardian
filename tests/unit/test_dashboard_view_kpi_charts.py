@@ -5,25 +5,14 @@ Pure tests against ``build_dashboard_context`` — no FastAPI / TestClient.
 
 from __future__ import annotations
 
-from agent_guardian.models.severity import SeverityBand
 from agent_guardian.server.dashboard_view import (
-    _band_segment_index,
     build_dashboard_context,
 )
 
-
-def test_band_segment_index_locked_mapping() -> None:
-    """The 5 band enums map to indices 0..4 left → right."""
-    assert _band_segment_index(SeverityBand.CRITICAL) == 0
-    assert _band_segment_index(SeverityBand.POOR) == 1
-    assert _band_segment_index(SeverityBand.WARNING) == 2
-    assert _band_segment_index(SeverityBand.GOOD) == 3
-    assert _band_segment_index(SeverityBand.EXCELLENT) == 4
-
-
-def test_band_segment_index_unknown_and_not_evaluated_return_negative_one() -> None:
-    assert _band_segment_index(None) == -1
-    assert _band_segment_index(SeverityBand.NOT_EVALUATED) == -1
+# QA-065 (2026-06-04) — the standalone BAND tile and its ``_band_segment_index``
+# helper were removed; the band now rides along on the AIVSS tile's sub-caption,
+# so there is no longer a 5-segment band axis to index. The former
+# ``test_band_segment_index_*`` cases were deleted with the helper.
 
 
 def test_kpi_chart_data_present_with_no_scan() -> None:
@@ -36,7 +25,7 @@ def test_kpi_chart_data_present_with_no_scan() -> None:
     )
     data = ctx.payload["kpi_chart_data"]
     assert data["aivss_pct"] == 0.0
-    assert data["band_index"] == -1
+    assert "band_index" not in data
     assert data["severity_mix"] == {
         "critical": 0,
         "high": 0,
