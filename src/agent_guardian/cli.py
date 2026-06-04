@@ -3275,9 +3275,10 @@ def scan(
         "--no-owasp-llm",
         help=(
             "Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, "
-            "denial-of-wallet, detection-evasion). Default: those four specialists "
-            "DO run alongside the core ASI01-10 slate -- agentic security needs "
-            "transport-level secret-leak and DoW checks to be the default surface."
+            "denial-of-wallet, detection-evasion, output-handling). Default: those "
+            "five specialists DO run alongside the core ASI01-10 slate -- agentic "
+            "security needs transport-level secret-leak and DoW checks to be the "
+            "default surface."
         ),
     ),
     contract: Path | None = typer.Option(

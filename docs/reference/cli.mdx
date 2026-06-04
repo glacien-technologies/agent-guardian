@@ -336,7 +336,7 @@ Model specs: `stub`, `openai:gpt-4o`, `anthropic:claude-haiku-4-5`,
 | `--tier T` | auto-detected | Force tier: `T1`, `T2`, `T3`, `T4`. |
 | `--seed N` | `0` | RNG seed for determinism. |
 | `--goal TEXT` | unset | Operator's natural-language attack goal. When set, the Commander LLM decomposes it into per-agent briefs. |
-| `--no-owasp-llm` | off (specialists DO run) | Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion). |
+| `--no-owasp-llm` | off (specialists DO run) | Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion, output-handling). |
 | `--pretext` | off | Wrap attacker payloads in a rotating legitimate-operations pretext (auditor / compliance / incident / onboarding). |
 | `--indirect` | off | Deliver attacker payloads embedded in trusted-channel content (retrieved doc / tool output / email / memory / a2a). |
 | `--pov-gate` | off | Re-run each finding's trigger N times and drop the unreproducible ones before scoring. |
