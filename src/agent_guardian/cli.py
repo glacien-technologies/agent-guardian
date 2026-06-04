@@ -57,7 +57,12 @@ from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.config import Config, env_api_key, load_config
 from agent_guardian.contract.preflight import PreflightReport
 from agent_guardian.core.sandbox import SandboxViolation
-from agent_guardian.core.swarm import SwarmCommander, SwarmConfig, SwarmEvent
+from agent_guardian.core.swarm import (
+    SwarmCommander,
+    SwarmConfig,
+    SwarmEvent,
+    expected_agent_count,
+)
 from agent_guardian.llm import (
     AnthropicClient,
     BaseLLM,
@@ -4144,8 +4149,11 @@ async def _run_scan_inner(
         total_tokens=cfg.swarm.budget.max_total_tokens,
         # OWASP-LLM specialists default ON post-launch hardening: transport-level
         # secret-leak and DoW are required default surface for agentic security.
-        # --no-owasp-llm suppresses them and reverts to the 10-agent slate cap.
-        max_parallel_agents=(min(10, cfg.swarm.max_parallel_agents) if no_owasp_llm else 14),
+        # Size the parallel cap to the REAL slate (expected_agent_count: 16 with the
+        # specialists, 11 with --no-owasp-llm) so the default scan never silently
+        # truncates -- the old hand-counted 14 dropped detection-evasion +
+        # output-handling on full targets. See core/swarm._phase_decompose.
+        max_parallel_agents=expected_agent_count(include_m2_agents=not no_owasp_llm),
         tier_override=tier_override,
         target_goal=goal,
         mode=resolved_mode,

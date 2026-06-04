@@ -96,3 +96,22 @@ async def test_decompose_excludes_m2_agents_by_default() -> None:
     names = {a.name for a in agents}
     assert "fuzzing-agent" not in names
     assert "secret-extraction-agent" not in names
+
+
+def test_expected_agent_count_matches_real_slate() -> None:
+    """Regression: the default agent cap must equal the real slate size.
+
+    The CLI sizes ``max_parallel_agents`` from ``expected_agent_count`` so the
+    default scan never silently truncates the slate (previously the cap was a
+    hand-counted 14 against a real 16-agent slate, dropping detection-evasion
+    and output-handling on full targets).
+    """
+    from agent_guardian.agents import GAP_FILL_AGENTS, M2_SPECIALIST_AGENTS
+    from agent_guardian.core.swarm import _ASI_AGENT_CLASSES, expected_agent_count
+
+    core = len(_ASI_AGENT_CLASSES) + len(GAP_FILL_AGENTS)
+    assert expected_agent_count(include_m2_agents=False) == core
+    assert expected_agent_count(include_m2_agents=True) == core + len(M2_SPECIALIST_AGENTS)
+    # Concrete values guard against drift in either direction.
+    assert expected_agent_count(include_m2_agents=False) == 11
+    assert expected_agent_count(include_m2_agents=True) == 16

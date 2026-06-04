@@ -118,6 +118,28 @@ _ASI_AGENT_CLASSES: tuple[type[AsiAgent], ...] = (
 )
 
 
+def expected_agent_count(*, include_m2_agents: bool) -> int:
+    """Number of attacker agents in the default parallel slate (excludes recon).
+
+    Single source of truth for how many agents a scan dispatches, so the CLI can
+    size ``max_parallel_agents`` to the real slate instead of a hand-counted
+    constant. Sizing the cap below this value makes :meth:`_phase_decompose`
+    drop the tail (see the slice + warning there) -- which previously hid
+    detection-evasion + output-handling on full targets. Derived from the live
+    agent tuples so it cannot drift:
+
+    * 10 ASI agents (:data:`_ASI_AGENT_CLASSES`)
+    * 1 always-on gap-fill agent (``GAP_FILL_AGENTS`` -- IdentityLeak)
+    * 5 OWASP-LLM specialists (``M2_SPECIALIST_AGENTS``) when enabled
+    """
+    from agent_guardian.agents import GAP_FILL_AGENTS, M2_SPECIALIST_AGENTS
+
+    count = len(_ASI_AGENT_CLASSES) + len(GAP_FILL_AGENTS)
+    if include_m2_agents:
+        count += len(M2_SPECIALIST_AGENTS)
+    return count
+
+
 # Spec §6.1 -- Commander goal-decomposition system prompt. Verbatim from the
 # design-spec. The Commander LLM emits a SwarmBrief JSON object listing
 # per-agent sub-goals, hypotheses, priority weights, and the number of
@@ -1311,9 +1333,21 @@ class SwarmCommander:
                     )
                 continue
             agents.append(agent)
-        # Respect max_parallel_agents (10 is the natural cap; lower values
-        # serialise the tail).
-        capped = agents[: max(1, self.config.max_parallel_agents)]
+        # Respect max_parallel_agents. NOTE: this is a hard slice -- agents beyond
+        # the cap are DROPPED, not deferred. The CLI sizes the default cap to the
+        # full slate via expected_agent_count(), so a default scan never truncates;
+        # an explicit lower cap still truncates, but we log exactly what was dropped
+        # so it can never be silent.
+        cap = max(1, self.config.max_parallel_agents)
+        capped = agents[:cap]
+        if len(agents) > cap:
+            _LOG.warning(
+                "phase decompose: max_parallel_agents=%d < applicable agents=%d; "
+                "DROPPED (not run): %s",
+                cap,
+                len(agents),
+                ", ".join(a.name for a in agents[cap:]),
+            )
         _LOG.info(
             "phase decompose: done (applicable=%d, capped_to=%d, per_agent_tokens=%d)",
             len(agents),
