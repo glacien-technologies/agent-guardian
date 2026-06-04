@@ -30,7 +30,7 @@ record the change in `CHANGELOG.md` under `[Unreleased]`.
 
 Estimated time: ~30 minutes once the operator is logged in.
 
-1. **Sign in.** Visit <https://www.bestpractices.dev/> and sign in with the
+1. **Sign in.** Visit [https://www.bestpractices.dev/](https://www.bestpractices.dev/) and sign in with the
    GitHub account that owns `glacien-technologies/agent-guardian`. The
    Security Lead role holds this credential.
 2. **Add the project.** Click *Add Project*, paste the repository URL
