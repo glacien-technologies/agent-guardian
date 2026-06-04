@@ -22,6 +22,7 @@ from __future__ import annotations
 import pytest
 
 from agent_guardian.adapters.prompt import PromptAdapter
+from agent_guardian.agents.base import AgentReport
 from agent_guardian.core.scoring import (
     _tier_weighted_aggregate_excluding,
     compute_aivss,
@@ -85,6 +86,61 @@ def test_build_completeness_zero_planned_is_zero_pct_not_hundred() -> None:
     assert completeness.turns_planned == 0
     assert completeness.turns_used == 0
     assert completeness.pct == 0.0
+
+
+def _report(agent: str, terminated_by: str, turns: int) -> AgentReport:
+    return AgentReport(
+        agent=agent,
+        asi_category=None,
+        findings_count=0,
+        turns=turns,
+        duration_seconds=0.0,
+        terminated_by=terminated_by,  # type: ignore[arg-type]
+    )
+
+
+def test_build_completeness_corpus_exhausted_reads_full() -> None:
+    """Agents that ran their whole (small) probe corpus count as 100% complete.
+
+    Regression for the phantom-denominator bug: probe corpora per ASI category
+    are far smaller than ``max_turns_per_agent``, so a fully-run, uncapped scan
+    used to read ~50% via ``turns_used / (agents * 12)`` and have its
+    ``--mode full`` grade withheld. Corpus-exhausted (or succeeded) agents now
+    count as complete, so the authoritative gate is actually reachable.
+    """
+    cmd = _commander()
+    cmd._active_agents = [object()] * 4  # type: ignore[list-item]  # only len() matters
+    cmd._agent_reports = [
+        _report("identity-leak-agent", "exhausted", 2),
+        _report("secret-extraction-agent", "success", 3),
+        _report("drift-agent", "exhausted", 5),
+        _report("fuzzing-agent", "exhausted", 12),
+    ]
+    c = cmd._build_completeness()
+    assert c.agents_planned == 4
+    assert c.agents_completed == 4
+    assert c.agents_cut_short == 0
+    # 100% complete -- NOT the old 22/(4*12)=45.8% turns-based reading.
+    assert c.pct == 100.0
+    # turns_used / turns_planned retained as informational detail.
+    assert c.turns_used == 22
+    assert c.turns_planned == 4 * (cmd.config.max_turns_per_agent or 12)
+
+
+def test_build_completeness_framework_cut_short_reduces_pct() -> None:
+    """Only framework-truncated agents (cancelled / budget / error) lower it."""
+    cmd = _commander()
+    cmd._active_agents = [object()] * 4  # type: ignore[list-item]  # only len() matters
+    cmd._agent_reports = [
+        _report("a", "exhausted", 4),
+        _report("b", "success", 3),
+        _report("c", "cancelled", 6),  # early-stopped mid-run
+        _report("d", "budget", 5),  # budget-truncated mid-corpus
+    ]
+    c = cmd._build_completeness()
+    assert c.agents_completed == 2
+    assert c.agents_cut_short == 2
+    assert c.pct == 50.0  # 2 of 4 applicable agents finished
 
 
 def test_tier_aggregate_excluding_all_categories_returns_zero() -> None:
