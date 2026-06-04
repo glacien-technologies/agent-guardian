@@ -224,27 +224,6 @@ def _band_class(band: SeverityBand | None) -> str:
     return band.value.lower()
 
 
-def _band_segment_index(band: SeverityBand | None) -> int:
-    """Return the 0-4 segment index for the BAND tile mini-chart.
-
-    QA-028 sub-ask 2: the BAND tile renders a 5-segment horizontal bar
-    (Critical · Poor · Warning · Good · Excellent, left → right). The
-    highlighted segment matches the current band. ``-1`` for an
-    unknown / not-evaluated band so the partial renders an all-muted
-    bar with no active segment.
-    """
-    mapping = {
-        SeverityBand.CRITICAL: 0,
-        SeverityBand.POOR: 1,
-        SeverityBand.WARNING: 2,
-        SeverityBand.GOOD: 3,
-        SeverityBand.EXCELLENT: 4,
-    }
-    if band is None:
-        return -1
-    return mapping.get(band, -1)
-
-
 def _humanise_seconds(seconds: float) -> str:
     """Render seconds as ``MM:SS`` for the elapsed clock."""
     if seconds < 0:
@@ -1282,6 +1261,20 @@ def build_dashboard_context(
     # report exporter) don't have to re-derive the join.
     _probes_list_for_evidence = _assemble_probes_list(scan_dir)
     _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
+    _probe_groups = _assemble_probe_groups(_probes_list_for_evidence)
+    # QA-066 (2026-06-04) — PROBES KPI tile. "How many probes did we actually
+    # run." ``completeness.turns_used`` is the authoritative, uncapped count of
+    # probe turns sent (one turn == one probe); the assembled ``probes_list``
+    # is display-capped at ``_PROBES_LIST_CAP`` so its length would undercount
+    # a long scan. We prefer the completeness figure when the scan has
+    # finalised and fall back to the live (uncapped-until-500) list length
+    # while a scan is still streaming, so the tile counts up in real time.
+    _probes_executed = (
+        scan.completeness.turns_used
+        if scan is not None and scan.completeness is not None and scan.completeness.turns_used
+        else len(_probes_list_for_evidence)
+    )
+    _probes_agents = len(_probe_groups)
     asi_dot_states = _asi_dot_states(scan, findings_by_asi)
     asi_covered = sum(1 for b in findings_by_asi.values() if sum(b.values()) > 0)
 
@@ -1422,16 +1415,19 @@ def build_dashboard_context(
             "aivss": (
                 "Composite agent safety score on a 0-100 scale. It is a "
                 "weighted average across the ten OWASP ASI sub-scores, "
-                "blended with the tier-specific scoring formula."
-            ),
-            "band": (
-                "Risk tier mapped from the AIVSS composite. Thresholds "
-                "are 0-39 critical, 40-59 poor, 60-79 warning, 80-89 "
-                "good, and 90-100 excellent."
+                "blended with the tier-specific scoring formula. The band "
+                "below maps the score to a risk tier: 0-39 critical, 40-59 "
+                "poor, 60-79 warning, 80-89 good, and 90-100 excellent."
             ),
             "findings": (
                 "Total exploit attempts the evaluator graded as valid. "
                 "Hover the tile for the per-severity breakdown."
+            ),
+            "probes": (
+                "Total probe attempts actually dispatched to the target "
+                "across every attack agent — one per conversation turn. "
+                "FINDINGS counts only the subset the evaluator graded as a "
+                "valid exploit."
             ),
             "elapsed": (
                 "Wall-clock duration of the scan, measured from the "
@@ -1464,7 +1460,6 @@ def build_dashboard_context(
         # payload values; no new sources of truth.
         "kpi_chart_data": {
             "aivss_pct": _fmt_pct(float(scan.aivss)) if scan is not None else 0.0,
-            "band_index": _band_segment_index(scan.band if scan is not None else None),
             "severity_mix": {
                 "critical": counts["critical"],
                 "high": counts["high"],
@@ -1498,6 +1493,11 @@ def build_dashboard_context(
         "elapsed_pct": _fmt_pct((elapsed / 900.0) * 100.0 if elapsed else 0.0),
         "probes_label": str(_probes_estimate(scan)),
         "probes_pct": 62.0 if scan is not None else 0.0,
+        # QA-066 (2026-06-04) — PROBES KPI tile values.
+        "probes_executed": _probes_executed,
+        "probes_agents_label": (
+            f"{_probes_agents} agent" if _probes_agents == 1 else f"{_probes_agents} agents"
+        ),
         "tokens_label": _humanise_int(scan.tokens_total if scan is not None else 0),
         "tokens_cap_label": "2 M",
         "tokens_pct": _fmt_pct(
@@ -1536,7 +1536,7 @@ def build_dashboard_context(
         # per agent; clicking it opens the modal with that agent's full
         # turn-by-turn chat. Derived from the SAME flat list (no extra disk
         # read).
-        "probe_groups": _assemble_probe_groups(_probes_list_for_evidence),
+        "probe_groups": _probe_groups,
         # BUG-1 (2026-06-02) — the legacy ``probes_payload_json`` was a
         # centralised JSON-island wall the slideover JS read on click.
         # It was removed because it dumped the full prompt + target
@@ -2135,12 +2135,9 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
     counts = p.get("counts", {})
     snapshot: dict[str, Any] = {
         "aivss": p.get("aivss_label"),
-        "band": p.get("band_label"),
-        # SSE Phase 1, Step 4 — the AIVSS tile's sub-caption was
-        # previously also keyed off ``band``; that collided with the
-        # BAND pill writer in the snapshot patcher (critic patch G8/P8).
-        # We expose the same label under a distinct key so the patcher
-        # can target ``data-live="band-sub"`` separately.
+        # QA-065 (2026-06-04) — the standalone BAND tile (``data-live="band"``)
+        # was removed; the band label now lives only on the AIVSS tile's
+        # sub-caption, which the snapshot patcher targets via ``band-sub``.
         "band-sub": p.get("band_label"),
         "needle": p.get("needle_pct"),
         "aivss-total": p.get("aivss_label"),
@@ -2148,6 +2145,11 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
         "elapsed-bar": p.get("elapsed_pct"),
         "probes": p.get("probes_label"),
         "probes-bar": p.get("probes_pct"),
+        # QA-066 (2026-06-04) — PROBES KPI tile live keys. The count climbs as
+        # memory.jsonl gains turn records mid-scan; the agent sub-caption
+        # updates as new agents come online.
+        "probes-count": p.get("probes_executed"),
+        "probes-agents": p.get("probes_agents_label"),
         "tokens": p.get("tokens_label"),
         "tokens-bar": p.get("tokens_pct"),
         "usd": p.get("usd_label"),

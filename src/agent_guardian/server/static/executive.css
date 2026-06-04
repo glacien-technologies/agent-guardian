@@ -206,7 +206,9 @@ body.exec-body {
   display: grid;
   /* QA-043 (2026-06-02): grid dropped from 8 → 6 columns once the
      CRITICAL + HIGH severity tiles were removed (severity mix lives on
-     the Findings bar chart further down the Overview pane). */
+     the Findings bar chart further down the Overview pane).
+     QA-065 + QA-066 (2026-06-04): BAND tile removed, PROBES tile added —
+     net 6 columns, unchanged. */
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.75rem;
 }
@@ -424,25 +426,9 @@ body.exec-body {
    QA-040/QA-049; the gauge restated information already carried by the
    band pill, so the dependency-free SVG was not worth its layout cost. */
 
-/* BAND tile — 5-segment band axis. */
-.exec-kpi__chart--band { gap: 2px; }
-.exec-kpi__band-seg {
-  flex: 1 1 0;
-  height: 8px;
-  border-radius: 2px;
-  /* Every segment always carries its band colour so the tile reads as a
-     5-band spectrum legend (critical -> excellent). Non-active segments are
-     dimmed; the current band is emphasised below. This also keeps the bars
-     visible when the band is Not Evaluated (no active segment). */
-  opacity: 0.4;
-}
-.exec-kpi__band-seg--critical { background: var(--exec-sev-critical); }
-.exec-kpi__band-seg--poor { background: var(--exec-sev-high); }
-.exec-kpi__band-seg--warning { background: var(--exec-sev-medium); }
-.exec-kpi__band-seg--good { background: var(--exec-sev-low); }
-.exec-kpi__band-seg--excellent { background: var(--exec-brand); }
-/* The current band is shown at full strength. */
-.exec-kpi__band-seg--active { opacity: 1; }
+/* QA-065 (2026-06-04): the BAND tile (and its 5-segment ``.exec-kpi__band-seg``
+   axis) was removed — the band now rides along on the AIVSS tile's
+   sub-caption, so a standalone band mini-chart had nothing left to draw. */
 
 /* FINDINGS tile — 4-segment stacked severity mix. */
 .exec-kpi__chart--findings { gap: 2px; }

@@ -211,8 +211,9 @@ def test_executive_route_returns_200_with_seeded_scan(client: TestClient, store:
 def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanStore) -> None:
     """The sticky topbar + KPI strip render with the 6 remaining tile labels.
 
-    QA-043 (2026-06-02) — CRITICAL + HIGH tiles dropped; the strip now ships
-    six tiles (AIVSS / Band / Findings / Elapsed / Cost / Coverage) and the
+    QA-043 (2026-06-02) — CRITICAL + HIGH tiles dropped. QA-065 + QA-066
+    (2026-06-04) — BAND tile dropped, PROBES tile added; the strip now ships
+    six tiles (AIVSS / Findings / Probes / Elapsed / Cost / Coverage) and the
     grid renders 6 columns.
     """
     scan = _make_scan()
@@ -229,8 +230,8 @@ def test_executive_renders_topbar_and_kpi_strip(client: TestClient, store: ScanS
     assert 'class="exec-kpi-strip"' in body
     for key, label in (
         ("aivss", "AIVSS"),
-        ("band", "Band"),
         ("findings", "Findings"),
+        ("probes", "Probes"),
         ("elapsed", "Elapsed"),
         ("cost", "Cost"),
         ("coverage", "Coverage"),

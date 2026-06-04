@@ -114,12 +114,13 @@ def test_executive_kpi_tile_renders_info_button_and_popover(
     QA-043 (2026-06-02) — CRITICAL + HIGH tiles removed; the strip is now
     six tiles. QA-044 + QA-039 — the popover is ``kpi-info-popover`` driven
     by click-to-open ``aria-controls`` rather than the old hover-only
-    ``aria-describedby`` + ``exec-kpi__desc-popover`` markup.
+    ``aria-describedby`` + ``exec-kpi__desc-popover`` markup. QA-065 + QA-066
+    (2026-06-04) — BAND tile dropped, PROBES tile added (still six).
     """
     scan = _make_scan()
     _persist(store, scan)
     body = client.get(f"/scan/{scan.id}?theme=executive").text
-    for key in ("aivss", "band", "findings", "elapsed", "cost", "coverage"):
+    for key in ("aivss", "findings", "probes", "elapsed", "cost", "coverage"):
         assert f'aria-controls="kpi-{key}-info"' in body, f"missing aria-controls for KPI {key!r}"
         assert f'id="kpi-{key}-info"' in body, f"missing popover id for KPI {key!r}"
     # New marker classes the QA validation greps for.
@@ -156,11 +157,12 @@ def test_executive_kpi_info_popover_css_drops_uppercase(client: TestClient) -> N
     "key,component",
     [
         # QA-061 (2026-06-03) — AIVSS tile no longer renders a mini-chart;
-        # it uses the same plain-text big-numeric + band-label treatment
-        # as the BAND tile and is exercised by
-        # ``test_executive_aivss_tile_renders_plain_text_after_qa_061``
+        # it uses a plain-text big-numeric + band-label treatment and is
+        # exercised by ``test_executive_aivss_tile_renders_plain_text_after_qa_061``
         # below instead of this parametrisation.
-        ("band", "kpi-chart-band"),
+        # QA-065 (2026-06-04) — the BAND tile (and its ``kpi-chart-band``
+        # mini-chart) was removed. QA-066 — the new PROBES tile is likewise
+        # plain-text (count + agent sub-caption), so neither appears here.
         ("findings", "kpi-chart-findings"),
         ("elapsed", "kpi-chart-elapsed"),
         ("cost", "kpi-chart-cost"),
@@ -198,6 +200,57 @@ def test_executive_aivss_tile_renders_plain_text_after_qa_061(
     assert 'data-live="aivss"' in body
 
 
+def test_executive_band_tile_removed_and_probes_tile_added(
+    client: TestClient, store: ScanStore
+) -> None:
+    """QA-065 + QA-066 (2026-06-04) — the standalone BAND tile is gone and the
+    PROBES tile takes its slot.
+
+    The band label still renders (on the AIVSS tile's sub-caption), but the
+    second ``data-kpi="band"`` tile and its ``kpi-chart-band`` mini-chart must
+    be absent. The PROBES tile carries the live count + agent sub-caption.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    # BAND tile + its mini-chart are gone.
+    assert 'data-kpi="band"' not in body
+    assert 'data-component="kpi-chart-band"' not in body
+    assert "exec-kpi__band-seg" not in body
+    # PROBES tile is present with its live hooks.
+    assert 'data-kpi="probes"' in body
+    assert 'data-live="probes-count"' in body
+    assert 'data-live="probes-agents"' in body
+    # The band label is preserved on the AIVSS tile's sub-caption.
+    assert 'data-live="band-sub"' in body
+
+
+def test_probes_executed_prefers_completeness_turns_over_capped_list() -> None:
+    """``probes_executed`` reads the uncapped ``completeness.turns_used`` so a
+    long scan isn't undercounted by the 500-row ``probes_list`` display cap."""
+    from agent_guardian.models.scan import ScanCompleteness
+    from agent_guardian.server.dashboard_view import build_dashboard_context
+
+    scan = _make_scan().model_copy(
+        update={
+            "completeness": ScanCompleteness(
+                agents_planned=4,
+                agents_completed=4,
+                turns_used=137,
+                turns_planned=160,
+            )
+        }
+    )
+    ctx = build_dashboard_context(
+        scan_id=scan.id,
+        scan=scan,
+        is_running=False,
+        base_url="http://127.0.0.1:8080",
+        version_label="test",
+    )
+    assert ctx.payload["probes_executed"] == 137
+
+
 def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
     """``kpi_chart_data`` is exposed on the dashboard context."""
     from agent_guardian.server.dashboard_view import build_dashboard_context
@@ -212,7 +265,6 @@ def test_executive_kpi_chart_data_dict_present_on_view_model() -> None:
     data = ctx.payload["kpi_chart_data"]
     assert set(data.keys()) >= {
         "aivss_pct",
-        "band_index",
         "severity_mix",
         "elapsed_uncapped",
         "cost_uncapped",

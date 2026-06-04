@@ -1,12 +1,20 @@
 {# Executive — KPI strip (in-panel, Overview only).
 
    Six tiles in a responsive grid; locked left-to-right order:
-     AIVSS / Band / Findings / Elapsed / Cost / Coverage
+     AIVSS / Findings / Probes / Elapsed / Cost / Coverage
 
    QA-043 (2026-06-02):
      - CRITICAL + HIGH severity tiles removed; their dot-cluster mini-chart
        restated info that lives in the FINDINGS bar chart further down the
        Overview page. Grid drops from 8 → 6 columns.
+
+   QA-065 + QA-066 (2026-06-04):
+     - Standalone BAND tile removed. The band label already rides along on
+       the AIVSS tile as its sub-caption (``data-live="band-sub"``), so a
+       second tile restating the same band was redundant.
+     - PROBES tile added: the count of probe attempts actually dispatched
+       (FINDINGS counts only the ones graded valid). Net tile count is
+       unchanged at 6 columns.
 
    QA-044 + QA-039 (2026-06-02):
      - The ``ⓘ`` button opens a prose explainer popover
@@ -83,31 +91,10 @@
        primary scan signal anyway). #}
     <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="aivss">{{ aivss_label }}</span>
     {# SSE Phase 1, Step 4 — this band label is the AIVSS tile's
-       sub-caption and is structurally distinct from the BAND pill below
-       (different parent tile, different colour-class binding). The
-       ``data-live="band"`` attribute previously collided with the BAND
-       pill's writer (critic patch G8/P8); we rename to ``band-sub`` so
-       the snapshot patcher can target the two surfaces independently. #}
+       sub-caption. QA-065 (2026-06-04) removed the standalone BAND tile, so
+       this is now the only on-dashboard surface for the band; the snapshot
+       patcher targets it via the distinct ``data-live="band-sub"`` key. #}
     <span class="exec-kpi__sub exec-kpi__sub--{{ band_class }}" data-live="band-sub">{{ band_label }}</span>
-  </div>
-
-  <div class="exec-kpi" data-kpi="band">
-    <span class="exec-kpi__label">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14 4 6"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
-      Band
-      {{ kpi_info('band') }}
-    </span>
-    <span class="exec-kpi__value exec-kpi__value--{{ band_class }}" data-live="band">{{ band_label }}</span>
-    {# Mini-chart: 5-segment horizontal bar (Critical · Poor · Warning · Good · Excellent). #}
-    {% set _seg = kpi_chart_data.band_index | default(-1) %}
-    {% set _seg_classes = ['critical', 'poor', 'warning', 'good', 'excellent'] %}
-    <span class="exec-kpi__chart exec-kpi__chart--band" data-component="kpi-chart-band" aria-hidden="true">
-      {% for cls in _seg_classes %}
-        <span class="exec-kpi__band-seg exec-kpi__band-seg--{{ cls }}{% if loop.index0 == _seg %} exec-kpi__band-seg--active{% endif %}"></span>
-      {% endfor %}
-    </span>
-    {# QA-062 (2026-06-03) — hover data-table dropped from every tile except
-       FINDINGS; the prose ⓘ explainer remains the single source of detail. #}
   </div>
 
   <div class="exec-kpi" data-kpi="findings">
@@ -137,11 +124,28 @@
     {{ kpi_hover_table('findings') }}
   </div>
 
+  {# QA-066 (2026-06-04) — PROBES tile. "How many probes did we actually run."
+     FINDINGS counts the exploit attempts the evaluator graded valid; PROBES
+     counts every attempt dispatched, so the two read as numerator / universe.
+     Plain-text treatment (big count + agent sub-caption) mirrors the AIVSS
+     tile rather than carrying a mini-chart, since the raw count has no
+     meaningful denominator to chart against. #}
+  <div class="exec-kpi" data-kpi="probes">
+    <span class="exec-kpi__label">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
+      Probes
+      {{ kpi_info('probes') }}
+    </span>
+    <span class="exec-kpi__value" data-live="probes-count">{{ probes_executed }}</span>
+    <span class="exec-kpi__sub" data-live="probes-agents">{{ probes_agents_label }}</span>
+  </div>
+
   {# QA-043 — CRITICAL + HIGH tiles removed (2026-06-02).
      The severity breakdown lives in the Findings-by-severity bar chart
      further down the Overview pane; restating it here as standalone KPI
-     tiles duplicated the information without adding new signal. The grid
-     now renders 6 columns at >=1280px (see ``executive.css`` §3).
+     tiles duplicated the information without adding new signal. The strip
+     renders 6 columns at >=1280px (see ``executive.css`` §3): QA-065 dropped
+     the BAND tile and QA-066 added PROBES, a net wash.
   #}
 
   <div class="exec-kpi" data-kpi="elapsed">
