@@ -2,7 +2,7 @@
 
 What is shipped, what is in flight, and what is planned for
 AgentGuardian, with semver windows. The detail-rich rendered version
-lives in [`docs/reference/roadmap.mdx`](./roadmap.mdx) on the Mintlify
+lives in [`docs/reference/roadmap.mdx`](https://docs.agentguardian.dev/reference/roadmap) on the Mintlify
 site; this Markdown stub pins the legacy URL
 (`docs/reference/roadmap.md`) and is the single source of truth the
 GA-narrative guard reads.
@@ -47,7 +47,7 @@ behaviour for v1.0 users is preserved unless explicitly called out.
 
 ## v1.2 and beyond
 
-Earlier exploratory work tracked in [`ROADMAP.md`](../../ROADMAP.md) at
+Earlier exploratory work tracked in [`ROADMAP.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/ROADMAP.md) at
 the repository root. The hosted dashboard architecture is captured in
 [`architecture/hosted-dashboard.md`](../architecture/hosted-dashboard.md);
 ship date follows the v1.1 cycle.
