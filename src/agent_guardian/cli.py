@@ -80,6 +80,14 @@ from agent_guardian.models.tier import Tier
 
 _LOG = logging.getLogger(__name__)
 
+# QA-072 (2026-06-04) — the operator's EXPLICIT terminal-verbosity intent, set
+# by the global ``--verbose`` / ``--quiet`` / ``--log-level`` flags in
+# :func:`main`. ``None`` means "no flag passed" — the scan command then keeps
+# the terminal quiet (WARNING) and routes the full trace to ``run.log`` instead.
+# It is deliberately NOT set by ``$AGENT_GUARDIAN_LOG_LEVEL`` (that env var now
+# controls the run.log depth, not the screen).
+_CLI_TERMINAL_INTENT: str | None = None
+
 # ---------------------------------------------------------------------------
 # Exit codes (PRD §8.4)
 # ---------------------------------------------------------------------------
@@ -3108,11 +3116,13 @@ def scan(
         "--debug",
         count=True,
         help=(
-            "Stream per-agent reflections (prompt + target_response + verdict) "
-            "to stdout in real time. Use -1x for truncated panels (the default "
-            "block format); -2x (--debug --debug) to disable truncation and "
-            "show full prompt + reasoning. Composes with the Live region — "
-            "panels print as scrollback ABOVE the swarm board, not inside it."
+            "Upgrade the attack feed from the default one-line-per-probe "
+            "summary to full panels (prompt + target_response + verdict). "
+            "Use -1x for truncated panels; -2x (--debug --debug) to disable "
+            "truncation and show full prompt + reasoning. Panels print as "
+            "scrollback ABOVE the swarm board. The raw per-call model trace "
+            "always lands in ~/.agentguardian/scans/<id>/run.log regardless of "
+            "this flag; pass -v to also tee it to the terminal."
         ),
     ),
     debug_format: str = typer.Option(
@@ -4004,14 +4014,40 @@ async def _run_scan_inner(
     # CLI is a one-scan-per-process tool, so cleanup isn't required.
     install_jsonl_log_handler(partial_scan_dir)
 
-    # QA-005 — attach the reflection sink BEFORE the TUI so the renderer
-    # wraps whatever observer is already wired (otel, store, etc.) and
-    # the TUI's attach_to() wraps the renderer in turn. The wrap chain
-    # is: TUI → AttackFeedRenderer → prior observer (otel / store /
-    # caller-supplied). All three run per event; failures in any one
-    # are suppressed so a sick sink can't break the swarm.
+    # QA-072 (2026-06-04) — route the FULL raw log trace to a per-scan run.log
+    # and keep the terminal quiet by default. ``AGENT_GUARDIAN_LOG_LEVEL`` now
+    # sets the CAPTURED depth (run.log + the events.jsonl/dashboard bridge,
+    # default DEBUG); the terminal shows only the board + the compact attack
+    # feed unless the operator explicitly raised verbosity via the global
+    # ``-v`` / ``--log-level``. The full per-call model trace is always one
+    # ``cat ~/.agentguardian/scans/<id>/run.log`` away.
+    from agent_guardian.logging_setup import attach_run_log_file, set_terminal_log_level
+
+    try:
+        attach_run_log_file(
+            partial_scan_dir / "run.log",
+            level=os.environ.get("AGENT_GUARDIAN_LOG_LEVEL") or "DEBUG",
+        )
+    except OSError as _exc:  # pragma: no cover — never block a scan on a log file
+        _LOG.debug("run.log attach failed (%s)", _exc)
+    # Quiet the terminal unless the operator explicitly asked for more; the full
+    # trace still lands in run.log + the dashboard Logs tab regardless.
+    set_terminal_log_level(_CLI_TERMINAL_INTENT or "WARNING")
+
+    # QA-005 + QA-072 — attach the reflection sink BEFORE the TUI so the renderer
+    # wraps whatever observer is already wired (otel, store, etc.) and the TUI's
+    # attach_to() wraps the renderer in turn. The wrap chain is: TUI →
+    # AttackFeedRenderer → prior observer. Now that raw logs are off-screen, the
+    # feed IS the operator's red-team narrative, so it rides every interactive
+    # scan by DEFAULT in COMPACT mode (one line per probe). ``--debug`` upgrades
+    # to full panels, ``--debug 2`` drops truncation, ``--debug-format json``
+    # emits NDJSON. We skip the feed only when the Live UI is suppressed
+    # (``--no-tui`` / piped) and the operator didn't explicitly ask via
+    # ``--debug``.
     feed_renderer: Any = None
-    if debug_level > 0:
+    _feed_is_json = debug_format == "json"
+    _want_feed = debug_level > 0 or (not no_tui and not _feed_is_json)
+    if _want_feed:
         from agent_guardian.ui.attack_feed import (
             AttackFeedRenderer,
             DebugFormat,
@@ -4019,10 +4055,11 @@ async def _run_scan_inner(
         )
 
         level_cast: DebugLevel = 2 if debug_level >= 2 else 1
-        fmt_cast: DebugFormat = "json" if debug_format == "json" else "text"
+        fmt_cast: DebugFormat = "json" if _feed_is_json else "text"
         feed_renderer = AttackFeedRenderer(
             level=level_cast,
             format=fmt_cast,
+            compact=debug_level == 0 and not _feed_is_json,
             scan_id=scan_id,
         )
         feed_renderer.attach_to(swarm)
@@ -4244,6 +4281,11 @@ async def _run_scan_inner(
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )
+    # QA-072 — point the operator at the full raw trace. The terminal stays
+    # quiet during the scan (board + compact attack feed); the per-call model
+    # log lives here. To stderr so it never pollutes a ``--debug-format json``
+    # stdout pipeline.
+    typer.echo(f"full log: {partial_scan_dir / 'run.log'}", err=True)
 
     # QA-049 — prominent dashboard URL banner at scan-end. The plain
     # `▸ Scan … track live at <url>` line that print_scan_urls emits
@@ -4374,6 +4416,11 @@ def main(
     else:
         effective_level = None  # configure_logging() reads the env var
     configure_logging(level=effective_level)
+    # QA-072 — remember the EXPLICIT terminal intent so the scan command can
+    # keep the screen quiet by default (full trace -> run.log) while still
+    # honouring a deliberate ``-v`` / ``--log-level`` / ``-q``.
+    global _CLI_TERMINAL_INTENT
+    _CLI_TERMINAL_INTENT = effective_level
     # Project-local .env auto-loading. Fires for every sub-command so
     # ``agent-guardian scan`` / ``doctor`` / ``serve`` all see the keys.
     # See ``_try_load_dotenv`` for the (deliberately conservative) lookup.

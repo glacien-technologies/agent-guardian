@@ -68,6 +68,7 @@ __all__ = [
     "DebugLevel",
     "build_curl_one_liner",
     "render_reflection_block",
+    "render_reflection_line",
 ]
 
 
@@ -261,6 +262,46 @@ def _title_text(turn: Mapping[str, Any]) -> Text:
     return title
 
 
+# QA-072 (2026-06-04) — compact one-line verdict glyph per outcome. The full
+# panel keys its border off the verdict; the compact line leads with a glyph in
+# the same colour so a fast vertical scan still reads "what got through".
+_VERDICT_GLYPH: dict[str, tuple[str, str]] = {
+    # verdict -> (glyph, human label)
+    "pass": ("✓", "defended"),
+    "fail": ("✗", "EXPLOITED"),
+    "inconclusive": ("~", "inconclusive"),
+}
+
+
+def render_reflection_line(turn: Mapping[str, Any]) -> Text:
+    """Render ONE reflection as a single compact terminal line (QA-072).
+
+    Shape: ``<glyph> <ASI> · <agent> · <label> (conf 0.xx)`` — the default
+    scan-feed surface. Far quieter than the full :func:`render_reflection_block`
+    panel (one line vs. a seven-row box) while still naming the agent, the ASI
+    category, and the outcome. Colour is keyed off the verdict, matching the
+    panel's border semantics.
+    """
+    verdict = str(turn.get("verdict", "")).strip()
+    glyph, label = _VERDICT_GLYPH.get(verdict, ("·", verdict or "pending"))
+    style = _verdict_style(verdict)
+    asi = str(turn.get("asi_category", "—")) or "—"
+    asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"
+    agent = str(turn.get("agent", "agent"))
+
+    line = Text()
+    line.append(f"{glyph} ", style=style)
+    line.append(f"{asi:<6}", style=asi_style)
+    line.append("  ")
+    line.append(agent, style="status.running")
+    line.append("  ·  ")
+    line.append(label, style=style)
+    confidence = turn.get("confidence")
+    if isinstance(confidence, (int, float)):
+        line.append(f"  (conf {float(confidence):.2f})", style="status.pending")
+    return line
+
+
 def render_reflection_block(turn: Mapping[str, Any], *, full: bool = False) -> RenderableType:
     """Build the Rich renderable for one reflection.
 
@@ -331,12 +372,19 @@ class AttackFeedRenderer:
         *,
         level: DebugLevel = 1,
         format: DebugFormat = "text",
+        compact: bool = False,
         console: Console | None = None,
         stream: IO[str] | None = None,
         scan_id: str | None = None,
     ) -> None:
         self.level: DebugLevel = level
         self.format: DebugFormat = format
+        # QA-072 — ``compact`` renders one terminal line per reflection instead
+        # of a full panel. It is the DEFAULT scan surface (the CLI attaches a
+        # compact renderer when no ``--debug`` flag is passed); ``--debug``
+        # upgrades to the panel. Ignored in ``format="json"`` (NDJSON is already
+        # one line). Requires ``level >= 1`` to emit.
+        self.compact = compact
         self.scan_id = scan_id
         self._console = console if console is not None else get_console()
         self._stream = stream  # ``None`` → resolve at write time so tests can swap stdout.
@@ -404,8 +452,12 @@ class AttackFeedRenderer:
         self.rendered_count += 1
 
     def _emit_text(self, turn: Mapping[str, Any]) -> None:
-        full = self.level == 2
-        renderable = render_reflection_block(turn, full=full)
+        # QA-072 — compact mode prints a single line per reflection (the default
+        # scan feed); otherwise the full panel (``--debug`` / ``--debug 2``).
+        if self.compact:
+            renderable: RenderableType = render_reflection_line(turn)
+        else:
+            renderable = render_reflection_block(turn, full=self.level == 2)
         # ``console.print`` is the QA-002 lock: when a Live region owns
         # stdout, Rich routes this print above the Live frame.
         self._console.print(renderable)

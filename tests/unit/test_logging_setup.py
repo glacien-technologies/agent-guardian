@@ -339,3 +339,66 @@ def test_structured_logging_enabled_tracks_json_env(
     assert logging_setup.structured_logging_enabled() is True
     monkeypatch.setenv(logging_setup.JSON_ENV_VAR, "false")
     assert logging_setup.structured_logging_enabled() is False
+
+
+# ---------------------------------------------------------------------------
+# QA-072 — run.log file sink + terminal-level decoupling
+# ---------------------------------------------------------------------------
+
+
+def test_attach_run_log_file_captures_debug_while_terminal_quiet(tmp_path) -> None:
+    """The run.log file captures DEBUG even when the terminal handler is at
+    WARNING — the whole point of the decoupling."""
+    import io as _io
+
+    stream = _io.StringIO()
+    # Terminal handler starts at WARNING (the scan default).
+    logging_setup.configure_logging(level="WARNING", stream=stream, force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    try:
+        log = logging.getLogger("agent_guardian.test.qa072")
+        log.debug("debug-only-line")
+        log.warning("warning-line")
+        for h in logging.getLogger().handlers:
+            h.flush()
+        file_text = run_log.read_text(encoding="utf-8")
+        # File got BOTH the debug and the warning.
+        assert "debug-only-line" in file_text
+        assert "warning-line" in file_text
+        # Terminal (WARNING) got the warning but NOT the debug line.
+        term = stream.getvalue()
+        assert "warning-line" in term
+        assert "debug-only-line" not in term
+    finally:
+        logging.getLogger().removeHandler(handler)
+
+
+def test_set_terminal_log_level_skips_file_and_jsonl_handlers(tmp_path) -> None:
+    """``set_terminal_log_level`` raises the console handler only — never the
+    run.log FileHandler nor a non-stream events bridge handler."""
+    import io as _io
+
+    stream = _io.StringIO()
+    logging_setup.configure_logging(level="DEBUG", stream=stream, force=True)
+    file_handler = logging_setup.attach_run_log_file(tmp_path / "run.log", level="DEBUG")
+    # A bare logging.Handler stands in for the JsonlLogHandler events bridge.
+    bridge = logging.Handler()
+    bridge.setLevel(logging.NOTSET)
+    logging.getLogger().addHandler(bridge)
+    try:
+        logging_setup.set_terminal_log_level("WARNING")
+        # The file handler keeps DEBUG (full trace).
+        assert file_handler.level == logging.DEBUG
+        # The bare bridge handler is untouched (still NOTSET=0).
+        assert bridge.level == logging.NOTSET
+    finally:
+        root = logging.getLogger()
+        root.removeHandler(file_handler)
+        root.removeHandler(bridge)
+
+
+def test_resolve_level_public_wrapper() -> None:
+    assert logging_setup.resolve_level("DEBUG") == logging.DEBUG
+    assert logging_setup.resolve_level("warning") == logging.WARNING
+    assert logging_setup.resolve_level(20) == logging.INFO
