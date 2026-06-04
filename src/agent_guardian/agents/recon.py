@@ -378,6 +378,7 @@ class ReconAgent:
         budget: AgentBudget | None = None,
         audit_rounds: int = 10,
         on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
+        on_probe: Callable[[str], None] | None = None,
     ) -> None:
         # The attacker LLM drives white-box profile extraction + the black-box
         # capability-audit deepening loop; wrapped in a usage-tracking decorator
@@ -400,6 +401,9 @@ class ReconAgent:
         # dashboard renderer can treat recon and specialist reflections
         # uniformly.
         self.on_reflection: Callable[[Mapping[str, Any]], None] | None = on_reflection
+        # Fires once per capability-audit probe (just before each target call) so
+        # the swarm can emit live recon progress instead of looking frozen.
+        self.on_probe: Callable[[str], None] | None = on_probe
 
     async def run(self, target: TargetAdapter, memory: SharedMemory) -> AgentReport:
         start = time.monotonic()
@@ -493,6 +497,7 @@ class ReconAgent:
             model=self._model,
             max_deepen_rounds=self._audit_rounds,
             cancel_event=getattr(self, "_cancel_event", None),
+            on_probe=self.on_probe,
         )
         transcript = audit_result.transcript
         turns = len(transcript)

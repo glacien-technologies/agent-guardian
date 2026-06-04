@@ -38,6 +38,9 @@ from typing import Any
 from rich.console import Console, RenderableType
 from rich.live import Live
 from rich.panel import Panel
+from rich.rule import Rule
+from rich.spinner import Spinner
+from rich.text import Text
 
 from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
 from agent_guardian.logging_setup import get_console
@@ -49,7 +52,8 @@ from agent_guardian.ui.dashboard import (
     make_dashboard,
 )
 from agent_guardian.ui.findings_panel import FindingRow, Severity
-from agent_guardian.ui.recon_panel import ReconSummary
+from agent_guardian.ui.recon_panel import ReconSummary, build_recon_panel
+from agent_guardian.ui.red_team_panel import build_red_team_panel
 
 __all__ = ["ScanTUI"]
 
@@ -89,6 +93,15 @@ def _next_phase_after(phase: str) -> CurrentPhase:
 # panel honest (no random colour) while not requiring a per-finding
 # sidecar feed.
 _DEFAULT_SEVERITY: Severity = "high"
+
+
+def _fmt_mmss(seconds: float) -> str:
+    """Compact elapsed clock for the thin status line."""
+    if seconds < 60.0:
+        return f"{seconds:.0f}s"
+    mins = int(seconds // 60)
+    secs = int(seconds - mins * 60)
+    return f"{mins}m {secs:02d}s"
 
 
 class ScanTUI:
@@ -132,6 +145,11 @@ class ScanTUI:
         self._plan_panel = plan_panel
         self._debug_feed = debug_feed
         self._legacy_board = legacy_board
+        # QA-075 — narration model: phase sections are PRINTED durably to
+        # scrollback in order (recon summary → "Phase 2" rule → final table),
+        # and the Live region holds only a thin current-status line. This set
+        # tracks which durable sections have already been emitted (print-once).
+        self._printed_sections: set[str] = set()
 
     # ------------------------------------------------------------------
     # Attachment + lifecycle
@@ -151,12 +169,76 @@ class ScanTUI:
         swarm.observer = _observer
 
     def _render(self) -> RenderableType:
-        return make_dashboard(
-            self._state,
-            plan_panel=self._plan_panel,
-            debug_feed=self._debug_feed,
-            legacy=self._legacy_board,
-        )
+        # ``--legacy-board`` keeps the pre-QA-012 bottom-anchored board.
+        if self._legacy_board:
+            return make_dashboard(
+                self._state,
+                plan_panel=self._plan_panel,
+                debug_feed=self._debug_feed,
+                legacy=True,
+            )
+        # QA-075 narration model — the Live region is just a thin heartbeat
+        # line for the CURRENT phase; finished phases are printed durably to
+        # scrollback (see :meth:`_emit_durable_sections`).
+        return self._thin_status()
+
+    def _thin_status(self) -> RenderableType:
+        phase = self._state.current_phase
+        el = _fmt_mmss(self._state.elapsed_seconds)
+        if phase == "recon":
+            n = self._state.recon_probes_sent
+            act = self._state.recon_activity or "probing the target"
+            text = Text(
+                f" Phase 1 · Reconnaissance — {act} · {n} probes ({el})",
+                style="status.running",
+            )
+            return Spinner("dots", text=text, style="status.running")
+        if phase == "decompose":
+            return Spinner(
+                "dots",
+                text=Text(" Phase 1.5 · Planning the attack…", style="status.running"),
+                style="status.running",
+            )
+        if phase == "parallel":
+            # No bottom status line during red teaming: the per-probe verdict
+            # feed IS the heartbeat, and a pinned status line leaks copies into
+            # scrollback every time the feed scrolls past it. The final
+            # per-agent table prints durably when the phase completes.
+            return Text("")
+        if phase == "finalise":
+            return Spinner(
+                "dots",
+                text=Text(" Phase 3 · Scoring & finalising…", style="status.running"),
+                style="status.running",
+            )
+        # plan / done → nothing live (sections + final summary are durable).
+        return Text("")
+
+    def _emit_durable_sections(self) -> None:
+        """Print phase sections to scrollback (above the live heartbeat), once
+        each, so the transcript reads top-to-bottom:
+
+            Phase 1 · Reconnaissance  (summary panel, on recon done)
+            ── Phase 2 · Red Teaming ──   (rule, when red teaming begins)
+            <per-probe verdict feed streams here>
+            Phase 2 final per-agent table  (on red teaming done)
+
+        The per-probe verdict lines come from the compact attack feed
+        (``console.print`` scrollback), so printing the rule when ``parallel``
+        starts puts them under the heading.
+        """
+        if self._legacy_board or self._live is None:
+            return
+        phase = self._state.current_phase
+        if self._state.recon_summary is not None and "recon" not in self._printed_sections:
+            self._printed_sections.add("recon")
+            self._console.print(build_recon_panel(self._state))
+        if phase in {"parallel", "finalise", "done"} and "phase2" not in self._printed_sections:
+            self._printed_sections.add("phase2")
+            self._console.print(Rule("Phase 2 · Red Teaming", style="status.running"))
+        if phase in {"finalise", "done"} and "phase2_table" not in self._printed_sections:
+            self._printed_sections.add("phase2_table")
+            self._console.print(build_red_team_panel(self._state))
 
     async def __aenter__(self) -> ScanTUI:
         self._start = time.monotonic()
@@ -178,9 +260,11 @@ class ScanTUI:
         tb: TracebackType | None,
     ) -> None:
         if self._live is not None:
-            # One final render so the closing frame reflects the latest
-            # state (e.g. final AIVSS) before Live restores the cursor.
+            # Flush any not-yet-printed phase section (e.g. the final red-team
+            # table) durably, then a final heartbeat render, before Live
+            # restores the cursor. The closing frame reflects the latest state.
             self._state.elapsed_seconds = time.monotonic() - self._start
+            self._emit_durable_sections()
             self._live.update(self._render())
             self._live.stop()
             self._live = None
@@ -251,6 +335,17 @@ class ScanTUI:
 
         if kind == "recon_start":
             self._state.agent_status[_RECON_AGENT] = "running"
+        elif kind == "recon_progress":
+            # Live capability-audit progress — keep the Phase 1 panel moving
+            # (probe counter + current activity) during the otherwise-silent
+            # audit so the operator sees recon is working, not frozen.
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            sent = payload.get("probes_sent")
+            if isinstance(sent, int):
+                self._state.recon_probes_sent = sent
+            activity = payload.get("activity")
+            if isinstance(activity, str) and activity:
+                self._state.recon_activity = activity
         elif kind == "recon_done":
             self._state.agent_status[_RECON_AGENT] = "done"
         elif kind == "agent_start" and agent:
@@ -336,5 +431,8 @@ class ScanTUI:
         _ = new_status
 
         self._state.elapsed_seconds = time.monotonic() - self._start
+        # Print any newly-completed phase section to scrollback BEFORE updating
+        # the live heartbeat, so durable sections land above the live line.
+        self._emit_durable_sections()
         if self._live is not None:
             self._live.update(self._render())

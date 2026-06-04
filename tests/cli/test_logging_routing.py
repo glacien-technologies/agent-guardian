@@ -141,20 +141,21 @@ def test_log_message_appears_above_live_panel(
         async with tui:
             log.info("hello from inside the live region")
             tui.handle_event(
-                SwarmEvent(kind="recon_start", timestamp=time.monotonic())  # type: ignore[arg-type]
+                SwarmEvent(  # type: ignore[arg-type]
+                    kind="phase_start",
+                    timestamp=time.monotonic(),
+                    payload={"phase": "recon"},
+                )
             )
 
     asyncio.run(_run())
     text = console.export_text()
     # The log line "hello from inside the live region" must appear in
-    # the scrollback BEFORE the final panel border. Rich's Live writes
-    # the panel as the trailing frame in the recorded export when the
-    # Live exits (with refresh_per_second small enough that no
-    # transient frames flush). Assert ordering.
+    # scrollback BEFORE the live status line. QA-075 — the live region is now
+    # a thin "Phase 1 · Reconnaissance — probing…" heartbeat (not the old
+    # board); the QA-002 scrollback-ordering invariant is unchanged.
     assert "hello from inside the live region" in text
     log_idx = text.index("hello from inside the live region")
-    # QA-012 — the swarm-board flat title was replaced by the
-    # three phase-panel titles. Phase 1 is always the first frame.
     panel_idx = text.index("Phase 1 · Reconnaissance")
     assert log_idx < panel_idx, (
         "log line must serialize ABOVE the Live panel as scrollback; "

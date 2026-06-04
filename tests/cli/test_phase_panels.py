@@ -143,7 +143,10 @@ def test_red_team_panel_queued_when_recon_active() -> None:
     assert "queued" in text.lower()
 
 
-def test_red_team_panel_active_when_parallel() -> None:
+def test_red_team_panel_compact_summary_when_parallel() -> None:
+    """QA-074 — during the run the panel is a THIN summary (counts + budget),
+    NOT the full agent table; the table would fight with the live verdict feed
+    scrolling above. The full table renders only once red teaming completes."""
     state = DashboardState(scan_id="s", target_ref="https://x", tier="auto")
     state.current_phase = "parallel"
     state.agent_status["goal-hijack-agent"] = "running"
@@ -153,12 +156,16 @@ def test_red_team_panel_active_when_parallel() -> None:
     state.budget_usd_spent = 0.03
     text = _text(build_red_team_panel(state))
     assert "Phase 2 · Red Teaming" in text
-    # Agent rows render in the active state.
-    assert "goal-hijack-agent" in text
-    assert "tool-abuse-agent" in text
+    # Compact summary surfaces live counts...
+    assert "agents done" in text
+    assert "2 findings" in text
+    # ...but withholds the per-agent table during the run.
+    assert "goal-hijack-agent" not in text
 
 
-def test_red_team_panel_collapsed_when_finalise() -> None:
+def test_red_team_panel_full_table_when_finalise() -> None:
+    """QA-074 — once red teaming completes the full per-agent table renders as
+    the stable final status (the inverse of the old collapse-on-done shape)."""
     state = DashboardState(scan_id="s", target_ref="https://x", tier="auto")
     state.current_phase = "finalise"
     state.agent_status["goal-hijack-agent"] = "done"
@@ -167,8 +174,8 @@ def test_red_team_panel_collapsed_when_finalise() -> None:
     text = _text(build_red_team_panel(state))
     assert "Phase 2 · Red Teaming" in text
     assert "done" in text
-    # Collapsed form drops the agent table.
-    assert "goal-hijack-agent" not in text
+    # Full table is present at completion (the per-agent rows render).
+    assert "goal-hijack-agent" in text
 
 
 # ---------------------------------------------------------------------------

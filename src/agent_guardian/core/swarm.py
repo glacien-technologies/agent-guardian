@@ -185,6 +185,7 @@ _ASI_TO_AGENT_NAME: dict[AsiCategory, str] = {
 
 EventKind = Literal[
     "recon_start",
+    "recon_progress",
     "recon_done",
     "agent_start",
     "agent_progress",
@@ -770,6 +771,27 @@ class SwarmCommander:
             },
         )
         self._emit(SwarmEvent(kind="recon_start", timestamp=_utcnow(), agent="recon-agent"))
+
+        # Live recon progress — the capability audit fires a series of probes at
+        # the target (which can take tens of seconds, especially on a cold
+        # start). Without per-probe signal both the CLI board and the dashboard
+        # look frozen. Emit a lightweight ``recon_progress`` event before each
+        # probe so the UI can show "probing the target… N probes" + keep the
+        # elapsed clock moving.
+        _recon_probes_sent = 0
+
+        def _on_recon_probe(label: str) -> None:
+            nonlocal _recon_probes_sent
+            _recon_probes_sent += 1
+            self._emit(
+                SwarmEvent(
+                    kind="recon_progress",
+                    timestamp=_utcnow(),
+                    agent="recon-agent",
+                    payload={"probes_sent": _recon_probes_sent, "activity": label},
+                )
+            )
+
         recon = ReconAgent(
             attacker_llm=self.attacker_llm,
             model=self.config.attacker_model,
@@ -783,6 +805,7 @@ class SwarmCommander:
                 max_turns=25,
             ),
             on_reflection=self._make_reflection_sink("recon-agent"),
+            on_probe=_on_recon_probe,
         )
         recon_report: AgentReport | None = None
         try:

@@ -146,6 +146,11 @@ class DashboardState:
     # additive; absent keys render the legacy cell unchanged.
     agent_plan_label: dict[str, str] = field(default_factory=dict)
     agent_attachment_counts: dict[str, int] = field(default_factory=dict)
+    # Live recon progress — capability-audit probes dispatched so far + the
+    # current activity label. Populated from ``recon_progress`` events so the
+    # Phase 1 panel shows motion during the (otherwise silent) audit.
+    recon_probes_sent: int = 0
+    recon_activity: str = ""
 
     def __post_init__(self) -> None:
         # Seed every known agent row with a "pending" status so the
