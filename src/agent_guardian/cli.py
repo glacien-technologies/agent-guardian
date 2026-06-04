@@ -3582,6 +3582,21 @@ async def _run_scan(
     # watch the scan stream live. Only when we actually spawned a serve in-band
     # (otherwise the URL would 404 until the operator starts one).
     if auto_serve_result.spawned:
+        # Pre-create the on-disk scan directory BEFORE opening the browser.
+        # The auto-served dashboard runs in a SEPARATE process, so the only
+        # cross-process "this scan exists" signal is the scan dir on disk —
+        # the in-memory ``is_running`` flag lives in this process's store and
+        # is invisible to the child. The run creates this same dir later (see
+        # the ``partial_scan_dir.mkdir`` in ``_run_scan_inner``), but the
+        # freshly-opened tab races ahead of it and the route renders
+        # ``unknown scan: <id>`` until the operator hits F5. Touching the dir
+        # here (idempotent with the later mkdir) lets the dashboard land on its
+        # "ramping up" state immediately and fill in live as the run writes
+        # events.jsonl / memory.jsonl into it.
+        try:
+            (Path.home() / ".agentguardian" / "scans" / scan_id).mkdir(parents=True, exist_ok=True)
+        except OSError as _exc:  # pragma: no cover -- never block the scan
+            _LOG.debug("pre-create scan dir before browser-open failed (%s)", _exc)
         try:
             _maybe_open_browser(plan_dashboard_url, requested=open_browser)
         except Exception as _exc:  # pragma: no cover -- never block the scan
