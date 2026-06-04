@@ -148,6 +148,28 @@ def test_executive_kpi_info_popover_css_drops_uppercase(client: TestClient) -> N
     assert "text-transform: none" in body
 
 
+def test_executive_kpi_info_icon_uses_pointer_not_help_cursor(client: TestClient) -> None:
+    """QA-068 (2026-06-04) — the ⓘ button is a click target (toggles the
+    popover), so it must use ``cursor: pointer``. ``cursor: help`` rendered a
+    question-mark cursor over the icon, which operators read as a broken glyph.
+    """
+    body = client.get("/static/executive.css").text
+    # The info button block must not re-introduce the help-cursor declaration.
+    assert "cursor: help;" not in body
+    # And the click-target pointer cursor must be present.
+    assert "cursor: pointer;" in body
+
+
+def test_executive_probes_tile_carries_info_text(client: TestClient, store: ScanStore) -> None:
+    """QA-066 (2026-06-04) — the PROBES tile's ⓘ popover has prose, not an
+    empty surface."""
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    assert 'id="kpi-probes-info"' in body
+    assert "Total probe attempts actually dispatched" in body
+
+
 # ---------------------------------------------------------------------------
 # QA-028 sub-ask 2 — per-tile mini-charts
 # ---------------------------------------------------------------------------

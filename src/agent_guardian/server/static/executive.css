@@ -265,7 +265,10 @@ body.exec-body {
   border: 0;
   padding: 0;
   color: var(--exec-ink-subtle);
-  cursor: help;
+  /* QA-068 (2026-06-04) — the ⓘ button toggles a click-to-open popover, so
+     it must read as a click target. The previous help-cursor rendered a
+     question-mark glyph over the icon, which operators read as broken/odd. */
+  cursor: pointer;
   border-radius: 50%;
 }
 .exec-kpi__info svg {
