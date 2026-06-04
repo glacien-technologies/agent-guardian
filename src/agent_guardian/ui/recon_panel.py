@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
@@ -56,6 +57,16 @@ def _status_text(status: PhaseStatus) -> Text:
     return Text(_STATUS_GLYPH[status], style=_STATUS_STYLE[status])
 
 
+def _running_spinner(suffix: str = "") -> Spinner:
+    """An animated 'running' status — a real spinner (not the subtle ◐ glyph)
+    so it's obvious work is in flight. Rich advances the frame on each Live
+    auto-refresh, so it keeps spinning between events."""
+    label = Text(" running", style="status.running")
+    if suffix:
+        label.append(suffix, style="brand.dim")
+    return Spinner("dots", text=label, style="status.running")
+
+
 def _format_duration(seconds: float) -> str:
     if seconds <= 0.0:
         return "0s"
@@ -84,6 +95,35 @@ def _pending_panel(target_ref: str) -> Panel:
         title="Phase 1 · Reconnaissance",
         border_style="status.pending",
     )
+
+
+def _active_panel(state: DashboardState) -> Panel:
+    """Recon is running but hasn't produced a fingerprint yet.
+
+    The capability audit fires a series of probes at the target with no other
+    visible output for tens of seconds. Show a live "probing the target…"
+    status with the probe counter + current activity + a ticking elapsed so the
+    operator sees recon is working rather than a frozen "waiting" panel.
+    """
+    grid = Table.grid(padding=(0, 1), expand=True)
+    grid.add_column(no_wrap=True)
+    grid.add_column(justify="left", ratio=1)
+    spinner = _running_spinner(f" ({_format_duration(state.elapsed_seconds)})")
+    grid.add_row(Text("status", style="brand.dim"), spinner)
+    grid.add_row(
+        Text("target", style="brand.dim"),
+        Text(state.target_ref or "—", style="status.running"),
+    )
+    sent = state.recon_probes_sent
+    probe_word = "probe" if sent == 1 else "probes"
+    note = Text.assemble(
+        ("probing the target — ", "status.running"),
+        (f"{sent} {probe_word} sent", "status.running"),
+    )
+    if state.recon_activity:
+        note.append(f" · {state.recon_activity}", style="brand.dim")
+    grid.add_row(Text("note", style="brand.dim"), note)
+    return Panel(grid, title="Phase 1 · Reconnaissance", border_style="status.running")
 
 
 def _collapsed_panel(summary: ReconSummary) -> Panel:
@@ -117,12 +157,17 @@ def _full_panel(summary: ReconSummary, *, elapsed: float | None) -> Panel:
     grid.add_row(Text("what we found", style="brand.dim"), Text(what_we_found))
     if summary.notes:
         grid.add_row(Text("notes", style="brand.dim"), Text(summary.notes))
-    status_text = _status_text(summary.status)
-    if summary.status == "running" and elapsed is not None:
-        status_text.append(f" ({_format_duration(elapsed)})", style="brand.dim")
-    elif summary.status == "done":
-        status_text.append(f" ({_format_duration(summary.duration_seconds)})", style="brand.dim")
-    grid.add_row(Text("status", style="brand.dim"), status_text)
+    status_cell: Spinner | Text
+    if summary.status == "running":
+        suffix = f" ({_format_duration(elapsed)})" if elapsed is not None else ""
+        status_cell = _running_spinner(suffix)
+    else:
+        status_cell = _status_text(summary.status)
+        if summary.status == "done":
+            status_cell.append(
+                f" ({_format_duration(summary.duration_seconds)})", style="brand.dim"
+            )
+    grid.add_row(Text("status", style="brand.dim"), status_cell)
     border = (
         "status.done"
         if summary.status == "done"
@@ -147,7 +192,12 @@ def build_recon_panel(state: DashboardState) -> Panel:
     """
     summary = state.recon_summary
     if summary is None:
-        return _pending_panel(state.target_ref)
+        recon_active = (
+            state.current_phase == "recon"
+            or state.recon_probes_sent > 0
+            or state.agent_status.get("recon-agent") == "running"
+        )
+        return _active_panel(state) if recon_active else _pending_panel(state.target_ref)
     collapsed = state.current_phase in {"parallel", "finalise", "done"}
     if collapsed:
         return _collapsed_panel(summary)

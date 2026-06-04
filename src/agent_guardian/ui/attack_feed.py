@@ -445,6 +445,13 @@ class AttackFeedRenderer:
         """
         if self.level == 0:
             return
+        # QA-073 — the compact default feed is the RED-TEAM verdict narrative.
+        # Recon's capability-audit turns carry no attack verdict/ASI and would
+        # render as a wall of noisy "— recon-agent · pending" lines; recon
+        # progress has its own Phase-1 panel, so skip recon turns in compact
+        # mode. (NDJSON and the full ``--debug`` panels still include them.)
+        if self.compact and str(turn.get("agent", "")).strip() == "recon-agent":
+            return
         if self.format == "json":
             self._emit_json(turn, timestamp=timestamp)
         else:

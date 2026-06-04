@@ -1911,6 +1911,7 @@ def _compute_phase_state(scan_dir: Path | None) -> dict[str, Any]:
         return state
     current_phase: str | None = None
     last_running: str | None = None
+    recon_probes = 0
     try:
         with path.open("r", encoding="utf-8") as fh:
             for line in fh:
@@ -1924,6 +1925,16 @@ def _compute_phase_state(scan_dir: Path | None) -> dict[str, Any]:
                 if not isinstance(rec, dict):
                     continue
                 kind = rec.get("kind")
+                if kind == "recon_progress":
+                    # Live capability-audit probe counter — surfaced on the
+                    # recon pill so the dashboard shows recon working instead of
+                    # a static "running" during the (otherwise silent) audit.
+                    rp = rec.get("payload")
+                    if isinstance(rp, dict):
+                        sent = rp.get("probes_sent", 0)
+                        if isinstance(sent, int) and sent > recon_probes:
+                            recon_probes = sent
+                    continue
                 if kind not in ("phase_start", "phase_done"):
                     continue
                 payload = rec.get("payload")
@@ -1966,6 +1977,9 @@ def _compute_phase_state(scan_dir: Path | None) -> dict[str, Any]:
     if current_phase is None and last_running is not None:
         current_phase = last_running
     state["current_phase"] = current_phase
+    # Attach the live recon probe count so the PhaseSpine can caption the recon
+    # pill ("N probes") while the audit runs.
+    state["phases"]["recon"]["probes"] = recon_probes
     return state
 
 

@@ -200,17 +200,14 @@ def _make_event(kind: str, **extra: Any) -> SwarmEvent:
     return SwarmEvent(kind=kind, timestamp=time.monotonic(), **extra)  # type: ignore[arg-type]
 
 
-def test_live_region_renders_exactly_one_panel_during_simulated_scan(
+def test_narration_prints_durable_sections_in_order_once_each(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 10-event simulated scan must yield one Phase 1 panel in scrollback.
-
-    The smoking-gun QA-002 regression was duplicate panels in
-    scrollback after each event; replacing ``console.print(panel)``
-    with ``live.update(...)`` is what this test guards. The QA-012
-    composition surfaces a "Phase 1 · Reconnaissance" title in the
-    final frame; the duplicate-frame regression would replay it once
-    per event.
+    """QA-075 narration model — phases are PRINTED durably to scrollback in
+    order (recon summary → "Phase 2 · Red Teaming" heading → per-agent table),
+    each exactly once. The old bottom-anchored board is gone; the Live region
+    now holds only a thin heartbeat line. This still guards the QA-002
+    anti-duplicate invariant: each durable section prints once, not per-event.
     """
     console = _record_console(width=140)
     monkeypatch.setattr("agent_guardian.logging_setup._CONSOLE", console)
@@ -218,43 +215,52 @@ def test_live_region_renders_exactly_one_panel_during_simulated_scan(
     async def _run() -> None:
         tui = ScanTUI(scan_id="scan-1", target_ref="testbench", tier="auto", console=console)
         async with tui:
-            tui.handle_event(_make_event("recon_start"))
-            tui.handle_event(_make_event("recon_done"))
-            for agent in (
-                "goal-hijack-agent",
-                "tool-abuse-agent",
-                "privilege-agent",
-            ):
-                tui.handle_event(_make_event("agent_start", agent=agent))
-                tui.handle_event(
-                    _make_event(
-                        "agent_progress",
-                        agent=agent,
-                        payload={"turn": 2, "max_turns": 4},
-                    )
+            tui.handle_event(_make_event("phase_start", payload={"phase": "recon"}))
+            tui.handle_event(
+                _make_event(
+                    "recon_progress",
+                    agent="recon-agent",
+                    payload={"probes_sent": 3, "activity": "capability probe"},
                 )
+            )
+            tui.handle_event(
+                _make_event(
+                    "phase_done",
+                    payload={
+                        "phase": "recon",
+                        "agents_completed": 1,
+                        "agents_total": 1,
+                        "duration_seconds": 12.0,
+                        "summary": {
+                            "inferred_goal": "banking assistant",
+                            "probes_applicable": 8,
+                            "multi_agent": False,
+                        },
+                    },
+                )
+            )
+            tui.handle_event(
+                _make_event("phase_start", payload={"phase": "parallel", "agents_total": 3})
+            )
+            for agent in ("goal-hijack-agent", "tool-abuse-agent", "privilege-agent"):
+                tui.handle_event(_make_event("agent_start", agent=agent))
                 tui.handle_event(
                     _make_event("agent_done", agent=agent, payload={"findings_count": 1})
                 )
-            tui.handle_event(
-                _make_event(
-                    "checkpoint",
-                    provisional_aivss=42,
-                    decision=CheckpointDecision.CONTINUE,
-                )
-            )
+            tui.handle_event(_make_event("phase_done", payload={"phase": "parallel"}))
             tui.handle_event(_make_event("scan_done", provisional_aivss=42))
 
     asyncio.run(_run())
 
     text = console.export_text()
-    # Phase 1 panel rendered exactly once — duplicate-frame regression
-    # would replay the panel border per event. The phase tag is in the
-    # final frame's title once.
-    assert text.count("Phase 1 · Reconnaissance") == 1
-    # Phase 3 (Findings) panel rendered exactly once with the totals
-    # we projected from the three agent_done events (one finding each).
-    assert text.count("Phase 3 · Findings") == 1
+    # Recon summary section + Phase 2 heading + the final per-agent table all
+    # appear in scrollback.
+    assert "Phase 1 · Reconnaissance" in text
+    assert "Phase 2 · Red Teaming" in text
+    assert "goal-hijack-agent" in text  # final per-agent table rows
+    # Each durable section prints ONCE (not per-event): the table legend is a
+    # unique marker emitted only by the final table.
+    assert text.count("never produce findings by design") == 1
 
 
 def test_live_region_includes_final_aivss_after_scan_done(

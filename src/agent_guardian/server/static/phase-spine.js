@@ -328,6 +328,18 @@
       var snapCompleted = Number(slot.agents_completed) || 0;
       var snapTotal = Number(slot.agents_total) || 0;
       advanceSubBar(name, snapCompleted, snapTotal);
+      // Live recon probe counter — while recon is running, caption the pill
+      // with "N probes" (from the capability audit) instead of the 0/1 agent
+      // count, so the dashboard shows recon is actively working.
+      if (name === "recon" && snapState === "running") {
+        var probes = Number(slot.probes) || 0;
+        if (probes > 0) {
+          var reconCount = pill.querySelector("[data-phase-count]");
+          if (reconCount) {
+            reconCount.textContent = probes + (probes === 1 ? " probe" : " probes");
+          }
+        }
+      }
     }
     var current = phaseState.current_phase;
     if (current && PHASES.indexOf(current) >= 0) {

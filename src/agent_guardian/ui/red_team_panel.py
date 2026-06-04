@@ -23,13 +23,14 @@ from typing import TYPE_CHECKING
 
 from rich.console import Group, RenderableType
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
 # Pulled from a neutral leaf module (``ui._panel_render``) rather than
 # ``ui.dashboard`` so the static import graph stays acyclic — see the
 # module docstring on ``_panel_render`` for the CodeQL background.
-from agent_guardian.ui._panel_render import _render_agent_table, _render_progress
+from agent_guardian.ui._panel_render import _render_agent_table
 from agent_guardian.ui.state import AGENT_ROWS
 
 if TYPE_CHECKING:
@@ -65,47 +66,49 @@ def _queued_panel() -> Panel:
     )
 
 
-def _collapsed_panel(state: DashboardState) -> Panel:
-    """Single-line summary when Phase 3 (Findings) owns the focus."""
-    n_done = sum(
-        1
-        for name, _ in AGENT_ROWS
-        if name != "recon-agent" and state.agent_status.get(name) == "done"
-    )
-    n_findings = sum(count for name, count in state.agent_findings.items() if name != "recon-agent")
-    duration = state.phase_durations.get(
-        "parallel", state.elapsed_seconds - state.phase_durations.get("recon", 0.0)
-    )
-    line = Text.assemble(
-        ("Phase 2 · Red Teaming ", "brand.dim"),
-        ("✓ done ", "status.done"),
-        (f"({_format_duration(duration)})", "brand.dim"),
-        " · ",
-        (f"{n_done} agents", "status.done"),
-        " · ",
-        (f"{n_findings} findings", "sev.high" if n_findings else "brand.dim"),
-    )
-    return Panel(line, border_style="brand.dim", padding=(0, 1))
+def _running_summary_panel(state: DashboardState) -> Panel:
+    """Compact, single-line progress while red teaming runs.
 
-
-def _active_title(state: DashboardState) -> str:
-    elapsed = state.elapsed_seconds
-    title = f"Phase 2 · Red Teaming · {_format_duration(elapsed)} elapsed"
+    QA-074 — during the run we keep the Phase 2 panel THIN (a spinner + live
+    counts) instead of the full agent table. The constantly-redrawing 11-row
+    table fought with the per-probe verdict log lines scrolling above it and was
+    hard to read. The full per-agent table renders once red teaming COMPLETES
+    (see :func:`_done_table_panel`); until then the scrollback verdict feed is
+    the live detail and this line is just the heartbeat.
+    """
+    specialists = [name for name, _ in AGENT_ROWS if name != "recon-agent"]
+    total = len(specialists)
+    done = sum(1 for n in specialists if state.agent_status.get(n) == "done")
+    running = sum(1 for n in specialists if state.agent_status.get(n) == "running")
+    findings = sum(c for name, c in state.agent_findings.items() if name != "recon-agent")
+    label = Text()
+    label.append(f" {done}/{total} agents done", style="status.running")
+    if running:
+        label.append(f" · {running} attacking", style="brand.dim")
+    label.append(" · ", style="brand.dim")
+    label.append(f"{findings} findings", style="sev.high" if findings else "brand.dim")
+    label.append(f" · {_format_duration(state.elapsed_seconds)}", style="brand.dim")
     cap = state.budget_usd_cap
     spent = state.budget_usd_spent
     if cap is not None and cap > 0:
         pct = int(min(100, (spent / cap) * 100))
-        title += f" · budget {pct}% (${spent:.4f}/${cap:.4f})"
-    return title
+        label.append(f" · budget {pct}%", style="brand.dim")
+    spinner = Spinner("dots", text=label, style="status.running")
+    return Panel(
+        spinner,
+        title="Phase 2 · Red Teaming",
+        border_style="status.running",
+        padding=(0, 1),
+    )
 
 
-def _active_panel(state: DashboardState) -> Panel:
+def _done_table_panel(state: DashboardState) -> Panel:
+    """Full per-agent table — shown once red teaming COMPLETES, so the operator
+    reads a stable final status (not a table redrawing under the live feed)."""
     # QA-049 — column legend. Without this hint operators read a
     # "Findings: 0 / Status: done" row on the recon-agent (or any
     # skipped-mode agent) as "the test failed silently"; in reality
-    # recon-class agents never produce findings by design. Spelling
-    # out what the Findings column actually counts disambiguates the
-    # "0 findings while status=done" surface.
+    # recon-class agents never produce findings by design.
     legend = Text.assemble(
         ("legend  ", "brand.dim"),
         ("Findings", "bold"),
@@ -116,34 +119,30 @@ def _active_panel(state: DashboardState) -> Panel:
         ("never produce findings by design", "brand.dim"),
         (".", "brand.dim"),
     )
-    # Render helpers come from the neutral ``_panel_render`` leaf module,
-    # so this module no longer has any static or runtime dependency on
-    # ``ui.dashboard`` — the CodeQL-flagged static import cycle is gone.
     parts: list[RenderableType] = [legend, _render_agent_table(state)]
-    progress = _render_progress(state)
-    if progress is not None:
-        parts.append(progress)
     body: RenderableType = Group(*parts)
-    return Panel(
-        body,
-        title=_active_title(state),
-        border_style="status.running",
+    duration = state.phase_durations.get(
+        "parallel", state.elapsed_seconds - state.phase_durations.get("recon", 0.0)
     )
+    findings = sum(c for name, c in state.agent_findings.items() if name != "recon-agent")
+    title = f"Phase 2 · Red Teaming · ✓ done ({_format_duration(duration)}) · {findings} findings"
+    return Panel(body, title=title, border_style="status.done")
 
 
 def build_red_team_panel(state: DashboardState) -> Panel:
     """Return the Phase 2 panel for the given dashboard state.
 
-    Dispatches between queued / active / collapsed presentations based
-    on ``state.current_phase``:
+    QA-074 layout — dispatch by ``state.current_phase``:
 
     * ``plan`` / ``recon`` / ``decompose`` → queued placeholder.
-    * ``parallel`` → today's agent table inside a phase panel.
-    * ``finalise`` / ``done`` → single-line collapsed summary.
+    * ``parallel`` → THIN running summary (spinner + live counts). The full
+      table is intentionally withheld here so the per-probe verdict log lines
+      scrolling above stay readable.
+    * ``finalise`` / ``done`` → the full per-agent table (stable final status).
     """
     phase = state.current_phase
     if phase in {"plan", "recon", "decompose"}:
         return _queued_panel()
     if phase in {"finalise", "done"}:
-        return _collapsed_panel(state)
-    return _active_panel(state)
+        return _done_table_panel(state)
+    return _running_summary_panel(state)

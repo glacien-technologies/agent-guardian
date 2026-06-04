@@ -31,6 +31,8 @@ from agent_guardian.adapters.http import HttpAdapter, HttpAdapterToolCall
 from agent_guardian.llm.base import LLMMessage, LLMRequest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agent_guardian.adapters.base import TargetAdapter
     from agent_guardian.llm.base import BaseLLM
 
@@ -86,6 +88,17 @@ _DEEPEN_SYSTEM = (
 _DEEPEN_CONTEXT_TURNS = 12
 
 
+def _notify(on_probe: Callable[[str], None] | None, label: str) -> None:
+    """Fire the progress callback, swallowing any error so a sick observer can
+    never break the audit (the callback is a UI/telemetry hint only)."""
+    if on_probe is None:
+        return
+    try:
+        on_probe(label)
+    except Exception:  # progress hint must never abort recon
+        _LOG.debug("capability audit: on_probe callback raised — continuing", exc_info=True)
+
+
 async def run_capability_audit(
     target: TargetAdapter,
     *,
@@ -93,17 +106,25 @@ async def run_capability_audit(
     model: str,
     max_deepen_rounds: int = 10,
     cancel_event: asyncio.Event | None = None,
+    on_probe: Callable[[str], None] | None = None,
 ) -> CapabilityAuditResult:
-    """Run the fixed probes + cross-session memory test + adaptive deepening."""
+    """Run the fixed probes + cross-session memory test + adaptive deepening.
+
+    ``on_probe(label)`` (optional) fires once just BEFORE each target call so a
+    live UI can show recon progress ("probing the target…") instead of looking
+    frozen during the audit. ``label`` is a short human phase tag.
+    """
     result = CapabilityAuditResult()
 
     for probe in _ACTION_PROBES:
         if _cancelled(cancel_event):
             return result
+        _notify(on_probe, "capability probe")
         reply, tool_calls = await _safe_call(target, probe)
         result.transcript.append((probe, reply))
         result.tool_calls_per_turn.append(tool_calls)
 
+    _notify(on_probe, "cross-session memory test")
     await _run_memory_probe(target, result, cancel_event)
 
     for _ in range(max(0, max_deepen_rounds)):
@@ -112,6 +133,7 @@ async def run_capability_audit(
         nxt = await _propose_next_probe(llm, model, result.transcript)
         if nxt is None:  # DONE / unparseable / call failed
             break
+        _notify(on_probe, "adaptive deepening probe")
         reply, tool_calls = await _safe_call(target, nxt)
         result.transcript.append((nxt, reply))
         result.tool_calls_per_turn.append(tool_calls)
