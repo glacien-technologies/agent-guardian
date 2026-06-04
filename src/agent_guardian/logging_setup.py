@@ -39,6 +39,7 @@ import os
 import re
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import IO, Any
 
 from rich.console import Console
@@ -739,6 +740,81 @@ def configure_logging(
     for noisy in _NOISY_DEPS:
         logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))
     _CONFIGURED = True
+
+
+def resolve_level(level: str | int | None) -> int:
+    """Public wrapper over :func:`_resolve_level` for callers (the CLI) that
+    need to turn a level spec (``"DEBUG"`` / ``"info"`` / ``20`` / ``None``)
+    into a :mod:`logging` int without reaching into a private helper."""
+    return _resolve_level(level)
+
+
+def attach_run_log_file(
+    path: str | os.PathLike[str],
+    *,
+    level: str | int | None = "DEBUG",
+) -> logging.Handler:
+    """Attach a :class:`logging.FileHandler` that captures the FULL log trace.
+
+    QA-072 (2026-06-04) — the scan command routes the raw stdlib stream to a
+    per-scan ``run.log`` so the terminal can stay quiet (board + compact attack
+    feed) while every line is still recoverable on disk. The file always
+    captures at ``level`` (default ``DEBUG``) regardless of how high the
+    terminal handler filters — so we also lower the ROOT level to ``level`` when
+    needed, otherwise the root would gate ``DEBUG`` records before any handler
+    sees them.
+
+    The handler carries the same plain formatter as the non-TTY console path
+    (timestamp + level + logger + trace id) and the same secret-redacting
+    filter, so API keys never land in the file. Returns the handler so the
+    caller can detach it (the CLI is one-scan-per-process, so it usually does
+    not bother).
+    """
+    resolved = _resolve_level(level)
+    root = logging.getLogger()
+    # Root level gates BEFORE per-handler levels: if the root sits at WARNING, a
+    # DEBUG record never reaches this file handler. We drop the root floor below
+    # so the full trace flows — but any EXISTING handler that was relying on the
+    # root level (``level == NOTSET``) would then silently start passing DEBUG
+    # too (the console would un-quiet, the events bridge would balloon). Pin
+    # those to the prior effective root level FIRST so lowering the root only
+    # affects the new file sink; callers raise the console separately via
+    # :func:`set_terminal_log_level`.
+    prior_root_level = root.level if root.level != logging.NOTSET else logging.WARNING
+    for existing in root.handlers:
+        if existing.level == logging.NOTSET:
+            existing.setLevel(prior_root_level)
+
+    fpath = Path(path)
+    fpath.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(fpath, mode="a", encoding="utf-8")
+    handler.setFormatter(logging.Formatter(_DEFAULT_FORMAT, datefmt=_DEFAULT_DATEFMT))
+    handler.setLevel(resolved)
+    handler.addFilter(_RedactingFilter())
+    root.addHandler(handler)
+    if root.level == logging.NOTSET or root.level > resolved:
+        root.setLevel(resolved)
+    return handler
+
+
+def set_terminal_log_level(level: str | int) -> None:
+    """Set the level on the TERMINAL handler(s) only — never the run.log file
+    handler or the events.jsonl bridge.
+
+    QA-072 — decouples what the operator sees on screen from what is captured.
+    Targets the Rich/stream console handler (``RichHandler`` on a TTY, or the
+    plain ``StreamHandler`` basicConfig installs) and explicitly skips
+    :class:`logging.FileHandler` (the run.log) and any non-stream handler such
+    as the ``JsonlLogHandler`` events bridge (a bare ``logging.Handler``).
+    """
+    resolved = _resolve_level(level)
+    for handler in logging.getLogger().handlers:
+        # FileHandler is a StreamHandler subclass — skip it FIRST so run.log
+        # keeps its own (lower) level.
+        if isinstance(handler, logging.FileHandler):
+            continue
+        if isinstance(handler, (RichHandler, logging.StreamHandler)):
+            handler.setLevel(resolved)
 
 
 def is_configured() -> bool:

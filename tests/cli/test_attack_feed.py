@@ -413,3 +413,59 @@ def test_attachments_section_omits_b64_payload_field() -> None:
     console.print(render_reflection_block(turn))
     text = console.export_text()
     assert "iVBORw0KGgo=" not in text
+
+
+# ---------------------------------------------------------------------------
+# QA-072 — compact one-line-per-probe mode (default scan feed)
+# ---------------------------------------------------------------------------
+
+
+def test_render_reflection_line_is_single_line_with_verdict() -> None:
+    """The compact line names ASI + agent + a verdict label, on ONE line."""
+    from agent_guardian.ui.attack_feed import render_reflection_line
+
+    console = _record_console()
+    turn = _turn_record(verdict="fail", agent="secret-extraction-agent", asi_category="ASI05")
+    console.print(render_reflection_line(turn))
+    text = console.export_text().strip()
+    # Exactly one rendered line.
+    assert "\n" not in text, f"expected a single line, got:\n{text}"
+    # Names the category, the agent, and the human verdict label.
+    assert "ASI05" in text
+    assert "secret-extraction-agent" in text
+    assert "EXPLOITED" in text
+    # The full-panel section labels must NOT appear in the compact line.
+    for label in ("STRATEGY", "PROMPT", "TARGET RESPONSE", "REASON"):
+        assert label not in text
+
+
+def test_render_reflection_line_defended_for_pass() -> None:
+    from agent_guardian.ui.attack_feed import render_reflection_line
+
+    console = _record_console()
+    console.print(render_reflection_line(_turn_record(verdict="pass")))
+    text = console.export_text()
+    assert "defended" in text
+    assert "EXPLOITED" not in text
+
+
+def test_compact_renderer_emits_line_not_panel() -> None:
+    """``AttackFeedRenderer(compact=True)`` prints the one-liner per emit."""
+    console = _record_console()
+    renderer = AttackFeedRenderer(level=1, format="text", compact=True, console=console)
+    renderer.emit(_turn_record(verdict="fail", asi_category="ASI03"))
+    renderer.emit(_turn_record(verdict="pass", asi_category="ASI03"))
+    text = console.export_text()
+    assert renderer.rendered_count == 2
+    # No panel section headers -> it's the compact surface, not the box.
+    assert "STRATEGY" not in text and "TARGET RESPONSE" not in text
+    assert "EXPLOITED" in text and "defended" in text
+
+
+def test_noncompact_renderer_still_emits_panel() -> None:
+    """Back-compat: compact=False keeps the full QA-005 panel."""
+    console = _record_console()
+    renderer = AttackFeedRenderer(level=1, format="text", compact=False, console=console)
+    renderer.emit(_turn_record())
+    text = console.export_text()
+    assert "STRATEGY" in text and "TARGET RESPONSE" in text
