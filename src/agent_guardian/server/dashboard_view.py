@@ -1276,7 +1276,24 @@ def build_dashboard_context(
     )
     _probes_agents = len(_probe_groups)
     asi_dot_states = _asi_dot_states(scan, findings_by_asi)
-    asi_covered = sum(1 for b in findings_by_asi.values() if sum(b.values()) > 0)
+    # QA-070 (2026-06-04) — COVERAGE = ASI dimensions actually EXERCISED, not
+    # the subset that produced findings. The old count
+    # (``categories with >=1 finding``) made a well-defended target read as
+    # under-covered: a category that ran and came back clean (zero findings) is
+    # fully covered, yet didn't count. It also never reconciled with the
+    # "skipped agents" panel — a single-agent target skips ASI07 (orchestration
+    # is N/A), so operators expect 9/10, not "7/10 with only 1 skipped".
+    # A category is exercised once at least one probe is dispatched for it; we
+    # count distinct ASI codes seen across the assembled probe list. This is 0
+    # before any agent runs, climbs live as agents dispatch, and settles at
+    # ``10 - <skipped>`` — so coverage + skipped now sum to the full taxonomy.
+    asi_covered = len(
+        {
+            code
+            for probe in _probes_list_for_evidence
+            if (code := str(probe.get("asi_category", "")).strip().upper()) in findings_by_asi
+        }
+    )
 
     if scan is not None:
         commander_model = _engine_field(scan, "commander", "stub")
@@ -1439,7 +1456,12 @@ def build_dashboard_context(
                 "across the commander, attacker, and evaluator phases."
             ),
             "coverage": (
-                "Number of probe categories exercised out of the ten OWASP ASI dimensions."
+                "How many of the ten OWASP ASI dimensions were actually "
+                "exercised — at least one probe dispatched. Dimensions the "
+                "recon phase ruled not applicable to this target (shown under "
+                "Skipped agents) are not counted; coverage plus skipped span "
+                "the full taxonomy. A category that ran and stayed clean still "
+                "counts as covered."
             ),
         },
         # QA-044 (2026-06-02) — structured hover data tables. Each entry
@@ -2157,6 +2179,15 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
         "findings": p.get("findings_total"),
         "findings-total": p.get("findings_total"),
         "asi-covered": f"{p.get('asi_covered', 0)} / 10",
+        # QA-069 (2026-06-04) — per-category ASI radar values, aligned 1:1 with
+        # the radar's fixed axis order (``asi_rows`` order). Pending categories
+        # plot at 0. ``executive_charts.js`` reads this off the snapshot and
+        # updates the radar dataset in place so the shape fills in live instead
+        # of staying frozen at its first-paint state until an F5.
+        "asi_radar": [
+            0.0 if row.get("is_pending") else row.get("score_pct", 0.0)
+            for row in p.get("asi_rows", [])
+        ],
         "critical": counts.get("critical", 0),
         "high": counts.get("high", 0),
         "medium": counts.get("medium", 0),

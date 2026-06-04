@@ -10,19 +10,20 @@
      - asi_rows[*].name        — axis label
      - asi_rows[*].score_pct   — radial value
      - asi_rows[*].code        — ASI code
-     - asi_rows[*].is_pending  — drop pending rows from the live shape
+     - asi_rows[*].is_pending  — pending categories plot at 0 (not dropped)
+
+   QA-069 (2026-06-04): always emit ALL 10 axes. The previous build dropped
+   ``is_pending`` rows, so early in a live scan — when only one category had a
+   score — the radar collapsed to a single axis (a meaningless 1-spoke shape).
+   A radar needs a stable frame: every category is an axis from the first
+   paint, pending ones plot at 0 and fill in as scores arrive. The live SSE
+   patcher (``executive_charts.js``) updates the values in place against this
+   fixed axis order.
 #}
 {% set _radar_rows = [] %}
 {% for r in asi_rows %}
-  {% if not r.is_pending %}
-    {% set _ = _radar_rows.append({'label': r.name, 'value': r.score_pct, 'code': r.code}) %}
-  {% endif %}
+  {% set _ = _radar_rows.append({'label': r.name, 'value': (0 if r.is_pending else r.score_pct), 'code': r.code}) %}
 {% endfor %}
-{% if not _radar_rows %}
-  {% for r in asi_rows %}
-    {% set _ = _radar_rows.append({'label': r.name, 'value': 0, 'code': r.code}) %}
-  {% endfor %}
-{% endif %}
 {% set _radar_payload = {
   'labels': _radar_rows | map(attribute='label') | list,
   'values': _radar_rows | map(attribute='value') | list,

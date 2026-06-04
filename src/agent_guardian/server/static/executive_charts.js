@@ -77,6 +77,11 @@
   /* Chart: ASI radar                                                  */
   /* ----------------------------------------------------------------- */
 
+  // QA-069 (2026-06-04) — module-scoped handle on the live radar instance so
+  // the SSE snapshot subscriber can update its values in place (rather than
+  // tearing the chart down and re-instantiating on every 500ms snapshot).
+  var asiRadarChart = null;
+
   function mountAsiRadar() {
     if (!window.Chart) { return; }
     var canvas = document.getElementById("exec-asi-radar");
@@ -92,7 +97,7 @@
     var bgElev = readToken("--exec-bg-elev") || "#ffffff";
     var subtle = readToken("--exec-ink-subtle") || "#8a8a8a";
 
-    new Chart(canvas, {
+    asiRadarChart = new Chart(canvas, {
       type: "radar",
       data: {
         labels: payload.labels,
@@ -169,6 +174,55 @@
         },
       },
     });
+  }
+
+  // QA-069 (2026-06-04) — update the radar's values in place from a live
+  // snapshot. ``values`` is aligned 1:1 with the rendered axis order
+  // (``asi_radar`` in the snapshot == ``asi_rows`` order server-side). We only
+  // touch the dataset data, never the labels, so the axis frame stays stable.
+  function updateAsiRadar(values) {
+    if (!asiRadarChart || !Array.isArray(values) || !values.length) { return; }
+    var ds = asiRadarChart.data && asiRadarChart.data.datasets
+      && asiRadarChart.data.datasets[0];
+    if (!ds) { return; }
+    // Defensive: only apply when the cardinality matches the rendered axes,
+    // otherwise a mismatched array would silently distort the shape.
+    if (asiRadarChart.data.labels && values.length !== asiRadarChart.data.labels.length) {
+      return;
+    }
+    ds.data = values;
+    asiRadarChart.update("none"); // no entry animation on a live tick
+  }
+
+  // QA-069 (2026-06-04) — subscribe to the per-scan ``/live`` snapshot stream
+  // and repaint the radar as per-category scores arrive. Mirrors the
+  // self-owned-EventSource pattern in phase-spine.js (each live widget owns its
+  // own stream to the same endpoint; freshness-dot.js owns the connection
+  // health UI). No-ops on terminal scans and when EventSource is unavailable.
+  function attachRadarLive() {
+    if (typeof EventSource === "undefined") { return; }
+    var body = document.body;
+    if (!body) { return; }
+    var scanId = body.getAttribute("data-scan-id");
+    if (!scanId) { return; }
+    if (body.getAttribute("data-is-terminal") === "true") { return; }
+    var url = "/scans/" + encodeURIComponent(scanId) + "/live";
+    var es;
+    try {
+      es = new EventSource(url);
+    } catch (err) {
+      return;
+    }
+    es.addEventListener("snapshot", function (evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        if (data && data.asi_radar) { updateAsiRadar(data.asi_radar); }
+      } catch (err) { /* swallow malformed frame */ }
+    });
+    es.addEventListener("scan_done", function () {
+      try { es.close(); } catch (err) { /* swallow */ }
+    });
+    es.onerror = function () { /* browser auto-reconnects; freshness-dot owns UI */ };
   }
 
   /* ----------------------------------------------------------------- */
@@ -374,6 +428,7 @@
     mountSeverityBar();
     mountCopyButtons();
     watchPanelVisibility();
+    attachRadarLive();
   }
 
   if (document.readyState === "loading") {
@@ -385,6 +440,7 @@
   /* Expose helpers for tests / SSE re-renders. */
   window.AgentGuardianExecutive = {
     mountAsiRadar: mountAsiRadar,
+    updateAsiRadar: updateAsiRadar,
     mountSeverityBar: mountSeverityBar,
     mountCopyButtons: mountCopyButtons,
     watchPanelVisibility: watchPanelVisibility,
