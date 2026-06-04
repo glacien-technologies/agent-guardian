@@ -36,6 +36,17 @@ from agent_guardian.adapters.http_shapes import (
     register_shape,
 )
 from agent_guardian.adapters.prompt import PromptAdapter
+from agent_guardian.adapters.response_envelope import (
+    EnvelopeToolCall,
+    ResponseEnvelope,
+    ResponseMapping,
+    envelope_from_target,
+    has_planted_token,
+    project_http_last_response,
+    project_json_response,
+    project_text_response,
+    tool_names_from_envelope,
+)
 
 __all__ = [
     "ADKAdapter",
@@ -43,6 +54,7 @@ __all__ = [
     "AutoGenAdapter",
     "CodeAdapter",
     "CrewAIAdapter",
+    "EnvelopeToolCall",
     "FrameworkAdapter",
     "HttpAdapter",
     "HttpShape",
@@ -50,12 +62,20 @@ __all__ = [
     "MemoryWriteCallback",
     "OpenAIAgentsAdapter",
     "PromptAdapter",
+    "ResponseEnvelope",
+    "ResponseMapping",
     "StrandsAdapter",
     "TargetAdapter",
     "TargetFingerprint",
     "TargetMode",
     "ToolCallCallback",
+    "envelope_from_target",
     "get_shape",
+    "has_planted_token",
     "list_shapes",
+    "project_http_last_response",
+    "project_json_response",
+    "project_text_response",
     "register_shape",
+    "tool_names_from_envelope",
 ]

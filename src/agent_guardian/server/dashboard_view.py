@@ -1665,6 +1665,13 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
           "domain": str,
           "sensitive_actions": list[str],
           "declared_guardrails": list[str],
+          "guardrail_posture": str,            # "none"/"weak"/... or ""
+          "requires_confirmation": bool|None,  # None ⇒ omit the row
+          "data_exposure": list[str],          # observed disclosures
+          "behavioral_flags": list[str],       # behavioural observations
+          "tool_descriptions": dict[str,str],  # tool -> one-line purpose
+          "recon_coverage": dict[str,str],     # band -> coverage state
+          "recon_probe_count": int,            # probes fired in the audit
           "profile_source": str,
           "profile_confidence": float,
           "skipped_agents": list[{agent, asi, reason}],
@@ -1709,6 +1716,13 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "domain": "",
         "sensitive_actions": [],
         "declared_guardrails": [],
+        "guardrail_posture": "",
+        "requires_confirmation": None,
+        "data_exposure": [],
+        "behavioral_flags": [],
+        "tool_descriptions": {},
+        "recon_coverage": {},
+        "recon_probe_count": 0,
         "profile_source": "",
         "profile_confidence": 0.0,
         "skipped_agents": [],
@@ -1801,6 +1815,20 @@ def _assemble_recon_summary(scan_dir: Path | None) -> dict[str, Any]:
         "domain": str(latest_fp.get("domain") or ""),
         "sensitive_actions": list(latest_fp.get("sensitive_actions") or []),
         "declared_guardrails": list(latest_fp.get("declared_guardrails") or []),
+        # Deeper evidence-grounded recon signals (additive). Older fingerprint
+        # records lack these keys; the `or` defaults keep them rendering as
+        # empty / omitted rows without raising.
+        "guardrail_posture": str(latest_fp.get("guardrail_posture") or ""),
+        "requires_confirmation": (
+            bool(latest_fp.get("requires_confirmation"))
+            if latest_fp.get("requires_confirmation") is not None
+            else None
+        ),
+        "data_exposure": list(latest_fp.get("data_exposure") or []),
+        "behavioral_flags": list(latest_fp.get("behavioral_flags") or []),
+        "tool_descriptions": dict(latest_fp.get("tool_descriptions") or {}),
+        "recon_coverage": dict(latest_fp.get("recon_coverage") or {}),
+        "recon_probe_count": int(latest_fp.get("recon_probe_count") or 0),
         "profile_source": str(latest_fp.get("profile_source") or "heuristic"),
         "profile_confidence": float(latest_fp.get("profile_confidence") or 0.0),
         "skipped_agents": skipped,

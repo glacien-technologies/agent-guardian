@@ -1348,6 +1348,21 @@ body.exec-body {
 .exec-recon__chip--num { font-variant-numeric: tabular-nums; }
 .exec-recon__chip--domain { background: var(--exec-bg-sunken); color: var(--exec-ink); }
 .exec-recon__chip--asi { background: var(--exec-bg-sunken); color: var(--exec-ink); }
+/* Guardrail posture / confirmation chips. Plain by default; the --warn
+   modifier (none / weak posture, no-confirmation-required, data exposure)
+   borrows the critical-severity palette so a soft guard reads as a risk. */
+.exec-recon__chip--posture {
+  text-transform: none;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--exec-brand) 10%, transparent);
+  color: var(--exec-brand-strong);
+}
+.exec-recon__chip--warn {
+  text-transform: none;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--exec-sev-critical) 12%, transparent);
+  color: var(--exec-sev-critical);
+}
 .exec-recon__goal {
   font-family: var(--exec-font-serif);
   font-size: 14px;
@@ -1415,6 +1430,31 @@ body.exec-body {
   color: var(--exec-sev-critical);
   border-color: color-mix(in srgb, var(--exec-sev-critical) 28%, transparent);
 }
+/* Inline one-line tool purpose (recon-enumerated). Muted sans, trails the
+   mono tool handle inside the same chip; the full text is also on `title`. */
+.exec-recon__tool-desc {
+  margin-left: 6px;
+  font-family: var(--exec-font-sans);
+  font-size: 11px;
+  color: var(--exec-ink-muted);
+}
+
+/* Coverage line — compact "Purpose ✓ · Tools ◑ · …" band ledger. */
+.exec-recon__coverage {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+}
+.exec-recon__coverage-band { white-space: nowrap; }
+.exec-recon__coverage-glyph {
+  font-family: var(--exec-font-mono);
+  color: var(--exec-brand-strong);
+}
+.exec-recon__coverage-sep { color: var(--exec-ink-subtle); }
 /* Discovered-tools expander (no-JS checkbox toggle). The checkbox, the extra
    tool chips, and the toggle label are all flex children of
    ``.exec-recon__tools`` alongside the sample chips. The toggle is pushed to

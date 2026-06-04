@@ -106,6 +106,60 @@ async def test_extraction_uses_generous_max_tokens() -> None:
     assert rec.last_max_tokens is not None and rec.last_max_tokens >= 1500
 
 
+_DEEP_PROFILE_JSON = json.dumps(
+    {
+        "inferred_goal": "authorize refunds for verified customers",
+        "domain": "banking",
+        "sensitive_actions": ["refund_payment"],
+        "declared_guardrails": ["verify identity before any refund"],
+        "has_tools": True,
+        "has_memory": False,
+        "is_multi_agent": False,
+        "external_systems": True,
+        "cross_session_data": False,
+        "declared_tools": ["refund_payment", "get_balance"],
+        "confidence": 0.9,
+        "guardrail_posture": "weak",
+        "requires_confirmation": False,
+        "data_exposure": ["returns customer balances without verification"],
+        "behavioral_flags": ["no refusals observed", "honors compound requests"],
+        "touches_pii": True,
+        "tool_descriptions": {"get_balance": "look up an account balance"},
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_profile_from_audit_parses_deep_recon_fields() -> None:
+    """The new evidence-grounded keys round-trip through profile_from_audit."""
+    transcript = [("What can you do?", "I can refund and check balances.")]
+    profile = await profile_from_audit(
+        transcript, llm=StubLLM(default=_DEEP_PROFILE_JSON), model="stub"
+    )
+    assert profile is not None
+    assert profile.guardrail_posture == "weak"
+    assert profile.requires_confirmation is False
+    assert profile.data_exposure == ["returns customer balances without verification"]
+    assert profile.behavioral_flags == ["no refusals observed", "honors compound requests"]
+    assert profile.touches_pii is True
+    assert profile.tool_descriptions == {"get_balance": "look up an account balance"}
+
+
+@pytest.mark.asyncio
+async def test_profile_deep_fields_default_when_absent() -> None:
+    """Older models that omit the new keys still parse with safe defaults."""
+    profile = await profile_from_audit(
+        [("hi", "hello")], llm=StubLLM(default=_PROFILE_JSON), model="stub"
+    )
+    assert profile is not None
+    assert profile.guardrail_posture is None
+    assert profile.requires_confirmation is None
+    assert profile.data_exposure == []
+    assert profile.behavioral_flags == []
+    assert profile.touches_pii is False
+    assert profile.tool_descriptions == {}
+
+
 @pytest.mark.asyncio
 async def test_profile_from_audit_structures_transcript() -> None:
     transcript = [
@@ -115,3 +169,50 @@ async def test_profile_from_audit_structures_transcript() -> None:
     profile = await profile_from_audit(transcript, llm=StubLLM(default=_PROFILE_JSON), model="stub")
     assert profile is not None
     assert profile.has_tools is True
+
+
+class _PromptCapturingStub(StubLLM):
+    """StubLLM that records the last user prompt so we can assert on it."""
+
+    def __init__(self, default: str) -> None:
+        super().__init__(default=default)
+        self.last_user: str | None = None
+
+    async def complete(self, request):  # type: ignore[no-untyped-def]
+        self.last_user = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"), None
+        )
+        return await super().complete(request)
+
+
+@pytest.mark.asyncio
+async def test_profile_from_audit_renders_observed_actions_block() -> None:
+    """Structured tool calls are prepended as a keys-only per-turn block."""
+    from agent_guardian.adapters.http import HttpAdapterToolCall
+
+    transcript = [("What can you do?", "I can help.")]
+    tool_calls_per_turn = [
+        (HttpAdapterToolCall(name="get_balance", arguments={"acct": "secret-123"}),),
+    ]
+    stub = _PromptCapturingStub(_PROFILE_JSON)
+    profile = await profile_from_audit(
+        transcript, llm=stub, model="stub", tool_calls_per_turn=tool_calls_per_turn
+    )
+    assert profile is not None
+    assert stub.last_user is not None
+    assert "Observed tool calls" in stub.last_user
+    assert "get_balance" in stub.last_user
+    # Argument KEY (acct) is present; the VALUE must NOT leak into the prompt.
+    assert "acct" in stub.last_user
+    assert "secret-123" not in stub.last_user
+
+
+@pytest.mark.asyncio
+async def test_profile_from_audit_no_observed_block_when_no_tool_calls() -> None:
+    transcript = [("What can you do?", "I can help.")]
+    stub = _PromptCapturingStub(_PROFILE_JSON)
+    await profile_from_audit(transcript, llm=stub, model="stub", tool_calls_per_turn=[()])
+    assert stub.last_user is not None
+    assert "Observed tool calls" not in stub.last_user
+    # Default callers (no tool calls) get the byte-for-byte transcript-only form.
+    assert stub.last_user.startswith("Audit transcript:")

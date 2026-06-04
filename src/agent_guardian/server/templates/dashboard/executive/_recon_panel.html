@@ -16,6 +16,13 @@
      - is_multi_agent / touches_pii
      - inferred_goal / domain
      - sensitive_actions / declared_guardrails
+     - guardrail_posture         — "none"|"weak"|"moderate"|"strict"|phrase
+     - requires_confirmation     — bool|None (None ⇒ row omitted)
+     - data_exposure             — list[str] observed disclosures
+     - behavioral_flags          — list[str] behavioural observations
+     - tool_descriptions         — dict[tool -> one-line purpose]
+     - recon_coverage            — dict[band -> coverage state]
+     - recon_probe_count         — int probes fired in the audit
      - profile_source / profile_confidence
      - skipped_agents            — list[{agent, asi, reason}]
 
@@ -155,7 +162,8 @@
           <dd class="exec-recon__dd">
             <span class="exec-recon__tools">
               {% for tool in recon_summary.tool_sample %}
-                <code class="exec-recon__tool-chip">{{ tool }}</code>
+                {% set desc = recon_summary.tool_descriptions.get(tool) %}
+                <code class="exec-recon__tool-chip"{% if desc %} title="{{ desc }}"{% endif %}>{{ tool }}{% if desc %}<span class="exec-recon__tool-desc">{{ desc }}</span>{% endif %}</code>
               {% endfor %}
               {% if recon_summary.tool_count > recon_summary.tool_sample|length %}
                 {# No-JS expander. The checkbox + extra chips + toggle label are
@@ -166,7 +174,8 @@
                 <input type="checkbox" id="exec-recon-tools-toggle"
                        class="exec-recon__tools-cb" aria-label="Show all discovered tools">
                 {% for tool in recon_summary.discovered_tools if tool not in recon_summary.tool_sample %}
-                  <code class="exec-recon__tool-chip exec-recon__tool-chip--extra">{{ tool }}</code>
+                  {% set desc = recon_summary.tool_descriptions.get(tool) %}
+                  <code class="exec-recon__tool-chip exec-recon__tool-chip--extra"{% if desc %} title="{{ desc }}"{% endif %}>{{ tool }}{% if desc %}<span class="exec-recon__tool-desc">{{ desc }}</span>{% endif %}</code>
                 {% endfor %}
                 <label for="exec-recon-tools-toggle" class="exec-recon__tools-toggle">
                   <span class="exec-recon__more-open">+ {{ recon_summary.tool_count - recon_summary.tool_sample|length }} more</span>
@@ -194,19 +203,109 @@
         </div>
       {% endif %}
 
-      {# Declared guardrails — what the agent told us it WON'T do.
-         These become refusal-baseline anchors: the evaluator uses them
-         to grade whether an attack genuinely escalated past the
-         agent's own stated limits. #}
-      {% if recon_summary.declared_guardrails %}
+      {# Guardrails posture — a chip leading with the recon agent's
+         classification of how strongly the agent refuses / guards
+         (none / weak read as warnings), followed by the agent's stated
+         "won't do" list beneath. Declared guardrails are refusal-baseline
+         anchors: the evaluator uses them to grade whether an attack
+         genuinely escalated past the agent's own stated limits. #}
+      {% if recon_summary.guardrail_posture or recon_summary.declared_guardrails %}
         <div class="exec-recon__row exec-recon__row--wide">
-          <dt class="exec-recon__dt">Declared guardrails</dt>
+          <dt class="exec-recon__dt">Guardrails posture</dt>
           <dd class="exec-recon__dd">
-            <ul class="exec-recon__guards">
-              {% for g in recon_summary.declared_guardrails %}
-                <li class="exec-recon__guard">{{ g }}</li>
+            {% if recon_summary.guardrail_posture %}
+              <span class="exec-recon__chip exec-recon__chip--posture
+                {% if recon_summary.guardrail_posture in ('none', 'weak') %}exec-recon__chip--warn{% endif %}">
+                {{ recon_summary.guardrail_posture }}
+              </span>
+            {% endif %}
+            {% if recon_summary.declared_guardrails %}
+              <ul class="exec-recon__guards">
+                {% for g in recon_summary.declared_guardrails %}
+                  <li class="exec-recon__guard">{{ g }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+
+      {# Confirmation — whether sensitive / destructive actions require any
+         confirmation / approval / out-of-band check. None ⇒ row omitted
+         (recon never established it); False ⇒ warning (none required). #}
+      {% if recon_summary.requires_confirmation is not none %}
+        <div class="exec-recon__row">
+          <dt class="exec-recon__dt">Confirmation</dt>
+          <dd class="exec-recon__dd">
+            {% if recon_summary.requires_confirmation %}
+              <span class="exec-recon__chip exec-recon__chip--posture">required</span>
+            {% else %}
+              <span class="exec-recon__chip exec-recon__chip--posture exec-recon__chip--warn">none required</span>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+
+      {# Data exposure — concrete observed unauthorized / sensitive
+         disclosures the recon audit elicited. Rendered as warning chips. #}
+      {% if recon_summary.data_exposure %}
+        <div class="exec-recon__row exec-recon__row--wide">
+          <dt class="exec-recon__dt">Data exposure</dt>
+          <dd class="exec-recon__dd">
+            <span class="exec-recon__tools">
+              {% for item in recon_summary.data_exposure %}
+                <span class="exec-recon__chip exec-recon__chip--warn">{{ item }}</span>
               {% endfor %}
-            </ul>
+            </span>
+          </dd>
+        </div>
+      {% endif %}
+
+      {# Behavioral flags — short behavioural observations from the audit
+         (e.g. "no refusals observed", "honors compound requests"). #}
+      {% if recon_summary.behavioral_flags %}
+        <div class="exec-recon__row exec-recon__row--wide">
+          <dt class="exec-recon__dt">Behavioral flags</dt>
+          <dd class="exec-recon__dd">
+            <span class="exec-recon__tools">
+              {% for flag in recon_summary.behavioral_flags %}
+                <span class="exec-recon__chip">{{ flag }}</span>
+              {% endfor %}
+            </span>
+          </dd>
+        </div>
+      {% endif %}
+
+      {# Coverage — the capability-audit band ledger rendered as a compact
+         "Purpose ✓ · Tools ✓ · Memory ◑ · …" line. State glyphs:
+         confirmed ✓, partial ◑, unknown ·. #}
+      {% if recon_summary.recon_coverage %}
+        {% set _bands = [
+          ('purpose', 'Purpose'), ('tools', 'Tools'), ('memory', 'Memory'),
+          ('multi_agent', 'Multi-agent'), ('guardrails', 'Guardrails'),
+          ('sensitive_actions', 'Sensitive')
+        ] %}
+        <div class="exec-recon__row exec-recon__row--wide">
+          <dt class="exec-recon__dt">Coverage</dt>
+          <dd class="exec-recon__dd">
+            <span class="exec-recon__coverage">
+              {% for key, label in _bands if key in recon_summary.recon_coverage %}
+                {%- set state = recon_summary.recon_coverage.get(key) -%}
+                {%- set glyph = '✓' if state == 'confirmed' else ('◑' if state == 'partial' else '·') -%}
+                {% if not loop.first %}<span class="exec-recon__coverage-sep" aria-hidden="true">·</span>{% endif %}
+                <span class="exec-recon__coverage-band">{{ label }} <span class="exec-recon__coverage-glyph">{{ glyph }}</span></span>
+              {% endfor %}
+            </span>
+          </dd>
+        </div>
+      {% endif %}
+
+      {# Probes — how many capability-audit probes were fired. #}
+      {% if recon_summary.recon_probe_count > 0 %}
+        <div class="exec-recon__row">
+          <dt class="exec-recon__dt">Probes</dt>
+          <dd class="exec-recon__dd">
+            <span class="exec-recon__chip exec-recon__chip--num">{{ recon_summary.recon_probe_count }} probes</span>
           </dd>
         </div>
       {% endif %}

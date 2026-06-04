@@ -1,0 +1,91 @@
+{# Rendered JSONL events page (opened from the slideover's "View JSONL events
+   for this probe" evidence link). Replaces the raw text/event-stream dump the
+   link used to open in a new tab. The route (_collect_jsonl_records) pretty-
+   prints each record server-side; a tiny dependency-free highlighter colors
+   keys / strings / numbers / bools / null client-side.
+
+   ``rec.pretty`` is autoescaped inside <pre> (safe); the highlighter reads
+   textContent, re-escapes, then wraps tokens in spans — so no markup injection
+   from operator-untrusted event payloads. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSONL events · {{ scan_id }}{% if probe %} · {{ probe }}{% endif %}</title>
+  <style>
+    :root {
+      --bg:#faf9fb; --panel:#ffffff; --ink:#1c1320; --muted:#6b6470; --border:#e7e2ec;
+      --head:#f6f3fa; --accent:#7c3aed;
+      --key:#6d28d9; --str:#0f766e; --num:#b45309; --bool:#9333ea; --null:#9ca3af;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); padding:24px;
+           font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    header { margin:0 0 16px; }
+    h1 { margin:0 0 4px; font:600 16px/1.3 system-ui,-apple-system,sans-serif; }
+    .sub { color:var(--muted); font:13px/1.4 system-ui,sans-serif; }
+    .sub code { background:#efe9fb; border-radius:5px; padding:1px 6px; }
+    .count { color:var(--muted); font:13px system-ui,sans-serif; margin:14px 0 12px; }
+    .event { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+             margin:0 0 12px; overflow:hidden; }
+    .event__head { display:flex; gap:10px; align-items:center; padding:8px 14px;
+                   border-bottom:1px solid var(--border); background:var(--head); }
+    .badge { font:600 11px system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase;
+             color:var(--accent); background:#efe9fb; border-radius:6px; padding:2px 8px; }
+    .meta { color:var(--muted); font:12px system-ui,sans-serif; }
+    pre.json { margin:0; padding:14px; overflow-x:auto; white-space:pre; tab-size:2; }
+    pre.json .key  { color:var(--key); }
+    pre.json .str  { color:var(--str); }
+    pre.json .num  { color:var(--num); }
+    pre.json .bool { color:var(--bool); }
+    pre.json .null { color:var(--null); }
+    .empty { color:var(--muted); font:14px system-ui,sans-serif; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>JSONL events</h1>
+    <p class="sub">scan <code>{{ scan_id }}</code>{% if probe %} · probe <code>{{ probe }}</code>{% endif %}</p>
+  </header>
+
+  {% if records %}
+    <p class="count">{{ records|length }} event{{ '' if records|length == 1 else 's' }}{% if probe %} for this probe{% endif %}</p>
+    {% for rec in records %}
+      <section class="event">
+        <div class="event__head">
+          <span class="badge">{{ rec.kind }}</span>
+          {% if rec.seq is not none %}<span class="meta">seq {{ rec.seq }}</span>{% endif %}
+          <span class="meta">{{ rec.source }}</span>
+        </div>
+        <pre class="json">{{ rec.pretty }}</pre>
+      </section>
+    {% endfor %}
+  {% else %}
+    <p class="empty">No JSONL events found{% if probe %} for this probe{% endif %}.</p>
+  {% endif %}
+
+  <script>
+    (function () {
+      function esc(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function highlight(json) {
+        return esc(json).replace(
+          /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+          function (m) {
+            var cls = "num";
+            if (/^"/.test(m)) { cls = /:$/.test(m) ? "key" : "str"; }
+            else if (/true|false/.test(m)) { cls = "bool"; }
+            else if (/null/.test(m)) { cls = "null"; }
+            return '<span class="' + cls + '">' + m + "</span>";
+          }
+        );
+      }
+      document.querySelectorAll("pre.json").forEach(function (el) {
+        el.innerHTML = highlight(el.textContent);
+      });
+    })();
+  </script>
+</body>
+</html>
