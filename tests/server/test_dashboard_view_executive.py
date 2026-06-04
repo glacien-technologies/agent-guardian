@@ -11,6 +11,7 @@ view-model layer is covered in isolation.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,7 +35,122 @@ from agent_guardian.server.dashboard_view import (
     _parse_reflection_line,
     _timestamp_label,
     build_dashboard_context,
+    live_snapshot,
 )
+
+
+def _write_probe_record(fh: object, agent: str, asi: str) -> None:
+    """Append one ``record_type=reflection`` probe turn to an open memory.jsonl."""
+    turn = {
+        "agent": agent,
+        "asi_category": asi,
+        "turn": 1,
+        "prompt": "p",
+        "target_response": "r",
+        "verdict": "robust",
+    }
+    rec = {
+        "timestamp": "2026-05-27T12:30:15+00:00",
+        "record_type": "reflection",
+        "payload": {"agent": agent, "content": json.dumps(turn)},
+    }
+    fh.write(json.dumps(rec) + "\n")  # type: ignore[attr-defined]
+
+
+def test_coverage_counts_distinct_exercised_categories(tmp_path: Path) -> None:
+    """QA-070 (2026-06-04) — COVERAGE counts distinct ASI categories that
+    received a probe, NOT categories with findings.
+
+    Clean (no-finding) categories still count; duplicate-category probes don't
+    double-count; recon / blank-category rows are ignored.
+    """
+    mem = tmp_path / "memory.jsonl"
+    with mem.open("w", encoding="utf-8") as fh:
+        _write_probe_record(fh, "asi01-goal", "ASI01")
+        _write_probe_record(fh, "asi01-goal", "ASI01")  # duplicate -> still 1
+        _write_probe_record(fh, "asi02-tool", "ASI02")
+        _write_probe_record(fh, "asi03-pii", "ASI03")  # clean category, counts
+        _write_probe_record(fh, "recon", "")  # recon / blank -> ignored
+    ctx = build_dashboard_context(
+        scan_id="cli-cov",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8080",
+        version_label="t",
+        scan_dir=tmp_path,
+    )
+    assert ctx.payload["asi_covered"] == 3
+    # The live snapshot carries the same exercised count, "N / 10" shaped.
+    assert live_snapshot(ctx)["asi-covered"] == "3 / 10"
+
+
+def test_live_snapshot_carries_full_10_axis_radar(tmp_path: Path) -> None:
+    """QA-069 (2026-06-04) — the radar's live values array always has all 10
+    axes (pending categories at 0), so the client updates a stable frame."""
+    ctx = build_dashboard_context(
+        scan_id="cli-radar",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8080",
+        version_label="t",
+        scan_dir=tmp_path,
+    )
+    radar = live_snapshot(ctx)["asi_radar"]
+    assert isinstance(radar, list)
+    assert len(radar) == 10
+    # No scan yet -> every category pending -> plots at 0.
+    assert all(v == 0 or v == 0.0 for v in radar)
+
+
+def _scan_with_partial_scores() -> Scan:
+    """A scan where only ONE ASI category has a score; the other nine are
+    absent (pending) — the mid-scan shape that used to collapse the radar."""
+    return Scan(
+        id="cli-partial-radar",
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=50,
+        band=SeverityBand.WARNING,
+        sub_scores={},
+        findings=[],
+        asi_scores={AsiCategory.ASI01: 80.0},  # only one category scored
+        duration_seconds=1.0,
+        cost_usd=0.0,
+        tokens_total=0,
+        mode="full",
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
+    )
+
+
+def test_radar_renders_all_ten_axes_when_most_categories_pending(tmp_path: Path) -> None:
+    """QA-069 (2026-06-04) — even when only one category is scored, the radar
+    keeps all 10 axes (the old build dropped pending rows and collapsed to a
+    single spoke). The data-chart payload + the offscreen data table both
+    carry 10 entries; pending categories plot at 0.
+    """
+    scan = _scan_with_partial_scores()
+    scan_dir = tmp_path / scan.id
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    (scan_dir / "scan.json").write_text(scan.model_dump_json(indent=2), encoding="utf-8")
+
+    app = create_app(scan_store=ScanStore(root_dir=tmp_path))
+    client = TestClient(app)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+
+    # The radar canvas data-chart payload carries all 10 axis labels + values.
+    m = re.search(r'id="exec-asi-radar"[^>]*data-chart=\'([^\']+)\'', body)
+    assert m, "radar canvas with data-chart not found"
+    payload = json.loads(m.group(1).replace("&#34;", '"').replace("&quot;", '"'))
+    assert len(payload["labels"]) == 10
+    assert len(payload["values"]) == 10
+    # Exactly one axis carries a non-zero score; the nine pending ones are 0.
+    assert sum(1 for v in payload["values"] if v) == 1
+
 
 # ---------------------------------------------------------------------------
 # probes_list helpers
