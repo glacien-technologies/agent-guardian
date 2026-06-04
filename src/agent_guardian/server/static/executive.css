@@ -429,14 +429,20 @@ body.exec-body {
 .exec-kpi__band-seg {
   flex: 1 1 0;
   height: 8px;
-  background: var(--exec-bg-sunken);
   border-radius: 2px;
+  /* Every segment always carries its band colour so the tile reads as a
+     5-band spectrum legend (critical -> excellent). Non-active segments are
+     dimmed; the current band is emphasised below. This also keeps the bars
+     visible when the band is Not Evaluated (no active segment). */
+  opacity: 0.4;
 }
-.exec-kpi__band-seg--critical.exec-kpi__band-seg--active { background: var(--exec-sev-critical); }
-.exec-kpi__band-seg--poor.exec-kpi__band-seg--active { background: var(--exec-sev-high); }
-.exec-kpi__band-seg--warning.exec-kpi__band-seg--active { background: var(--exec-sev-medium); }
-.exec-kpi__band-seg--good.exec-kpi__band-seg--active { background: var(--exec-sev-low); }
-.exec-kpi__band-seg--excellent.exec-kpi__band-seg--active { background: var(--exec-sev-low); }
+.exec-kpi__band-seg--critical { background: var(--exec-sev-critical); }
+.exec-kpi__band-seg--poor { background: var(--exec-sev-high); }
+.exec-kpi__band-seg--warning { background: var(--exec-sev-medium); }
+.exec-kpi__band-seg--good { background: var(--exec-sev-low); }
+.exec-kpi__band-seg--excellent { background: var(--exec-brand); }
+/* The current band is shown at full strength. */
+.exec-kpi__band-seg--active { opacity: 1; }
 
 /* FINDINGS tile — 4-segment stacked severity mix. */
 .exec-kpi__chart--findings { gap: 2px; }
