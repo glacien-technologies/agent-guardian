@@ -115,6 +115,23 @@ def test_scan_view_404_for_truly_unknown_id(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_scan_view_renders_200_for_empty_scan_dir(client: TestClient, store: ScanStore) -> None:
+    """An on-disk scan dir with NO scan.json yet renders the ramping-up
+    dashboard (200), not ``unknown scan`` (404).
+
+    QA-071 (2026-06-04) — the scan command pre-creates this dir before opening
+    the auto-served dashboard in a separate process (the in-memory
+    ``is_running`` flag is invisible cross-process, so the dir is the only
+    "scan exists" signal). This pins the route contract that backs that fix:
+    a bare directory is enough to render the live shell, which then fills in
+    as the run writes events.jsonl / memory.jsonl into it.
+    """
+    scan_id = "cli-ramping-up"
+    store.scan_dir(scan_id).mkdir(parents=True, exist_ok=True)  # empty: no scan.json
+    resp = client.get(f"/scan/{scan_id}", follow_redirects=False)
+    assert resp.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Lines 92-93 — OSError on scan_dir.stat() inside scan_view
 # ---------------------------------------------------------------------------
