@@ -97,7 +97,7 @@ Scorecard badge and the Downloads badge):
 The Passing-tier criteria are re-affirmed annually as part of the
 Engineering Standards review (`docs/engineering-standards-reviews/`).
 Promotion to Silver or Gold is **not** a current cycle goal — see
-[`ROADMAP.md`](../../ROADMAP.md).
+[`ROADMAP.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/ROADMAP.md).
 
 ---
 
