@@ -14,15 +14,11 @@ edit to this file is required.
 
 from __future__ import annotations
 
-import importlib
-import logging
 from abc import ABC, abstractmethod
 
 from agent_guardian.ci.comment import MARKER
 
 __all__ = ["MARKER", "Poster", "PosterError", "get_poster"]
-
-_LOG = logging.getLogger(__name__)
 
 
 class PosterError(RuntimeError):
@@ -49,37 +45,53 @@ class Poster(ABC):
 # Platforms that ship today vs. modules added later by other agents. We do not
 # hard-code the full set here so a new poster module is pickable the moment it
 # lands on disk; this set only powers a friendlier "did you mean" error.
-_KNOWN_PLATFORMS = ("github", "gitlab", "bitbucket")
+# Per-platform loaders. Each does a LITERAL import of exactly one poster module
+# (so semgrep's non-literal-import audit stays clean and no arbitrary module can
+# be loaded) and stays lazy (only the chosen loader runs). Distinct functions
+# avoid mypy's no-redef on a shared import alias.
+def _load_github() -> Poster:
+    from agent_guardian.ci.posters.github import get_poster
+
+    return get_poster()
+
+
+def _load_gitlab() -> Poster:
+    from agent_guardian.ci.posters.gitlab import get_poster
+
+    return get_poster()
+
+
+def _load_bitbucket() -> Poster:
+    from agent_guardian.ci.posters.bitbucket import get_poster
+
+    return get_poster()
+
+
+_POSTER_LOADERS = {
+    "github": _load_github,
+    "gitlab": _load_gitlab,
+    "bitbucket": _load_bitbucket,
+}
+_KNOWN_PLATFORMS = tuple(_POSTER_LOADERS)
 
 
 def get_poster(platform: str) -> Poster:
     """Resolve and instantiate the poster for ``platform``.
 
-    Lazily imports ``agent_guardian.ci.posters.<platform>`` and calls its
-    module-level ``get_poster()`` factory.
+    Dispatches to a per-platform loader that lazily imports exactly one poster
+    module and calls its ``get_poster()`` factory.
 
     Raises:
-        PosterError: if no module exists for ``platform`` or it does not expose
-            a ``get_poster`` factory.
+        PosterError: if no loader exists for ``platform`` or the module did not
+            return a :class:`Poster` instance.
     """
     name = (platform or "").strip().lower()
-    if not name:
-        raise PosterError("no platform given -- choose one of: " + ", ".join(_KNOWN_PLATFORMS))
-    try:
-        module = importlib.import_module(f"agent_guardian.ci.posters.{name}")
-    except ModuleNotFoundError as exc:
-        # Only swallow a missing *platform* module; re-raise if the platform
-        # module itself failed to import one of its own dependencies.
-        if exc.name and exc.name.endswith(f"posters.{name}"):
-            _LOG.debug("no poster module for platform %r: %s", name, exc)
-            raise PosterError(
-                f"no poster for platform '{platform}' -- available: {', '.join(_KNOWN_PLATFORMS)}"
-            ) from exc
-        raise
-    factory = getattr(module, "get_poster", None)
-    if factory is None:
-        raise PosterError(f"poster module for '{platform}' does not expose a get_poster() factory")
-    poster = factory()
+    loader = _POSTER_LOADERS.get(name)
+    if loader is None:
+        raise PosterError(
+            f"no poster for platform '{platform}' -- choose one of: " + ", ".join(_KNOWN_PLATFORMS)
+        )
+    poster = loader()
     if not isinstance(poster, Poster):
         raise PosterError(f"poster module for '{platform}' did not return a Poster instance")
     return poster
