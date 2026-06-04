@@ -230,9 +230,12 @@ def test_build_completeness_counts_agents_and_turns() -> None:
     assert c.agents_completed == 1  # goal-hijack finished; recon excluded
     assert c.agents_cut_short == 1  # tool-abuse cancelled
     assert c.turns_used == 7  # 5 + 2 (recon's turn excluded)
-    # pct is turns-based: turns_used / turns_planned (2 agents * 12 max-turns).
+    # pct is agents-based: agents_completed / agents_planned. Corpus-exhaustion
+    # counts as complete (probe corpora are smaller than the turn cap), so only
+    # the cancelled agent reduces it. turns_used / turns_planned are retained as
+    # informational detail.
     assert c.turns_planned == 24
-    assert c.pct == pytest.approx(round(7 / 24 * 100, 1))
+    assert c.pct == 50.0  # 1 of 2 applicable agents finished (goal-hijack; tool-abuse cancelled)
 
 
 def test_scan_model_defaults_are_backcompat() -> None:

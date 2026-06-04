@@ -1923,33 +1923,49 @@ class SwarmCommander:
             finalise_truncated=self._finalise_truncated,
         )
 
-    def _build_completeness(self) -> ScanCompleteness:
-        """Scan-completeness metric: how much of the launched attack slate ran.
+    # An agent is "cut short" only when the FRAMEWORK truncated it before it
+    # could finish its probe corpus: an early-stop ``cancelled`` signal, a
+    # ``budget`` exhaustion, or an ``error``. Everything else (``success`` /
+    # ``exhausted`` / ``refused`` / ``not_tested``) means the agent reached its
+    # own terminal state having run the probes it had.
+    _TRUNCATED_TERMINATIONS: ClassVar[tuple[str, ...]] = ("cancelled", "budget", "error")
 
-        ``agents_planned`` is the launched slate (recon excluded, since it is a
+    def _build_completeness(self) -> ScanCompleteness:
+        """Scan-completeness metric: did the planned attack agents finish testing?
+
+        ``agents_planned`` is the launched attack slate (recon excluded — it is a
         phase-1 prerequisite, not an attack agent). ``pct`` is the headline
         ``agents_completed / agents_planned``.
+
+        IMPORTANT — this measures *agents that finished their work*, NOT
+        turns-burned / turn-cap. Probe corpora per ASI category are far smaller
+        than ``max_turns_per_agent`` (often 1-5 probes), so an agent that ran
+        every probe it had legitimately stops well below the turn ceiling. The
+        old turns_used/(agents x max_turns) ratio treated that as "incomplete",
+        making the ``--mode full`` 95% authoritative gate *structurally
+        unreachable* for any real target — a fully-run, uncapped scan would
+        still read ~50%. Completeness now counts an agent that exhausted its
+        corpus (or succeeded) as complete; only framework-truncated agents
+        (``cancelled`` / ``budget`` / ``error``) reduce the figure.
+        ``turns_used`` / ``turns_planned`` are retained as informational detail.
+
+        Zero planned agents (recon ruled every class out, or empty slate) is 0%,
+        not 100% — so an empty scan cannot silently compose into a gate-pass.
         """
         attack_reports = [r for r in self._agent_reports if r.agent != "recon-agent"]
         planned = len(self._active_agents)
-        cut_short = sum(1 for r in attack_reports if r.terminated_by == "cancelled")
-        completed = sum(1 for r in attack_reports if r.terminated_by not in ("cancelled", "error"))
+        cut_short = sum(
+            1 for r in attack_reports if r.terminated_by in self._TRUNCATED_TERMINATIONS
+        )
+        completed = sum(
+            1 for r in attack_reports if r.terminated_by not in self._TRUNCATED_TERMINATIONS
+        )
         turns_used = sum(r.turns for r in attack_reports)
         per_agent_max = self.config.max_turns_per_agent or 12
         turns_planned = planned * per_agent_max
-        # Headline = fraction of planned attack *work* actually executed
-        # (turns), not agents fully completed. Early-stop cancels in-flight
-        # agents (so agents_completed is ~0 on a normal early-stop) even though
-        # real attacking happened -- turns_used/turns_planned reflects that
-        # honestly, while agents_completed / agents_cut_short remain as detail.
-        #
-        # Zero planned turns means the swarm launched no attack agents at all
-        # (e.g. recon ruled every agent class out, or the slate was empty for
-        # some other reason). That is NOT 100% complete -- it is 0%, and the
-        # completeness gate in ``_phase_finalise`` will then route the band to
-        # NOT_EVALUATED. Reporting "100% complete" on a zero-agent plan was the
-        # silent fallback that let an empty scan compose into a gate-pass.
-        pct = (turns_used / turns_planned * 100.0) if turns_planned else 0.0
+        # Headline = fraction of the planned applicable agents that ran to
+        # completion (corpus-exhausted or succeeded), capped at the planned set.
+        pct = (min(completed, planned) / planned * 100.0) if planned else 0.0
         return ScanCompleteness(
             agents_planned=planned,
             agents_completed=completed,
