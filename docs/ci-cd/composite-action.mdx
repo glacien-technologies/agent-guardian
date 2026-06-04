@@ -14,13 +14,15 @@ A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF,
 <Steps>
   <Step title="Grant permissions" icon="key">
     The calling workflow must grant `security-events: write` so SARIF
-    upload succeeds. Composite actions cannot declare repository-level
+    upload succeeds, and `pull-requests: write` so the sticky PR comment can
+    be upserted. Composite actions cannot declare repository-level
     permissions, so the caller owns this.
 
     ```yaml
     permissions:
       contents: read
-      security-events: write
+      pull-requests: write     # required for the sticky AgentGuardian comment
+      security-events: write   # required for codeql-action/upload-sarif
     ```
   </Step>
 
@@ -34,6 +36,7 @@ A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF,
 
     permissions:
       contents: read
+      pull-requests: write
       security-events: write
 
     jobs:
@@ -48,6 +51,8 @@ A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF,
               model: gemini:gemini-2.5-flash
               mode: full
               fail-under: "70"
+              max-critical: "0"
+              comment: "true"
             env:
               GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     ```
@@ -74,6 +79,11 @@ A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF,
 | `mode` | `full` | `fast`, `smart`, or `full`. |
 | `budget-usd` | `""` | Runtime USD cap. Empty disables the cap. |
 | `fail-under` | `70` | Minimum AIVSS for exit-0. Empty skips the gate. |
+| `max-critical` | `0` | CRITICAL-finding ceiling (`--max-critical`). Exceeding it fails the gate. Empty disables this ceiling. |
+| `max-high` | `""` | HIGH-finding ceiling (`--max-high`). Empty disables this ceiling. |
+| `max-medium` | `""` | MEDIUM-finding ceiling (`--max-medium`). Empty disables this ceiling. |
+| `max-low` | `""` | LOW-finding ceiling (`--max-low`). Empty disables this ceiling. |
+| `comment` | `true` | On a `pull_request` event, upsert a sticky AgentGuardian summary comment via `agent-guardian comment`. Set `false` to skip. |
 | `output-path` | `agentguardian-scan.sarif` | Where the SARIF is written. |
 | `upload-sarif` | `true` | Set `false` to skip the Code Scanning upload. |
 | `category` | `agentguardian` | SARIF category used for Code Scanning grouping. |
@@ -87,6 +97,39 @@ A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF,
 |------|-------------|
 | `sarif-path` | Path of the SARIF report. |
 | `exit-code` | Raw scan exit code (see [exit codes](/reference/exit-codes)). |
+
+## Severity gates
+
+`fail-under` gates on the numeric AIVSS floor. The `max-*` inputs add
+**per-severity ceilings** on top of it, AND-combined: the gate fails if AIVSS
+drops below `fail-under` **or** any severity count exceeds its ceiling. The
+default `max-critical: "0"` means a single CRITICAL finding fails the build
+even when the AIVSS still clears the floor.
+
+```yaml
+with:
+  fail-under: "70"   # AIVSS floor
+  max-critical: "0"  # zero CRITICAL findings tolerated
+  max-high: "0"      # zero HIGH findings tolerated
+  max-medium: "5"    # up to 5 MEDIUM findings allowed
+```
+
+Set any of these to an empty string (`""`) to disable that individual ceiling.
+
+## Sticky PR comment
+
+When `comment` is `true` (default) and the workflow is triggered by a
+`pull_request` event, the action runs `agent-guardian comment --platform
+github` after the scan. It upserts a single summary comment on the PR — keyed
+by a hidden HTML marker so re-runs edit the existing comment in place rather
+than posting a new one on every push. The comment embeds the same
+`fail-under` / `max-*` verdict as the gate, so a green/red comment always
+matches the CI exit code.
+
+The comment step is advisory: if it cannot post (for example a fork PR whose
+`GITHUB_TOKEN` lacks write scope) it logs a warning and the job continues — it
+never changes the scan's pass/fail outcome. See [PR comments](/ci-cd/pr-comments)
+for a rendered sample and the marker details.
 
 ## Sample report
 

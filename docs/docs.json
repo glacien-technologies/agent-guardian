@@ -86,11 +86,16 @@
         "group": "CI/CD",
         "icon": "git-branch",
         "pages": [
+          "ci-cd/overview",
           "ci-cd/github-actions",
           "ci-cd/composite-action",
           "ci-cd/gitlab-ci",
-          "ci-cd/fail-builds-on-high-risk",
-          "ci-cd/upload-sarif"
+          "ci-cd/bitbucket",
+          "ci-cd/security-gates",
+          "ci-cd/upload-sarif",
+          "ci-cd/pr-comments",
+          "ci-cd/fail-builds-on-critical-findings",
+          "ci-cd/fail-builds-on-high-risk"
         ]
       },
       {

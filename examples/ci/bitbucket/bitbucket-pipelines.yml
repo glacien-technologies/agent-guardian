@@ -1,0 +1,51 @@
+# AgentGuardian on Bitbucket Pipelines.
+#
+# Runs an adversarial-swarm scan against your agent, gates the pipeline on an
+# AIVSS floor, then publishes a sticky PR comment and a Code Insights report
+# (with one annotation per finding) onto the build commit.
+#
+# Copy this into your repo root as `bitbucket-pipelines.yml` and replace the
+# placeholders marked <...>. Set the secrets listed under "Repository
+# variables" in the docs (Repository settings -> Repository variables):
+#
+#   GEMINI_API_KEY        (secured)  - or OPENAI_API_KEY / ANTHROPIC_API_KEY
+#   BITBUCKET_TOKEN       (secured)  - repository/workspace access token (Bearer)
+#                                      OR BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD
+#
+# BITBUCKET_WORKSPACE, BITBUCKET_REPO_SLUG, BITBUCKET_PR_ID and BITBUCKET_COMMIT
+# are injected automatically by Bitbucket Pipelines on a pull-request build.
+
+image: python:3.12-slim
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: AgentGuardian red-team scan
+          script:
+            - pip install --no-cache-dir agent-guardian
+            # 1) Scan + gate. --fail-under makes a low AIVSS fail the step
+            #    (non-zero exit). The SARIF + scan.json are always written.
+            - |
+              agent-guardian scan \
+                --framework langgraph \
+                --framework-ref my_app.graph:graph \
+                --model gemini:gemini-2.5-flash \
+                --mode full \
+                --budget-usd 0.10 \
+                --output sarif \
+                --output-path scan.sarif \
+                --fail-under 70 \
+                || SCAN_EXIT=$?
+            # 2) Sticky PR comment (upsert by hidden marker). Mirror the same
+            #    gate thresholds so the comment's verdict matches the exit code.
+            - |
+              agent-guardian comment \
+                --platform bitbucket \
+                --fail-under 70
+            # 3) Code Insights report + per-finding annotations on the commit.
+            - agent-guardian code-insights --platform bitbucket
+            # 4) Surface the gate result as the step outcome.
+            - exit ${SCAN_EXIT:-0}
+          artifacts:
+            - scan.sarif

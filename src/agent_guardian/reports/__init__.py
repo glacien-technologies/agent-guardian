@@ -12,6 +12,10 @@ from agent_guardian.reports.canonical import (
     from_canonical_json,
     to_canonical_json,
 )
+from agent_guardian.reports.codeclimate import (
+    emit_codeclimate,
+    write_codeclimate,
+)
 from agent_guardian.reports.json_report import (
     SCHEMA_VERSION,
     VerifyResult,
@@ -54,6 +58,7 @@ __all__ = [
     "ReportError",
     "VerifyResult",
     "available_pdf_engines",
+    "emit_codeclimate",
     "emit_json",
     "emit_junit",
     "emit_markdown",
@@ -63,6 +68,7 @@ __all__ = [
     "to_canonical_json",
     "validate_output_engine_available",
     "verify_signatures",
+    "write_codeclimate",
     "write_json",
     "write_junit",
     "write_markdown",

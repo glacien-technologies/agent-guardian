@@ -614,7 +614,7 @@ class _ContractScanContext:
 # ---------------------------------------------------------------------------
 
 
-_TEXT_FORMATS: frozenset[str] = frozenset({"json", "sarif", "junit", "md"})
+_TEXT_FORMATS: frozenset[str] = frozenset({"json", "sarif", "junit", "md", "gitlab"})
 _ALL_FORMATS: frozenset[str] = _TEXT_FORMATS | {"pdf"}
 
 
@@ -644,6 +644,12 @@ def _render_scan(scan: Scan, output_format: str) -> str:
         root = emit_junit(scan)
         ET.indent(root, space="  ")
         return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")
+    if output_format == "gitlab":
+        # GitLab Code Quality report (Code Climate JSON subset). Imported
+        # lazily so the binary/report formats stay pay-for-what-you-use.
+        from agent_guardian.reports.codeclimate import emit_codeclimate
+
+        return json.dumps(emit_codeclimate(scan), indent=2, sort_keys=True)
     # markdown
     from agent_guardian.reports.markdown import emit_markdown
 
@@ -677,6 +683,13 @@ def _write_report(scan: Scan, output_format: str, path: Path) -> None:
         from agent_guardian.reports.markdown import write_markdown
 
         write_markdown(scan, path)
+        return
+    if output_format == "gitlab":
+        # GitLab Code Quality report (Code Climate JSON subset). Lazily import
+        # the emitter shipped by the GitLab agent.
+        from agent_guardian.reports.codeclimate import write_codeclimate
+
+        write_codeclimate(scan, path)
         return
     # pdf
     from agent_guardian.reports.pdf import write_pdf
@@ -1229,7 +1242,7 @@ def serve(
 def report(
     scan_id: str = typer.Argument(..., help="Scan ID to regenerate reports for."),
     output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md | pdf."
+        "json", "--output", help="Report format: json | sarif | junit | md | gitlab | pdf."
     ),
     output_path: Path | None = typer.Option(
         None,
@@ -1296,6 +1309,177 @@ def report(
         return
 
     typer.echo(_render_scan(scan, output))
+
+
+# ---------------------------------------------------------------------------
+# CI/CD helpers (comment / code-insights)
+# ---------------------------------------------------------------------------
+
+
+def _load_scan_for_ci(scan: str | None) -> Scan:
+    """Load a :class:`Scan` for a CI sub-command.
+
+    ``scan`` may be a scan id (resolved under ``~/.agentguardian/scans/<id>``),
+    a path to a ``scan.json`` / ``scan.raw.json`` file, or ``None`` to pick the
+    newest scan on disk. Raises :class:`typer.Exit` (``EXIT_CONFIG``) with a
+    clear stderr message on any failure.
+    """
+    scans_root = Path.home() / ".agentguardian" / "scans"
+    scan_file: Path | None = None
+
+    if scan is None:
+        # Newest scan by directory mtime.
+        if not scans_root.is_dir():
+            typer.echo(f"no scans found under {scans_root}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        candidates = [d for d in scans_root.iterdir() if d.is_dir()]
+        if not candidates:
+            typer.echo(f"no scans found under {scans_root}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        newest = max(candidates, key=lambda d: d.stat().st_mtime)
+        for name in ("scan.raw.json", "scan.json"):
+            candidate = newest / name
+            if candidate.is_file():
+                scan_file = candidate
+                break
+    else:
+        as_path = Path(scan)
+        if as_path.is_file():
+            scan_file = as_path
+        else:
+            scan_dir = scans_root / scan
+            for name in ("scan.raw.json", "scan.json"):
+                candidate = scan_dir / name
+                if candidate.is_file():
+                    scan_file = candidate
+                    break
+
+    if scan_file is None:
+        typer.echo(f"no scan found for '{scan}'", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    try:
+        payload = json.loads(scan_file.read_text(encoding="utf-8"))
+        return Scan.model_validate(payload)
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        typer.echo(f"could not load scan from {scan_file}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+@app.command()
+def comment(
+    scan: str | None = typer.Option(
+        None,
+        "--scan",
+        help=(
+            "Scan id, or a path to a scan.json. Defaults to the newest scan "
+            "under ~/.agentguardian/scans."
+        ),
+    ),
+    platform: str = typer.Option(
+        "github",
+        "--platform",
+        help="Code host to post the comment to: github | gitlab | bitbucket.",
+    ),
+    fail_under: int | None = typer.Option(
+        None, "--fail-under", help="Gate floor mirrored into the comment verdict."
+    ),
+    max_critical: int | None = typer.Option(
+        None, "--max-critical", help="CRITICAL-finding ceiling mirrored into the verdict."
+    ),
+    max_high: int | None = typer.Option(
+        None, "--max-high", help="HIGH-finding ceiling mirrored into the verdict."
+    ),
+    max_medium: int | None = typer.Option(
+        None, "--max-medium", help="MEDIUM-finding ceiling mirrored into the verdict."
+    ),
+    max_low: int | None = typer.Option(
+        None, "--max-low", help="LOW-finding ceiling mirrored into the verdict."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the comment body to stdout instead of posting it.",
+    ),
+) -> None:
+    """Upsert an AgentGuardian summary comment on the current PR / MR.
+
+    The gate verdict embedded in the comment uses the same --fail-under /
+    --max-* thresholds as the ``scan`` gate, so a green/red comment matches the
+    CI exit code. With --dry-run the rendered body is printed, never posted.
+    """
+    from agent_guardian.ci.comment import render_comment
+    from agent_guardian.core.gate import evaluate_gate
+
+    scan_result = _load_scan_for_ci(scan)
+    gate = evaluate_gate(
+        scan_result,
+        fail_under=fail_under,
+        max_critical=max_critical,
+        max_high=max_high,
+        max_medium=max_medium,
+        max_low=max_low,
+    )
+    body = render_comment(scan_result, gate)
+    if dry_run:
+        typer.echo(body)
+        return
+    from agent_guardian.ci.posters.base import PosterError, get_poster
+
+    try:
+        poster = get_poster(platform)
+        poster.upsert(body)
+    except PosterError as exc:
+        typer.echo(f"comment error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    typer.echo(f"posted AgentGuardian comment to {platform}")
+
+
+@app.command(name="code-insights")
+def code_insights(
+    scan: str | None = typer.Option(
+        None,
+        "--scan",
+        help=(
+            "Scan id, or a path to a scan.json. Defaults to the newest scan "
+            "under ~/.agentguardian/scans."
+        ),
+    ),
+    platform: str = typer.Option(
+        "bitbucket",
+        "--platform",
+        help="Code host for the Code Insights report (bitbucket).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Render the report without posting it.",
+    ),
+) -> None:
+    """Publish a Code Insights report for a scan (Bitbucket).
+
+    The platform poster implements ``post_code_insights(scan)``; this command
+    lazily resolves it so a platform module added later wires in without an
+    edit here.
+    """
+    from agent_guardian.ci.posters.base import PosterError, get_poster
+
+    scan_result = _load_scan_for_ci(scan)
+    try:
+        poster = get_poster(platform)
+        post = getattr(poster, "post_code_insights", None)
+        if post is None:
+            typer.echo(
+                f"platform '{platform}' does not support code-insights "
+                "(no post_code_insights method)",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        post(scan_result, dry_run=dry_run)
+    except PosterError as exc:
+        typer.echo(f"code-insights error: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    if not dry_run:
+        typer.echo(f"posted Code Insights report to {platform}")
 
 
 @app.command()
@@ -2985,8 +3169,28 @@ def scan(
     fail_under: int | None = typer.Option(
         None, "--fail-under", help="Exit 1 if final AIVSS < this value."
     ),
+    max_critical: int | None = typer.Option(
+        None,
+        "--max-critical",
+        help="Exit 1 if the number of CRITICAL findings exceeds this value.",
+    ),
+    max_high: int | None = typer.Option(
+        None,
+        "--max-high",
+        help="Exit 1 if the number of HIGH findings exceeds this value.",
+    ),
+    max_medium: int | None = typer.Option(
+        None,
+        "--max-medium",
+        help="Exit 1 if the number of MEDIUM findings exceeds this value.",
+    ),
+    max_low: int | None = typer.Option(
+        None,
+        "--max-low",
+        help="Exit 1 if the number of LOW findings exceeds this value.",
+    ),
     output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md | pdf."
+        "json", "--output", help="Report format: json | sarif | junit | md | gitlab | pdf."
     ),
     output_path: Path | None = typer.Option(
         None, "--output-path", help="Where to write the report file."
@@ -3256,6 +3460,10 @@ def scan(
                 budget_seconds=budget_seconds,
                 recon_budget_seconds=recon_budget_seconds,
                 fail_under=fail_under,
+                max_critical=max_critical,
+                max_high=max_high,
+                max_medium=max_medium,
+                max_low=max_low,
                 output=output,
                 output_path=output_path,
                 no_tui=effective_no_tui,
@@ -3305,6 +3513,10 @@ async def _run_scan(
     budget_seconds: float | None,
     recon_budget_seconds: float | None,
     fail_under: int | None,
+    max_critical: int | None = None,
+    max_high: int | None = None,
+    max_medium: int | None = None,
+    max_low: int | None = None,
     output: str,
     output_path: Path | None,
     no_tui: bool,
@@ -3738,6 +3950,10 @@ async def _run_scan(
             target_llm=target_llm,
             tier_override=tier_override,
             fail_under=fail_under,
+            max_critical=max_critical,
+            max_high=max_high,
+            max_medium=max_medium,
+            max_low=max_low,
             output=output,
             output_path=output_path,
             no_tui=no_tui,
@@ -3797,6 +4013,10 @@ async def _run_scan_inner(
     target_llm: Any,
     tier_override: Tier | None,
     fail_under: int | None,
+    max_critical: int | None = None,
+    max_high: int | None = None,
+    max_medium: int | None = None,
+    max_low: int | None = None,
     output: str,
     output_path: Path | None,
     no_tui: bool,
@@ -4327,28 +4547,31 @@ async def _run_scan_inner(
                 err=True,
             )
 
-    # --fail-under: a non-authoritative scan is ALWAYS a failure (it tested
-    # nothing); otherwise compare the numeric AIVSS against the floor. A
-    # FAST/SMART scan (#44) is also non-authoritative as a gate input: its
-    # numeric score reflects how much was tested, not how safe the agent is,
-    # so we refuse to gate-pass on it and emit a loud stderr warning.
-    if fail_under is not None:
-        if not authoritative:
-            typer.echo(
-                f"--fail-under {fail_under}: FAILED -- scan is non-authoritative "
-                "(NOT_EVALUATED); a stub/unscored run never passes a gate.",
-                err=True,
-            )
-            return EXIT_FAIL_UNDER
-        if not scan_result.mode_authoritative:
-            typer.echo(
-                f"WARNING: --fail-under {fail_under}: this scan was run in "
-                f"--mode {scan_result.mode}; quoted score {scan_result.aivss} is "
-                "not authoritative -- re-run with --mode full for a real gate.",
-                err=True,
-            )
-            return EXIT_FAIL_UNDER
-        if scan_result.aivss < fail_under:
+    # CI gate: AND-combine --fail-under with the per-severity --max-* ceilings.
+    # A non-authoritative scan is ALWAYS a failure (it tested nothing) and a
+    # FAST/SMART scan (#44) is non-authoritative as a gate input: its numeric
+    # score reflects how much was tested, not how safe the agent is. The pure
+    # ``evaluate_gate`` helper makes that decision; we surface each failing
+    # reason on stderr. The gate is only consulted when the operator opted into
+    # at least one threshold so an unconstrained scan still exits 0.
+    gate_requested = any(
+        threshold is not None
+        for threshold in (fail_under, max_critical, max_high, max_medium, max_low)
+    )
+    if gate_requested:
+        from agent_guardian.core.gate import evaluate_gate
+
+        gate = evaluate_gate(
+            scan_result,
+            fail_under=fail_under,
+            max_critical=max_critical,
+            max_high=max_high,
+            max_medium=max_medium,
+            max_low=max_low,
+        )
+        if not gate.passed:
+            for reason in gate.reasons:
+                typer.echo(f"gate FAILED: {reason}", err=True)
             return EXIT_FAIL_UNDER
     return EXIT_OK
 

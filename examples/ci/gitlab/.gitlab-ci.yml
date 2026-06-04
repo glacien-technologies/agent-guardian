@@ -1,0 +1,75 @@
+# AgentGuardian — GitLab CI/CD adversarial scan on merge requests.
+#
+# What this pipeline does on every merge_request_event (and main push):
+#   1. Installs agent-guardian.
+#   2. Runs the adversarial swarm and emits SARIF for GitLab's security widget.
+#   3. Re-emits the same scan as a GitLab Code Quality report so findings show
+#      up inline in the MR diff (artifacts:reports:codequality).
+#   4. Upserts a single sticky AgentGuardian note on the MR (create-or-update).
+#   5. Fails the job (and thus blocks the merge) when the scan gate trips.
+#
+# Copy-paste this file to your repo root as .gitlab-ci.yml, then:
+#   * Settings → CI/CD → Variables: add your provider key (GEMINI_API_KEY /
+#     OPENAI_API_KEY / ANTHROPIC_API_KEY) as a masked variable.
+#   * Settings → CI/CD → Variables: add GITLAB_TOKEN — a project or personal
+#     access token with the `api` scope — so the sticky MR note can be posted.
+#     (CI_JOB_TOKEN works for read-only calls but cannot write MR notes on most
+#     GitLab tiers.)
+#   * Replace the ENDPOINT / framework placeholders below with your real target.
+
+stages:
+  - redteam
+
+agentguardian:
+  stage: redteam
+  image: python:3.12-slim
+  variables:
+    # Provider key for the --model you pick. Set as a masked CI/CD variable.
+    GEMINI_API_KEY: $GEMINI_API_KEY
+    # Token used by `agent-guardian comment --platform gitlab` to upsert the
+    # sticky MR note. Needs the `api` scope.
+    GITLAB_TOKEN: $GITLAB_TOKEN
+  before_script:
+    - pip install --no-cache-dir agent-guardian
+  script:
+    # 1+2) Run the swarm. SARIF feeds GitLab's Vulnerability Report. We do NOT
+    #      let a failing gate abort the script yet (|| true) so we can still
+    #      publish the Code Quality report and the MR note before we exit.
+    - |
+      agent-guardian scan \
+        --endpoint "$AGENTGUARDIAN_ENDPOINT" \
+        --model gemini:gemini-2.5-flash \
+        --mode full \
+        --budget-usd 0.10 \
+        --output sarif \
+        --output-path gl-sast-report.json \
+        --fail-under 70 \
+      && SCAN_EXIT=0 || SCAN_EXIT=$?
+    # 3) Resolve the scan we just produced (newest dir under the scans root) and
+    #    re-emit it as a GitLab Code Quality report.
+    - SCAN_ID="$(ls -t ~/.agentguardian/scans | head -n 1)"
+    - |
+      agent-guardian report "$SCAN_ID" \
+        --output gitlab \
+        --output-path gl-code-quality-report.json
+    # 4) Upsert the sticky MR note. `comment` defaults to the newest scan and
+    #    mirrors the same gate thresholds into the rendered verdict.
+    - |
+      agent-guardian comment \
+        --platform gitlab \
+        --fail-under 70
+    # 5) Re-raise the scan gate's exit code so a regression blocks the merge.
+    - exit "$SCAN_EXIT"
+  artifacts:
+    when: always        # publish reports even when the gate fails the job
+    paths:
+      - gl-sast-report.json
+      - gl-code-quality-report.json
+    reports:
+      sast: gl-sast-report.json                    # Security & Compliance widget
+      codequality: gl-code-quality-report.json     # inline MR Code Quality widget
+    expire_in: 30 days
+  rules:
+    # MR pipelines get the sticky note + inline Code Quality; main keeps the gate.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"

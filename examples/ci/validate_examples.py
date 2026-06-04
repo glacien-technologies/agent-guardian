@@ -132,6 +132,80 @@ def _validate_sample(example: str) -> None:
             raise AssertionError(f"sample-scan.json missing field {required!r}")
 
 
+# ---------------------------------------------------------------------------
+# CI template validation (examples/ci/**)
+# ---------------------------------------------------------------------------
+#
+# Every copy-pasteable CI config we ship must stay valid YAML with the
+# minimal structure each forge requires. Validating them here means a typo in
+# a template is caught by our own CI rather than by a user's pipeline.
+
+_CI_ROOT = _HERE  # examples/ci/
+
+
+def _discover_ci_templates() -> list[Path]:
+    """Return every CI template file under ``examples/ci/**``.
+
+    Globs ``*.yml`` / ``*.yaml`` (GitHub, GitLab, Bitbucket) including the
+    dotfile ``.gitlab-ci.yml`` which a plain ``*.yml`` glob misses.
+    """
+    seen: dict[Path, None] = {}
+    for pattern in ("**/*.yml", "**/*.yaml", "**/.gitlab-ci.yml"):
+        for path in _CI_ROOT.glob(pattern):
+            if path.is_file():
+                seen[path.resolve()] = None
+    return sorted(seen)
+
+
+def _validate_ci_template(path: Path) -> None:
+    """YAML-parse a CI template and assert its forge-specific top-level shape."""
+    import yaml
+
+    with path.open("r", encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    if not isinstance(doc, dict):
+        raise AssertionError(f"{path.name} did not parse to a YAML mapping")
+
+    parent = path.parent.name
+    if parent == "github":
+        # A GitHub workflow needs an `on` trigger and a `jobs` mapping. PyYAML
+        # parses the bareword `on:` key as the boolean True, so accept either.
+        if "on" not in doc and True not in doc:
+            raise AssertionError(f"{path.name}: GitHub workflow missing 'on:' trigger")
+        if not isinstance(doc.get("jobs"), dict) or not doc["jobs"]:
+            raise AssertionError(f"{path.name}: GitHub workflow has no 'jobs:'")
+    elif parent == "gitlab":
+        # A GitLab pipeline must define at least one job (a top-level mapping
+        # key whose value is a mapping, e.g. `agentguardian:`).
+        jobs = [k for k, v in doc.items() if isinstance(v, dict) and not k.startswith(".")]
+        if not jobs:
+            raise AssertionError(f"{path.name}: GitLab pipeline defines no jobs")
+    elif parent == "bitbucket":
+        if "pipelines" not in doc:
+            raise AssertionError(f"{path.name}: bitbucket-pipelines.yml missing 'pipelines:'")
+    # Unknown forges still get the parse + mapping check above.
+
+
+def _run_ci_templates() -> tuple[int, int]:
+    """Validate every CI template; return ``(ok, fail)`` counts."""
+    templates = _discover_ci_templates()
+    ok = fail = 0
+    for path in templates:
+        rel = path.relative_to(_PROJECT_ROOT)
+        try:
+            _validate_ci_template(path)
+        except Exception as exc:  # keep going across all templates.
+            traceback.print_exc()
+            print(f"  FAIL {rel} -> {type(exc).__name__}: {exc}")
+            fail += 1
+        else:
+            print(f"  ok   {rel}")
+            ok += 1
+    if not templates:
+        print("  (no CI templates found under examples/ci/**)")
+    return ok, fail
+
+
 async def _run_one(spec: ExampleSpec) -> tuple[str, bool, str]:
     skip, reason = _should_skip(spec)
     if skip:
@@ -165,6 +239,10 @@ async def main() -> int:
             ok += 1
         else:
             fail += 1
+    print("\nCI templates (examples/ci/**):")
+    ci_ok, ci_fail = _run_ci_templates()
+    ok += ci_ok
+    fail += ci_fail
     print(f"\n{ok} ok, {fail} failed")
     return 0 if fail == 0 else 1
 

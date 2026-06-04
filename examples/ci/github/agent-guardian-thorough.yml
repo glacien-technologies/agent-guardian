@@ -1,0 +1,46 @@
+# AgentGuardian — THOROUGH preset (hardened release-branch gate).
+#
+# Copy this to `.github/workflows/agent-guardian.yml`. TEMPLATE only — not
+# wired into AgentGuardian's own CI.
+#
+# Use this on PRs into a protected release branch. It runs a full scan with a
+# high AIVSS floor and zero tolerance for CRITICAL/HIGH/MEDIUM findings, and
+# raises the spend cap so a deep scan completes.
+#
+# Trigger: pull_request (never pull_request_target).
+
+name: AgentGuardian (thorough)
+
+on:
+  pull_request:
+    branches: [main, release/**]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: glacien-technologies/agent-guardian/.github/actions/agentguardian-scan@v1
+        with:
+          framework: langgraph
+          framework-ref: my_app.graph:graph
+          # Fork-without-secrets fallback. On a hardened branch a stub run
+          # stays red by design — a maintainer must re-run from a trusted
+          # branch with a real provider key to clear the gate.
+          model: ${{ secrets.GEMINI_API_KEY != '' && 'gemini:gemini-2.5-flash' || 'stub' }}
+          mode: full
+          budget-usd: "1.00"
+          fail-under: "80"
+          max-critical: "0"
+          max-high: "0"
+          max-medium: "0"
+          comment: "true"
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

@@ -5,7 +5,7 @@ description: "Block merges when AgentGuardian's AIVSS score drops below your flo
 icon: "shield-check"
 ---
 
-A *security gate* is a non-zero CLI exit that a CI provider treats as a failed check. AgentGuardian's gate is a single flag — `--fail-under N` — backed by a six-code exit table and the QA-004 authoritativeness rules that refuse to gate-pass on a thin scan.
+A *security gate* is a non-zero CLI exit that a CI provider treats as a failed check. AgentGuardian's gate combines an AIVSS floor (`--fail-under N`) with optional per-severity finding ceilings (`--max-critical` / `--max-high` / `--max-medium` / `--max-low`), backed by a six-code exit table and the QA-004 authoritativeness rules that refuse to gate-pass on a thin scan.
 
 ## When to use this
 
@@ -29,7 +29,28 @@ agent-guardian scan \
   --fail-under 70
 ```
 
-`--fail-under` is the **only** flag that turns a scan into a gate. Without it the CLI always exits `0` on a clean run regardless of the AIVSS — the report is produced, but no merge is ever blocked. Source: [`cli.py:2303–2305`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L2303-L2305).
+`--fail-under` is the primary flag that turns a scan into a gate. Without any gate flag the CLI always exits `0` on a clean run regardless of the AIVSS — the report is produced, but no merge is ever blocked. Source: [`cli.py:2303–2305`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L2303-L2305).
+
+## Per-severity ceilings
+
+The AIVSS floor is a single aggregate number — a scan can clear `--fail-under` while still introducing one nasty CRITICAL finding. The `--max-*` flags add per-severity **ceilings** on the finding count:
+
+```bash
+agent-guardian scan ... \
+  --fail-under 70 \
+  --max-critical 0 \   # fail if ANY critical finding is present
+  --max-high 0 \       # fail if ANY high finding is present
+  --max-medium 5 \     # tolerate up to 5 medium findings
+  --max-low 20         # tolerate up to 20 low findings
+```
+
+Each ceiling fails the gate when the **count** of findings in that severity band **exceeds** the value (so `--max-critical 0` fails on the first critical, `--max-high 3` fails on the fourth high). A flag left unset imposes no ceiling for that band.
+
+**All conditions are AND-combined.** The gate passes only when *every* configured condition passes: the AIVSS is at or above `--fail-under` **and** each severity count is at or below its `--max-*` ceiling. Any single failing condition fails the whole gate, and every failing condition is named in the stderr banner and the [PR comment verdict](/ci-cd/pr-comments). The decision logic is a pure, unit-tested function — [`core/gate.py:evaluate_gate`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/core/gate.py) — shared by the `scan` enforcement path and the `comment` sub-command, so the comment verdict always matches the exit code.
+
+<Warning>
+  The OSS gate is **stateless — there is no baseline**. `--max-critical 0` fails on *any* critical finding, including one that predates the PR. The gate reports the agent's current posture, not the delta versus a previous scan. Baseline-diff (failing only on *newly introduced* findings) is a hosted (SaaS) feature. See the [CI/CD overview](/ci-cd/overview) for the full caveat.
+</Warning>
 
 ## Exit-code table
 

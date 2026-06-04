@@ -20,6 +20,15 @@ nav:
       - Live dashboard: architecture/live-dashboard.mdx
       - Hosted dashboard (forward-looking): architecture/hosted-dashboard.md
       - Observability: architecture/observability.mdx
+  - CI/CD:
+      - Overview: ci-cd/overview.mdx
+      - GitHub Actions: ci-cd/github-actions.mdx
+      - Composite action: ci-cd/composite-action.mdx
+      - GitLab CI: ci-cd/gitlab-ci.mdx
+      - Bitbucket Pipelines: ci-cd/bitbucket.mdx
+      - Security gates: ci-cd/security-gates.mdx
+      - Upload SARIF: ci-cd/upload-sarif.mdx
+      - PR comments: ci-cd/pr-comments.mdx
   - Reference:
       - CLI: reference/cli.md
       - Roadmap: reference/roadmap.md
