@@ -37,11 +37,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import statistics
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agent_guardian.adapters.http import HttpAdapter, HttpAdapterLastResponse, HttpAdapterToolCall
 from agent_guardian.adapters.response_envelope import (
@@ -717,6 +718,84 @@ class CapabilityAuditResult:
     memory_conversational: bool = False
     memory_cross_session: bool = False
     coverage: dict[str, str] = field(default_factory=dict)
+    # Time-channel inference-family fingerprint (RECON-TC-001). Populated by the
+    # runtime recon-probe pass: {"mean_ms", "stdev_ms", "samples"} from issuing
+    # one stable benign question N times and measuring per-call latency.
+    inference_latency_profile: dict[str, float] = field(default_factory=dict)
+    # Coarse classification of that profile: "tight-cluster" (small-class hosted
+    # model) vs "wide-variance" (large reasoning model / multi-step pipeline).
+    time_channel_signal: str = ""
+
+
+# Below this per-call latency standard deviation (ms) the cluster is "tight" —
+# consistent with a small-class hosted model (per recon/time-channel YAML).
+_TIGHT_STDEV_MS = 50.0
+
+
+def _is_latency_variance_probe(probe: object) -> bool:
+    """A recon probe whose oracle is per-call latency variance."""
+    return "latency_variance" in str(getattr(probe, "expected_evidence", "") or "")
+
+
+async def _run_time_channel_probe(
+    target: TargetAdapter,
+    result: CapabilityAuditResult,
+    *,
+    cancel_event: asyncio.Event | None,
+    on_probe: Callable[[str], None] | None,
+    probes: list[Any] | None = None,
+) -> None:
+    """Execute the latency-variance recon probe(s) and record the profile.
+
+    This is the runtime wiring for the bundled recon corpus (RECON-TC-001): the
+    probe infrastructure was schema-validated + unit-tested but never executed
+    during a real audit. It issues the probe's stable benign question N times,
+    measures per-call latency, and stores
+    :attr:`CapabilityAuditResult.inference_latency_profile`. Best-effort: any
+    error or cancel leaves the profile empty and never aborts recon.
+    """
+    if probes is None:
+        from agent_guardian.probes.loader import load_recon_probes
+
+        try:
+            probes = list(load_recon_probes())
+        except Exception as exc:  # pragma: no cover — defensive
+            _LOG.debug("time-channel: load_recon_probes failed (%s) — skipping", exc)
+            return
+    probe = next((p for p in probes if _is_latency_variance_probe(p)), None)
+    seeds = list(getattr(probe, "seeds", []) or []) if probe is not None else []
+    if not seeds:
+        return
+    # NB: the time-channel probe is a pure LATENCY side-measurement — it issues
+    # the same benign question repeatedly and only the timing matters. We do NOT
+    # append it to ``result.transcript`` / ``tool_calls_per_turn`` (those are the
+    # content turns the LLM profiler reads and the probe-log mirrors one-line-
+    # per-turn); polluting them would skew the profile and break those
+    # invariants. Only the latency profile is recorded.
+    latencies: list[float] = []
+    for seed in seeds:
+        if _cancelled(cancel_event):
+            break
+        _notify(on_probe, "time-channel probe")
+        _reply, _tool_calls, _snap, latency_ms = await _safe_call(target, seed)
+        latencies.append(latency_ms)
+    if len(latencies) < 2:
+        return
+    mean_ms = statistics.fmean(latencies)
+    stdev_ms = statistics.pstdev(latencies)
+    result.inference_latency_profile = {
+        "mean_ms": mean_ms,
+        "stdev_ms": stdev_ms,
+        "samples": float(len(latencies)),
+    }
+    result.time_channel_signal = "tight-cluster" if stdev_ms < _TIGHT_STDEV_MS else "wide-variance"
+    _LOG.debug(
+        "time-channel: samples=%d mean=%.1fms stdev=%.1fms signal=%s",
+        len(latencies),
+        mean_ms,
+        stdev_ms,
+        result.time_channel_signal,
+    )
 
 
 def _notify(on_probe: Callable[[str], None] | None, label: str) -> None:
@@ -893,6 +972,11 @@ async def run_capability_audit(
             coverage.rounds_since_new_signal = 0
         else:
             coverage.rounds_since_new_signal += 1
+
+    # Runtime recon-probe pass — execute the bundled recon corpus (time-channel
+    # inference-family fingerprint). Best-effort; never aborts the audit.
+    if not _cancelled(cancel_event):
+        await _run_time_channel_probe(target, result, cancel_event=cancel_event, on_probe=on_probe)
 
     result.coverage = _coverage_snapshot(coverage)
     return result

@@ -136,6 +136,40 @@ Techniques in your toolbox include:
             severity=self.default_severity,
         )
 
+    def prioritize_seeds(
+        self, seeds: list[ProbeSeed], fingerprint: TargetFingerprint
+    ) -> list[ProbeSeed]:
+        """Route reasoning-targeted probes by the recon-detected inference family.
+
+        H-CoT (``ASI01-HCOT-*``, hijack the visible thinking block) and ReAct
+        (``ASI01-REACT-*``, abuse the ReAct loop) probes are only meaningful
+        against a reasoning-family target. When the time-channel recon probe
+        classified the target as a small hosted model (``tight-cluster``), move
+        them to the BACK so the FAST-mode probe cap spends its budget on the
+        applicable direct/indirect probes first. This is a SOFT reorder — never a
+        drop — so an uncapped run still fires every probe (no false negatives from
+        a coarse latency heuristic). For ``wide-variance`` (reasoning model) or an
+        unmeasured target, the original order stands.
+        """
+        if fingerprint.inference_class != "tight-cluster":
+            return seeds
+
+        def _is_reasoning_targeted(seed: ProbeSeed | str) -> bool:
+            pid = getattr(seed, "probe_id", "") or ""
+            return "-HCOT-" in pid or "-REACT-" in pid
+
+        applicable = [s for s in seeds if not _is_reasoning_targeted(s)]
+        reasoning = [s for s in seeds if _is_reasoning_targeted(s)]
+        if not reasoning:
+            return seeds
+        _LOG.debug(
+            "reasoning-probe routing: target inference_class=tight-cluster — "
+            "deprioritised %d reasoning-targeted probes behind %d applicable",
+            len(reasoning),
+            len(applicable),
+        )
+        return applicable + reasoning
+
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
         from agent_guardian.strategies.crescendo import CrescendoStrategy
         from agent_guardian.strategies.mad_max import MadMaxStrategy
