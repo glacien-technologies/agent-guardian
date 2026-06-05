@@ -676,6 +676,21 @@ class ScanStore:
         completed_rows.sort(key=lambda r: -r[0])
         completed_summaries = [s for (_k, s) in completed_rows]
 
+        # Disk-running fix-up: a CLI scan runs in a SEPARATE process from this
+        # dashboard, so it is never in the in-memory ``_running`` registry above.
+        # Detect it from disk instead — a partial snapshot present with no
+        # terminal scan.json means the scan is still live. This makes the
+        # list badge correct (the template blanks AIVSS/band while is_running).
+        completed_summaries = [
+            dataclasses.replace(s, is_running=True)
+            if (
+                (self._root / s.scan_id / "scan.partial.json").is_file()
+                and not is_terminal_scan_on_disk(self._root / s.scan_id)
+            )
+            else s
+            for s in completed_summaries
+        ]
+
         all_rows = running_summaries + completed_summaries
         total = len(all_rows)
         page = all_rows[offset : offset + limit]

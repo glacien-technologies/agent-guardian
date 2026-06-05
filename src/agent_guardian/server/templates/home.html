@@ -46,12 +46,14 @@
             {% if s.target_ref %}{{ s.target_mode }}: {{ s.target_ref }}{% else %}—{% endif %}
           </td>
           <td>
-            {% if s.aivss is not none %}
+            {% if s.is_running %}<span class="muted">—</span>
+            {% elif s.aivss is not none %}
             <span class="aivss aivss-{{ (s.band or '')|lower }}">{{ s.aivss }}</span>
             {% else %}—{% endif %}
           </td>
           <td>
-            {% if s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}—{% endif %}
+            {% if s.is_running %}<span class="muted">—</span>
+            {% elif s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}—{% endif %}
           </td>
           <td>{{ s.findings_count if s.findings_count is not none else '—' }}</td>
           <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '—' }}</td>
