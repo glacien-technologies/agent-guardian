@@ -25,6 +25,7 @@ from agent_guardian.strategies.base import (
     StrategyDone,
     StrategyResult,
     Turn,
+    seed_probe_id,
     seed_text,
 )
 
@@ -114,15 +115,23 @@ class FuzzStrategy(Strategy):
         self.max_turns = max_turns if max_turns is not None else ctx.max_turns
         if self.max_turns < 1:
             raise ValueError("max_turns must be >= 1")
-        self._corpus: list[str] = [seed_text(s) for s in ctx.seeds] or ["test"]
+        # Each corpus entry is ``(text, parent_probe_id)`` so the dedicated
+        # ``ASI02-FUZZ-*`` provenance survives mutation AND coverage-promotion.
+        # Dropping it (storing bare strings) was the bug that collapsed every
+        # fuzz finding to the synthetic ``fuzzing-agent-ASI02`` id and left
+        # coverage attributing mutated prompt prefixes instead of probe ids.
+        self._corpus: list[tuple[str, str | None]] = [
+            (seed_text(s), seed_probe_id(s)) for s in ctx.seeds
+        ] or [("test", None)]
         self._seen: set[str] = set()
         self._last_prompt: str | None = None
+        self._last_parent_id: str | None = None
 
-    def _mutate(self) -> str:
-        base = self.ctx.rng.choice(self._corpus)
+    def _mutate(self) -> tuple[str, str | None]:
+        base_text, base_parent = self.ctx.rng.choice(self._corpus)
         mutator = self.ctx.rng.choice(_MUTATORS)
-        mutated = mutator(base, self.ctx.rng)
-        return mutated[:4000] or base  # cap payload size
+        mutated = mutator(base_text, self.ctx.rng)
+        return (mutated[:4000] or base_text, base_parent)  # cap payload size
 
     async def generate_next(
         self, history: list[Turn], target_response: str | None
@@ -136,13 +145,23 @@ class FuzzStrategy(Strategy):
             sig = response_signature(target_response)
             if sig not in self._seen:
                 self._seen.add(sig)
-                self._corpus.append(self._last_prompt)
+                # Promote with its parent provenance so descendants stay
+                # attributable to the dedicated fuzz corpus probe.
+                self._corpus.append((self._last_prompt, self._last_parent_id))
                 _LOG.debug("fuzz: new coverage signature %s (corpus=%d)", sig, len(self._corpus))
 
-        payload = self._mutate()
+        payload, parent_id = self._mutate()
         self._last_prompt = payload
+        self._last_parent_id = parent_id
         self._turn_count += 1
         meta = self._build_seed_metadata(None)
+        # Stamp a stable, parent-attributable seed_id on every fuzz turn. The
+        # ``-mutant-fuzz`` suffix marks it as a fuzz mutation while the agent
+        # loop + coverage recover the ``ASI02-FUZZ-*`` parent by stripping at
+        # ``-mutant-`` (see AsiAgent._build_finding). ``None`` parent (the bare
+        # "test" fallback corpus, i.e. no seeds) leaves the turn unattributed.
+        if parent_id:
+            meta["seed_id"] = f"{parent_id}-mutant-fuzz"
         meta["fuzz_corpus_size"] = len(self._corpus)
         meta["fuzz_signatures"] = len(self._seen)
         return NextPrompt(text=payload, rationale="fuzz-mutation", metadata=meta)
