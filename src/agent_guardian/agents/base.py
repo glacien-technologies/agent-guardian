@@ -2229,8 +2229,22 @@ class AsiAgent(ABC):
             trigger_prompt=prompt,
             verdict_v2=verdict.verdict,
             trigger_response=trigger_response,
+            evidence_types=self._derive_evidence_tags(prompt, response, verdict),
             created_at=_utcnow(),
         )
+
+    def _derive_evidence_tags(self, prompt: str, response: str, verdict: JudgeVerdict) -> list[str]:
+        """Deterministic, transcript-derived structured evidence tags for a finding.
+
+        Default: no tags. Specialist agents override to attach best-effort signals
+        (e.g. a retry storm, an accepted unverified artifact, an action taken
+        without an authority check) to ``Finding.evidence_types`` so a report can
+        say *which* structured signal corroborated the finding. Must be
+        deterministic and black-box-safe (parse only the observable
+        prompt/response), never an LLM call.
+        """
+        _ = (prompt, response, verdict)
+        return []
 
 
 # Silence unused-import warnings: these are part of the public re-export surface.
