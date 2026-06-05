@@ -131,6 +131,12 @@ class ProbeSeed:
     # hashable.
     mitre_atlas: tuple[str, ...] = ()
     csa_category: str | None = None
+    # A1 — per-seed delivery channel (``Scenario.delivery_vector``). When a
+    # goal-specific scenario tags an attack as arriving via a trusted channel
+    # (rag_doc / tool_output / email / a2a_message / memory_write / …), this
+    # threads that channel through so the strategy delivers via THAT vector
+    # rather than a random global rotation. ``None`` / ``"user_input"`` = direct.
+    delivery_vector: str | None = None
 
 
 def seed_text(seed: ProbeSeed | str) -> str:
@@ -545,6 +551,11 @@ class Strategy(ABC):
         # Set on the first turn; reused on every LLM-generated follow-up so
         # downstream tooling can ask "which probe did this turn descend from?".
         self._parent_probe_id: str | None = None
+        # A1 — the delivery channel of the seed currently anchoring this thread.
+        # Captured on the fresh seed and inherited by LLM-generated refinements
+        # (mirrors ``_parent_probe_id``) so the whole thread delivers via the
+        # same trusted channel.
+        self._active_delivery_vector: str | None = None
 
     @abstractmethod
     async def generate_next(
@@ -604,8 +615,15 @@ class Strategy(ABC):
                 # turns can still attribute provenance.
                 self._parent_probe_id = pid
                 meta["seed_id"] = pid
+            # A1 — capture the fresh seed's delivery channel (if any) so the
+            # whole refinement thread delivers via the same trusted channel.
+            vec = getattr(seed, "delivery_vector", None)
+            if vec:
+                self._active_delivery_vector = vec
         elif self._parent_probe_id:
             meta["seed_id"] = self._parent_probe_id
+        if self._active_delivery_vector:
+            meta["delivery_vector"] = self._active_delivery_vector
         return meta
 
     def _attack_system_extra(self) -> str:
@@ -635,8 +653,15 @@ class Strategy(ABC):
             from agent_guardian.strategies.pretext import render_pretext_directive
 
             extra = f"{extra}\n\n{render_pretext_directive(self.ctx.rng)}"
-        # M2 roadmap #2 — indirect-injection delivery (trusted-channel envelope).
-        if self.ctx.enable_indirect:
+        # M2 roadmap #2 / A1 — indirect-injection delivery (trusted-channel
+        # envelope). A per-seed ``delivery_vector`` (from a goal-specific
+        # scenario) routes via THAT specific channel; otherwise the global
+        # ``enable_indirect`` toggle rotates a random channel as before.
+        if self._active_delivery_vector and self._active_delivery_vector != "user_input":
+            from agent_guardian.strategies.indirect import render_indirect_directive_for
+
+            extra = f"{extra}\n\n{render_indirect_directive_for(self._active_delivery_vector, self.ctx.rng)}"
+        elif self.ctx.enable_indirect:
             from agent_guardian.strategies.indirect import render_indirect_directive
 
             extra = f"{extra}\n\n{render_indirect_directive(self.ctx.rng)}"

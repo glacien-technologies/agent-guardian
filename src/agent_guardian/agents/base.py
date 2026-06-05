@@ -1149,6 +1149,9 @@ class AsiAgent(ABC):
                         text=s.attack_text,
                         asi=self.asi_category.value,
                         severity=s.severity_estimate.value,
+                        # A1 — preserve the scenario's delivery channel so the
+                        # strategy delivers via that trusted vector (was dropped).
+                        delivery_vector=s.delivery_vector,
                     )
                 )
 
