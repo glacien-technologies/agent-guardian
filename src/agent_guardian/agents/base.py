@@ -847,6 +847,20 @@ class AsiAgent(ABC):
         _ = fingerprint  # base class is always applicable
         return True
 
+    def prioritize_seeds(
+        self, seeds: list[ProbeSeed], fingerprint: TargetFingerprint
+    ) -> list[ProbeSeed]:
+        """Optionally reorder this run's seeds for the discovered target.
+
+        Called once in :meth:`run` between ``seeds_for_category`` and the
+        FAST-mode probe cap, so a subclass can push less-applicable probes to the
+        back (where the cap truncates first) WITHOUT dropping any — an uncapped
+        run still fires every probe. Base class is a no-op; override to route
+        target-specific probe families (e.g. reasoning-targeted H-CoT/ReAct
+        probes against reasoning-family targets).
+        """
+        return seeds
+
     def build_attack_specialization(self, fingerprint: TargetFingerprint) -> str:
         """Return the attacker-LLM specialization paragraph for this run.
 
@@ -1098,7 +1112,7 @@ class AsiAgent(ABC):
         # attached a brief, synthesise ``n_scenarios_requested`` attacker-
         # written scenarios and fold them into the seed pool as additional
         # ``ProbeSeed`` entries. The standard seed iteration is unchanged.
-        standard_seeds = self.seeds_for_category()
+        standard_seeds = self.prioritize_seeds(self.seeds_for_category(), fingerprint)
         # v1.1 -- FAST scan mode caps each agent's probe corpus at top-N
         # seeds (the first N in the list, which are ordered by historical
         # effectiveness in our YAML loader). The cap is injected by

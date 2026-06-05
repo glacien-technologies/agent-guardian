@@ -751,6 +751,7 @@ class ReconAgent:
             tool_descriptions=dict(audit.tool_descriptions) if audit else {},
             recon_coverage=dict(audit_result.coverage),
             recon_probe_count=len(transcript),
+            inference_class=audit_result.time_channel_signal,
         )
         try:
             await memory.set_target_fingerprint(refined)

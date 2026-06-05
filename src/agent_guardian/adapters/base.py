@@ -184,6 +184,11 @@ class TargetFingerprint(BaseModel):
     tool_descriptions: dict[str, str] = Field(default_factory=dict)
     recon_coverage: dict[str, str] = Field(default_factory=dict)
     recon_probe_count: int = 0
+    # Coarse inference-family class from the time-channel recon probe
+    # (RECON-TC-001): "tight-cluster" (small hosted model), "wide-variance"
+    # (large reasoning model / multi-step pipeline), or "" (not measured).
+    # Used to route reasoning-targeted probes (H-CoT / ReAct) to capable targets.
+    inference_class: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
