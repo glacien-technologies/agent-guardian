@@ -55,7 +55,7 @@ class _FixedAttackStrategy(Strategy):
     name = "fixed-attack"
 
     def __init__(self, ctx: StrategyContext) -> None:
-        self.ctx = ctx
+        super().__init__(ctx)
         self._n = 0
 
     async def generate_next(
@@ -75,6 +75,7 @@ class _RecordingTarget(TargetAdapter):
     """Return scripted responses per call and record every prompt it saw."""
 
     def __init__(self, responses: list[str]) -> None:
+        super().__init__()
         self._responses = responses
         self.prompts_seen: list[str] = []
 
