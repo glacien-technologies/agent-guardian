@@ -15,29 +15,25 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_readme_does_not_imply_nist_rmf_alignment_for_agent_guardian() -> None:
-    """README — AgentGuardian row must NOT carry NIST RMF, PyRIT row must read PyRIT risk taxonomy."""
-    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    # Locate the comparison table block.
-    lines = readme.splitlines()
-    table_lines = [ln for ln in lines if ln.startswith("|")]
-    assert table_lines, "comparison table not found in README"
+def test_comparison_page_does_not_imply_nist_rmf_alignment_for_agent_guardian() -> None:
+    """Comparison page — the AgentGuardian row must NOT carry NIST RMF.
+
+    The competitor comparison table moved out of the README into its own docs
+    page (``docs/concepts/agent-guardian-vs.mdx``); this NIST-positioning guard
+    follows it. The core invariant is unchanged: AgentGuardian itself must not
+    imply NIST RMF alignment. How OTHER tools are described — e.g. whether the
+    PyRIT row reads "NIST AI RMF (partial)" — is the page's editorial call and is
+    not asserted here.
+    """
+    page = (_REPO_ROOT / "docs" / "concepts" / "agent-guardian-vs.mdx").read_text(encoding="utf-8")
+    table_lines = [ln for ln in page.splitlines() if ln.startswith("|")]
+    assert table_lines, "comparison table not found on the comparison page"
     # The AgentGuardian row contains the literal '**AgentGuardian**' cell.
-    ag_rows = [ln for ln in table_lines if "AgentGuardian" in ln]
+    ag_rows = [ln for ln in table_lines if "**AgentGuardian**" in ln]
     assert ag_rows, "AgentGuardian row missing from comparison table"
     for row in ag_rows:
         assert "NIST" not in row, (
             f"AgentGuardian comparison row must not imply NIST alignment; row was: {row}"
-        )
-    # The PyRIT row must now describe its own risk taxonomy, not NIST RMF.
-    pyrit_rows = [ln for ln in table_lines if "PyRIT" in ln]
-    assert pyrit_rows, "PyRIT row missing from comparison table"
-    for row in pyrit_rows:
-        assert "PyRIT risk taxonomy" in row, (
-            f"PyRIT row must read 'PyRIT risk taxonomy'; row was: {row}"
-        )
-        assert "NIST AI RMF (partial)" not in row, (
-            f"PyRIT row must no longer claim 'NIST AI RMF (partial)'; row was: {row}"
         )
 
 

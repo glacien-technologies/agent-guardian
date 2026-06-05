@@ -79,11 +79,13 @@ def test_readme_has_marketing_sections() -> None:
         assert needle in readme, f"README missing section: {needle}"
 
 
-def test_readme_has_comparison_table() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    # Quick markers — the comparison row must mention PyRIT, garak, etc.
+def test_comparison_page_lists_competitors() -> None:
+    # The competitor comparison moved out of the README into its own docs page
+    # (docs/concepts/agent-guardian-vs.mdx). The positioning guard follows it:
+    # the page must still name every competitor we compare against.
+    page = (REPO_ROOT / "docs" / "concepts" / "agent-guardian-vs.mdx").read_text(encoding="utf-8")
     for vendor in ("PyRIT", "garak", "Promptfoo", "Inspect", "DeepTeam"):
-        assert vendor in readme, f"README comparison table missing {vendor}"
+        assert vendor in page, f"comparison page missing {vendor}"
 
 
 def test_readme_embeds_swarm_diagram() -> None:
