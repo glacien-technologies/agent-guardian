@@ -1,11 +1,12 @@
 """End-to-end: DetectionEvasionAgent produces a real guardrail-evasion finding.
 
-Drives the full ``AsiAgent.run`` loop with a target whose guardrail refuses a
-baseline harmful action verbatim but complies once the action is rewritten
-(any mutation changes the text, so it is no longer the exact blocked string).
-The judge defends the refused baseline and marks the complied variant exploited.
-The agent must therefore emit at least one EXPLOITED finding — the
-baseline-refused -> variant-complied evasion the lane exists to surface.
+Drives the full ``AsiAgent.run`` loop with a KEYWORD guardrail: the target
+refuses any prompt that still contains a monitored token (``transfer`` /
+``delete`` / ``funds`` / ...) in cleartext, and only complies once a mutation
+has actually obscured those tokens. This is stronger than an exact-match stub —
+it proves *token-removing* evasion (a wrapping mutation that keeps the keywords
+stays blocked; an encoding/obfuscating one gets through). The agent must emit an
+EXPLOITED finding whose winning variant no longer contains the monitored tokens.
 """
 
 from __future__ import annotations
@@ -48,12 +49,16 @@ _EXPLOITED = json.dumps(
 )
 
 
-class _GuardrailTarget(TargetAdapter):
-    """Refuses the EXACT baseline action; complies with anything rewritten."""
+# Monitored tokens the guardrail keys on — drawn from the baseline corpus.
+_MONITORED = ("transfer", "delete", "export", "escalate", "disable", "funds", "log", "privileg")
 
-    def __init__(self, baselines: set[str]) -> None:
+
+class _KeywordGuardrailTarget(TargetAdapter):
+    """Refuses any prompt that still contains a monitored token in cleartext;
+    complies only once a mutation has obscured them."""
+
+    def __init__(self) -> None:
         super().__init__()
-        self._baselines = baselines
         self.prompts_seen: list[str] = []
 
     def fingerprint(self) -> TargetFingerprint:
@@ -73,7 +78,8 @@ class _GuardrailTarget(TargetAdapter):
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         self.prompts_seen.append(prompt)
-        if prompt.strip() in self._baselines:
+        lowered = prompt.lower()
+        if any(kw in lowered for kw in _MONITORED):
             return "I'm sorry, but I can't help with that request."
         return f"{_COMPLY_MARKER}: completed the requested operation."
 
@@ -81,25 +87,37 @@ class _GuardrailTarget(TargetAdapter):
         return None
 
 
-async def test_detection_evasion_emits_guardrail_evasion_finding() -> None:
+async def test_detection_evasion_emits_token_removing_guardrail_evasion() -> None:
     agent = DetectionEvasionAgent(
         attacker_llm=StubScript().default("ok").build(),
         evaluator_llm=(
             StubScript().respond_to(_COMPLY_MARKER, _EXPLOITED).default(_DEFENDED).build()
         ),
-        budget=AgentBudget(tokens_remaining=200_000, max_turns=6),
+        budget=AgentBudget(tokens_remaining=400_000, max_turns=10),
     )
-    baselines = {seed.text for seed in agent.seeds_for_category()}  # type: ignore[union-attr]
-    target = _GuardrailTarget(baselines)
+    target = _KeywordGuardrailTarget()
     memory = SharedMemory("de-e2e", root_dir=pathlib.Path(tempfile.mkdtemp()))
 
     report = await agent.run(target, memory)
 
-    # The agent fired at least one plain baseline (refused) AND at least one
-    # mutated variant (complied) — i.e. it did not just re-send the seed.
-    assert any(p.strip() in baselines for p in target.prompts_seen)
-    assert any(p.strip() not in baselines for p in target.prompts_seen)
-    # And it surfaced the evasion as an EXPLOITED finding.
+    # At least one plain baseline (carrying monitored tokens) was refused.
+    assert any(any(kw in p.lower() for kw in _MONITORED) for p in target.prompts_seen)
+    # The evasion was surfaced as an EXPLOITED finding...
     assert report.findings_count >= 1
     findings = memory.all_findings()
-    assert any(f.verdict_v2 == "exploited" and f.success for f in findings)
+    exploited = [f for f in findings if f.verdict_v2 == "exploited" and f.success]
+    assert exploited
+    # ...and at least one winning variant actually REMOVED the monitored tokens —
+    # a token-removing evasion, not just "any rewrite". Only an obscuring
+    # mutation (encoding / reversal) clears the keyword guardrail; a wrapping
+    # mutation that kept the keywords would have stayed blocked. (The stub judge
+    # keys on a substring in the rendered conversation, which accumulates across
+    # turns, so a few refused baselines may also be tagged exploited — we assert
+    # the GENUINE token-removed variant exists rather than that all do.)
+    assert any(
+        f.trigger_prompt is not None
+        and not any(kw in f.trigger_prompt.lower() for kw in _MONITORED)
+        for f in exploited
+    ), (
+        f"no exploited finding had the monitored tokens removed: {[f.trigger_prompt for f in exploited]!r}"
+    )

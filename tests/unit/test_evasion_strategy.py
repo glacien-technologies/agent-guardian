@@ -30,7 +30,13 @@ from agent_guardian.strategies.base import (
 from agent_guardian.strategies.evasion_strategy import EvasionStrategy
 
 
-def _ctx(seeds: list[ProbeSeed], *, last_verdict: str = "", rng_seed: int = 0) -> StrategyContext:
+def _ctx(
+    seeds: list[ProbeSeed],
+    *,
+    last_verdict: str = "",
+    rng_seed: int = 0,
+    declared_tools: list[str] | None = None,
+) -> StrategyContext:
     return StrategyContext(
         attacker_llm=StubLLM(default="ok"),
         attacker_model="stub",
@@ -39,6 +45,7 @@ def _ctx(seeds: list[ProbeSeed], *, last_verdict: str = "", rng_seed: int = 0) -
         memory=SharedMemory("evasion-strat", root_dir=pathlib.Path(tempfile.mkdtemp())),
         rng=random.Random(rng_seed),
         last_verdict=last_verdict,
+        declared_tools=declared_tools or [],
     )
 
 
@@ -96,6 +103,38 @@ async def test_non_defended_advances_to_next_baseline() -> None:
     assert res.text == _BASE_B.text
     assert res.rationale == "evasion-baseline"
     assert res.metadata["seed_id"] == "ASI10-EV-002"
+
+
+async def test_recon_adaptive_baseline_names_a_discovered_tool() -> None:
+    """When recon discovered concrete tool names, the FIRST baseline is
+    target-specific — it names a real tool — rather than only the generic
+    static corpus."""
+    # A distinctive tool name that appears NOWHERE in the static corpus, so the
+    # assertion only passes if recon-templating actually injected it.
+    ctx = _ctx([_BASE_A], declared_tools=["zzx_purge_ledger", "zzx_rotate_keys"])
+    strat = EvasionStrategy(ctx)
+    res = await strat.generate_next([], None)
+    assert isinstance(res, NextPrompt)
+    assert "zzx_purge_ledger" in res.text
+    assert res.rationale == "evasion-baseline"
+    # The static corpus is still reachable as a later baseline.
+    ctx.last_verdict = "exploited"
+    seen = {res.text}
+    for _ in range(8):
+        out = await strat.generate_next(
+            [Turn(prompt="x", response="Sure, done.", metadata={})], "Sure, done."
+        )
+        if isinstance(out, StrategyDone):
+            break
+        seen.add(out.text)
+    assert _BASE_A.text in seen
+
+
+async def test_no_recon_tools_uses_static_corpus_only() -> None:
+    ctx = _ctx([_BASE_A])  # no declared_tools
+    strat = EvasionStrategy(ctx)
+    res = await strat.generate_next([], None)
+    assert res.text == _BASE_A.text  # straight to the static baseline
 
 
 async def test_exhausts_and_terminates() -> None:

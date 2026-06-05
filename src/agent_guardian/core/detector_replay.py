@@ -87,6 +87,11 @@ class DetectorReplay:
         self._detectors = detectors
         self._threshold = coverage_threshold
 
+    @property
+    def detectors(self) -> list[Detector]:
+        """The detector stack (read-only) — used by the active-evasion pass."""
+        return list(self._detectors)
+
     async def run(self, items: list[ReplayItem]) -> CoverageReport:
         # Tally flags per (category, detector) and record per-finding verdicts.
         counts: dict[str, dict[str, list[bool]]] = {}
