@@ -51,9 +51,12 @@
   }
 
   function verdictClass(verdict) {
-    if (verdict === 'pass') { return 'dash-reflection-card--pass'; }
-    if (verdict === 'fail') { return 'dash-reflection-card--fail'; }
-    if (verdict === 'inconclusive') {
+    if (verdict === 'pass' || verdict === 'defended') { return 'dash-reflection-card--pass'; }
+    if (verdict === 'fail' || verdict === 'exploited' || verdict === 'info_leak') {
+      return 'dash-reflection-card--fail';
+    }
+    if (verdict === 'inconclusive' || verdict === 'needs_followup' ||
+        verdict === 'weakness_observed' || verdict === 'simulated_or_unverified') {
       return 'dash-reflection-card--inconclusive';
     }
     return 'dash-reflection-card--neutral';

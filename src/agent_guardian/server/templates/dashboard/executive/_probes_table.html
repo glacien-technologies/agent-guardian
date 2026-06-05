@@ -69,14 +69,37 @@
           <span class="exec-probes-table__agent">{{ g.agent or '—' }}</span>
         </td>
         <td class="exec-probes-table__cell--verdict">
+          {# Worst-case rollup pill — same single source of truth as the Findings
+             tab evidence pills. Judge v2 (M5 / Stage D) gives each verdict a
+             distinct pill colour via ``exec-verdict-pill--<verdict>``. #}
           <span class="exec-verdict-pill exec-verdict-pill--{{ _verdict }}">
-            {%- if _verdict == 'fail' -%}EXPLOITED
-            {%- elif _verdict == 'pass' -%}DEFENDED
+            {%- if _verdict == 'fail' or _verdict == 'exploited' -%}EXPLOITED
+            {%- elif _verdict == 'info_leak' -%}INFO LEAK
+            {%- elif _verdict == 'weakness_observed' -%}WEAKNESS
+            {%- elif _verdict == 'needs_followup' -%}NEEDS FOLLOW-UP
+            {%- elif _verdict == 'simulated_or_unverified' -%}UNVERIFIED
+            {%- elif _verdict == 'pass' or _verdict == 'defended' -%}DEFENDED
             {%- elif _verdict == 'inconclusive' -%}INCONCLUSIVE
             {%- elif _verdict == 'recon' -%}RECON
             {%- else -%}PENDING
             {%- endif -%}
           </span>
+          {# Judge v2 (M5 / Stage D) — strongest-evidence run-result strap line.
+             Additive + defensive: rendered only when the aggregator found a
+             graded turn (``has_run_result``). Surfaces the operator-facing
+             "strongest evidence: turn N" and an evaluator-attack marker when the
+             attacker tried to manipulate the judge on some turn. #}
+          {% set _rr = g.run_result %}
+          {% if _rr and _rr.has_run_result %}
+            <span class="exec-run-result">
+              {% if _rr.best_evidence_turn is not none %}
+                <span class="exec-run-result__evidence">strongest evidence: turn {{ _rr.best_evidence_turn }}</span>
+              {% endif %}
+              {% if _rr.evaluator_attack %}
+                <span class="exec-evaluator-attack" title="An attacker prompt tried to manipulate the judge on this run — not a target exploit.">⚠ evaluator-attack</span>
+              {% endif %}
+            </span>
+          {% endif %}
         </td>
         <td class="exec-probes-table__cell--turn"><span class="exec-probes-table__turn">{{ g.turn_count }} turn{{ '' if g.turn_count == 1 else 's' }}</span></td>
         <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ g.timestamp_label }}</time></td>

@@ -41,8 +41,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
+from agent_guardian.core.run_aggregator import aggregate_run_verdicts
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
+from agent_guardian.models.judge import normalize_verdict
+from agent_guardian.models.run_result import AsiRunResult
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity, SeverityBand
 
@@ -437,20 +440,42 @@ def _truncate_for_preview(value: Any) -> str:
     return text[:_FINDING_CHILD_PREVIEW_CHARS].rstrip() + "…"
 
 
+# Judge v2 (M0) — the verdicts that created a Finding (used to pick the
+# representative turn). Legacy "fail" normalizes into ``exploited``.
+_FINDING_VERDICT_SET: frozenset[str] = frozenset({"exploited", "info_leak", "weakness_observed"})
+
+
+# Judge v2 (M5 / Stage D) — the six-verdict taxonomy → operator-facing label.
+# Keyed by the CANONICAL v2 value; legacy ``pass`` / ``fail`` / ``inconclusive``
+# normalize through :func:`normalize_verdict` before lookup so there is one map,
+# not two. ``feedback_no_raw_enum_in_ui`` — the operator never sees the raw enum.
+_VERDICT_LABELS: Final[dict[str, str]] = {
+    "exploited": "EXPLOITED",
+    "info_leak": "INFO LEAK",
+    "weakness_observed": "WEAKNESS",
+    "needs_followup": "NEEDS FOLLOW-UP",
+    "defended": "DEFENDED",
+    "simulated_or_unverified": "UNVERIFIED",
+}
+
+
 def _verdict_label(verdict: str) -> str:
     """Map an internal verdict enum value to its operator-facing label.
 
     Honours ``feedback_no_raw_enum_in_ui`` — the table never shows
-    ``fail`` / ``pass`` / ``inconclusive`` verbatim; the operator sees
-    ``EXPLOITED`` / ``DEFENDED`` / ``INCONCLUSIVE`` / ``PENDING``.
+    ``fail`` / ``pass`` / ``inconclusive`` verbatim; the operator sees a clean
+    label from the six-verdict taxonomy (``EXPLOITED`` / ``INFO LEAK`` /
+    ``WEAKNESS`` / ``NEEDS FOLLOW-UP`` / ``DEFENDED`` / ``UNVERIFIED``).
+
+    Judge v2 (M5 / Stage D) — legacy ``pass`` / ``fail`` / ``inconclusive``
+    normalize through :func:`normalize_verdict` onto the v2 taxonomy first, so
+    both old and new records resolve through the SAME label map. An empty /
+    blank verdict (an un-graded live turn) renders ``PENDING``.
     """
-    if verdict == "fail":
-        return "EXPLOITED"
-    if verdict == "pass":
-        return "DEFENDED"
-    if verdict == "inconclusive":
-        return "INCONCLUSIVE"
-    return "PENDING"
+    v = (verdict or "").strip().lower()
+    if not v:
+        return "PENDING"
+    return _VERDICT_LABELS.get(normalize_verdict(v), "PENDING")
 
 
 def _confidence_pct(value: Any) -> str:
@@ -541,14 +566,23 @@ def _attach_evidence_to_findings(
         capped = matched[:_FINDING_EVIDENCE_CAP]
         # Count verdicts in the capped slice. The badge text the template
         # renders reads the SAME enum keys ("fail" / "pass" / "inconclusive"),
-        # so the counts and the colours can never disagree.
+        # so the counts and the colours can never disagree. Judge v2 (M0) — fold
+        # the six v2 verdicts into those three colour buckets so legacy AND new
+        # records tally consistently (exploited/info_leak->fail,
+        # defended->pass, the ambiguous middle grounds->inconclusive).
         stats = {"fail": 0, "pass": 0, "inconclusive": 0, "unknown": 0}
         for p in capped:
-            v = str(p.get("verdict") or "")
-            if v in ("fail", "pass", "inconclusive"):
-                stats[v] += 1
-            else:
+            raw = str(p.get("verdict") or "")
+            if not raw:
                 stats["unknown"] += 1
+                continue
+            norm = normalize_verdict(raw)
+            if norm in ("exploited", "info_leak"):
+                stats["fail"] += 1
+            elif norm == "defended":
+                stats["pass"] += 1
+            else:
+                stats["inconclusive"] += 1
         item["evidence"] = capped
         item["evidence_total"] = total
         item["evidence_truncated"] = total > _FINDING_EVIDENCE_CAP
@@ -600,8 +634,10 @@ def _representative_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
     if not records:
         return {}
     ordered = _sort_turns_in_order(records)
+    # Judge v2 (M0) — surface the strongest finding-creating turn (exploited /
+    # info_leak / weakness_observed); legacy "fail" normalizes to "exploited".
     for rec in ordered:
-        if str(rec.get("verdict") or "") == "fail":
+        if normalize_verdict(str(rec.get("verdict") or "")) in _FINDING_VERDICT_SET:
             return rec
     return ordered[-1]
 
@@ -633,6 +669,17 @@ def _conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "verdict_label": _verdict_label(verdict),
                 "confidence_pct": _confidence_pct(rec.get("confidence")),
                 "reasoning": str(rec.get("reasoning") or ""),
+                # Judge v2 (M5 / Stage D) — per-turn signals for the slide-over
+                # chat thread. ``verify`` flips the turn header to a
+                # "VERIFICATION PROBE" badge (the judge's drill-down turn vs an
+                # attack turn); ``evaluator_attack`` shows a "⚠ evaluator-attack"
+                # marker (attacker tried to manipulate the judge — not a target
+                # exploit); ``evidence`` is the verbatim span the judge quoted as
+                # proof. All default falsy / empty so legacy turns render with no
+                # extra chrome.
+                "verify": bool(rec.get("verify", False)),
+                "evaluator_attack": bool(rec.get("evaluator_attack", False)),
+                "evidence": str(rec.get("evidence") or ""),
             }
         )
     return out
@@ -692,15 +739,23 @@ def build_finding_slideover_ctx(
     # specific turn flipped it; otherwise mirror the representative turn's
     # verdict so the header pill and the surfaced reasoning agree.
     if finding.success:
-        verdict = "fail"
-    elif capped and all(str(c.get("verdict")) == "pass" for c in capped):
-        verdict = "pass"
+        # Judge v2 (M0) — prefer the finding's own v2 verdict when present so
+        # an info_leak success header reads "INFO LEAK", not a generic
+        # EXPLOITED; fall back to "exploited" for legacy findings.
+        verdict = finding.verdict_v2 or "exploited"
+    elif capped and all(normalize_verdict(str(c.get("verdict"))) == "defended" for c in capped):
+        verdict = "defended"
     elif rep:
-        verdict = str(rep.get("verdict") or "inconclusive")
+        verdict = normalize_verdict(str(rep.get("verdict") or "needs_followup"))
     else:
-        verdict = "inconclusive"
+        verdict = "needs_followup"
+
+    # Judge v2 (M5 / Stage D) — strongest-evidence run-result for the finding
+    # drawer, derived from the correlated probe attempts.
+    run_result = _run_result_view(capped)
 
     return {
+        "run_result": run_result,
         "record_id": finding.id,
         "probe_id": finding.probe_id,
         "agent": str(rep.get("agent") or ""),
@@ -731,6 +786,12 @@ def build_finding_slideover_ctx(
         "confidence": rep.get("confidence") if rep else finding.confidence,
         "panel_votes": [],
         "reasoning": str(rep.get("reasoning") or ""),
+        # Judge v2 (M5 / Stage D) — verbatim judge evidence + evaluator-attack
+        # marker for the single-turn (flat) layout. Sourced from the
+        # representative turn so the surfaced evidence matches the shown verdict.
+        "evidence": str(rep.get("evidence") or ""),
+        "evaluator_attack": bool(rep.get("evaluator_attack", False)),
+        "verify": bool(rep.get("verify", False)),
         # Chat conversation is only meaningful when there's more than one
         # turn; a single-turn finding uses the flat prompt/response layout.
         "conversation": conversation if len(conversation) > 1 else [],
@@ -771,7 +832,12 @@ def build_probe_slideover_ctx(
     # row), and keep the conversation as the multi-turn context.
     rep = probe
 
+    # Judge v2 (M5 / Stage D) — strongest-evidence run-result for the single-
+    # probe drawer too, derived from the clicked row's sibling turns.
+    run_result = _run_result_view(ordered)
+
     return {
+        "run_result": run_result,
         "record_id": rep.get("probe_id") or "",
         "probe_id": rep.get("probe_id") or "",
         "agent": rep.get("agent") or "",
@@ -798,6 +864,11 @@ def build_probe_slideover_ctx(
         "confidence": rep.get("confidence"),
         "panel_votes": rep.get("panel_votes") or [],
         "reasoning": rep.get("reasoning") or "",
+        # Judge v2 (M5 / Stage D) — verbatim judge evidence + evaluator-attack
+        # marker for the single-turn (flat) layout.
+        "evidence": str(rep.get("evidence") or ""),
+        "evaluator_attack": bool(rep.get("evaluator_attack", False)),
+        "verify": bool(rep.get("verify", False)),
         "conversation": conversation if len(conversation) > 1 else [],
         "summary": f"Probe {rep.get('probe_id')}" if rep.get("probe_id") else "Probe details",
     }
@@ -808,9 +879,17 @@ def build_probe_slideover_ctx(
 # outcome the agent reached so a single ``fail`` turn in an otherwise-defended
 # thread is never hidden behind a green pill. Higher number == worse.
 _VERDICT_RANK: Final[dict[str, int]] = {
-    "fail": 3,
+    # Legacy three.
+    "fail": 6,
     "inconclusive": 2,
     "pass": 1,
+    # Judge v2 (M0) six-value taxonomy — worst-case wins.
+    "exploited": 6,
+    "info_leak": 5,
+    "weakness_observed": 4,
+    "simulated_or_unverified": 3,
+    "needs_followup": 2,
+    "defended": 1,
 }
 
 
@@ -831,6 +910,67 @@ def _rollup_verdict(turns: list[dict[str, Any]]) -> str:
             best_rank = rank
             best = v
     return best
+
+
+def _run_result_view(turns: list[dict[str, Any]]) -> dict[str, Any]:
+    """Derive the per-agent run-result view-model from ordered turn records.
+
+    Judge v2 (M5 / Stage D). The :class:`AsiRunResult` rollup is computed
+    in-process on the agent and attached to its :class:`AgentReport`, but it is
+    NOT persisted to ``memory.jsonl`` (the cross-process channel the dashboard
+    reads). Rather than add a new persistence path, we recompute the SAME
+    strongest-evidence rollup from the turn records the dashboard already reads
+    — :func:`~agent_guardian.core.run_aggregator.aggregate_run_verdicts` is the
+    single source of truth, so the dashboard's run verdict can never disagree
+    with the report's.
+
+    Returns a dict shaped for the probes table / drawer:
+
+        {
+          "has_run_result": bool,      # False ⇒ omit the row entirely
+          "run_verdict": str,          # v2 verdict (pill value)
+          "run_verdict_label": str,    # human label
+          "run_confidence_pct": str,   # "95%" or ""
+          "best_evidence_turn": int|None,  # operator-facing turn number
+          "evaluator_attack": bool,    # any turn flagged an evaluator-attack
+        }
+
+    ``best_evidence_turn`` maps the aggregator's list INDEX onto the winning
+    record's own ``turn`` number (falling back to 1-based position) so the
+    operator reads "strongest evidence: turn N" in the transcript's own
+    numbering. ``has_run_result`` is False for an empty / verdict-less thread
+    (e.g. recon, which carries no graded turns) so the caller omits the row.
+    """
+    empty: dict[str, Any] = {
+        "has_run_result": False,
+        "run_verdict": "",
+        "run_verdict_label": "",
+        "run_confidence_pct": "",
+        "best_evidence_turn": None,
+        "evaluator_attack": False,
+    }
+    if not turns:
+        return empty
+    # Only graded turns contribute a meaningful run verdict; a thread with no
+    # verdict at all (recon capability probing) rolls up to the neutral
+    # needs_followup floor with best_evidence_turn = -1 — nothing was tested, so
+    # we omit the row rather than show a misleading "NEEDS FOLLOW-UP".
+    if not any(str(t.get("verdict") or t.get("verdict_v2") or "") for t in turns):
+        return empty
+    result: AsiRunResult = aggregate_run_verdicts(turns)
+    if result.best_evidence_turn < 0:
+        return empty
+    idx = result.best_evidence_turn
+    best_record = turns[idx] if 0 <= idx < len(turns) else {}
+    best_turn_no = int(best_record.get("turn", 0) or 0) or (idx + 1)
+    return {
+        "has_run_result": True,
+        "run_verdict": result.run_verdict,
+        "run_verdict_label": _verdict_label(result.run_verdict),
+        "run_confidence_pct": _confidence_pct(result.run_confidence),
+        "best_evidence_turn": best_turn_no,
+        "evaluator_attack": result.evaluator_attack_detected,
+    }
 
 
 def _group_key_for(probe: dict[str, Any]) -> str:
@@ -904,6 +1044,15 @@ def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, 
         # misleading "PENDING". Mark it "recon" so the table shows a neutral
         # completed state instead.
         verdict = "recon" if agent == "recon-agent" else _rollup_verdict(turns)
+        # Judge v2 (M5 / Stage D) — strongest-evidence run-result rollup
+        # (run_verdict + best_evidence_turn + evaluator_attack), recomputed from
+        # the same turns via the canonical aggregator. Recon (and any verdict-
+        # less thread) returns ``has_run_result=False`` so the table / drawer
+        # simply omits the row. Never overrides the worst-case ``verdict`` pill
+        # the row already shows — it's an additive "strongest evidence" signal.
+        run_result = (
+            {"has_run_result": False} if agent == "recon-agent" else _run_result_view(turns)
+        )
         groups.append(
             {
                 "group_key": key,
@@ -914,6 +1063,7 @@ def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, 
                 "turn_count": len(turns),
                 "timestamp_label": timestamp_label,
                 "turns": turns,
+                "run_result": run_result,
             }
         )
     return groups
@@ -953,8 +1103,13 @@ def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, An
     # metadata + run-context blocks render all-"—". Flag it so the slide-over
     # collapses those empty sections and frames the modal as capability recon.
     is_recon = agent == "recon-agent"
+    # Judge v2 (M5 / Stage D) — strongest-evidence run-result for the drawer
+    # (run_verdict pill + "strongest evidence: turn N" + evaluator-attack flag).
+    # Recon carries no graded turns, so this is omitted there.
+    run_result = {"has_run_result": False} if is_recon else _run_result_view(ordered)
     return {
         "is_recon": is_recon,
+        "run_result": run_result,
         "record_id": probe_id or agent,
         "probe_id": probe_id,
         "agent": agent,
@@ -1866,6 +2021,13 @@ def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
     timestamp_label = _timestamp_label(rec.get("timestamp"))
     seed_id = turn.get("seed_id")
     probe_id = str(seed_id) if seed_id else ""
+    # Judge v2 (M5 / Stage D) — a verify turn is the bounded drill-down re-probe
+    # of a prior ``needs_followup`` claim. ``agents/base.py`` stamps the
+    # turn_record with ``intent="verify"`` / ``verify=True`` (else
+    # ``intent="attack"`` / ``verify=False``). Either flag, when truthy, marks
+    # the turn as a verification probe; we OR them so a record carrying only one
+    # still reads correctly. Missing keys default to a plain attack turn.
+    is_verify = bool(turn.get("verify", False)) or str(turn.get("intent", "")) == "verify"
     return {
         "agent": str(turn.get("agent", payload.get("agent", ""))),
         "asi_category": str(turn.get("asi_category", "")),
@@ -1880,6 +2042,19 @@ def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
         "reasoning": str(turn.get("reasoning", "")),
         "timestamp_label": timestamp_label,
         "attacker_refused": bool(turn.get("attacker_refused", False)),
+        # Judge v2 (M5 / Stage D) — verify-turn + corroboration signals plumbed
+        # through to the per-turn view-model. ``verdict_v2`` is the normalized
+        # v2 verdict (prefer it over the legacy ``verdict`` for run rollup);
+        # ``evaluator_attack`` flags an attacker prompt that tried to manipulate
+        # the judge; ``evidence`` is the verbatim span proving the verdict;
+        # ``intent`` / ``verify`` distinguish a verification probe from an
+        # attack turn. All default safe so legacy records (which lack them)
+        # render unchanged with no badge / no evidence row.
+        "verdict_v2": str(turn.get("verdict_v2", "") or ""),
+        "evaluator_attack": bool(turn.get("evaluator_attack", False)),
+        "evidence": str(turn.get("evidence", "") or ""),
+        "intent": str(turn.get("intent", "") or ""),
+        "verify": is_verify,
     }
 
 

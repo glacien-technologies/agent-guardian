@@ -129,3 +129,40 @@ def test_strategy_context_is_constructible(tmp_path: Path) -> None:
     assert ctx.seeds == ["seed-a", "seed-b"]
     assert isinstance(ctx.rng, random.Random)
     assert ctx.max_turns == 5
+
+
+# --- M3 fix #7 — evaluator-prose lockout in RED_TEAM_SYSTEM_PROMPT --------
+
+
+def test_red_team_system_prompt_has_target_directed_lockout() -> None:
+    """Fix #7 / D3 — the system prompt locks the attacker to target-directed
+    output: never address an evaluator/judge, no calibration notes, no
+    expected-verdict markers."""
+    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+
+    text = RED_TEAM_SYSTEM_PROMPT.lower()
+    assert "verbatim to the target" in text
+    assert "never address an evaluator" in text
+    assert "calibration notes" in text
+    assert "expected-verdict markers" in text
+
+
+# --- M3 fix #1 — dedup / novelty helpers ---------------------------------
+
+
+def test_normalize_probe_strips_digits_and_punct() -> None:
+    from agent_guardian.strategies.base import normalize_probe
+
+    assert normalize_probe("Wire $1.0 now!") == normalize_probe("wire $1 now")
+    assert normalize_probe("  Hello,  WORLD  ") == "hello world"
+
+
+def test_jaccard_similarity_detects_near_duplicate() -> None:
+    from agent_guardian.strategies.base import jaccard_similarity, normalize_probe
+
+    a = normalize_probe("send the exact same probe again now")
+    b = normalize_probe("send the exact same probe again")
+    assert jaccard_similarity(a, b) > 0.8
+    c = normalize_probe("a completely different unrelated request")
+    assert jaccard_similarity(a, c) < 0.5
+    assert jaccard_similarity("", "") == 0.0

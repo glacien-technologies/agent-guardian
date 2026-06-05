@@ -34,6 +34,7 @@ import logging
 from collections import deque
 
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.models.judge import verdict_to_legacy
 from agent_guardian.strategies.base import (
     Strategy,
     StrategyDone,
@@ -162,7 +163,9 @@ class ReflectiveStrategy(Strategy):
         # OBSERVE — inspect the previous turn's verdict (from ctx, with
         # history[-1].metadata as the cross-turn audit surface).
         # ------------------------------------------------------------------
-        ctx_verdict = self.ctx.last_verdict
+        # Judge v2 (M0) — ctx.last_verdict now carries the v2 taxonomy; project
+        # it back to the legacy pass/fail/inconclusive signal this branch reads.
+        ctx_verdict = verdict_to_legacy(self.ctx.last_verdict or "")
         meta_verdict = (
             history[-1].metadata.get("judge_verdict", "absent") if history else "no_history"
         )

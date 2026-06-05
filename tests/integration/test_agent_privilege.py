@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from random import Random
 
+from agent_guardian.adapters.base import TargetFingerprint
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.agents.base import AgentBudget
 from agent_guardian.agents.privilege import PrivilegeAgent
@@ -22,9 +23,10 @@ async def test_privilege_finds_findings(
     small_budget: AgentBudget,
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
+    fingerprint_with_tools: TargetFingerprint,
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=compliant_target_llm)
+    memory = make_memory(fingerprint=fingerprint_with_tools)
+    target = make_target(llm=compliant_target_llm, fingerprint=fingerprint_with_tools)
     agent = PrivilegeAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=fail_judge_llm,
@@ -60,9 +62,10 @@ async def test_privilege_refused_target_yields_no_findings(
     small_budget: AgentBudget,
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
+    fingerprint_with_tools: TargetFingerprint,
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=refusing_target_llm)
+    memory = make_memory(fingerprint=fingerprint_with_tools)
+    target = make_target(llm=refusing_target_llm, fingerprint=fingerprint_with_tools)
     agent = PrivilegeAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=pass_judge_llm,
@@ -82,9 +85,10 @@ async def test_privilege_tiny_budget(
     tiny_budget: AgentBudget,
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
+    fingerprint_with_tools: TargetFingerprint,
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=compliant_target_llm)
+    memory = make_memory(fingerprint=fingerprint_with_tools)
+    target = make_target(llm=compliant_target_llm, fingerprint=fingerprint_with_tools)
     agent = PrivilegeAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=fail_judge_llm,

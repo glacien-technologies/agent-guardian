@@ -83,6 +83,10 @@ class _StaticTarget(TargetAdapter):
             framework=None,
             declared_tools=[],
             declared_memory_keys=[],
+            # STAGE-1 DriftAgent gates on a behaviour anchor — give it an
+            # inferred goal so this progress-emitter test (which happens to
+            # drive DriftAgent) stays applicable and actually runs turns.
+            inferred_goal="a static stub assistant",
             notes="static stub for agent_progress tests",
         )
 

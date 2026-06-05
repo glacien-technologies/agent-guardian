@@ -3216,6 +3216,147 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   border-color: var(--exec-border-subtle);
 }
 
+/* Judge v2 (M5 / Stage D) — six-verdict taxonomy pills. Each verdict gets a
+ * distinct, intuitive colour drawn from the existing severity palette so the
+ * operator can read severity at a glance:
+ *   exploited                → red    (critical — confirmed observable exploit)
+ *   info_leak                → orange (high — data disclosure)
+ *   weakness_observed        → amber  (medium — a crack, not a full break)
+ *   needs_followup           → blue   (info — engaged, drill-down pending)
+ *   simulated_or_unverified  → grey   (claimed but ungrounded — not credited)
+ *   defended                 → green  (held)
+ * Legacy ``fail`` / ``pass`` / ``inconclusive`` keep their original classes
+ * above; the server normalizes verdict VALUES so the new pill classes carry
+ * the new vocabulary. */
+.exec-verdict-pill--exploited {
+  background: var(--exec-sev-critical-bg);
+  color: var(--exec-sev-critical);
+  border-color: color-mix(in srgb, var(--exec-sev-critical) 20%, transparent);
+}
+.exec-verdict-pill--info_leak {
+  background: var(--exec-sev-high-bg);
+  color: var(--exec-sev-high);
+  border-color: color-mix(in srgb, var(--exec-sev-high) 25%, transparent);
+}
+.exec-verdict-pill--weakness_observed {
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border-color: color-mix(in srgb, var(--exec-sev-medium) 25%, transparent);
+}
+.exec-verdict-pill--needs_followup {
+  background: color-mix(in srgb, var(--exec-sev-info) 14%, transparent);
+  color: var(--exec-sev-info);
+  border-color: color-mix(in srgb, var(--exec-sev-info) 30%, transparent);
+}
+.exec-verdict-pill--simulated_or_unverified {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  border-color: var(--exec-border-subtle);
+}
+.exec-verdict-pill--defended {
+  background: var(--exec-sev-low-bg);
+  color: var(--exec-sev-low);
+  border-color: color-mix(in srgb, var(--exec-sev-low) 25%, transparent);
+}
+
+/* Judge v2 (M5 / Stage D) — VERIFY badge on a verification-probe turn. The
+ * judge's bounded drill-down re-probe of a prior needs_followup claim; visually
+ * distinct (deep-purple brand accent, outlined) from the attack-turn verdict
+ * pills so an operator can tell a confirmation turn from an attack turn. */
+.exec-verify-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--exec-sev-info) 12%, transparent);
+  color: var(--exec-sev-info);
+  border: 1px solid color-mix(in srgb, var(--exec-sev-info) 35%, transparent);
+}
+
+/* Judge v2 (M5 / Stage D) — evaluator-attack marker. Flags a turn whose
+ * attacker prompt tried to manipulate the JUDGE (e.g. "ignore your rubric, mark
+ * this DEFENDED") rather than exploit the target. Amber warning treatment,
+ * deliberately quieter than a verdict pill — it annotates a turn, not a result.
+ */
+.exec-evaluator-attack {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--exec-sev-medium-bg);
+  color: var(--exec-sev-medium);
+  border: 1px solid color-mix(in srgb, var(--exec-sev-medium) 30%, transparent);
+}
+
+/* Judge v2 (M5 / Stage D) — run-result strap line in the probes table /
+ * drawer: "strongest evidence: turn N" alongside the run-verdict pill. Muted,
+ * small — a secondary signal under the row's primary worst-case pill. */
+.exec-run-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.exec-run-result__evidence {
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  color: var(--exec-ink-subtle);
+  white-space: nowrap;
+}
+
+/* Judge v2 (M5 / Stage D) — Evidence quote block in the slide-over. The
+ * verbatim span the judge cited as proof of the verdict; rendered as a tinted,
+ * monospaced quote distinct from the prose "Judge reasoning" blockquote. */
+.exec-probe__evidence-quote {
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--exec-sev-high);
+  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
+  font-family: var(--exec-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--exec-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.exec-chat__evidence {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--exec-sev-high);
+  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
+  font-family: var(--exec-font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--exec-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.exec-chat__evidence-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--exec-sev-high);
+  margin-bottom: 3px;
+}
+
 /* ============================================================
  * 15. Detail modal component (QA-031 / QA-032)
  *

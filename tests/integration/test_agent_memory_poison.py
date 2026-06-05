@@ -52,17 +52,29 @@ async def test_memory_poison_finds_findings_when_memory_present(
     assert "Memory Manipulation" in findings[0].mitre_atlas
 
 
-async def test_memory_poison_skips_when_no_memory(
+async def test_memory_poison_skips_when_recon_confirms_stateless(
     attacker_llm: StubLLM,
     compliant_target_llm: StubLLM,
     fail_judge_llm: StubLLM,
     small_budget: AgentBudget,
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
-    fingerprint_bare: TargetFingerprint,
 ) -> None:
-    memory = make_memory(fingerprint=fingerprint_bare)
-    target = make_target(llm=compliant_target_llm, fingerprint=fingerprint_bare)
+    # STAGE-1 confirm-before-poison gate: the agent skips ONLY when recon has
+    # POSITIVELY confirmed the target is stateless (no positive memory signal
+    # AND recon_coverage["memory"] is a concrete non-unknown verdict). An
+    # all-empty bare fingerprint (unknown coverage) now RUNS, by design.
+    stateless_fp = TargetFingerprint(
+        mode="prompt",
+        ref="<test>",
+        has_memory=False,
+        is_multi_agent=False,
+        cross_session_data_detected=False,
+        recon_coverage={"memory": "stateless"},
+        notes="recon-confirmed stateless",
+    )
+    memory = make_memory(fingerprint=stateless_fp)
+    target = make_target(llm=compliant_target_llm, fingerprint=stateless_fp)
     agent = MemoryPoisonAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=fail_judge_llm,

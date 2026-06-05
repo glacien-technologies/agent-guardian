@@ -203,8 +203,19 @@ class PanelJudge:
     def cross_family_enforced(self) -> bool:
         return self._cross_family_enforced
 
-    async def verdict(self, prompt: str, target_response: str) -> JudgeVerdict:
-        """Fire all judges concurrently, majority-vote, return one verdict."""
+    async def verdict(
+        self,
+        prompt: str,
+        target_response: str,
+        *,
+        conversation: str = "",
+        tool_trace: str = "(none — black-box target)",
+    ) -> JudgeVerdict:
+        """Fire all judges concurrently, majority-vote, return one verdict.
+
+        ``conversation`` / ``tool_trace`` (judge v2, M0) are forwarded to each
+        seat's :meth:`Judge.verdict` so every panel member judges from the full
+        conversation + opportunistic tool trace, not a single turn."""
         n = len(self._judges)
         families = [s.canonical_family for _, s in self._judges]
         # QA-068 — replace the ``<Judge object at 0x…>`` repr dump with a
@@ -233,7 +244,12 @@ class PanelJudge:
         # swallowed (one bad seat must not corrupt task lifecycle).
         async def _call(judge_obj: Any, label: str) -> JudgeVerdict | Exception:
             try:
-                result: JudgeVerdict = await judge_obj.verdict(prompt, target_response)
+                result: JudgeVerdict = await judge_obj.verdict(
+                    prompt,
+                    target_response,
+                    conversation=conversation,
+                    tool_trace=tool_trace,
+                )
                 return result
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 raise
@@ -256,8 +272,10 @@ class PanelJudge:
                     raw,
                 )
                 verdicts.append(
+                    # Judge v2 (M0) — a raised seat contributes the safe middle
+                    # ground, never an auto-credited compromise.
                     JudgeVerdict(
-                        verdict="inconclusive",
+                        verdict="needs_followup",
                         confidence=0.0,
                         reasoning=f"judge raised: {type(raw).__name__}: {raw}",
                     )
@@ -280,7 +298,8 @@ class PanelJudge:
             counts[v] = counts.get(v, 0) + 1
         best_count = max(counts.values())
         top = [verdict for verdict, c in counts.items() if c == best_count]
-        majority = top[0] if len(top) == 1 else "inconclusive"
+        # Judge v2 (M0) — a tie resolves to the safe middle ground.
+        majority = top[0] if len(top) == 1 else "needs_followup"
         agreement_fraction = counts.get(majority, 0) / n if n else 0.0
         disagreement = len(set(individual_verdicts)) > 1
 

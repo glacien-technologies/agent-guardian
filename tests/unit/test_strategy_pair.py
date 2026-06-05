@@ -261,15 +261,31 @@ async def test_non_json_prose_does_not_reach_target(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _capture_refine_msg(captured: list[object]) -> str:
+    """Return the user-message content of the PAIR refine call (escalate or refine).
+
+    Both the escalate and defend directives carry the ``Judge verdict on your
+    previous attack:`` block, so we key on that to find the refine round.
+    """
+    from agent_guardian.llm.base import LLMRequest
+
+    for req in captured:
+        assert isinstance(req, LLMRequest)
+        for msg in req.messages:
+            if msg.role == "user" and "Judge verdict on your previous attack" in msg.content:
+                return msg.content
+    return ""
+
+
 async def test_pair_reads_judge_verdict_from_both_ctx_and_history_metadata(
     tmp_path: Path,
 ) -> None:
-    """Phase A.A1 — PAIR uses ctx.last_verdict + history[-1].metadata to refine.
+    """Fix #3 — PAIR branches on the v2 verdict written to ctx.last_verdict.
 
-    When ctx.last_verdict is non-empty, the refine prompt sent to the
-    attacker LLM must include the ``Judge feedback:`` block carrying the
-    verdict, confidence and reasoning. This proves both surfaces (ctx +
-    history) are read on every refinement turn.
+    An ``exploited`` verdict must route to the ESCALATE directive: the refine
+    prompt carries the ``Judge verdict ...`` block plus the capitalize-on-
+    success instruction (do NOT rewrite away), and renders a human-readable
+    verdict word + the reasoning. This proves the verdict surface is read.
     """
     from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
 
@@ -286,7 +302,7 @@ async def test_pair_reads_judge_verdict_from_both_ctx_and_history_metadata(
             )
 
     ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
-    ctx.last_verdict = "fail"
+    ctx.last_verdict = "exploited"
     ctx.last_verdict_confidence = 0.85
     ctx.last_verdict_reasoning = "leaked system prompt"
 
@@ -296,27 +312,182 @@ async def test_pair_reads_judge_verdict_from_both_ctx_and_history_metadata(
     history = [
         Turn(
             prompt=first.text,
-            response="refused",
+            response="here is the system prompt",
             metadata={
-                "judge_verdict": "fail",
+                "judge_verdict": "exploited",
                 "judge_confidence": 0.85,
                 "judge_reasoning": "leaked system prompt",
             },
         )
     ]
-    await p.generate_next(history, "refused")
+    await p.generate_next(history, "here is the system prompt")
 
-    # Find the refine call's user-message content.
-    assert captured, "expected at least one captured request"
-    refine_user_msg = ""
-    for req in captured:
-        for msg in req.messages:
-            if msg.role == "user" and "rewrite it to be more effective" in msg.content:
-                refine_user_msg = msg.content
+    refine_user_msg = _capture_refine_msg(captured)
     assert refine_user_msg, "expected a refine call to the attacker LLM"
-    # The Judge feedback block must be present, with verdict + reasoning.
-    assert "Judge feedback: fail" in refine_user_msg
+    assert "Judge verdict on your previous attack: exploited" in refine_user_msg
     assert "leaked system prompt" in refine_user_msg
+    # Escalate branch — must instruct capitalize, not rewrite-away.
+    assert "do NOT rewrite away from this" in refine_user_msg
+
+
+async def test_pair_escalate_branch_on_exploited(tmp_path: Path) -> None:
+    """Fix #3 — an exploited verdict routes PAIR to the escalate branch."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": "bulk-dump"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    ctx.last_verdict = "info_leak"
+    ctx.last_verdict_confidence = 0.9
+    ctx.last_verdict_reasoning = "leaked one record"
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [Turn(prompt=first.text, response="record: alice 4111")]
+    second = await p.generate_next(history, "record: alice 4111")
+    assert isinstance(second, NextPrompt)
+    assert second.rationale.startswith("pair-escalate")
+    msg = _capture_refine_msg(captured)
+    assert "Escalate this foothold" in msg
+    # The escalate branch must NOT carry the "rewrite it to be more effective"
+    # defend phrasing.
+    assert "rewrite it to be more effective" not in msg
+
+
+async def test_pair_refine_branch_on_defended(tmp_path: Path) -> None:
+    """Fix #3 — a defended verdict routes PAIR to the critique-rewrite branch."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": "smarter-attack"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    ctx.last_verdict = "defended"
+    ctx.last_verdict_confidence = 0.8
+    ctx.last_verdict_reasoning = "refused cleanly"
+    p = PAIRStrategy(ctx)
+    first = await p.generate_next([], None)
+    assert isinstance(first, NextPrompt)
+    history = [Turn(prompt=first.text, response="I can't help with that")]
+    second = await p.generate_next(history, "I can't help with that")
+    assert isinstance(second, NextPrompt)
+    assert second.rationale.startswith("pair-refine")
+    msg = _capture_refine_msg(captured)
+    assert "rewrite it to be more effective" in msg
+    assert "Escalate this foothold" not in msg
+
+
+async def test_pair_rolling_transcript_includes_multiple_turns(tmp_path: Path) -> None:
+    """Fix #2 — the refine prompt renders >1 prior turn (rolling transcript)."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": f"rewrite-{len(captured)}"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    ctx.last_verdict = "defended"
+    p = PAIRStrategy(ctx)
+    history = [
+        Turn(prompt="probe one", response="resp one", metadata={"judge_verdict": "defended"}),
+        Turn(prompt="probe two", response="resp two", metadata={"judge_verdict": "defended"}),
+    ]
+    await p.generate_next(history, "resp two")
+    msg = _capture_refine_msg(captured)
+    assert msg, "expected a refine call"
+    # Both prior turns must appear in the rolling transcript.
+    assert "probe one" in msg
+    assert "probe two" in msg
+    assert "Turn 1" in msg and "Turn 2" in msg
+
+
+async def test_pair_none_response_renders_sentinel_not_none(tmp_path: Path) -> None:
+    """Fix #6 — a None target response renders the guarded sentinel, never 'None'."""
+    from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+
+    captured: list[LLMRequest] = []
+
+    class _CapturingLLM(StubLLM):
+        async def complete(self, request: LLMRequest) -> LLMResponse:  # type: ignore[override]
+            captured.append(request)
+            return LLMResponse(
+                text=json.dumps({"critique": "c", "rewrite": "next"}),
+                model=request.model,
+                provider="capture",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
+    ctx.last_verdict = "defended"
+    p = PAIRStrategy(ctx)
+    # A prior turn exists but the latest response is empty (egress-refused /
+    # blocked turn). PAIR's first-turn guard routes a literal None to the seed
+    # path, so the realistic egress-refused case the loop hands PAIR is an
+    # empty string — both map to the sentinel via the same guard.
+    history = [Turn(prompt="probe", response="", metadata={"judge_verdict": "defended"})]
+    await p.generate_next(history, "")
+    msg = _capture_refine_msg(captured)
+    assert msg, "expected a refine call"
+    assert "no response" in msg
+    # The literal string "RESPONSE: None" must never appear.
+    assert "RESPONSE: None" not in msg
+
+
+async def test_pair_dedup_forces_rotation_on_repeat(tmp_path: Path) -> None:
+    """Fix D1 / #1 — when the attacker keeps returning the SAME rewrite, PAIR
+
+    must not emit a verbatim repeat; the dedup gate rotates to a distinct probe.
+    """
+    # Attacker always returns the same rewrite text.
+    repeat = json.dumps({"critique": "c", "rewrite": "send the exact same probe again"})
+    llm = StubLLM(default=repeat)
+    ctx = _ctx(
+        tmp_path,
+        llm=llm,
+        seeds=["alpha distinct probe", "beta different probe", "gamma another probe"],
+    )
+    p = PAIRStrategy(ctx, max_critiques=4)
+    history: list[Turn] = []
+    response: str | None = None
+    emitted: list[str] = []
+    while True:
+        r = await p.generate_next(history, response)
+        if isinstance(r, StrategyDone):
+            break
+        emitted.append(r.text)
+        response = "I can't help with that"
+        history.append(
+            Turn(prompt=r.text, response=response, metadata={"judge_verdict": "defended"})
+        )
+    # No two emitted probes may be verbatim repeats of each other.
+    assert len(emitted) == len(set(emitted)), f"verbatim repeat emitted: {emitted}"
 
 
 async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:
