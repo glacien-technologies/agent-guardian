@@ -2246,6 +2246,25 @@ class AsiAgent(ABC):
         _ = (prompt, response, verdict)
         return []
 
+    @staticmethod
+    def _acts_without_check(
+        response: str, *, act_re: re.Pattern[str], check_re: re.Pattern[str]
+    ) -> bool | None:
+        """Shared accept-vs-verify heuristic for evidence tagging (B2/B3).
+
+        Returns ``True`` when the observable response shows the agent performing
+        the sensitive action (``act_re``) WITHOUT demanding a verification
+        (``check_re``); ``False`` when it demanded a check; ``None`` when neither
+        signal is present. Deterministic, parses only observable text —
+        black-box-safe.
+        """
+        text = response or ""
+        if check_re.search(text):
+            return False
+        if act_re.search(text):
+            return True
+        return None
+
 
 # Silence unused-import warnings: these are part of the public re-export surface.
 _ = (field,)
