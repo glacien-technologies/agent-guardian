@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+## [1.0.0rc8] — 2026-06-05
+
 ### Fixed
 - **Dashboard Overview polish (2026-06-04, PRs #32/#33/#34/#35).** The KPI strip drops the standalone BAND tile (the band already rides on the AIVSS tile's sub-caption) and adds a PROBES tile reporting how many probe attempts were actually dispatched. The ⓘ metric-info button uses a pointer cursor instead of the help question-mark. The "Adversarial Surface Index" radar now renders all ten ASI axes from first paint (it used to collapse to a single spoke early in a scan) and updates live over SSE instead of only on refresh. The COVERAGE tile counts ASI dimensions actually exercised (≥1 probe) rather than only those that produced findings, so a clean-but-tested category still counts and coverage reconciles with the Skipped-agents panel (coverage + skipped span the full taxonomy). The auto-served dashboard no longer briefly renders `unknown scan: <id>` when opened at scan start — the scan directory is pre-created so the separate dashboard process recognises the run immediately.
 
