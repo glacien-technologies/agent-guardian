@@ -6,7 +6,7 @@ icon: "shield-alert"
 
 ## What's in the library
 
-AgentGuardian ships **96 probes** across the 10 OWASP-ASI 2026 categories.
+AgentGuardian ships **124 probes** across the 10 OWASP-ASI 2026 categories.
 Each probe is a YAML attack technique annotated with MITRE ATLAS v5.4.0
 technique IDs and CSA Agentic-RT categories. The corpus is loaded at scan
 start by `agent_guardian.probes.loader.load_all_probes` and dispatched by
@@ -78,7 +78,7 @@ Adversary text — typed, fetched from a document, or relayed through a tool
 
 <CardGroup cols={1}>
   <Card title="Prompt injection (ASI01)" icon="message-square-warning" href="/attacks/prompt-injection">
-    9 probes. Direct goal redirect, indirect-via-doc, role-swap pretext,
+    20 probes. Direct goal redirect, indirect-via-doc, role-swap pretext,
     EchoLeak zero-click, persona-break jailbreak. Covers `--indirect` and
     `--pretext` flag paths.
   </Card>
