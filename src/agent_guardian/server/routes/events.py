@@ -89,15 +89,25 @@ async def events_view(
 def _collect_jsonl_records(scan_dir: Path, probe: str | None) -> list[dict[str, Any]]:
     """Read the scan's JSONL files and pretty-print each record for the view.
 
-    Reads ``events.jsonl`` then ``recon_probes.jsonl`` (the latter only exists
-    when the opt-in recon probe log was enabled). When ``probe`` is set, only
-    records whose raw line references that id are kept — a substring match is
-    robust across the id's several nested positions (``probe_id`` /
-    ``seed_id`` / payload fields). Defensive: a missing or corrupt file yields
-    no rows and never raises; output is capped at :data:`_MAX_VIEW_RECORDS`.
+    Reads ``events.jsonl``, ``recon_probes.jsonl`` (the latter only exists when
+    the opt-in recon probe log was enabled), then ``memory.jsonl``. When
+    ``probe`` is set, only records whose raw line references that id are kept —
+    a substring match is robust across the id's several nested positions
+    (``probe_id`` / ``seed_id`` / payload fields).
+
+    ``memory.jsonl`` reflection rows are DECODED (the per-turn ``turn_record``
+    is JSON-encoded inside ``payload.content``) and surfaced as ``turn`` records
+    so the page shows the AUTHORITATIVE, untruncated prompt / target response /
+    judge reasoning — the ``events.jsonl`` ``log`` lines only carry an elided
+    ``…`` preview. The complete, uncapped record is also persisted on disk by
+    :func:`agent_guardian.server.probe_export.write_probe_exports`.
+
+    Defensive: a missing or corrupt file yields no rows and never raises;
+    output is capped at :data:`_MAX_VIEW_RECORDS` (a render-size guard for the
+    HTML page only — the on-disk ``probe/`` export is uncapped).
     """
     out: list[dict[str, Any]] = []
-    for fname in ("events.jsonl", "recon_probes.jsonl"):
+    for fname in ("events.jsonl", "recon_probes.jsonl", "memory.jsonl"):
         try:
             raw = (scan_dir / fname).read_text(encoding="utf-8")
         except OSError as exc:
@@ -117,6 +127,23 @@ def _collect_jsonl_records(scan_dir: Path, probe: str | None) -> list[dict[str, 
             if isinstance(rec, dict):
                 kind = str(rec.get("kind") or rec.get("intent") or "event")
                 seq = rec.get("seq")
+            # memory.jsonl reflection rows carry the full turn record as a
+            # JSON string in ``payload.content`` — decode it so the page shows
+            # the verbatim prompt / response / reasoning, not an escaped blob.
+            if fname == "memory.jsonl" and isinstance(rec, dict):
+                if rec.get("record_type") != "reflection":
+                    continue
+                content = (rec.get("payload") or {}).get("content")
+                turn = None
+                if isinstance(content, str):
+                    try:
+                        turn = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        turn = None
+                if isinstance(turn, dict):
+                    rec = turn
+                    kind = f"turn · {turn.get('verdict') or 'turn'}"
+                    seq = turn.get("turn")
             out.append(
                 {
                     "source": fname,

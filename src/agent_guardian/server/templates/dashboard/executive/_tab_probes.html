@@ -91,6 +91,13 @@
       </td>
       <td class="exec-probes-table__cell--verdict">
         <span class="exec-verdict-pill" data-slot="verdict-pill"></span>
+        {# Judge v2 (M5 / Stage D) — strongest-evidence strap line, mirrors the
+           server-rendered row in ``_probes_table.html``. Hidden until a graded
+           reflection rolls the verdict up; ``live-append.js:setProbeRunEvidence``
+           fills + reveals it so the live row matches the snapshot. #}
+        <span class="exec-run-result" data-slot="run-result" hidden>
+          <span class="exec-run-result__evidence" data-slot="run-evidence"></span>
+        </span>
       </td>
       <td class="exec-probes-table__cell--turn">
         <span class="exec-probes-table__turn" data-slot="turn"></span>

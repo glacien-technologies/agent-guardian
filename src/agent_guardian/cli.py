@@ -4469,6 +4469,17 @@ async def _run_scan_inner(
         typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
     (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
+    # Persist the authoritative, untruncated per-probe JSON export under
+    # ``<scan_dir>/probe/`` (one file per probe + index.json). Unlike the
+    # dashboard's previewed log lines, this is the complete record — verbatim
+    # prompts, full target responses, full judge reasoning, worst-case verdict.
+    # Best-effort: an export failure never fails the scan.
+    try:
+        from agent_guardian.server.probe_export import write_probe_exports
+
+        write_probe_exports(scan_dir)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
