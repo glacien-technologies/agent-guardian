@@ -246,6 +246,20 @@ substring match, not LLM judgement.
             rubric=self.judge_rubric(),
         )
 
+    def _derive_evidence_tags(self, prompt: str, response: str, verdict: JudgeVerdict) -> list[str]:
+        """Tag WHICH dangerous-output canary family reflected (``canary_type:<fam>``).
+
+        Reuses the deterministic ``reflects_canary`` oracle so a report can say
+        "confirmed via XSS canary reflection" instead of just "canary reflected".
+        """
+        _ = (prompt, verdict)
+        matched = reflects_canary(response)
+        if not matched:
+            return []
+        m = re.match(r"AG_([A-Z0-9]+)_CANARY", matched, re.IGNORECASE)
+        family = m.group(1).lower() if m else "unknown"
+        return [f"canary_type:{family}"]
+
     def seeds_for_category(self) -> list[ProbeSeed]:
         from agent_guardian.probes.loader import seeds_for_asi_with_provenance
 

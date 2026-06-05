@@ -61,7 +61,14 @@ _LOG = logging.getLogger("agent_guardian.strategies.sibling_map")
 # without updating the docstring above.
 SIBLING_MAP: dict[AsiCategory, list[str]] = {
     AsiCategory.ASI01: ["cipher", "low_resource", "flip_attack", "skeleton_key"],
-    AsiCategory.ASI02: ["cipher", "many_shot", "pap", "art_prompt"],
+    AsiCategory.ASI02: [
+        "arg_injection",
+        "chain_compose",
+        "cipher",
+        "many_shot",
+        "pap",
+        "art_prompt",
+    ],
     AsiCategory.ASI03: ["skeleton_key", "pap", "low_resource", "deceptive_delight"],
     AsiCategory.ASI04: ["art_prompt", "cipher", "flip_attack"],
     AsiCategory.ASI05: ["h_cot", "cipher", "flip_attack"],

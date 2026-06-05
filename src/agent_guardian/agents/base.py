@@ -1149,6 +1149,9 @@ class AsiAgent(ABC):
                         text=s.attack_text,
                         asi=self.asi_category.value,
                         severity=s.severity_estimate.value,
+                        # A1 — preserve the scenario's delivery channel so the
+                        # strategy delivers via that trusted vector (was dropped).
+                        delivery_vector=s.delivery_vector,
                     )
                 )
 
@@ -2226,8 +2229,41 @@ class AsiAgent(ABC):
             trigger_prompt=prompt,
             verdict_v2=verdict.verdict,
             trigger_response=trigger_response,
+            evidence_types=self._derive_evidence_tags(prompt, response, verdict),
             created_at=_utcnow(),
         )
+
+    def _derive_evidence_tags(self, prompt: str, response: str, verdict: JudgeVerdict) -> list[str]:
+        """Deterministic, transcript-derived structured evidence tags for a finding.
+
+        Default: no tags. Specialist agents override to attach best-effort signals
+        (e.g. a retry storm, an accepted unverified artifact, an action taken
+        without an authority check) to ``Finding.evidence_types`` so a report can
+        say *which* structured signal corroborated the finding. Must be
+        deterministic and black-box-safe (parse only the observable
+        prompt/response), never an LLM call.
+        """
+        _ = (prompt, response, verdict)
+        return []
+
+    @staticmethod
+    def _acts_without_check(
+        response: str, *, act_re: re.Pattern[str], check_re: re.Pattern[str]
+    ) -> bool | None:
+        """Shared accept-vs-verify heuristic for evidence tagging (B2/B3).
+
+        Returns ``True`` when the observable response shows the agent performing
+        the sensitive action (``act_re``) WITHOUT demanding a verification
+        (``check_re``); ``False`` when it demanded a check; ``None`` when neither
+        signal is present. Deterministic, parses only observable text —
+        black-box-safe.
+        """
+        text = response or ""
+        if check_re.search(text):
+            return False
+        if act_re.search(text):
+            return True
+        return None
 
 
 # Silence unused-import warnings: these are part of the public re-export surface.
