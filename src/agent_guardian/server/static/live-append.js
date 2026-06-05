@@ -271,7 +271,14 @@
     var asi = safeStr(payload.asi || p.asi);
     var probeId = safeStr(payload.probe_id || p.probe_id || "");
     var verdict = "pending";
-    if (kind === "agent_done") {
+    if (kind === "reflection") {
+      // The per-turn JUDGE verdict — the real signal the row must roll up on.
+      // It only arrives on ``reflection`` events; the ``agent_*`` progress
+      // events carry no per-turn verdict, which is why a row that only listened
+      // to those stayed frozen on its first turn (e.g. DEFENDED) even after a
+      // later turn leaked. Worst-case wins in ``appendProbe``.
+      verdict = (safeStr(payload.verdict || p.verdict).toLowerCase()) || "pending";
+    } else if (kind === "agent_done") {
       var n = Number(p.findings_count || 0);
       verdict = n > 0 ? "fail" : "pass";
     } else if (kind === "agent_skipped") {
@@ -285,10 +292,16 @@
         ts = new Date(payload.ts * 1000).toISOString();
       } catch (e) { ts = ""; }
     }
-    // ``agent_progress`` carries the live turn index; ``agent_start`` is the
-    // first turn. We count distinct turn arrivals on the row rather than
-    // trust the event to carry a running total.
-    var isTurn = kind === "agent_start" || kind === "agent_progress";
+    // The 1-based turn index carried by ``agent_start`` / ``agent_progress``
+    // and by ``reflection``. We roll the row's turn count up via ``max()`` on
+    // this number (idempotent — immune to double-counting when both a progress
+    // and a reflection event land for the same turn) rather than blindly
+    // incrementing per arrival.
+    var turnNum = 0;
+    var rawTurn = payload.turn != null ? payload.turn : p.turn;
+    if (rawTurn != null) { turnNum = parseInt(rawTurn, 10) || 0; }
+    var isTurn =
+      kind === "agent_start" || kind === "agent_progress" || kind === "reflection";
     return {
       kind: kind,
       agent: agent,
@@ -297,6 +310,7 @@
       verdict: verdict,
       ts: ts,
       isTurn: isTurn,
+      turnNum: turnNum,
     };
   }
 
@@ -329,6 +343,24 @@
     // Drop any stale modifier before re-applying.
     pillNode.className = "exec-verdict-pill exec-verdict-pill--" + verdict;
     pillNode.textContent = VERDICT_LABELS[verdict] || "PENDING";
+  }
+
+  /**
+   * Set the "strongest evidence: turn N" strap line on a probe row and reveal
+   * its container. Works for both the live-cloned template (which carries a
+   * ``data-slot="run-evidence"`` span inside a hidden ``.exec-run-result``) and
+   * a server-rendered row (matched by the ``.exec-run-result__evidence`` class).
+   * No-ops gracefully when neither is present so an older cached template can't
+   * throw. ``turnNum`` <= 0 is ignored (nothing meaningful to point at).
+   */
+  function setProbeRunEvidence(row, turnNum) {
+    if (!row || !turnNum || turnNum <= 0) { return; }
+    var ev = row.querySelector('[data-slot="run-evidence"]')
+      || row.querySelector(".exec-run-result__evidence");
+    if (!ev) { return; }
+    ev.textContent = "strongest evidence: turn " + turnNum;
+    var box = row.querySelector(".exec-run-result");
+    if (box && box.hasAttribute("hidden")) { box.removeAttribute("hidden"); }
   }
 
   /**
@@ -365,9 +397,15 @@
         "/scan/" + encodeURIComponent(scanId) + "/probe?group=" + encodeURIComponent(ev.agent)
       );
     }
-    var turnCount = ev.isTurn ? 1 : 0;
+    var turnCount = ev.turnNum > 0 ? ev.turnNum : (ev.isTurn ? 1 : 0);
     row.setAttribute("data-turn-count", String(turnCount));
     setProbeVerdict(row, ev.verdict);
+    // Seed the strongest-evidence strap line when this first event already
+    // carries a graded verdict on a numbered turn (e.g. a reflection that
+    // arrives before any agent_start).
+    if ((VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK.pending || 0)) {
+      setProbeRunEvidence(row, ev.turnNum);
+    }
     fillSlot(row, "asi", ev.asi || "—");
     fillSlot(row, "agent", ev.agent || "—");
     fillSlot(row, "turn", turnCount + (turnCount === 1 ? " turn" : " turns"));
@@ -544,15 +582,37 @@
           )
         : null;
       if (existing) {
-        if (ev.isTurn) {
-          var n = (parseInt(existing.getAttribute("data-turn-count") || "0", 10) || 0) + 1;
+        // Turn count: roll up via max() on the explicit turn number so a
+        // reflection and an agent_progress for the same turn don't double-count;
+        // fall back to a simple bump only when no number is carried.
+        var cur = parseInt(existing.getAttribute("data-turn-count") || "0", 10) || 0;
+        var n = cur;
+        if (ev.turnNum > 0) { n = Math.max(cur, ev.turnNum); }
+        else if (ev.isTurn) { n = cur + 1; }
+        if (n !== cur) {
           existing.setAttribute("data-turn-count", String(n));
           fillSlot(existing, "turn", n + (n === 1 ? " turn" : " turns"));
         }
-        // Roll the verdict up to the worst outcome seen so far.
+        // Roll the verdict up to the worst outcome seen so far. When it
+        // STRICTLY worsens, record the turn that produced the strongest
+        // evidence so the row's strap line tracks the live rollup (e.g. a
+        // DEFENDED turn-1 row flips to INFO LEAK pointing at turn 2).
+        //
+        // ``agent_done`` only knows findings_count>0 → coarse "fail", which
+        // outranks every precise per-turn verdict (info_leak, weakness …). Once
+        // a graded reflection verdict is on the row it is authoritative, so the
+        // coarse summary is a FALLBACK only — it must never overwrite the
+        // precise verdict the per-turn reflections rolled up. Otherwise the live
+        // row would read EXPLOITED where the snapshot reads INFO LEAK.
         var current = existing.getAttribute("data-verdict") || "pending";
-        if ((VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK[current] || 0)) {
+        var graded = (VERDICT_RANK[current] || 0) > 0;
+        var coarseSummary = ev.kind === "agent_done";
+        if (
+          !(coarseSummary && graded) &&
+          (VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK[current] || 0)
+        ) {
           setProbeVerdict(existing, ev.verdict);
+          setProbeRunEvidence(existing, ev.turnNum);
         }
         if (ev.ts) { fillSlot(existing, "timestamp", ev.ts); }
         if (ev.probeId && !existing.getAttribute("data-probe-id")) {
@@ -637,6 +697,13 @@
     source.addEventListener("reflection", function (e) {
       var data = safeParse(e.data) || {};
       appendLog(data);
+      // A reflection carries the per-turn judge verdict — the ONLY event that
+      // does. Feed it to the Probes row too so the row's verdict pill +
+      // strongest-evidence strap line consolidate live (worst-case wins); the
+      // ``agent_*`` progress events alone never carry a verdict.
+      if (!data.kind) { data.kind = "reflection"; }
+      data._kind = "reflection";
+      appendProbe(data);
     });
   }
 

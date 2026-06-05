@@ -213,6 +213,12 @@ def test_probes_row_template_slots(client: TestClient, store: ScanStore) -> None
         "verdict-pill",
         "turn",
         "timestamp",
+        # Strongest-evidence strap line — populated live by
+        # ``live-append.js:setProbeRunEvidence`` when a per-turn reflection rolls
+        # the row verdict up (so the live row matches the server-rendered one
+        # instead of freezing on turn 1's verdict).
+        "run-result",
+        "run-evidence",
     ):
         assert f'data-slot="{slot}"' in tpl, f"probe row template missing data-slot='{slot}'"
 
