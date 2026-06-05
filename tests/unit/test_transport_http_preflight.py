@@ -14,11 +14,13 @@ timeout twice in a row, mis-classifying live targets as
 * Accept a ``sample_body`` override for contract-driven scans that already
   know the on-wire shape.
 * Treat *any* HTTP response (including 422) as "reachable, schema-protected"
-  — only transport-level connect/timeout failures across both attempts mark
+  — only transport-level connect/timeout failures across ALL attempts mark
   the target down.
-* Bump the timeout to 5s so Cloud Run cold starts are absorbed.
+* Use a 5-attempt progressive-backoff budget (5s/10s/15s/20s/30s; ≤80s) so a
+  cold scale-to-zero target has time to boot and reply — each attempt also
+  re-pings, warming the container.
 
-The three test cases below pin those guarantees.
+The test cases below pin those guarantees.
 """
 
 from __future__ import annotations
@@ -94,26 +96,25 @@ async def test_contract_sample_body_overrides_default() -> None:
 @respx.mock
 @pytest.mark.asyncio
 async def test_connect_error_marks_unreachable() -> None:
-    """A genuine connect failure (DNS / TLS / listener down) across both attempts is unreachable."""
+    """A genuine connect failure (DNS / TLS / listener down) across all attempts is unreachable."""
     route = respx.post(ENDPOINT).mock(side_effect=httpx.ConnectError("connection refused"))
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is False
-    # Two attempts before giving up.
-    # 3 attempts with progressive timeout backoff (5s / 10s / 15s) tolerate
-    # Cloud Run cold starts; only exhaust marks unreachable.
-    assert route.call_count == 3
+    # 5 attempts with progressive timeout backoff (5s/10s/15s/20s/30s) tolerate
+    # Cloud Run cold starts; only exhausting all of them marks unreachable.
+    assert route.call_count == 5
 
 
 @respx.mock
 @pytest.mark.asyncio
 async def test_read_timeout_marks_unreachable() -> None:
-    """A read timeout across both attempts is unreachable (target accepted the connection but never replied)."""
+    """A read timeout across all attempts is unreachable (target accepted the connection but never replied)."""
     route = respx.post(ENDPOINT).mock(side_effect=httpx.ReadTimeout("read timed out"))
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is False
-    # 3 attempts with progressive timeout backoff (5s / 10s / 15s) tolerate
-    # Cloud Run cold starts; only exhaust marks unreachable.
-    assert route.call_count == 3
+    # 5 attempts with progressive timeout backoff (5s/10s/15s/20s/30s) tolerate
+    # Cloud Run cold starts; only exhausting all of them marks unreachable.
+    assert route.call_count == 5
 
 
 @respx.mock
@@ -132,7 +133,7 @@ async def test_cold_start_recovers_on_attempt_two() -> None:
     """Cloud Run cold start: 1st POST times out (container booting), 2nd POST succeeds.
 
     Regression: the previous 5s x 2 budget false-positived UNREACHABLE on
-    healthy testbenches whose first POST after idle exceeded 5s. The 3-attempt
+    healthy testbenches whose first POST after idle exceeded 5s. The
     progressive-backoff budget must recover cleanly on attempt 2 without the
     operator needing to retry the whole scan.
     """
@@ -161,6 +162,27 @@ async def test_cold_start_recovers_on_attempt_three() -> None:
     reachable = await _endpoint_reachability_preflight(ENDPOINT)
     assert reachable is True
     assert route.call_count == 3
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_very_slow_cold_start_recovers_on_attempt_five() -> None:
+    """The extended budget's whole point: a target that stalls through the
+    first FOUR attempts (a heavy cold boot + LLM warm-up) still recovers on the
+    5th rather than false-positiving UNREACHABLE. The pre-bump 3-attempt budget
+    would have given up here."""
+    route = respx.post(ENDPOINT).mock(
+        side_effect=[
+            httpx.ReadTimeout("booting 1"),
+            httpx.ReadTimeout("booting 2"),
+            httpx.ReadTimeout("booting 3"),
+            httpx.ConnectTimeout("booting 4"),
+            httpx.Response(200, json={"output": {"text": "pong"}}),
+        ]
+    )
+    reachable = await _endpoint_reachability_preflight(ENDPOINT)
+    assert reachable is True
+    assert route.call_count == 5
 
 
 # --------------------------------------------------------------------------- #

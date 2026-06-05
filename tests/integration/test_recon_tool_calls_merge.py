@@ -83,3 +83,114 @@ async def test_recon_or_merges_structured_tool_calls_into_declared_tools(
     declared_lower = {n.lower() for n in fp.declared_tools}
     assert "kb_search" in declared_lower
     assert "open_ticket" in declared_lower
+
+
+async def test_recon_tier1_structured_tool_survives_when_profile_omits_it(
+    tmp_path: Any,
+) -> None:
+    """3-tier OR with Tier-1 wins: a structured tool_call name must survive into
+    ``declared_tools`` even when the Tier-2 schema-extraction profile omits it.
+
+    The profiler stub returns a profile naming only ``refund_payment``; the
+    adapter fired a structured ``kb_search`` block. The final merge must keep
+    BOTH — the Tier-2 list is canonical but the Tier-1 floor is OR-preserved.
+    """
+    import json
+
+    profile_json = json.dumps(
+        {
+            "inferred_goal": "help customers",
+            "domain": "support",
+            "sensitive_actions": [],
+            "declared_guardrails": [],
+            "has_tools": True,
+            "has_memory": False,
+            "is_multi_agent": False,
+            "external_systems": False,
+            "cross_session_data": False,
+            "declared_tools": ["refund_payment"],
+            "confidence": 0.8,
+        }
+    )
+
+    class _OneToolHttpAdapter(HttpAdapter):
+        def __init__(self) -> None:
+            super().__init__("https://x.example", shape="openai", model="gpt-4o-mini")
+            self._fingerprint = TargetFingerprint(mode="http", ref="one-tool")
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:  # type: ignore[override]
+            _ = (prompt, session)
+            self._last_response = HttpAdapterLastResponse(
+                text="Done.",
+                tool_calls=(HttpAdapterToolCall(name="kb_search", arguments={"q": "x"}),),
+                raw=None,
+            )
+            return "Done."
+
+    adapter = _OneToolHttpAdapter()
+    memory = SharedMemory("scan-tier1-wins", root_dir=tmp_path)
+    # The profiler extraction matches any prompt; declared_tools=["refund_payment"].
+    agent = ReconAgent(attacker_llm=StubLLM(default=profile_json), model="stub", audit_rounds=0)
+    try:
+        await agent.run(adapter, memory)
+    finally:
+        await adapter.aclose()
+    fp = memory.target_fingerprint()
+    assert fp is not None
+    declared_lower = {n.lower() for n in fp.declared_tools}
+    # Tier-2 canonical name present...
+    assert "refund_payment" in declared_lower
+    # ...AND the Tier-1 structured tool the profile never saw is OR-preserved.
+    assert "kb_search" in declared_lower
+
+
+async def test_recon_audit_build_surfaces_deep_fields_and_coverage(
+    tmp_path: Any,
+) -> None:
+    """The black-box audit fingerprint build threads the new evidence-grounded
+    profile fields onto the fingerprint AND records the capability-audit
+    coverage ledger + probe count.
+    """
+    import json
+
+    profile_json = json.dumps(
+        {
+            "inferred_goal": "help customers",
+            "domain": "support",
+            "sensitive_actions": ["refund_payment"],
+            "declared_guardrails": [],
+            "has_tools": True,
+            "has_memory": False,
+            "is_multi_agent": False,
+            "external_systems": False,
+            "cross_session_data": False,
+            "declared_tools": ["refund_payment"],
+            "confidence": 0.8,
+            "guardrail_posture": "weak",
+            "requires_confirmation": False,
+            "data_exposure": ["returns balances without verification"],
+            "behavioral_flags": ["no refusals observed"],
+            "touches_pii": True,
+            "tool_descriptions": {"refund_payment": "issue a refund"},
+        }
+    )
+    adapter = _ProseOnlyToolHttpAdapter()
+    memory = SharedMemory("scan-deep-recon", root_dir=tmp_path)
+    agent = ReconAgent(attacker_llm=StubLLM(default=profile_json), model="stub", audit_rounds=0)
+    try:
+        await agent.run(adapter, memory)
+    finally:
+        await adapter.aclose()
+    fp = memory.target_fingerprint()
+    assert fp is not None
+    # Deep profile fields threaded onto the fingerprint.
+    assert fp.guardrail_posture == "weak"
+    assert fp.requires_confirmation is False
+    assert fp.data_exposure == ["returns balances without verification"]
+    assert fp.behavioral_flags == ["no refusals observed"]
+    assert fp.touches_pii is True
+    assert fp.tool_descriptions == {"refund_payment": "issue a refund"}
+    # Coverage ledger + probe count came from the CapabilityAuditResult.
+    assert isinstance(fp.recon_coverage, dict)
+    assert fp.recon_coverage  # at least the seed-spine bands were marked
+    assert fp.recon_probe_count > 0

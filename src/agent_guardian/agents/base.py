@@ -363,6 +363,37 @@ def _log_preview(text: str | None, cap: int = _LOG_PREVIEW_CAP) -> str:
     return f"{flat[:cap]}…[+{len(flat) - cap} chars]"
 
 
+def _build_recon_brief(fingerprint: TargetFingerprint) -> str:
+    """Compact single-paragraph brief of the recon agent's behavioural intel.
+
+    Folds the evidence-grounded recon signals (guardrail posture, confirmation
+    requirement, observed data exposure, behavioural flags, sensitive actions)
+    into one sentence the attacker strategies can read. Returns ``""`` when
+    recon established none of them, so the goal / surface_notes stay unchanged
+    on a heuristic-only fingerprint. Defensive against older fingerprints whose
+    fields are absent — ``getattr`` keeps it working before the model is
+    re-validated.
+    """
+    parts: list[str] = []
+    posture = getattr(fingerprint, "guardrail_posture", None)
+    if posture:
+        parts.append(f"guardrail posture {posture}")
+    requires_confirmation = getattr(fingerprint, "requires_confirmation", None)
+    if requires_confirmation is False:
+        parts.append("sensitive actions require NO confirmation")
+    elif requires_confirmation is True:
+        parts.append("sensitive actions require confirmation")
+    data_exposure = getattr(fingerprint, "data_exposure", None) or []
+    if data_exposure:
+        parts.append("observed data exposure: " + "; ".join(data_exposure))
+    behavioral_flags = getattr(fingerprint, "behavioral_flags", None) or []
+    if behavioral_flags:
+        parts.append("behaviour: " + "; ".join(behavioral_flags))
+    if fingerprint.sensitive_actions:
+        parts.append("sensitive actions: " + ", ".join(fingerprint.sensitive_actions))
+    return ". ".join(parts)
+
+
 class AsiAgent(ABC):
     """Base class for the 10 ASI-aligned specialist agents (PRD §3).
 
@@ -876,6 +907,20 @@ class AsiAgent(ABC):
         goal = f"Compromise the target via {self.asi_category.value}"
         if fingerprint.declared_tools:
             goal = f"{goal} — target exposes tools: {', '.join(fingerprint.declared_tools)}"
+        # Deeper recon intel — fold the evidence-grounded brief (guardrail
+        # posture, confirmation requirement, observed data exposure,
+        # behavioural flags, sensitive actions) into BOTH the goal string and
+        # the surface_notes so every attacker strategy — even ones that only
+        # read ``ctx.goal`` — receives the richer behavioural picture. Compact,
+        # single-paragraph; only the parts recon actually established appear.
+        recon_brief = _build_recon_brief(fingerprint)
+        if recon_brief:
+            goal = f"{goal} — recon: {recon_brief}"
+        surface_notes = (
+            f"{fingerprint.notes} | recon: {recon_brief}"
+            if (fingerprint.notes and recon_brief)
+            else (recon_brief or fingerprint.notes)
+        )
         ctx = StrategyContext(
             attacker_llm=self.attacker_llm,
             attacker_model=self.attacker_model,
@@ -887,7 +932,7 @@ class AsiAgent(ABC):
             attack_specialization=getattr(self, "attack_specialization", ""),
             declared_tools=list(fingerprint.declared_tools),
             declared_memory_keys=list(fingerprint.declared_memory_keys),
-            surface_notes=fingerprint.notes,
+            surface_notes=surface_notes,
             enable_pretext=getattr(self, "_enable_pretext", False),
             enable_indirect=getattr(self, "_enable_indirect", False),
         )

@@ -101,17 +101,24 @@ async def _classify_endpoint_health(
        the spurious ``422 Unprocessable Entity`` that FastAPI returns when the
        endpoint declares a required body model and we POST an empty payload.
 
-    Retry/timeout behavior is unchanged from the legacy probe: 3 attempts with
-    progressive per-attempt timeouts (5s, 10s, 15s; ≤30s total worst-case) to
-    absorb Cloud Run / Lambda / Knative cold starts. Transport faults
-    (connect/timeout) are retried; the FIRST HTTP response (any status) ends
-    the loop and is classified — a 4xx/5xx is the target's answer, not a
-    reason to keep retrying.
+    Retry/timeout behavior: 5 attempts with progressive per-attempt timeouts
+    (5s, 10s, 15s, 20s, 30s; ≤80s total worst-case) to absorb a cold
+    Cloud Run / Lambda / Knative scale-to-zero target whose first request must
+    boot the container (and often a heavy LLM/agent stack) before it can reply.
+    The escalating schedule doubles as a warm-up: each attempt re-pings the
+    target, so a container that was asleep is usually awake and answering by a
+    later attempt. Transport faults (connect/timeout) are retried; the FIRST
+    HTTP response (any status) ends the loop and is classified — a 4xx/5xx is
+    the target's answer, not a reason to keep retrying. A genuinely-down host
+    (connection refused / DNS failure) raises ``ConnectError`` immediately on
+    each attempt, so the extra attempts cost ~nothing there — only a target
+    that ACCEPTS the connection then stalls (the cold-start case) spends the
+    full budget, which is exactly when we want to wait.
     """
     import httpx
 
     body: dict[str, Any] = sample_body if sample_body is not None else {"input": "ping"}
-    per_attempt_timeouts = (5.0, 10.0, 15.0)
+    per_attempt_timeouts = (5.0, 10.0, 15.0, 20.0, 30.0)
     last_exc: Exception | None = None
     for attempt, secs in enumerate(per_attempt_timeouts):
         async with httpx.AsyncClient(timeout=httpx.Timeout(secs)) as client:

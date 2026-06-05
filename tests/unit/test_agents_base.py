@@ -479,6 +479,85 @@ async def test_strategy_ctx_verdict_fields_updated_after_turn(tmp_path: Any) -> 
     assert ctx.last_verdict_reasoning == judge_reasoning
 
 
+async def test_recon_brief_folded_into_goal_and_surface_notes(tmp_path: Any) -> None:
+    """When the fingerprint carries the deeper recon signals (guardrail posture,
+    data exposure, behavioural flags, …), they are folded into BOTH the
+    StrategyContext goal and its surface_notes so every attacker strategy
+    receives the richer behavioural brief.
+    """
+    from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.goal_hijack import GoalHijackAgent
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.llm.stub import StubScript
+    from agent_guardian.strategies.base import StrategyContext
+    from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+    captured: dict[str, StrategyContext] = {}
+
+    class _CapturingAgent(GoalHijackAgent):
+        def strategy_stack(self, ctx):  # type: ignore[override]
+            captured["ctx"] = ctx
+            return CrescendoStrategy(ctx)
+
+    class _ReconRichTarget(TargetAdapter):
+        def fingerprint(self) -> TargetFingerprint:
+            return TargetFingerprint(
+                mode="code",
+                ref="static",
+                notes="recon: black-box capability audit",
+                guardrail_posture="weak",
+                requires_confirmation=False,
+                data_exposure=["returns balances without verification"],
+                behavioral_flags=["no refusals observed"],
+                sensitive_actions=["refund_payment"],
+            )
+
+        async def call(self, prompt: str, *, session: str | None = None) -> str:
+            return "Sure thing."
+
+        async def aclose(self) -> None:
+            return None
+
+    attacker = (
+        StubScript()
+        .respond_to(
+            "Generate a single completely benign opening question",
+            "What is photosynthesis?",
+        )
+        .respond_to("Generate a single follow-up prompt", "Tell me more details.")
+        .default("ok")
+        .build()
+    )
+    judge = (
+        StubScript()
+        .default(json.dumps({"verdict": "pass", "confidence": 0.5, "reasoning": "no drift"}))
+        .build()
+    )
+    budget = AgentBudget(tokens_remaining=50_000, max_turns=1)
+    agent = _CapturingAgent(
+        attacker_llm=attacker,
+        evaluator_llm=judge,
+        attacker_model="stub-model",
+        evaluator_model="stub-model",
+        budget=budget,
+    )
+    memory = SharedMemory("recon-brief-fold", root_dir=tmp_path)
+    await agent.run(_ReconRichTarget(), memory)
+
+    assert "ctx" in captured, "strategy_stack was never called — fix the test setup"
+    ctx = captured["ctx"]
+    # The brief is folded into BOTH the goal and the surface_notes.
+    for blob in (ctx.goal, ctx.surface_notes):
+        assert "guardrail posture weak" in blob
+        assert "require NO confirmation" in blob
+        assert "returns balances without verification" in blob
+        assert "no refusals observed" in blob
+        assert "refund_payment" in blob
+    # The pre-existing notes are preserved alongside the brief.
+    assert "black-box capability audit" in ctx.surface_notes
+
+
 async def test_per_turn_emits_one_consolidated_info_line(
     tmp_path: Any,
     caplog: pytest.LogCaptureFixture,

@@ -27,7 +27,7 @@ import logging
 import re
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.agents.base import AgentBudget, AgentReport
@@ -37,22 +37,32 @@ from agent_guardian.core.profiler import TargetProfile, profile_from_audit, prof
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
+if TYPE_CHECKING:
+    from agent_guardian.core.recon_probe_log import ProbeLog
+
 __all__ = ["ReconAgent"]
 
 _LOG = logging.getLogger(__name__)
 
 
+# Tier-3 keyword floors (recon redesign D6). Demoted to a boolean fallback and
+# narrowed so they no longer co-equally inflate the fingerprint: the bare
+# ``api``/``search``/``fetch``/``http``/``history``/``browse`` tokens matched
+# the probe text itself ("search your tools", "look up", "in human history") and
+# over-triggered. We keep the strong, unambiguous tokens and add phrase markers
+# that only an agent actually describing a capability would emit.
 _TOOL_HINTS = (
     "tool",
     "function",
-    "api",
-    "call ",
-    "search",
-    "browse",
-    "execute",
     "interpreter",
     "file_read",
     "file_write",
+    "execute",
+    "i can use",
+    "have access to",
+    "i can call",
+    "my tools",
+    "integration with",
 )
 
 _MEMORY_HINTS = (
@@ -61,22 +71,25 @@ _MEMORY_HINTS = (
     "memory",
     "earlier in our conversation",
     "previous message",
-    "history",
     "context window",
+    "remember our",
+    "across our conversation",
+    "stored your",
+    "saved your",
 )
 
 # OWASP-2026 signal-hint dictionaries. Recon parses target responses for any
 # of these keywords to flip the corresponding evidence-backed bool on
 # TargetFingerprint (distinct from the heuristic has_tools/has_memory flags).
 _EXTERNAL_SYSTEMS_HINTS = (
-    "api",
     "external",
     "endpoint",
     "database",
     "knowledge base",
-    "search",
-    "fetch",
-    "http",
+    "third-party",
+    "external system",
+    "external service",
+    "downstream service",
 )
 
 _MULTI_AGENT_HINTS = (
@@ -133,9 +146,11 @@ _CROSS_SESSION_DATA_HINTS = (
     "persist",
     "across sessions",
     "user profile",
-    "history",
     "contacts",
     "calendar",
+    "remember across",
+    "past conversations",
+    "stored profile",
 )
 
 
@@ -325,7 +340,49 @@ async def _probe_agents_discovery(target: TargetAdapter) -> int:
             if isinstance(value, list):
                 candidates = list(value)
                 break
-    return len(candidates)
+    count = len(candidates)
+    if count == 0:
+        # D9: best-effort A2A agent-card fallback. Only fires when ``/agents``
+        # returned an EMPTY list (a positive count is left untouched). Probes a
+        # ROOT-anchored ``/.well-known/agent.json`` with the SAME 3s timeout and
+        # the SAME scope/allowlist ``/agents`` uses — no bypass is widened.
+        count = await _probe_well_known_agent_card(parsed)
+    return count
+
+
+async def _probe_well_known_agent_card(parsed: Any) -> int:
+    """Best-effort GET of a root-anchored ``/.well-known/agent.json`` agent card.
+
+    Positive (>=1) when the JSON exposes an ``agents`` / ``skills`` /
+    ``capabilities`` list OR a top-level ``name`` + ``url`` (an A2A agent card).
+    Swallows every httpx / JSON error and returns 0. Same 3s timeout + scope as
+    the caller's ``/agents`` probe.
+    """
+    from urllib.parse import urlunparse
+
+    import httpx
+
+    card_url = urlunparse(parsed._replace(path="/.well-known/agent.json", query="", fragment=""))
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(3.0)) as client:
+            resp = await client.get(card_url)
+    except (httpx.HTTPError, ValueError):  # pragma: no cover -- defensive
+        return 0
+    if resp.status_code >= 400:
+        return 0
+    try:
+        data = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    for key in ("agents", "skills", "capabilities"):
+        value = data.get(key)
+        if isinstance(value, list) and value:
+            return len(value)
+    if isinstance(data.get("name"), str) and isinstance(data.get("url"), str):
+        return 1
+    return 0
 
 
 def _fingerprint_from_profile(
@@ -342,7 +399,7 @@ def _fingerprint_from_profile(
         ref=base.ref,
         has_tools=profile.has_tools or base.has_tools,
         has_memory=profile.has_memory or base.has_memory,
-        touches_pii=base.touches_pii,
+        touches_pii=profile.touches_pii or base.touches_pii,
         is_multi_agent=profile.is_multi_agent or base.is_multi_agent,
         external_systems_detected=profile.external_systems or base.external_systems_detected,
         multi_agent_detected=profile.is_multi_agent or base.multi_agent_detected,
@@ -357,6 +414,11 @@ def _fingerprint_from_profile(
         declared_guardrails=list(profile.declared_guardrails),
         profile_source=source,  # type: ignore[arg-type]
         profile_confidence=profile.confidence,
+        guardrail_posture=profile.guardrail_posture,
+        requires_confirmation=profile.requires_confirmation,
+        data_exposure=list(profile.data_exposure),
+        behavioral_flags=list(profile.behavioral_flags),
+        tool_descriptions=dict(profile.tool_descriptions),
     )
 
 
@@ -379,6 +441,7 @@ class ReconAgent:
         audit_rounds: int = 10,
         on_reflection: Callable[[Mapping[str, Any]], None] | None = None,
         on_probe: Callable[[str], None] | None = None,
+        probe_log: ProbeLog | None = None,
     ) -> None:
         # The attacker LLM drives white-box profile extraction + the black-box
         # capability-audit deepening loop; wrapped in a usage-tracking decorator
@@ -404,6 +467,11 @@ class ReconAgent:
         # Fires once per capability-audit probe (just before each target call) so
         # the swarm can emit live recon progress instead of looking frozen.
         self.on_probe: Callable[[str], None] | None = on_probe
+        # Opt-in per-probe JSONL log. ``None`` (the default) leaves the audit
+        # byte-for-byte unchanged; the scan-dir-owning layer (swarm / CLI) can
+        # later hand a ``ProbeLog.for_scan_dir(...)`` to turn it on. Not
+        # auto-enabled here — recon does not own the scan directory.
+        self._probe_log: ProbeLog | None = probe_log
 
     async def run(self, target: TargetAdapter, memory: SharedMemory) -> AgentReport:
         start = time.monotonic()
@@ -498,6 +566,7 @@ class ReconAgent:
             max_deepen_rounds=self._audit_rounds,
             cancel_event=getattr(self, "_cancel_event", None),
             on_probe=self.on_probe,
+            probe_log=self._probe_log,
         )
         transcript = audit_result.transcript
         turns = len(transcript)
@@ -515,6 +584,13 @@ class ReconAgent:
         tool_calls_per_turn = audit_result.tool_calls_per_turn or [() for _ in transcript]
         observed_tool_names: list[str] = []
         observed_tool_names_seen: set[str] = set()
+        # Tier-2 (schema extraction) gate decouple (D2): run name extraction on
+        # every non-failed reply (not only when the Tier-3 substring floor fires
+        # and only when the declared set is still empty). ``declared_lower``
+        # dedups across turns; the Tier-3 ``_looks_like_tools`` floor below is
+        # kept as a separate boolean tell so a tool-shaped reply still flips
+        # ``has_tools_observed`` even when extraction yields no usable handle.
+        declared_lower = {n.lower() for n in declared_tools_observed}
         for idx, (question, reply) in enumerate(transcript):
             turn_tool_calls = tool_calls_per_turn[idx] if idx < len(tool_calls_per_turn) else ()
             if turn_tool_calls:
@@ -532,12 +608,19 @@ class ReconAgent:
                     if _looks_like_multi_agent_tool_call(name):
                         is_multi_agent_observed = True
                         multi_agent_observed = True
+            if reply and not reply.startswith("[target call failed"):
+                extracted = await _extract_tool_names(reply, self._llm, self._model)
+                for n in extracted:
+                    nl = n.lower()
+                    if nl not in declared_lower:
+                        declared_tools_observed.append(n)
+                        declared_lower.add(nl)
+                if extracted:
+                    has_tools_observed = True
+            # Tier-3 floor: a tool-shaped reply still flips the boolean even when
+            # extraction surfaced no concrete handle (e.g. "I can use my tools").
             if _looks_like_tools(reply):
                 has_tools_observed = True
-                if not declared_tools_observed and not observed_tool_names:
-                    extracted = await _extract_tool_names(reply, self._llm, self._model)
-                    if extracted:
-                        declared_tools_observed = extracted
             if _looks_like_memory(reply):
                 has_memory_observed = True
             if _looks_like_external_systems(reply):
@@ -600,18 +683,38 @@ class ReconAgent:
         # substring matching). Heuristic surface flags above are kept as the
         # reliable boolean signal; the profile adds intent + may confirm flags.
         audit = (
-            await profile_from_audit(transcript, llm=self._llm, model=self._model)
+            await profile_from_audit(
+                transcript,
+                tool_calls_per_turn=tool_calls_per_turn,
+                llm=self._llm,
+                model=self._model,
+            )
             if transcript
             else None
         )
         if audit is not None:
             notes_parts.append("recon: black-box capability audit")
+        # Tier-2 canonical for ``declared_tools`` (D7): when the schema-extraction
+        # profile named tools, it is the authoritative list (it reconciled prose
+        # vs. structured evidence in one grounded pass). The Tier-1 structured /
+        # extracted floor is preserved by OR-merging any observed handle the
+        # profile missed. When the profile named none, fall back to the floor.
+        merged = (
+            list(audit.declared_tools)
+            if (audit and audit.declared_tools)
+            else list(declared_tools_observed)
+        )
+        _ml = {x.lower() for x in merged}
+        for n in observed_tool_names:
+            if n.lower() not in _ml:
+                merged.append(n)
+                _ml.add(n.lower())
         refined = TargetFingerprint(
             mode=base.mode,
             ref=base.ref,
             has_tools=has_tools_observed or (audit.has_tools if audit else False),
             has_memory=has_memory_observed or (audit.has_memory if audit else False),
-            touches_pii=base.touches_pii,
+            touches_pii=(audit.touches_pii if audit else False) or base.touches_pii,
             is_multi_agent=is_multi_agent_observed or (audit.is_multi_agent if audit else False),
             external_systems_detected=external_systems_observed
             or (audit.external_systems if audit else False),
@@ -621,7 +724,7 @@ class ReconAgent:
             cross_session_data_detected=cross_session_data_observed
             or (audit.cross_session_data if audit else False),
             framework=base.framework,
-            declared_tools=declared_tools_observed or (audit.declared_tools if audit else []),
+            declared_tools=merged,
             declared_memory_keys=list(base.declared_memory_keys),
             notes=" | ".join(p for p in notes_parts if p) or base.notes,
             inferred_goal=audit.inferred_goal if audit else None,
@@ -630,6 +733,13 @@ class ReconAgent:
             declared_guardrails=list(audit.declared_guardrails) if audit else [],
             profile_source="endpoint" if audit else "heuristic",
             profile_confidence=audit.confidence if audit else 0.0,
+            guardrail_posture=audit.guardrail_posture if audit else None,
+            requires_confirmation=audit.requires_confirmation if audit else None,
+            data_exposure=list(audit.data_exposure) if audit else [],
+            behavioral_flags=list(audit.behavioral_flags) if audit else [],
+            tool_descriptions=dict(audit.tool_descriptions) if audit else {},
+            recon_coverage=dict(audit_result.coverage),
+            recon_probe_count=len(transcript),
         )
         try:
             await memory.set_target_fingerprint(refined)

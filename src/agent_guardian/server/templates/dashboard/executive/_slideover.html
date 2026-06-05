@@ -336,7 +336,7 @@
   <p class="exec-probe__label">Evidence chain</p>
   <p class="exec-probe__evidence">
     <a class="exec-probe__evidence-link"
-       href="/scan/{{ scan_id }}/events{% if ctx.probe_id %}?probe={{ ctx.probe_id }}{% endif %}"
+       href="/scan/{{ scan_id }}/events/view{% if ctx.probe_id %}?probe={{ ctx.probe_id }}{% endif %}"
        target="_blank"
        rel="noopener">View JSONL events for this {{ _kind }}</a>
   </p>

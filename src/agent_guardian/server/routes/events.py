@@ -1,17 +1,30 @@
-"""GET /scan/{id}/events — SSE event stream."""
+"""GET /scan/{id}/events — SSE event stream + /events/view rendered JSONL."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+import json
+import logging
+from typing import TYPE_CHECKING, Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from agent_guardian.server.auth import require_dashboard_auth
-from agent_guardian.server.routes._deps import get_scan_store
+from agent_guardian.server.routes._deps import get_scan_store, get_templates
 from agent_guardian.server.sse import stream_scan_events
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["router"]
 
+_LOG = logging.getLogger(__name__)
+
 router = APIRouter(dependencies=[Depends(require_dashboard_auth)])
+
+# Cap the rendered-view page so a long, noisy scan can't build a multi-MB
+# HTML document. The SSE stream (above) remains the unbounded source of truth.
+_MAX_VIEW_RECORDS = 500
 
 
 @router.get("/scan/{scan_id}/events")
@@ -43,3 +56,75 @@ async def events_stream(request: Request, scan_id: str) -> StreamingResponse:
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+@router.get("/scan/{scan_id}/events/view", response_class=HTMLResponse)
+async def events_view(
+    request: Request,
+    scan_id: str,
+    probe: str | None = Query(default=None),
+) -> HTMLResponse:
+    """Render the scan's JSONL records as pretty-printed, highlighted JSON.
+
+    This is what the slideover's "View JSONL events for this probe" link opens.
+    The bare ``/events`` endpoint above is a ``text/event-stream`` SSE source —
+    opening it in a browser tab dumps the raw replay, which is unreadable. This
+    route instead reads the on-disk JSONL (``events.jsonl`` and, when present,
+    the recon probe log ``recon_probes.jsonl``), optionally filters to a single
+    ``probe`` id, and renders each record formatted in ``events_view.html``.
+    """
+    store = get_scan_store(request)
+    templates = get_templates(request)
+    scan_dir = store.scan_dir(scan_id)
+    if not store.is_running(scan_id) and not scan_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
+    records = _collect_jsonl_records(scan_dir, probe)
+    return templates.TemplateResponse(
+        request,
+        "events_view.html",
+        {"scan_id": scan_id, "probe": probe, "records": records},
+    )
+
+
+def _collect_jsonl_records(scan_dir: Path, probe: str | None) -> list[dict[str, Any]]:
+    """Read the scan's JSONL files and pretty-print each record for the view.
+
+    Reads ``events.jsonl`` then ``recon_probes.jsonl`` (the latter only exists
+    when the opt-in recon probe log was enabled). When ``probe`` is set, only
+    records whose raw line references that id are kept — a substring match is
+    robust across the id's several nested positions (``probe_id`` /
+    ``seed_id`` / payload fields). Defensive: a missing or corrupt file yields
+    no rows and never raises; output is capped at :data:`_MAX_VIEW_RECORDS`.
+    """
+    out: list[dict[str, Any]] = []
+    for fname in ("events.jsonl", "recon_probes.jsonl"):
+        try:
+            raw = (scan_dir / fname).read_text(encoding="utf-8")
+        except OSError as exc:
+            _LOG.debug("events_view: %s not readable (%s) -- skipping", fname, exc)
+            continue
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if not stripped or (probe and probe not in stripped):
+                continue
+            try:
+                rec = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError) as exc:
+                _LOG.debug("events_view: skipping corrupt %s line (%s)", fname, exc)
+                continue
+            kind = "event"
+            seq: Any = None
+            if isinstance(rec, dict):
+                kind = str(rec.get("kind") or rec.get("intent") or "event")
+                seq = rec.get("seq")
+            out.append(
+                {
+                    "source": fname,
+                    "kind": kind,
+                    "seq": seq,
+                    "pretty": json.dumps(rec, indent=2, ensure_ascii=False, default=str),
+                }
+            )
+            if len(out) >= _MAX_VIEW_RECORDS:
+                return out
+    return out

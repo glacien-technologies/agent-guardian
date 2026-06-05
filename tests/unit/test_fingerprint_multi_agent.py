@@ -37,8 +37,13 @@ from agent_guardian.adapters.http import (
 )
 from agent_guardian.agents.a2a import A2AAgent
 from agent_guardian.agents.memory_poison import MemoryPoisonAgent
-from agent_guardian.agents.recon import ReconAgent, _looks_like_multi_agent_tool_call
+from agent_guardian.agents.recon import (
+    ReconAgent,
+    _fingerprint_from_profile,
+    _looks_like_multi_agent_tool_call,
+)
 from agent_guardian.core.memory import SharedMemory
+from agent_guardian.core.profiler import TargetProfile
 from agent_guardian.llm.stub import StubLLM
 
 # ---------------------------------------------------------------------------
@@ -174,6 +179,73 @@ def test_a2a_agent_is_not_applicable_for_plain_http_target() -> None:
 # ---------------------------------------------------------------------------
 # 3. Pure helper: name-shape detector
 # ---------------------------------------------------------------------------
+
+
+def test_fingerprint_round_trips_deep_recon_fields() -> None:
+    """The new evidence-grounded fields persist + reload through model_dump."""
+    fp = TargetFingerprint(
+        mode="http",
+        ref="https://x.example/chat",
+        guardrail_posture="weak",
+        requires_confirmation=False,
+        data_exposure=["returns balances without verification"],
+        behavioral_flags=["no refusals observed"],
+        touches_pii=True,
+        tool_descriptions={"get_balance": "look up a balance"},
+        recon_coverage={"purpose": "confirmed", "tools": "partial"},
+        recon_probe_count=12,
+    )
+    reloaded = TargetFingerprint.model_validate(fp.model_dump())
+    assert reloaded.guardrail_posture == "weak"
+    assert reloaded.requires_confirmation is False
+    assert reloaded.data_exposure == ["returns balances without verification"]
+    assert reloaded.behavioral_flags == ["no refusals observed"]
+    assert reloaded.touches_pii is True
+    assert reloaded.tool_descriptions == {"get_balance": "look up a balance"}
+    assert reloaded.recon_coverage == {"purpose": "confirmed", "tools": "partial"}
+    assert reloaded.recon_probe_count == 12
+
+
+def test_fingerprint_from_profile_carries_deep_fields() -> None:
+    """The white-box merge copies the new evidence-grounded profile fields."""
+    base = TargetFingerprint(mode="code", ref="m.agent", touches_pii=False)
+    profile = TargetProfile(
+        inferred_goal="refunds",
+        has_tools=True,
+        guardrail_posture="strict",
+        requires_confirmation=True,
+        data_exposure=["leaked an internal id"],
+        behavioral_flags=["refuses firmly"],
+        touches_pii=True,
+        tool_descriptions={"refund": "issue a refund"},
+    )
+    fp = _fingerprint_from_profile(base, profile, source="code")
+    assert fp.guardrail_posture == "strict"
+    assert fp.requires_confirmation is True
+    assert fp.data_exposure == ["leaked an internal id"]
+    assert fp.behavioral_flags == ["refuses firmly"]
+    # touches_pii is OR-ed: profile True wins over base False.
+    assert fp.touches_pii is True
+    assert fp.tool_descriptions == {"refund": "issue a refund"}
+
+
+def test_fingerprint_old_record_without_deep_fields_validates() -> None:
+    """An OLD persisted dict lacking the new keys still validates (defaults)."""
+    old = {
+        "mode": "http",
+        "ref": "https://x.example/chat",
+        "has_tools": True,
+        "declared_tools": ["search"],
+        "inferred_goal": "answer support questions",
+    }
+    fp = TargetFingerprint.model_validate(old)
+    assert fp.guardrail_posture is None
+    assert fp.requires_confirmation is None
+    assert fp.data_exposure == []
+    assert fp.behavioral_flags == []
+    assert fp.tool_descriptions == {}
+    assert fp.recon_coverage == {}
+    assert fp.recon_probe_count == 0
 
 
 @pytest.mark.parametrize(

@@ -173,6 +173,17 @@ class TargetFingerprint(BaseModel):
     declared_guardrails: list[str] = Field(default_factory=list)
     profile_source: Literal["code", "prompt", "framework", "endpoint", "heuristic"] = "heuristic"
     profile_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Deeper evidence-grounded recon signals (additive). Defaults make older
+    # persisted fingerprint records (which lack these keys) parse unchanged.
+    # ``recon_coverage`` / ``recon_probe_count`` carry the capability-audit
+    # ledger so the dashboard can render coverage state + probe volume.
+    guardrail_posture: str | None = None
+    requires_confirmation: bool | None = None
+    data_exposure: list[str] = Field(default_factory=list)
+    behavioral_flags: list[str] = Field(default_factory=list)
+    tool_descriptions: dict[str, str] = Field(default_factory=dict)
+    recon_coverage: dict[str, str] = Field(default_factory=dict)
+    recon_probe_count: int = 0
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
