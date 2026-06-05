@@ -108,6 +108,11 @@ class DetectionEvasionAgent(AsiAgent):
         coverage report. The coverage pass is best-effort — a failure there never
         fails the attack run.
         """
+        # Reset per-run state up front so a reused agent instance never exposes a
+        # prior run's coverage/evasions when THIS run does not populate them
+        # (skipped, no replay items, or no external detector wired).
+        self._last_coverage = None
+        self._last_evasions = []
         report = await super().run(target, memory)
         try:
             coverage = await self._measure_detector_coverage(target, memory)

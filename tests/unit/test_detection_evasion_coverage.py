@@ -189,6 +189,37 @@ async def test_active_evasion_does_not_over_report_when_intent_lost() -> None:
     assert all(o.intent_preserved is False for o in evasions if not o.variant_flagged)
 
 
+async def test_last_state_does_not_leak_across_runs() -> None:
+    """``last_coverage`` / ``last_evasions`` describe the MOST RECENT run, so a
+    reused agent instance must not expose a prior run's values when the current
+    run does not populate them (Codex review)."""
+    from agent_guardian.core.detector_replay import function_detector
+
+    agent = _agent()
+    # Run 1: external detector wired -> populates both coverage and evasions.
+    agent._detector_replay = DetectionEvasionAgent.build_replay(  # type: ignore[attr-defined]
+        [function_detector("ext", lambda req, resp: "transfer" in req.lower())]
+    )
+    await agent.run(
+        _KeywordGuardrailTarget(), SharedMemory("leak-1", root_dir=pathlib.Path(tempfile.mkdtemp()))
+    )
+    cov1 = agent.last_coverage
+    assert cov1 is not None
+    assert agent.last_evasions  # external detector -> active-evasion outcomes
+
+    # Run 2 on the SAME agent, but WITHOUT an external detector.
+    agent._detector_replay = None
+    await agent.run(
+        _KeywordGuardrailTarget(), SharedMemory("leak-2", root_dir=pathlib.Path(tempfile.mkdtemp()))
+    )
+    # The active-evasion list must RESET — this run had no external detector, so
+    # it must not still expose run 1's outcomes.
+    assert agent.last_evasions == []
+    # Coverage is recomputed for THIS run (a fresh object, not the stale one).
+    assert agent.last_coverage is not None
+    assert agent.last_coverage is not cov1
+
+
 async def test_coverage_pass_adds_no_extra_target_calls() -> None:
     """The coverage pass classifies STORED responses — it must not re-probe the
     target (no calls beyond those the attack loop already made)."""
