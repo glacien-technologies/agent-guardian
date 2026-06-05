@@ -1209,6 +1209,15 @@ class AsiAgent(ABC):
         # for this run so we don't churn JSONL when a strategy revisits the
         # same seed.
         seeds_announced: set[str] = set()
+        # Provenance backfill — the last concrete ``seed_id`` seen on this run.
+        # A refine turn (PAIR/TAP/Crescendo refinement) or a MAD-MAX turn that
+        # switched to a freshly-picked child whose ``_parent_probe_id`` is still
+        # ``None``, or a synthesized verify turn, can emit a NextPrompt with NO
+        # ``seed_id``. Such a turn is always a descendant of its thread's seed,
+        # so we stamp it with the most recent seen id. This keeps EVERY persisted
+        # reflection (and coverage's ``probes_attempted``) attributable, instead
+        # of dropping provenance the moment a strategy stops re-seeding.
+        last_seed_id: str | None = None
         # SSE Phase 2 Step 2.3 — current probe id for the agent_progress
         # producer. Starts as ``None`` (first turn has no prior probe);
         # updated after each ``strategy.generate_next`` result so the next
@@ -1589,6 +1598,15 @@ class AsiAgent(ABC):
             strat_meta = dict(result.metadata or {})
             seed_id_val = strat_meta.get("seed_id")
             seed_id = str(seed_id_val) if seed_id_val else None
+            # Provenance backfill — see ``last_seed_id`` above. An explicit
+            # seed_id refreshes the thread's provenance; a turn that dropped it
+            # (refine / child-switch / verify) inherits the last seen id so the
+            # reflection + coverage records stay attributable.
+            if seed_id:
+                last_seed_id = seed_id
+            elif last_seed_id:
+                seed_id = last_seed_id
+                strat_meta["seed_id"] = last_seed_id
             attacker_refused_val = bool(strat_meta.get("attacker_refused", False))
             attacker_refusal_text_val = (
                 str(strat_meta.get("attacker_refusal_text", "")) if attacker_refused_val else ""
@@ -1834,6 +1852,18 @@ class AsiAgent(ABC):
                 )
             else:
                 pending_verify_probe = None
+
+            # Thread the latest target response into the NEXT
+            # ``strategy.generate_next`` call. Without this, ``response`` stays
+            # pinned at its ``None`` initialiser and every multi-turn strategy
+            # (PAIR/TAP/Crescendo/MAD-MAX) sees ``target_response is None`` and
+            # re-takes its first-turn SEED branch — re-emitting the identical
+            # seed prompt every turn (the "same prompt 5x, all DEFENDED" bug)
+            # instead of refining off what the target actually said. A verify
+            # turn updates it too, so the drill-down's response feeds the next
+            # attack turn. (Egress-refused turns already set ``response = None``
+            # and ``continue`` above — they never reach here.)
+            response = target_response
 
         duration = time.monotonic() - start
         tokens = self._snapshot_tokens()
