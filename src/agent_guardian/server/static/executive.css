@@ -711,6 +711,13 @@ body.exec-body {
   border-radius: var(--exec-radius);
   text-align: center;
 }
+/* Empty-state placeholder row inside the always-rendered probes table.
+ * Reuses .exec-empty (centered, muted, italic) but drops the radius/background
+ * so it reads as a plain spanning table cell rather than a detached card. */
+.exec-probes-table__empty-row td.exec-empty {
+  background: none;
+  border-radius: 0;
+}
 
 /* ============================================================
  * 6. (removed) AIVSS hero card — QA-042 (2026-06-03)

@@ -45,8 +45,22 @@
   /* ---- Minimal, safe inline Markdown ----------------------------------- */
   // Emits text + element nodes into `parent`. Handles inline code, bold,
   // italic, and http(s) links. Unmatched markup is left as literal text.
+  //
+  // Ordering note (lenient emphasis): emphasis (`**…**`/`__…__`/`*…*`/`_…_`)
+  // is detected FIRST at a level that can SPAN an inline-code token — so a
+  // bold/italic run that wraps a `code` span (e.g. ``** `tool` **``) renders
+  // as bold-containing-code instead of leaving the `**` stranded. Inner
+  // surrounding whitespace inside the delimiters is tolerated and trimmed
+  // (so ``** word **`` renders bold "word"). The emphasis content is then
+  // recursively rendered (code spans + plain text) inside the <strong>/<em>.
   function renderInline(parent, text) {
-    // Split on inline code first; odd indices are code spans.
+    renderInlineEmphasis(parent, text);
+  }
+
+  // Render inline `code` spans and plain text into `parent`. Used for the
+  // leaf level (no emphasis left to match) — splits on backticks, odd indices
+  // are code spans.
+  function renderInlineCodeAndText(parent, text) {
     var segments = text.split("`");
     for (var s = 0; s < segments.length; s++) {
       if (s % 2 === 1) {
@@ -54,26 +68,30 @@
         code.className = "exec-md__icode";
         code.textContent = segments[s];
         parent.appendChild(code);
-      } else {
-        renderInlineEmphasis(parent, segments[s]);
+      } else if (segments[s]) {
+        parent.appendChild(document.createTextNode(segments[s]));
       }
     }
   }
 
   function renderInlineEmphasis(parent, text) {
-    // Token scanner: links [t](url), bold **t**/__t__, italic *t*/_t_.
-    var re = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*([^*]+)\*\*|__([^_]+)__)|(\*([^*]+)\*|_([^_]+)_)/;
+    // Token scanner. Links are matched first (their text is plain). Emphasis
+    // delimiters allow inner content to contain ANY characters (including
+    // backtick code spans) via a lazy ([\s\S]+?) capture; inner whitespace is
+    // trimmed and the trimmed content is recursively rendered so code spans
+    // inside the emphasis become <code>. Italic uses the same lenient body.
+    var re = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))|(\*\*([\s\S]+?)\*\*|__([\s\S]+?)__)|(\*([\s\S]+?)\*|_([\s\S]+?)_)/;
     var rest = text;
     var guard = 0;
     while (rest && guard < 5000) {
       guard++;
       var m = re.exec(rest);
       if (!m) {
-        parent.appendChild(document.createTextNode(rest));
+        renderInlineCodeAndText(parent, rest);
         break;
       }
       if (m.index > 0) {
-        parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+        renderInlineCodeAndText(parent, rest.slice(0, m.index));
       }
       if (m[1]) {
         // link: m[2]=text, m[3]=href (already constrained to http(s) by regex)
@@ -86,11 +104,12 @@
         parent.appendChild(a);
       } else if (m[4]) {
         var strong = document.createElement("strong");
-        strong.textContent = m[5] || m[6] || "";
+        // Recurse so inner code spans render; trim inner padding whitespace.
+        renderInlineCodeAndText(strong, (m[5] || m[6] || "").trim());
         parent.appendChild(strong);
       } else if (m[7]) {
         var em = document.createElement("em");
-        em.textContent = m[8] || m[9] || "";
+        renderInlineCodeAndText(em, (m[8] || m[9] || "").trim());
         parent.appendChild(em);
       }
       rest = rest.slice(m.index + m[0].length);

@@ -419,7 +419,7 @@ def test_executive_probes_tab_empty_state_when_no_memory_jsonl(
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    assert "No probe attempts recorded yet." in body
+    assert "No probe attempts recorded yet — they appear here as the swarm runs." in body
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +497,7 @@ def test_executive_clean_control_renders_all_4_tabs(client: TestClient, store: S
         assert f'id="tabpanel-{slug}"' in body
     # Locked empty-state copy across the 3 data-driven panes.
     assert "Nothing flagged yet." in body
-    assert "No probe attempts recorded yet." in body
+    assert "No probe attempts recorded yet — they appear here as the swarm runs." in body
     assert "No log events recorded yet." in body
 
 
