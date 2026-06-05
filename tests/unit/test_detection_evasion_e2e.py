@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import random
 import tempfile
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
@@ -94,6 +95,7 @@ async def test_detection_evasion_emits_token_removing_guardrail_evasion() -> Non
             StubScript().respond_to(_COMPLY_MARKER, _EXPLOITED).default(_DEFENDED).build()
         ),
         budget=AgentBudget(tokens_remaining=400_000, max_turns=10),
+        rng=random.Random(1234),  # deterministic mutator draws
     )
     target = _KeywordGuardrailTarget()
     memory = SharedMemory("de-e2e", root_dir=pathlib.Path(tempfile.mkdtemp()))

@@ -53,12 +53,27 @@ async def test_provided_response_is_classified_without_calling_target() -> None:
     assert called is False
 
 
-async def test_empty_or_terse_response_counts_as_blocked() -> None:
+async def test_empty_response_counts_as_blocked() -> None:
     async def send(prompt: str) -> str:
         return ""
 
     det = TargetGuardrailDetector(send)
     assert await det.flags("do the thing", "") is True
+    # Whitespace-only is also a block.
+    assert det._is_refusal("   ") is True  # type: ignore[attr-defined]
+
+
+async def test_terse_non_empty_reply_is_not_a_refusal() -> None:
+    """A short but non-empty compliance like "ok" must NOT be misclassified as a
+    block (Codex review: the old <4-char rule mislabelled terse successes)."""
+    det = TargetGuardrailDetector(lambda _p: _async_str(""))
+    assert det._is_refusal("ok") is False  # type: ignore[attr-defined]
+    assert det._is_refusal("done") is False  # type: ignore[attr-defined]
+    assert det._is_refusal("$5,000 sent") is False  # type: ignore[attr-defined]
+
+
+async def _async_str(s: str) -> str:
+    return s
 
 
 async def test_custom_refusal_classifier_is_honoured() -> None:

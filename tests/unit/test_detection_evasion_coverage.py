@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import random
 import tempfile
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
@@ -85,11 +86,15 @@ class _KeywordGuardrailTarget(TargetAdapter):
         return None
 
 
-def _agent() -> DetectionEvasionAgent:
+def _agent(*, rng_seed: int = 1234) -> DetectionEvasionAgent:
     return DetectionEvasionAgent(
         attacker_llm=StubScript().default("ok").build(),
         evaluator_llm=StubScript().respond_to(_COMPLY, _EXPLOITED).default(_DEFENDED).build(),
         budget=AgentBudget(tokens_remaining=400_000, max_turns=10),
+        # Seed the agent rng so the mutator operator draws are deterministic —
+        # otherwise a degenerate draw (e.g. an identity transform) can make a run
+        # produce no text-changing variant, flaking the evasion assertions.
+        rng=random.Random(rng_seed),
     )
 
 
@@ -142,6 +147,46 @@ async def test_active_evasion_runs_against_wired_external_detector() -> None:
     # The active-evasion pass classifies the variant via the STATIC detector — no
     # extra live-target calls.
     assert target.calls == calls_after_run
+
+
+async def test_active_evasion_does_not_over_report_when_intent_lost() -> None:
+    """A variant that slips past the static detector but DEFANGS the attack must
+    NOT be reported as a successful bypass — the active-evasion pass must consult
+    an intent judge (Codex review). Here the detector is exact-match (so every
+    mutation evades it) and the intent judge says INTENT_LOST, so no outcome may
+    be marked evaded."""
+    from agent_guardian.core.detector_replay import function_detector
+
+    baseline0 = DetectionEvasionAgent._BASELINE_ACTIONS[0]
+    agent = DetectionEvasionAgent(
+        attacker_llm=StubScript().default("ok").build(),
+        evaluator_llm=(
+            StubScript()
+            .respond_to("INTENT-PRESERVATION CHECK", "INTENT_LOST")
+            .respond_to(_COMPLY, _EXPLOITED)
+            .default(_DEFENDED)
+            .build()
+        ),
+        budget=AgentBudget(tokens_remaining=400_000, max_turns=10),
+        rng=random.Random(1234),  # deterministic mutator draws
+    )
+    # Exact-match "monitor": flags only the verbatim baseline, so ANY mutation
+    # evades it — isolating the intent judge as the deciding factor.
+    agent._detector_replay = DetectionEvasionAgent.build_replay(  # type: ignore[attr-defined]
+        [function_detector("ext", lambda req, resp: req.strip() == baseline0)]
+    )
+    target = _KeywordGuardrailTarget()
+    memory = SharedMemory("de-intent", root_dir=pathlib.Path(tempfile.mkdtemp()))
+
+    await agent.run(target, memory)
+
+    evasions = agent.last_evasions
+    assert evasions, "expected active-evasion outcomes for the flagged baseline"
+    # At least one variant slipped past the (exact-match) detector...
+    assert any(o.variant_flagged is False for o in evasions)
+    # ...but with intent judged LOST, NONE may be reported as a real bypass.
+    assert all(not o.evaded for o in evasions)
+    assert all(o.intent_preserved is False for o in evasions if not o.variant_flagged)
 
 
 async def test_coverage_pass_adds_no_extra_target_calls() -> None:

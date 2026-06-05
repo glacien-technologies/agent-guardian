@@ -99,10 +99,31 @@ def test_detection_evasion_applicable_with_guardrail_posture() -> None:
     assert agent.is_applicable(fp) is True
 
 
-def test_detection_evasion_applicable_with_recon_coverage() -> None:
+def test_detection_evasion_applicable_when_recon_confirmed_a_guardrail() -> None:
+    # Recon must have specifically ESTABLISHED the guardrails band (partial or
+    # confirmed) — not merely written a coverage ledger.
     agent = _agent(DetectionEvasionAgent)
-    fp = TargetFingerprint(mode="http", ref="x", recon_coverage={"guardrails": "tested"})
+    fp = TargetFingerprint(mode="http", ref="x", recon_coverage={"guardrails": "confirmed"})
     assert agent.is_applicable(fp) is True
+
+
+def test_detection_evasion_skips_when_coverage_has_no_guardrail_surface() -> None:
+    # Recon ALWAYS writes a six-band coverage ledger, so a non-empty
+    # recon_coverage alone must NOT open the lane. With the guardrails band still
+    # ``unknown`` (recon found no monitor), the agent must skip even though other
+    # bands were confirmed.
+    agent = _agent(DetectionEvasionAgent)
+    fp = TargetFingerprint(
+        mode="http",
+        ref="x",
+        recon_coverage={
+            "purpose": "confirmed",
+            "tools": "confirmed",
+            "guardrails": "unknown",
+            "sensitive": "partial",
+        },
+    )
+    assert agent.is_applicable(fp) is False
 
 
 def test_detection_evasion_applicable_with_wired_detector_replay() -> None:
