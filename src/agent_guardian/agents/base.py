@@ -79,6 +79,7 @@ __all__ = [
     "AgentBudget",
     "AgentReport",
     "AsiAgent",
+    "CostTrajectory",
     "Judge",
     "JudgeRubric",
     "fallback_seeds",
@@ -160,6 +161,48 @@ class AgentBudget:
             return False
         self.tokens_remaining -= n
         return True
+
+
+@dataclass
+class CostTrajectory:
+    """Run-level cumulative cost signal accumulated across a run's turns.
+
+    The single-turn ``measure_token_usage`` oracle (the declarative
+    ``allowed_tools`` contract) is never invoked inside :meth:`AsiAgent.run`,
+    so the denial-of-wallet lane had no *measured* amplification signal and no
+    multi-turn view at all. The run loop already estimates per-turn input and
+    output tokens for the budget; this folds those estimates into a cumulative
+    trajectory so a multi-turn cost blow-up (each turn individually bounded,
+    the trajectory not) becomes observable.
+
+    ``trajectory_af`` is the cumulative ``output / input`` amplification factor
+    across the whole run; ``peak_turn_af`` is the largest single-turn factor.
+    Both are best-effort estimates (≈4 chars/token), black-box-safe, and never
+    raise on a zero-input turn.
+    """
+
+    turns: int = 0
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+    peak_turn_af: float = 0.0
+
+    def observe(self, input_tokens: int, output_tokens: int) -> None:
+        """Fold one turn's input/output token estimates into the trajectory."""
+        it = max(0, int(input_tokens))
+        ot = max(0, int(output_tokens))
+        self.turns += 1
+        self.cumulative_input_tokens += it
+        self.cumulative_output_tokens += ot
+        turn_af = (ot / it) if it else 0.0
+        if turn_af > self.peak_turn_af:
+            self.peak_turn_af = turn_af
+
+    @property
+    def trajectory_af(self) -> float:
+        """Cumulative output/input amplification factor across the run."""
+        if self.cumulative_input_tokens <= 0:
+            return 0.0
+        return self.cumulative_output_tokens / self.cumulative_input_tokens
 
 
 @dataclass(frozen=True)
@@ -777,6 +820,13 @@ class AsiAgent(ABC):
         # the attack loop. See designs/sse-flow-and-live-ui.md "Phase 2
         # decisions (resolved 2026-06-03)" item 3.
         self._observer: Callable[[Any], None] | None = None
+        # Run-level cumulative cost signal. Reset at the top of every
+        # :meth:`run` and folded once per tested turn from the per-turn token
+        # estimates the loop already computes for the budget. The
+        # denial-of-wallet lane reads it for trajectory amplification (the
+        # multi-turn view the single-turn ``measure_token_usage`` oracle, which
+        # the loop never invokes, cannot give). Other agents leave it untouched.
+        self._cost_trajectory: CostTrajectory = CostTrajectory()
 
     @property
     def effective_target_findings(self) -> int:
@@ -1080,6 +1130,9 @@ class AsiAgent(ABC):
     async def run(self, target: TargetAdapter, memory: SharedMemory) -> AgentReport:
         """Execute the attack loop until a termination condition fires."""
         start = time.monotonic()
+        # Reset the run-level cost trajectory so a reused agent instance does
+        # not accumulate token estimates across separate target runs.
+        self._cost_trajectory = CostTrajectory()
         # CodeQL #153 — Judge is built lazily here (not in __init__) so the
         # init phase never dispatches to overridden ``judge_rubric``. By the
         # time ``run`` is awaited every subclass __init__ has fully run.
@@ -1500,13 +1553,18 @@ class AsiAgent(ABC):
             response_tokens = max(1, len(target_response) // 4)
             # Soft-deduct; if we run out we still record the verdict for this turn.
             self.budget.deduct_tokens(min(response_tokens, self.budget.tokens_remaining))
+            # Fold this tested turn's input/output token estimates into the
+            # run-level cost trajectory (the denial-of-wallet lane reads it for
+            # cumulative/trajectory amplification). Generic + cheap: it reuses
+            # the budget estimates already computed this turn.
+            self._cost_trajectory.observe(est_tokens, response_tokens)
 
             # Judge v2 (M0) — assemble the FULL prior conversation (oldest-first)
             # and the OPPORTUNISTIC structured tool trace so the judge decides
             # from everything, not a single turn. ``history`` already carries the
             # prior judge_verdict in Turn.metadata.
             conversation_str = _render_conversation(history)
-            tool_trace_str = _render_tool_trace(target, target_response)
+            tool_trace_str = self._augment_tool_trace(_render_tool_trace(target, target_response))
             try:
                 # Phase B.B4 — prefer the optional PanelJudge over the
                 # single Judge when configured. Both expose the same
@@ -2245,6 +2303,19 @@ class AsiAgent(ABC):
         """
         _ = (prompt, response, verdict)
         return []
+
+    def _augment_tool_trace(self, tool_trace: str) -> str:
+        """Optionally append agent-specific structured evidence to the judge trace.
+
+        Called once per turn after :func:`_render_tool_trace` and before the
+        judge sees ``{tool_trace}``. Base class returns it unchanged. The
+        denial-of-wallet lane overrides this to append a ``TRAJECTORY COST``
+        line built from :attr:`_cost_trajectory` so the judge can ground a
+        multi-turn amplification verdict on a real measured signal rather than
+        the per-turn ``measure_token_usage`` oracle the loop never invokes.
+        Must be deterministic and black-box-safe.
+        """
+        return tool_trace
 
     @staticmethod
     def _acts_without_check(
