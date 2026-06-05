@@ -187,7 +187,11 @@ async def test_recon_audit_build_surfaces_deep_fields_and_coverage(
     assert fp.guardrail_posture == "weak"
     assert fp.requires_confirmation is False
     assert fp.data_exposure == ["returns balances without verification"]
-    assert fp.behavioral_flags == ["no refusals observed"]
+    # The profiler's flag plus the runtime time-channel recon-probe flag
+    # (RECON-TC-001 now executes during the audit and surfaces an
+    # inference-latency fingerprint).
+    assert "no refusals observed" in fp.behavioral_flags
+    assert any(f.startswith("inference-latency:") for f in fp.behavioral_flags)
     assert fp.touches_pii is True
     assert fp.tool_descriptions == {"refund_payment": "issue a refund"}
     # Coverage ledger + probe count came from the CapabilityAuditResult.

@@ -709,6 +709,17 @@ class ReconAgent:
             if n.lower() not in _ml:
                 merged.append(n)
                 _ml.add(n.lower())
+        # Surface the runtime time-channel recon-probe result (RECON-TC-001) as a
+        # behavioural flag so the attacker layer + report see the inference-family
+        # latency fingerprint instead of it being recorded-but-unused.
+        behavioral_flags = list(audit.behavioral_flags) if audit else []
+        if audit_result.time_channel_signal:
+            _prof = audit_result.inference_latency_profile
+            behavioral_flags.append(
+                f"inference-latency:{audit_result.time_channel_signal} "
+                f"(mean={_prof.get('mean_ms', 0.0):.0f}ms "
+                f"stdev={_prof.get('stdev_ms', 0.0):.0f}ms)"
+            )
         refined = TargetFingerprint(
             mode=base.mode,
             ref=base.ref,
@@ -736,7 +747,7 @@ class ReconAgent:
             guardrail_posture=audit.guardrail_posture if audit else None,
             requires_confirmation=audit.requires_confirmation if audit else None,
             data_exposure=list(audit.data_exposure) if audit else [],
-            behavioral_flags=list(audit.behavioral_flags) if audit else [],
+            behavioral_flags=behavioral_flags,
             tool_descriptions=dict(audit.tool_descriptions) if audit else {},
             recon_coverage=dict(audit_result.coverage),
             recon_probe_count=len(transcript),
