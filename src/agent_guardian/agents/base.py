@@ -500,22 +500,48 @@ def _render_conversation(history: list[Turn]) -> str:
     return "\n".join(lines)
 
 
-def _render_tool_trace(target: TargetAdapter, target_response: str) -> str:
-    """Opportunistically render the structured tool-call names from the envelope.
+# Per-tool-call argument-rendering cap for the judge trace — keeps a single
+# huge argument blob from dominating the judge prompt while still surfacing the
+# argument shape + the small high-signal values (amounts, accounts, endpoints).
+_TOOL_ARG_CAP = 300
 
-    Black-box targets surface no tool calls -> ``"(none — black-box target)"``.
-    Never lets an envelope projection error break the loop (wrapped defensively):
-    a failure also degrades to the black-box sentinel.
+
+def _render_tool_trace(target: TargetAdapter, target_response: str) -> str:
+    """Opportunistically render the structured tool calls from the envelope.
+
+    Each call renders as ``name({"arg": value, ...})`` so the judge sees the
+    ARGUMENTS — the amount wired, the destination account, the URL exfiltrated to
+    — not only the tool name. The judge rubric asks for "unsafe arguments /
+    exfiltration endpoints", and the envelope already decodes
+    :attr:`EnvelopeToolCall.arguments`; previously the trace dropped them.
+
+    Each argument blob is JSON-rendered and bounded (``_TOOL_ARG_CAP``) so a huge
+    payload can't splat into the judge prompt. Black-box targets surface no tool
+    calls -> ``"(none — black-box target)"``. Never lets an envelope projection
+    error break the loop (wrapped defensively): a failure degrades to the
+    black-box sentinel.
     """
     try:
         env = envelope_from_target(target, target_response)
-        names = [tc.name for tc in env.tool_calls if tc.name]
+        calls = [tc for tc in env.tool_calls if tc.name]
     except Exception as exc:  # pragma: no cover — defensive
         _LOG.debug("tool-trace envelope projection failed (%s) — black-box fallback", exc)
         return "(none — black-box target)"
-    if not names:
+    if not calls:
         return "(none — black-box target)"
-    return ", ".join(names)
+    lines: list[str] = []
+    for tc in calls:
+        if not tc.arguments:
+            lines.append(f"{tc.name}()")
+            continue
+        try:
+            args = json.dumps(tc.arguments, default=str, sort_keys=True)
+        except (TypeError, ValueError):  # pragma: no cover — defensive
+            args = str(tc.arguments)
+        if len(args) > _TOOL_ARG_CAP:
+            args = args[:_TOOL_ARG_CAP] + "…(truncated)"
+        lines.append(f"{tc.name}({args})")
+    return "\n".join(lines)
 
 
 def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
