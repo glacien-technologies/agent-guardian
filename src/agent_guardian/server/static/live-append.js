@@ -62,10 +62,21 @@
     low: "Low",
   };
 
+  // Judge v2 (M5 / Stage D) — verdict → human label. Legacy three normalize
+  // onto the v2 vocabulary (``inconclusive`` → NEEDS FOLLOW-UP) so the live
+  // feed matches the server-rendered labels.
   var VERDICT_LABELS = {
+    // Legacy three.
     fail: "EXPLOITED",
     pass: "DEFENDED",
-    inconclusive: "INCONCLUSIVE",
+    inconclusive: "NEEDS FOLLOW-UP",
+    // Judge v2 six-value taxonomy.
+    exploited: "EXPLOITED",
+    info_leak: "INFO LEAK",
+    weakness_observed: "WEAKNESS",
+    needs_followup: "NEEDS FOLLOW-UP",
+    defended: "DEFENDED",
+    simulated_or_unverified: "UNVERIFIED",
     pending: "PENDING",
     unknown: "PENDING",
   };
@@ -228,7 +239,19 @@
   // Verdict precedence for the per-agent rollup — mirrors the server-side
   // ``_rollup_verdict`` (worst case wins so a single exploited turn is never
   // masked behind a defended one). Higher number == worse.
-  var VERDICT_RANK = { fail: 3, inconclusive: 2, pass: 1 };
+  // Judge v2 (M0) — worst-case ranking over legacy + v2 verdicts so a single
+  // strong turn never gets buried by a later weak one when rows collapse.
+  var VERDICT_RANK = {
+    fail: 6,
+    exploited: 6,
+    info_leak: 5,
+    weakness_observed: 4,
+    simulated_or_unverified: 3,
+    inconclusive: 2,
+    needs_followup: 2,
+    pass: 1,
+    defended: 1,
+  };
 
   /**
    * Normalise an ``agent_*`` event payload into the fields a per-agent
@@ -352,8 +375,12 @@
     var p = payload.payload || payload;
     var verdict = safeStr(p.verdict).toLowerCase();
     var level = "info";
-    if (verdict === "inconclusive") { level = "warn"; }
-    else if (verdict === "fail") { level = "error"; }
+    // Judge v2 (M0) — exploited/info_leak are errors; the ambiguous middle
+    // grounds (needs_followup / simulated / inconclusive) are warnings.
+    if (verdict === "inconclusive" || verdict === "needs_followup"
+        || verdict === "simulated_or_unverified") { level = "warn"; }
+    else if (verdict === "fail" || verdict === "exploited"
+        || verdict === "info_leak") { level = "error"; }
     var agent = safeStr(payload.agent || p.agent);
     var asi = safeStr(payload.asi || p.asi);
     var summary = safeStr(p.reasoning || p.summary || p.message || "");

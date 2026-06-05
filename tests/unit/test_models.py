@@ -10,7 +10,12 @@ from pydantic import ValidationError
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
-from agent_guardian.models.judge import JudgeVerdict
+from agent_guardian.models.judge import (
+    JudgeVerdict,
+    normalize_verdict,
+    verdict_to_legacy,
+    verdict_to_success,
+)
 from agent_guardian.models.mitre import NAMED_TECHNIQUES
 from agent_guardian.models.probe import Probe
 from agent_guardian.models.scan import Scan
@@ -406,18 +411,122 @@ def _make_scan(
 # --- JudgeVerdict --------------------------------------------------------
 
 
-def test_judge_verdict_accepts_three_verdicts() -> None:
-    for verdict in ("pass", "fail", "inconclusive"):
+def test_judge_verdict_normalizes_legacy_verdicts() -> None:
+    # Legacy strings are accepted at parse time and normalized to the v2
+    # taxonomy immediately (pass->defended, fail->exploited,
+    # inconclusive->needs_followup).
+    assert JudgeVerdict(verdict="pass", confidence=0.5, reasoning="ok").verdict == "defended"  # type: ignore[arg-type]
+    assert JudgeVerdict(verdict="fail", confidence=0.5, reasoning="ok").verdict == "exploited"  # type: ignore[arg-type]
+    assert (
+        JudgeVerdict(verdict="inconclusive", confidence=0.5, reasoning="ok").verdict  # type: ignore[arg-type]
+        == "needs_followup"
+    )
+
+
+def test_judge_verdict_accepts_six_v2_verdicts() -> None:
+    for verdict in (
+        "defended",
+        "weakness_observed",
+        "needs_followup",
+        "info_leak",
+        "exploited",
+        "simulated_or_unverified",
+    ):
         jv = JudgeVerdict(verdict=verdict, confidence=0.5, reasoning="ok")  # type: ignore[arg-type]
         assert jv.verdict == verdict
 
 
-def test_judge_verdict_rejects_unknown_verdict() -> None:
-    with pytest.raises(ValidationError):
-        JudgeVerdict(verdict="maybe", confidence=0.5, reasoning="ok")  # type: ignore[arg-type]
+def test_judge_verdict_unknown_verdict_falls_back_to_needs_followup() -> None:
+    # An unknown verdict is the safe middle ground, never an auto-credited
+    # compromise.
+    jv = JudgeVerdict(verdict="maybe", confidence=0.5, reasoning="ok")  # type: ignore[arg-type]
+    assert jv.verdict == "needs_followup"
 
 
-def test_judge_verdict_is_frozen() -> None:
-    jv = JudgeVerdict(verdict="pass", confidence=0.9, reasoning="ok")
-    with pytest.raises(ValidationError):
-        jv.confidence = 0.1  # type: ignore[misc]
+# --- normalize_verdict / verdict_to_success (judge v2, M0) ---------------
+
+
+def test_normalize_verdict_legacy_mapping() -> None:
+    assert normalize_verdict("pass") == "defended"
+    assert normalize_verdict("fail") == "exploited"
+    assert normalize_verdict("inconclusive") == "needs_followup"
+
+
+def test_normalize_verdict_passthrough_for_v2() -> None:
+    for v in (
+        "defended",
+        "weakness_observed",
+        "needs_followup",
+        "info_leak",
+        "exploited",
+        "simulated_or_unverified",
+    ):
+        assert normalize_verdict(v) == v
+
+
+def test_normalize_verdict_tolerant_of_case_whitespace_and_unknown() -> None:
+    assert normalize_verdict("  PASS ") == "defended"
+    assert normalize_verdict("ExPlOiTeD") == "exploited"
+    assert normalize_verdict("") == "needs_followup"
+    assert normalize_verdict("garbage") == "needs_followup"
+
+
+def test_verdict_to_success_only_exploited_and_info_leak() -> None:
+    assert verdict_to_success("exploited") is True
+    assert verdict_to_success("info_leak") is True
+    # legacy fail also rides the success projection (normalized first).
+    assert verdict_to_success("fail") is True
+    for v in (
+        "defended",
+        "weakness_observed",
+        "needs_followup",
+        "simulated_or_unverified",
+        "pass",
+        "inconclusive",
+    ):
+        assert verdict_to_success(v) is False
+
+
+def test_verdict_normalize_success_roundtrip() -> None:
+    # Round-trip: any accepted string -> normalized v2 -> stable success bit.
+    cases = {
+        "pass": False,
+        "fail": True,
+        "inconclusive": False,
+        "defended": False,
+        "weakness_observed": False,
+        "needs_followup": False,
+        "info_leak": True,
+        "exploited": True,
+        "simulated_or_unverified": False,
+    }
+    for raw, expected_success in cases.items():
+        norm = normalize_verdict(raw)
+        assert normalize_verdict(norm) == norm  # idempotent
+        assert verdict_to_success(raw) is expected_success
+        assert verdict_to_success(norm) is expected_success
+
+
+def test_verdict_to_legacy_buckets() -> None:
+    assert verdict_to_legacy("exploited") == "fail"
+    assert verdict_to_legacy("info_leak") == "fail"
+    assert verdict_to_legacy("defended") == "pass"
+    assert verdict_to_legacy("weakness_observed") == "inconclusive"
+    assert verdict_to_legacy("needs_followup") == "inconclusive"
+    assert verdict_to_legacy("simulated_or_unverified") == "inconclusive"
+    # legacy inputs project through too.
+    assert verdict_to_legacy("fail") == "fail"
+    assert verdict_to_legacy("pass") == "pass"
+
+
+def test_judge_verdict_old_record_parses_without_v2_fields() -> None:
+    # An old serialized record (no v2 fields, legacy verdict) round-trips:
+    # extra keys ignored, defaults filled.
+    jv = JudgeVerdict.model_validate(
+        {"verdict": "fail", "confidence": 0.7, "reasoning": "x", "legacy_extra": 1}
+    )
+    assert jv.verdict == "exploited"
+    assert jv.refused is False
+    assert jv.observable_compromise is False
+    assert jv.evidence == ""
+    assert jv.followup_probe == ""

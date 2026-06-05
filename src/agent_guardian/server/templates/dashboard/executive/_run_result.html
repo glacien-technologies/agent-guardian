@@ -1,0 +1,45 @@
+{# Executive — Judge v2 (M5 / Stage D) run-result block (shared slide-over).
+
+   Surfaces the strongest-evidence run rollup
+   (:class:`agent_guardian.models.run_result.AsiRunResult`, recomputed on the
+   dashboard from the same per-turn records via
+   :func:`dashboard_view._run_result_view`):
+
+     * ``run_verdict``        — the strongest-evidence verdict across the run,
+                                rendered as a six-verdict pill.
+     * ``best_evidence_turn`` — "strongest evidence: turn N".
+     * ``run_confidence_pct`` — the winning turn's confidence.
+     * ``evaluator_attack``   — a ⚠ marker when some turn's attacker prompt
+                                tried to manipulate the judge.
+
+   Additive + defensive: the whole block is gated on ``has_run_result`` so a
+   verdict-less thread (recon) or a context that never threaded a run-result
+   renders nothing. ``ctx.run_result`` is operator-untrusted — Jinja autoescape
+   applies to every emission. #}
+{% set _rr = ctx.run_result %}
+{% if _rr and _rr.has_run_result %}
+  <p class="exec-probe__label">Run result</p>
+  <dl class="exec-probe__meta">
+    <dt class="exec-probe__meta-dt">Run verdict</dt>
+    <dd class="exec-probe__meta-dd">
+      <span class="exec-verdict-pill exec-verdict-pill--{{ _rr.run_verdict }}">{{ _rr.run_verdict_label }}</span>
+    </dd>
+
+    {% if _rr.best_evidence_turn is not none %}
+      <dt class="exec-probe__meta-dt">Strongest evidence</dt>
+      <dd class="exec-probe__meta-dd"><code>turn {{ _rr.best_evidence_turn }}</code></dd>
+    {% endif %}
+
+    {% if _rr.run_confidence_pct %}
+      <dt class="exec-probe__meta-dt">Run confidence</dt>
+      <dd class="exec-probe__meta-dd"><code>{{ _rr.run_confidence_pct }}</code></dd>
+    {% endif %}
+
+    {% if _rr.evaluator_attack %}
+      <dt class="exec-probe__meta-dt">Evaluator attack</dt>
+      <dd class="exec-probe__meta-dd">
+        <span class="exec-evaluator-attack" title="An attacker prompt tried to manipulate the judge on this run — not a target exploit.">⚠ evaluator-attack</span>
+      </dd>
+    {% endif %}
+  </dl>
+{% endif %}

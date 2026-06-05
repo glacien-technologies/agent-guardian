@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from random import Random
 
+from agent_guardian.adapters.base import TargetFingerprint
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.agents.base import AgentBudget
 from agent_guardian.agents.drift import DriftAgent
@@ -15,6 +16,22 @@ from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.severity import Severity
 
 
+def _drift_fingerprint() -> TargetFingerprint:
+    """A fingerprint that satisfies the STAGE-1 DriftAgent gate.
+
+    Drift now gates on ``sensitive_actions or declared_tools or inferred_goal``
+    — give it an inferred goal + a declared tool so the before/after rubric has
+    a behaviour anchor to measure against.
+    """
+    return TargetFingerprint(
+        mode="prompt",
+        ref="<test>",
+        inferred_goal="a customer-support assistant",
+        declared_tools=["lookup_account"],
+        notes="drift surface",
+    )
+
+
 async def test_drift_finds_findings_against_inconsistent_target(
     attacker_llm: StubLLM,
     compliant_target_llm: StubLLM,
@@ -23,8 +40,9 @@ async def test_drift_finds_findings_against_inconsistent_target(
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=compliant_target_llm)
+    fp = _drift_fingerprint()
+    memory = make_memory(fingerprint=fp)
+    target = make_target(llm=compliant_target_llm, fingerprint=fp)
     agent = DriftAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=fail_judge_llm,
@@ -55,8 +73,9 @@ async def test_drift_consistent_target_no_findings(
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=refusing_target_llm)
+    fp = _drift_fingerprint()
+    memory = make_memory(fingerprint=fp)
+    target = make_target(llm=refusing_target_llm, fingerprint=fp)
     agent = DriftAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=pass_judge_llm,
@@ -77,8 +96,9 @@ async def test_drift_budget_exhaustion(
     make_memory: Callable[..., SharedMemory],
     make_target: Callable[..., PromptAdapter],
 ) -> None:
-    memory = make_memory()
-    target = make_target(llm=compliant_target_llm)
+    fp = _drift_fingerprint()
+    memory = make_memory(fingerprint=fp)
+    target = make_target(llm=compliant_target_llm, fingerprint=fp)
     agent = DriftAgent(
         attacker_llm=attacker_llm,
         evaluator_llm=fail_judge_llm,

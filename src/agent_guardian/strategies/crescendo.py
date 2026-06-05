@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 
+from agent_guardian.models.judge import verdict_to_legacy
 from agent_guardian.strategies.base import (
     NextPrompt,
     ProbeSeed,
@@ -125,12 +126,16 @@ class CrescendoStrategy(Strategy):
                 seed = self.ctx.seeds[idx]
                 self._seeds_used.add(idx)
                 self._forced_seed_index = None
+                # Fix #8 — a rotated-to seed is a fresh thread; clear the carried
+                # verdict before re-seeding parent_probe_id bookkeeping.
+                self._reset_verdict_on_fresh_seed(seed)
                 # Re-seed parent_probe_id bookkeeping for the new branch.
                 pid = seed_probe_id(seed)
                 if pid:
                     self._parent_probe_id = pid
             else:
                 seed = self._pick_seed()
+                self._reset_verdict_on_fresh_seed(seed)  # fix #8
                 if seed is not None and self.ctx.seeds:
                     # Best-effort: mark which index rng.choice landed on so
                     # later restarts skip it. ``list.index`` works for both
@@ -236,7 +241,9 @@ class CrescendoStrategy(Strategy):
         # Phase A.A1 — read judge verdict from BOTH surfaces (ctx and
         # history[-1].metadata) so the escalation prompt can pivot on the
         # judge's prior assessment when available.
-        ctx_verdict = self.ctx.last_verdict
+        # Judge v2 (M0) — project the v2 verdict back to the legacy
+        # pass/fail/inconclusive signal this escalation branch reads.
+        ctx_verdict = verdict_to_legacy(self.ctx.last_verdict or "")
         ctx_confidence = self.ctx.last_verdict_confidence
         ctx_reasoning = self.ctx.last_verdict_reasoning
         meta_verdict = history[-1].metadata.get("judge_verdict", "") if history else ""
@@ -248,11 +255,14 @@ class CrescendoStrategy(Strategy):
             meta_verdict,
             self._level,
         )
+        # Fix P3 / #6 — map a None/empty response to an explicit sentinel so the
+        # escalation prompt never templates the literal string "None".
+        safe_response = target_response if target_response else "[no response — target blocked]"
         escalate_payload = _ESCALATE_PROMPT.format(
             goal=self.ctx.goal,
             level=self._level,
             prev_prompt=prev.prompt,
-            prev_response=target_response,
+            prev_response=safe_response,
         )
         # Phase A.A1 — high-confidence fail is a strong escalation signal:
         # the prior turn ALREADY broke the target, so the attacker should

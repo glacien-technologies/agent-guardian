@@ -345,7 +345,9 @@ def test_finding_ctx_anchors_fields_to_the_flipping_turn(store: ScanStore) -> No
     ctx = build_finding_slideover_ctx(finding, scan_dir=scan_dir)
 
     # Representative = the flipping (turn 3) exchange — all four fields agree.
-    assert ctx["verdict"] == "fail"
+    # Judge v2 (M0) — a successful finding rolls up to "exploited" (legacy
+    # "fail" maps onto it) for the header pill.
+    assert ctx["verdict"] == "exploited"
     assert ctx["prompt"] == "attacker prompt turn 3"
     assert ctx["target_response"] == "target response turn 3"
     assert ctx["reasoning"] == "judge reasoning turn 3"

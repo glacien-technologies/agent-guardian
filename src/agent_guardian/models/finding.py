@@ -42,5 +42,17 @@ class Finding(BaseModel):
     pov_reference: str | None = None
     pov_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
     created_at: datetime
+    # Judge v2 (M0) — the v2 six-value verdict string that produced this
+    # finding (``Finding.success`` stays the binary scoring projection via
+    # ``verdict_to_success``; these are additive context, never read by
+    # ``core/scoring.py``). ``trigger_response`` carries the (capped) target
+    # reply that proves the compromise so the evidence is self-contained;
+    # ``evidence_types`` names the corroboration signals (e.g. ``observable``,
+    # ``tool_trace``) for later milestones.
+    verdict_v2: str | None = None
+    trigger_response: str | None = None
+    evidence_types: list[str] = Field(default_factory=list)
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
+    # and forward-serialized ones round-trip without raising.
+    model_config = ConfigDict(frozen=True, extra="ignore")

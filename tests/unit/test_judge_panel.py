@@ -35,12 +35,26 @@ class _FakeJudge:
         self._c = confidence
         self._r = reasoning
 
-    async def verdict(self, prompt: str, target_response: str) -> JudgeVerdict:
+    async def verdict(
+        self,
+        prompt: str,
+        target_response: str,
+        *,
+        conversation: str = "",
+        tool_trace: str = "(none — black-box target)",
+    ) -> JudgeVerdict:
         return JudgeVerdict(verdict=self._v, confidence=self._c, reasoning=self._r)  # type: ignore[arg-type]
 
 
 class _RaisingJudge:
-    async def verdict(self, prompt: str, target_response: str) -> JudgeVerdict:
+    async def verdict(
+        self,
+        prompt: str,
+        target_response: str,
+        *,
+        conversation: str = "",
+        tool_trace: str = "(none — black-box target)",
+    ) -> JudgeVerdict:
         raise RuntimeError("synthetic judge failure")
 
 
@@ -125,7 +139,7 @@ async def test_panel_unanimous_returns_mean_confidence() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
     # Unanimous + mean=0.9 -> 1.0 * 0.9 = 0.9.
     assert abs(v.confidence - 0.9) < 1e-6
 
@@ -143,7 +157,7 @@ async def test_panel_two_thirds_majority() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
     # (2/3) * mean(0.8, 0.8) = (2/3) * 0.8 = 0.5333...
     assert abs(v.confidence - (2 / 3) * 0.8) < 1e-6
 
@@ -161,7 +175,7 @@ async def test_panel_three_way_split_returns_inconclusive() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "inconclusive"
+    assert v.verdict == "needs_followup"
 
 
 @pytest.mark.asyncio
@@ -178,7 +192,7 @@ async def test_panel_seat_exception_becomes_inconclusive() -> None:
     )
     v = await panel.verdict("prompt", "response")
     # Two 'fail' seats outvote one 'inconclusive' fallback.
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
 
 
 @pytest.mark.asyncio
@@ -195,7 +209,7 @@ async def test_panel_tie_resolves_to_inconclusive() -> None:
     v = await panel.verdict("prompt", "response")
     # Tie 1-1 resolves to inconclusive. The verdict is carried by the field /
     # UI pill — NOT prepended as prose into the reasoning text.
-    assert v.verdict == "inconclusive"
+    assert v.verdict == "needs_followup"
     assert "panel" not in v.reasoning.lower()
     assert "unanimous" not in v.reasoning.lower()
 
@@ -212,7 +226,7 @@ async def test_panel_reasoning_is_raw_judge_text_not_verdict_prose() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "pass"
+    assert v.verdict == "defended"
     # Reasoning is the judges' raw analysis, with no "panel unanimous" jargon
     # and no "the judges found the target ..." verdict prose.
     assert v.reasoning == "Target refused and stayed in scope."
@@ -246,7 +260,7 @@ async def test_panel_reasoning_surfaces_judge_headline() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
     # The full judge reasoning is surfaced verbatim (both sentences), with no
     # verdict prose prepended.
     assert long_reasoning == v.reasoning
@@ -291,7 +305,7 @@ async def test_panel_headline_skips_heuristic_stub_reasoning() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
     # The non-stub reasoning's first sentence wins despite earlier stubs.
     assert "SQL injection payload" in v.reasoning
 
@@ -310,7 +324,7 @@ async def test_panel_reasoning_empty_when_only_stubs() -> None:
         ],
     )
     v = await panel.verdict("prompt", "response")
-    assert v.verdict == "fail"
+    assert v.verdict == "exploited"
     assert v.reasoning == ""
 
 

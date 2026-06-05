@@ -356,7 +356,7 @@ async def test_swarm_skips_inapplicable_agents(
     defended_target: PromptAdapter,
     fresh_memory: SharedMemory,
 ) -> None:
-    """Prompt-mode target → ToolAbuse, MemoryPoison, A2A get skipped."""
+    """Prompt-mode target → ToolAbuse and A2A get skipped."""
     events: list[SwarmEvent] = []
     swarm = SwarmCommander(
         config=_config(),
@@ -370,10 +370,12 @@ async def test_swarm_skips_inapplicable_agents(
     await swarm.run()
 
     skipped_agents = {e.agent for e in events if e.kind == "agent_skipped" and e.agent is not None}
-    # PromptAdapter has has_tools=False, has_memory=False, multi-agent=False
-    # → tool-abuse, memory-poison, a2a all gate out.
+    # PromptAdapter has has_tools=False / no declared tools / multi-agent=False
+    # → tool-abuse and a2a gate out. MemoryPoison now runs under
+    # confirm-before-poison (recon coverage is unknown for a bare prompt, so the
+    # memory lane is probed rather than silently skipped — STAGE-1 redesign).
     assert "tool-abuse-agent" in skipped_agents
-    assert "memory-poison-agent" in skipped_agents
+    assert "memory-poison-agent" not in skipped_agents
     assert "a2a-agent" in skipped_agents
 
     # IMPORTANT #5: every agent_skipped event must also be persisted to

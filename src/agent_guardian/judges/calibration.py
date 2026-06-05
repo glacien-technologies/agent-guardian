@@ -243,7 +243,7 @@ async def run_calibration(
         raw_v = str(getattr(verdict_obj, "verdict", "")).lower().strip()
         if raw_v in ("pass", "passed", "defended"):
             pv: Literal["pass", "fail"] = "pass"
-        elif raw_v in ("fail", "failed", "exploited", "broken"):
+        elif raw_v in ("fail", "failed", "exploited", "info_leak", "broken"):
             pv = "fail"
         else:
             # An ambiguous verdict counts as a wrong-class half-confidence prediction

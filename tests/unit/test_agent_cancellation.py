@@ -67,6 +67,10 @@ class _CountingTarget(TargetAdapter):
             framework=None,
             declared_tools=[],
             declared_memory_keys=[],
+            # STAGE-1 DriftAgent gates on a behaviour anchor — give it an
+            # inferred goal so this cancellation test (which drives DriftAgent)
+            # stays applicable and runs turns.
+            inferred_goal="a static stub assistant",
             notes="static stub for cancellation tests",
         )
 

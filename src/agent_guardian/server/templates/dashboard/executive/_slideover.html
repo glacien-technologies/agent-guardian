@@ -48,9 +48,17 @@
 #}
 {%- set _kind = kind | default('probe') -%}
 {%- set _verdict = ctx.verdict or 'unknown' -%}
-{%- if _verdict == 'fail' -%}
+{%- if _verdict == 'fail' or _verdict == 'exploited' -%}
   {%- set _verdict_label = 'EXPLOITED' -%}
-{%- elif _verdict == 'pass' -%}
+{%- elif _verdict == 'info_leak' -%}
+  {%- set _verdict_label = 'INFO LEAK' -%}
+{%- elif _verdict == 'weakness_observed' -%}
+  {%- set _verdict_label = 'WEAKNESS' -%}
+{%- elif _verdict == 'needs_followup' -%}
+  {%- set _verdict_label = 'NEEDS FOLLOW-UP' -%}
+{%- elif _verdict == 'simulated_or_unverified' -%}
+  {%- set _verdict_label = 'UNVERIFIED' -%}
+{%- elif _verdict == 'pass' or _verdict == 'defended' -%}
   {%- set _verdict_label = 'DEFENDED' -%}
 {%- elif _verdict == 'inconclusive' -%}
   {%- set _verdict_label = 'INCONCLUSIVE' -%}
@@ -218,17 +226,29 @@
   <p class="exec-probe__label">{% if _is_recon %}Recon conversation{% else %}Attack conversation{% endif %}</p>
   <ol class="exec-chat" aria-label="{% if _is_recon %}Recon probe conversation{% else %}Multi-turn attack conversation{% endif %}">
     {% for turn in ctx.conversation %}
-      <li class="exec-chat__turn" data-turn="{{ turn.turn_no }}">
+      <li class="exec-chat__turn" data-turn="{{ turn.turn_no }}"{% if turn.verify %} data-verify="true"{% endif %}>
         <div class="exec-chat__turn-head">
           {% if _is_recon %}
             <span class="exec-chat__turn-no">iteration {{ turn.iteration }}</span>
           {% else %}
-            <span class="exec-chat__turn-no">turn {{ turn.turn_no or turn.iteration }}{% if turn.max_turns %} / {{ turn.max_turns }}{% endif %}</span>
+            {# Judge v2 (M5 / Stage D) — a verify turn is the judge's bounded
+               drill-down re-probe of a prior needs_followup claim; label it
+               "VERIFICATION PROBE" (vs the implicit attack turn) and show a
+               VERIFY badge so the operator can tell it apart from an attack. #}
+            <span class="exec-chat__turn-no">
+              {%- if turn.verify -%}VERIFICATION PROBE{%- else -%}turn {{ turn.turn_no or turn.iteration }}{% if turn.max_turns %} / {{ turn.max_turns }}{% endif %}{%- endif -%}
+            </span>
+            {% if turn.verify %}
+              <span class="exec-verify-badge" title="Verification probe — the judge's bounded drill-down re-probe to confirm a prior claim (not a fresh attack turn).">VERIFY</span>
+            {% endif %}
           {% endif %}
           {% if not _is_recon %}
             <span class="exec-verdict-pill exec-verdict-pill--{{ turn.verdict }}">{{ turn.verdict_label }}</span>
             {% if turn.confidence_pct %}
               <span class="exec-chat__turn-conf">{{ turn.confidence_pct }}</span>
+            {% endif %}
+            {% if turn.evaluator_attack %}
+              <span class="exec-evaluator-attack" title="The attacker prompt tried to manipulate the judge on this turn — not a target exploit.">⚠ evaluator-attack</span>
             {% endif %}
           {% endif %}
         </div>
@@ -246,6 +266,13 @@
           <div class="exec-chat__judge">
             <span class="exec-chat__role">Judge reasoning</span>
             <blockquote class="exec-chat__reason">{{ turn.reasoning }}</blockquote>
+          </div>
+        {% endif %}
+        {# Judge v2 (M5 / Stage D) — the verbatim span the judge cited as proof
+           of the verdict. Additive: only rendered when the turn carries one. #}
+        {% if turn.evidence %}
+          <div class="exec-chat__evidence">
+            <span class="exec-chat__evidence-label">Evidence</span>{{ turn.evidence }}
           </div>
         {% endif %}
       </li>
@@ -266,6 +293,7 @@
       {%- else -%}<span class="exec-probe__meta-empty">—</span>{%- endif -%}
     </dd>
   </dl>
+  {% include "dashboard/executive/_run_result.html" %}
   {% endif %}
 
   {% else %}
@@ -330,6 +358,19 @@
       (no data available)
     </p>
   {% endif %}
+
+  {# Judge v2 (M5 / Stage D) — the verbatim span the judge cited as proof of
+     the verdict (single-turn layout). Additive: only shown when present. #}
+  {% if ctx.evidence %}
+    <p class="exec-probe__label">Evidence</p>
+    <blockquote class="exec-probe__evidence-quote">{{ ctx.evidence }}</blockquote>
+  {% endif %}
+  {% if ctx.evaluator_attack %}
+    <p class="exec-probe__evaluator-attack-row">
+      <span class="exec-evaluator-attack" title="The attacker prompt tried to manipulate the judge — not a target exploit.">⚠ evaluator-attack</span>
+    </p>
+  {% endif %}
+  {% include "dashboard/executive/_run_result.html" %}
   {% endif %}
 
   {# ----- 7. Evidence chain ----- #}

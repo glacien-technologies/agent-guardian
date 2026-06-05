@@ -78,9 +78,44 @@ def test_fuzzing_maps_to_asi02() -> None:
     assert FuzzingAgent.asi_category is AsiCategory.ASI02
 
 
-def test_detection_evasion_always_applicable() -> None:
+def test_detection_evasion_skips_without_monitor_surface() -> None:
+    # STAGE-1 REQUIRED gate: detection-evasion must skip a single-agent target
+    # with no declared guardrails, no guardrail posture, no recon coverage, and
+    # no wired detector-replay stack. This kills the D2 confabulation source.
     agent = _agent(DetectionEvasionAgent)
     fp = TargetFingerprint(mode="code", ref="x")
+    assert agent.is_applicable(fp) is False
+
+
+def test_detection_evasion_applicable_with_declared_guardrails() -> None:
+    agent = _agent(DetectionEvasionAgent)
+    fp = TargetFingerprint(mode="code", ref="x", declared_guardrails=["llama-guard-3"])
+    assert agent.is_applicable(fp) is True
+
+
+def test_detection_evasion_applicable_with_guardrail_posture() -> None:
+    agent = _agent(DetectionEvasionAgent)
+    fp = TargetFingerprint(mode="http", ref="x", guardrail_posture="strict")
+    assert agent.is_applicable(fp) is True
+
+
+def test_detection_evasion_applicable_with_recon_coverage() -> None:
+    agent = _agent(DetectionEvasionAgent)
+    fp = TargetFingerprint(mode="http", ref="x", recon_coverage={"guardrails": "tested"})
+    assert agent.is_applicable(fp) is True
+
+
+def test_detection_evasion_applicable_with_wired_detector_replay() -> None:
+    from agent_guardian.core.detector_replay import function_detector
+
+    agent = _agent(DetectionEvasionAgent)
+    fp = TargetFingerprint(mode="http", ref="x")
+    assert agent.is_applicable(fp) is False
+    # Wiring a real detector-replay stack opens the lane even with a bare
+    # fingerprint.
+    agent._detector_replay = DetectionEvasionAgent.build_replay(  # type: ignore[attr-defined]
+        [function_detector("d", lambda req, resp: True)]
+    )
     assert agent.is_applicable(fp) is True
 
 

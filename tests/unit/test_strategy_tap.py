@@ -124,8 +124,9 @@ def _scripted_llm() -> StubLLM:
             "Generate 4 refined attack prompts",
             json.dumps(["refined A", "refined B", "refined C", "refined D"]),
         )
-        .respond_to("relevance", "8")
-        .respond_to("On a scale of 0-10", "7")
+        # M3 fix #4 — the score prompt now asks how LIKELY a candidate is to
+        # make the target ACTUALLY perform the goal (not relevance).
+        .respond_to("how LIKELY this candidate", "7")
         .default("0")
         .build()
     )
@@ -190,7 +191,7 @@ async def test_all_candidates_pruned_returns_refused(tmp_path: Path) -> None:
             "Generate 4 refined attack prompts",
             json.dumps(["weak", "weaker"]),
         )
-        .respond_to("On a scale of 0-10", "2")  # always below threshold (5)
+        .respond_to("how LIKELY this candidate", "2")  # always below threshold (5)
         .build()
     )
     ctx = _ctx(tmp_path, llm=llm, seeds=["s1"])
@@ -257,7 +258,7 @@ async def test_attacker_refusal_synthesises_candidates_from_seeds(tmp_path: Path
             "I cannot help with that. As an AI, I won't comply.",
         )
         .respond_to(
-            "On a scale of 0-10",
+            "how LIKELY this candidate",
             "8",
         )
         .default("0")

@@ -29,6 +29,42 @@
 (function () {
   "use strict";
 
+  // ---- 0. Judge v2 (M5 / Stage D) verdict label + pill-colour maps ------
+  // Each of the six v2 verdicts now ships its OWN distinct pill class in
+  // executive.css (``--exploited`` red, ``--info_leak`` orange,
+  // ``--weakness_observed`` amber, ``--needs_followup`` blue,
+  // ``--simulated_or_unverified`` grey, ``--defended`` green). Legacy
+  // ``fail`` / ``pass`` / ``inconclusive`` normalize onto the v2 class so old
+  // and new records render the same vocabulary.
+  var V2_VERDICT_LABELS = {
+    fail: "EXPLOITED",
+    pass: "DEFENDED",
+    inconclusive: "NEEDS FOLLOW-UP",
+    exploited: "EXPLOITED",
+    info_leak: "INFO LEAK",
+    weakness_observed: "WEAKNESS",
+    needs_followup: "NEEDS FOLLOW-UP",
+    defended: "DEFENDED",
+    simulated_or_unverified: "UNVERIFIED",
+  };
+  var V2_VERDICT_PILL = {
+    fail: "exec-verdict-pill--exploited",
+    exploited: "exec-verdict-pill--exploited",
+    info_leak: "exec-verdict-pill--info_leak",
+    weakness_observed: "exec-verdict-pill--weakness_observed",
+    needs_followup: "exec-verdict-pill--needs_followup",
+    simulated_or_unverified: "exec-verdict-pill--simulated_or_unverified",
+    inconclusive: "exec-verdict-pill--needs_followup",
+    pass: "exec-verdict-pill--defended",
+    defended: "exec-verdict-pill--defended",
+  };
+  function v2VerdictLabel(verdict) {
+    return V2_VERDICT_LABELS[verdict] || "PENDING";
+  }
+  function v2VerdictPill(verdict) {
+    return V2_VERDICT_PILL[verdict] || "exec-verdict-pill--unknown";
+  }
+
   // ---- 1. Payload loaders ----------------------------------------------
   /**
    * Load a JSON payload from an embedded ``<script type="application/json">``
@@ -340,9 +376,8 @@
       else if (sev === "medium") { verdictCls = "exec-verdict-pill--inconclusive"; }
       verdictLabel = sevLabel.toUpperCase();
     } else {
-      if (verdict === "fail") { verdictCls = "exec-verdict-pill--fail"; }
-      else if (verdict === "pass") { verdictCls = "exec-verdict-pill--pass"; }
-      else if (verdict === "inconclusive") { verdictCls = "exec-verdict-pill--inconclusive"; }
+      // Judge v2 (M0) — map legacy + v2 verdicts onto a pill colour bucket.
+      if (V2_VERDICT_PILL[verdict]) { verdictCls = v2VerdictPill(verdict); }
     }
 
     var pill = root.querySelector("[data-slideover-verdict-pill]");
@@ -409,13 +444,9 @@
         setText(root.querySelector("[data-slideover-id]"), row.getAttribute("data-probe-id") || "—");
         var verdict = row.getAttribute("data-verdict") || "unknown";
         if (pill) {
-          var label = "PENDING";
-          var cls = "exec-verdict-pill--unknown";
-          if (verdict === "fail") { label = "EXPLOITED"; cls = "exec-verdict-pill--fail"; }
-          else if (verdict === "pass") { label = "DEFENDED"; cls = "exec-verdict-pill--pass"; }
-          else if (verdict === "inconclusive") { label = "INCONCLUSIVE"; cls = "exec-verdict-pill--inconclusive"; }
-          pill.className = "exec-verdict-pill " + cls;
-          pill.textContent = label;
+          // Judge v2 (M0) — label + colour bucket for legacy + v2 verdicts.
+          pill.className = "exec-verdict-pill " + v2VerdictPill(verdict);
+          pill.textContent = v2VerdictLabel(verdict);
         }
         loadProbeSheet(root, bodyNode, row.getAttribute("data-probe-href"));
       } else if (source === "finding") {
