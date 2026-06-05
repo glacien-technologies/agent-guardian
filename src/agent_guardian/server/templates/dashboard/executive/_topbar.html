@@ -6,10 +6,13 @@
 #}
 <header class="exec-topbar" role="banner">
   <div class="exec-topbar__brand">
+  <span style="display:inline-flex; align-items:center; gap:10px; cursor:pointer"
+        onclick="window.location.assign('/')">
     <img src="/static/logo.svg" alt="AgentGuardian" class="exec-topbar-logo" />
     <span class="exec-topbar__title">AgentGuardian</span>
-    <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
-  </div>
+  </span>
+  <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
+</div>  
   <div class="exec-topbar__right">
     <div class="exec-topbar__locality exec-topbar__locality--{{ 'local' if is_local else 'hosted' }}"
          aria-label="{{ locality_label }}">

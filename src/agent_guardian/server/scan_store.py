@@ -676,6 +676,33 @@ class ScanStore:
         completed_rows.sort(key=lambda r: -r[0])
         completed_summaries = [s for (_k, s) in completed_rows]
 
+        # Disk-running fix-up: a CLI scan runs in a SEPARATE process from this
+        # dashboard, so it is never in the in-memory ``_running`` registry
+        # above. Reconstruct its state from disk:
+        #   * partial snapshot present, no terminal scan.json, and recently
+        #     written -> still LIVE (badge "live").
+        #   * partial present, no terminal, but STALE (process killed / crashed
+        #     mid-run and never finalised) -> NOT live, so an abandoned scan
+        #     doesn't read as "live" forever.
+        #   * terminal scan.json present -> a real completed scan; left as-is.
+        # Either unfinished case blanks AIVSS/band (no finalised score exists).
+        # A live scan rewrites the partial every few seconds, so a partial that
+        # has gone quiet this long means the process is gone.
+        _stale_after_seconds = 300.0
+        now = time.time()
+        fixed: list[ScanSummary] = []
+        for s in completed_summaries:
+            scan_dir = self._root / s.scan_id
+            partial = scan_dir / "scan.partial.json"
+            if not is_terminal_scan_on_disk(scan_dir) and partial.is_file():
+                try:
+                    is_live = (now - partial.stat().st_mtime) < _stale_after_seconds
+                except OSError:  # pragma: no cover -- defensive
+                    is_live = False
+                s = dataclasses.replace(s, is_running=is_live, aivss=None, band=None)
+            fixed.append(s)
+        completed_summaries = fixed
+
         all_rows = running_summaries + completed_summaries
         total = len(all_rows)
         page = all_rows[offset : offset + limit]
