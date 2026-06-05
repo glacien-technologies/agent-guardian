@@ -50,22 +50,17 @@
          aria-labelledby="tab-probes"
          tabindex="0"
          hidden>
-  <h2 class="exec-section-title">All probes attempted.</h2>
+  <h2 class="exec-section-title">Probe attempts</h2>
   <p class="exec-section-lede">
-    {{ probe_groups | length }} agent{{ '' if probe_groups | length == 1 else 's' }}
-    across {{ probes_list | length }} turn{{ '' if probes_list | length == 1 else 's' }}
+    <span id="exec-probes-summary">{{ probe_groups | length }} agent{{ '' if probe_groups | length == 1 else 's' }} across {{ probes_list | length }} turn{{ '' if probes_list | length == 1 else 's' }}</span>
     &middot; each row opens the agent's full turn-by-turn conversation —
     verbatim prompts, target responses, judge verdicts, and a one-click
     reproduce command.
   </p>
-  {% if probe_groups | length == 0 %}
-    <p class="exec-empty">No probe attempts recorded yet.</p>
-  {% else %}
-    {% include "dashboard/executive/_probes_table.html" %}
-    {% set kind = "probe" %}
-    {% include "dashboard/executive/_finding_slideover.html" %}
-    <script src="/static/executive_findings.js?v={{ package_version }}" defer></script>
-  {% endif %}
+  {% include "dashboard/executive/_probes_table.html" %}
+  {% set kind = "probe" %}
+  {% include "dashboard/executive/_finding_slideover.html" %}
+  <script src="/static/executive_findings.js?v={{ package_version }}" defer></script>
 
   {# SSE Phase 2, Step 2.4 — live-append row template. ``live-append.js``
      clones this ``<tr>`` skeleton for a brand-new agent's first event and

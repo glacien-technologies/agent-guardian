@@ -300,6 +300,27 @@
     };
   }
 
+  /**
+   * Live-update the Probes-tab lede summary ("{A} agent(s) across {T}
+   * turn(s)") to match the rows currently in the tbody. A = number of
+   * per-agent rows; T = sum of their ``data-turn-count``.
+   */
+  function updateProbesSummary() {
+    var summary = document.getElementById("exec-probes-summary");
+    if (!summary) { return; }
+    var rows = document.querySelectorAll(
+      "#tabpanel-probes .exec-probes-table__row[data-probe-group]"
+    );
+    var agents = rows.length;
+    var turns = 0;
+    for (var i = 0; i < rows.length; i++) {
+      turns += parseInt(rows[i].getAttribute("data-turn-count") || "0", 10) || 0;
+    }
+    summary.textContent =
+      agents + (agents === 1 ? " agent" : " agents") +
+      " across " + turns + (turns === 1 ? " turn" : " turns");
+  }
+
   /** Set the verdict pill text + modifier class on a probe row. */
   function setProbeVerdict(row, verdict) {
     row.setAttribute("data-verdict", verdict);
@@ -537,11 +558,17 @@
         if (ev.probeId && !existing.getAttribute("data-probe-id")) {
           existing.setAttribute("data-probe-id", ev.probeId);
         }
+        updateProbesSummary();
         return;
       }
       var row = buildProbeRow(payload);
       if (!row) { return; }
+      // Drop the server-rendered empty placeholder before the first real
+      // row lands — otherwise it lingers above the streaming rows.
+      var er = document.getElementById("exec-probes-empty-row");
+      if (er) { er.remove(); }
       tbody.appendChild(row);
+      updateProbesSummary();
     });
   }
 

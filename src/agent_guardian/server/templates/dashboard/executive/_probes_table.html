@@ -105,5 +105,6 @@
         <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ g.timestamp_label }}</time></td>
       </tr>
     {% endfor %}
+    {% if probe_groups | length == 0 %}<tr id="exec-probes-empty-row" class="exec-probes-table__empty-row"><td colspan="4" class="exec-empty">No probe attempts recorded yet — they appear here as the swarm runs.</td></tr>{% endif %}
   </tbody>
 </table>

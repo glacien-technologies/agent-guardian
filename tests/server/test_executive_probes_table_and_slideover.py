@@ -540,10 +540,15 @@ def test_executive_probes_clean_control_empty_state_preserved(
     # No memory.jsonl seeded → probes_list is empty.
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    assert "No probe attempts recorded yet." in pane
-    # And the table + slide-over are NOT rendered in the empty branch.
-    assert 'class="exec-probes-table"' not in pane
-    assert 'id="exec-finding-slideover"' not in pane
+    # The empty placeholder copy renders inside the always-present table.
+    assert "No probe attempts recorded yet — they appear here as the swarm runs." in pane
+    # The table scaffold + slide-over now ALWAYS render (live-append target),
+    # even with zero probe groups.
+    assert 'class="exec-probes-table"' in pane
+    assert 'id="exec-finding-slideover"' in pane
+    # But the empty render still carries ZERO clickable agent rows — the
+    # placeholder row is not a probe-row-click target.
+    assert pane.count('data-action="probe-row-click"') == 0
 
 
 # ---------------------------------------------------------------------------
