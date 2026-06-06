@@ -4,7 +4,7 @@ This test fails CI if any of the canonical governance / security files
 still contain the placeholder phrases that were used during pre-launch
 drafting. The package metadata declares Production/Stable; users
 landing on PyPI clicking through to MAINTAINERS / SECURITY /
-governance must NOT find a ``_to be published_`` or
+governance docs must NOT find a ``_to be published_`` or
 ``_to be filled at launch_`` row staring back at them.
 
 Why is this a CI test instead of a one-shot edit? Because the file
@@ -33,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _GOVERNANCE_FILES = (
     "MAINTAINERS.md",
     "SECURITY.md",
-    "governance.md",
+    "docs/community/governance.md",
 )
 
 # Exact placeholder phrases the pre-launch drafts used. Each must be

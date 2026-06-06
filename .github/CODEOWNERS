@@ -43,7 +43,10 @@
 /CHANGELOG.md                      @glacien-technologies/oss-maintainers
 /CODE_OF_CONDUCT.md                @glacien-technologies/oss-maintainers
 /CONTRIBUTING.md                   @glacien-technologies/oss-maintainers
-/governance.md                     @glacien-technologies/oss-maintainers
+/docs/community/governance.md      @glacien-technologies/oss-maintainers
+/docs/community/oss-roadmap.md     @glacien-technologies/oss-maintainers
+/docs/community/ethics.md          @glacien-technologies/oss-maintainers
+/docs/integrations/index.md        @glacien-technologies/oss-maintainers
 /MAINTAINERS.md                    @glacien-technologies/oss-maintainers
 /SECURITY.md                       @glacien-technologies/oss-maintainers
 /TRADEMARKS.md                     @glacien-technologies/oss-maintainers

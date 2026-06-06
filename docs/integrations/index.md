@@ -11,9 +11,9 @@ AgentGuardian ships three distribution channels and two integration shims. Use t
 | **Pre-commit hook** (`.pre-commit-hooks.yaml`) | Local pre-commit entries for `scan` and `doctor`. | Catching regressions before the commit lands. |
 | **SARIF 2.1.0** (`--output sarif`) | Standard schema consumed by GitHub Code Scanning, Sonar, DefectDojo, Sarif Web Viewer. | Wiring findings into the security tooling you already run. |
 
-AgentGuardian is a merge gate on all three major forges — **GitHub Actions**, **GitLab CI**, and **Bitbucket Pipelines** — driven by one CLI. Each forge gets a SARIF / Code Quality report, inline annotations, and a single sticky PR/MR comment (upserted in place on every push). The full, consolidated CI/CD documentation lives under [`docs/ci-cd/`](docs/ci-cd/overview.mdx) — start with the [overview](docs/ci-cd/overview.mdx), then the per-forge pages: [GitHub Actions](docs/ci-cd/github-actions.mdx), [GitLab CI](docs/ci-cd/gitlab-ci.mdx), [Bitbucket](docs/ci-cd/bitbucket.mdx). See also [security gates](docs/ci-cd/security-gates.mdx) (the `--fail-under` / `--max-*` flags) and [PR comments](docs/ci-cd/pr-comments.mdx).
+AgentGuardian is a merge gate on all three major forges — **GitHub Actions**, **GitLab CI**, and **Bitbucket Pipelines** — driven by one CLI. Each forge gets a SARIF / Code Quality report, inline annotations, and a single sticky PR/MR comment (upserted in place on every push). The full, consolidated CI/CD documentation lives under [`docs/ci-cd/`](../ci-cd/overview.mdx) — start with the [overview](../ci-cd/overview.mdx), then the per-forge pages: [GitHub Actions](../ci-cd/github-actions.mdx), [GitLab CI](../ci-cd/gitlab-ci.mdx), [Bitbucket](../ci-cd/bitbucket.mdx). See also [security gates](../ci-cd/security-gates.mdx) (the `--fail-under` / `--max-*` flags) and [PR comments](../ci-cd/pr-comments.mdx).
 
-> **Stateless gate, no baseline.** The OSS gate judges every scan on its own — it has no memory of a prior scan, so a pre-existing finding can fail the gate and every finding counts. Baseline-diff (failing only on findings a PR *introduces*) is a hosted (SaaS) feature. See the [CI/CD overview](docs/ci-cd/overview.mdx).
+> **Stateless gate, no baseline.** The OSS gate judges every scan on its own — it has no memory of a prior scan, so a pre-existing finding can fail the gate and every finding counts. Baseline-diff (failing only on findings a PR *introduces*) is a hosted (SaaS) feature. See the [CI/CD overview](../ci-cd/overview.mdx).
 
 ## GitHub Actions
 
@@ -39,7 +39,7 @@ jobs:
           AGENT_GUARDIAN_AUTH_BEARER: ${{ secrets.MY_AGENT_BEARER }}
 ```
 
-Full input reference: [`.github/actions/agentguardian-scan/README.md`](.github/actions/agentguardian-scan/README.md).
+Full input reference: [`.github/actions/agentguardian-scan/README.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/.github/actions/agentguardian-scan/README.md).
 
 ## Docker
 
@@ -94,8 +94,8 @@ The composite action uploads SARIF for you. If you run the CLI directly, mirror 
     category: agentguardian
 ```
 
-A static example of what the report looks like, pre-rendered from real scan output: [`docs/_assets/sample-report.html`](docs/_assets/sample-report.html).
+A static example of what the report looks like, pre-rendered from real scan output: [`docs/_assets/sample-report.html`](../_assets/sample-report.html).
 
 ## Exit codes
 
-The CLI uses six exit codes — `0` (pass), `1` (gate failed or non-authoritative scan), `2` (config), `3` (target unreachable), `4` (LLM provider), `5` (sandbox), `130` (user interrupt). Full reference: [`docs/reference/exit-codes.mdx`](docs/reference/exit-codes.mdx).
+The CLI uses six exit codes — `0` (pass), `1` (gate failed or non-authoritative scan), `2` (config), `3` (target unreachable), `4` (LLM provider), `5` (sandbox), `130` (user interrupt). Full reference: [`docs/reference/exit-codes.mdx`](../reference/exit-codes.mdx).

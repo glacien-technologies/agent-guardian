@@ -261,13 +261,14 @@ The exact probe-to-standard mapping lives in [`docs/reports/owasp-mapping.mdx`](
 - [`docs/quickstart.mdx`](./docs/quickstart.mdx)
 - [`docs/attacks/overview.mdx`](./docs/attacks/overview.mdx)
 - [`docs/concepts/target-adapters.mdx`](./docs/concepts/target-adapters.mdx)
+- [`docs/integrations/index.md`](./docs/integrations/index.md)
 - [`docs/reference/cli.mdx`](./docs/reference/cli.mdx)
 
 ## Project status
 
 AgentGuardian `1.0.0` is the first stable release. Semantic versioning applies to the public Python API, CLI surface, report schemas, and probe IDs. Probe content and scoring may evolve within a minor release as coverage improves.
 
-See [`ROADMAP.md`](./ROADMAP.md), [`CHANGELOG.md`](./CHANGELOG.md), and [`governance.md`](./governance.md).
+See the [`OSS roadmap`](./docs/community/oss-roadmap.md), [`CHANGELOG.md`](./CHANGELOG.md), and [`governance`](./docs/community/governance.md).
 
 ## Contributing
 
@@ -279,7 +280,7 @@ All commits must be DCO-signed:
 git commit -s
 ```
 
-By participating you agree to [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) and [`ETHICS.md`](./ETHICS.md). AgentGuardian is for testing systems you own or are explicitly authorised to test.
+By participating you agree to [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) and the [`ethics policy`](./docs/community/ethics.md). AgentGuardian is for testing systems you own or are explicitly authorised to test.
 
 ## Community
 

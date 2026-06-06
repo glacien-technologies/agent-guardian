@@ -10,19 +10,21 @@
   and `--framework rag` adapters are on the 1.2 roadmap.
 
 
-This file is the canonical, repo-root roadmap for AgentGuardian (OSS).
+This file is the canonical roadmap for AgentGuardian OSS.
 It tracks the **current 90-day thematic cycle** only.
 
-- The Mintlify-rendered companion lives at [`docs/community/roadmap.mdx`](docs/community/roadmap.mdx) and links here.
+- The Mintlify-rendered companion lives at [`docs/community/roadmap.mdx`](roadmap.mdx) and links here.
 - Live progress is on the [GitHub Projects board](https://github.com/orgs/glacien-technologies/projects).
 - Anything not in this file is **not** a public commitment.
 
 ## How this roadmap works
 
 - **Time-bucketed, not version-locked.** We do not promise that a given item ships in v1.1, v1.2, or by any specific date. We commit to the *theme* for the cycle.
-- **Cycle length: ~90 days.** The current cycle refreshes on each tier-3 governance review per [`governance.md`](governance.md). Previous cycles' deliverables are visible in `CHANGELOG.md` and the git log.
+- **Cycle length: ~90 days.** The current cycle refreshes on each tier-3 governance review per [`governance.md`](governance.md). Previous cycles' deliverables are visible in [`CHANGELOG.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md) and the git log.
 - **No timelines inside the cycle.** Within a cycle, items move from "Now" to "Next" to "Later" as they get picked up, but there is no week-by-week schedule.
-- **Influence the roadmap.** Open a [Discussion in the Roadmap category](https://github.com/glacien-technologies/agent-guardian/discussions/categories/roadmap), file an issue with the `kind/roadmap-candidate` label, or — most effective — ship a PR.
+- **Influence the roadmap.** File a
+  [roadmap-candidate issue](https://github.com/glacien-technologies/agent-guardian/issues?q=is%3Aissue%20label%3Akind%2Froadmap-candidate)
+  or — most effective — ship a PR.
 
 ## Current cycle — 2026-Q3 (June – August 2026)
 
@@ -56,7 +58,7 @@ Make AgentGuardian's own supply-chain story easy to verify and easy to cite.
 
 - **OpenSSF Best Practices badge** enrolment at
   [bestpractices.dev](https://www.bestpractices.dev). Tracking doc:
-  [`docs/security/openssf-badge-status.md`](docs/security/openssf-badge-status.md).
+  [`docs/security/openssf-badge-status.md`](../security/openssf-badge-status.md).
 - **Reproducible-build verification record.** First independent
   byte-for-byte rebuild attestation appended to
   `docs/security/reproducible-builds.md` per the protocol already documented
@@ -99,18 +101,18 @@ These are deferred — by deliberate scoping, not because they are unwanted.
   traffic interception are out of scope for OSS and belong to AgentGuardian
   Enterprise.
 - **Managed evidence storage, team / SSO / audit-log workflows,
-  telemetry.** Same scoping — see [Open vs Enterprise](https://agentguardian.io/concepts/open-vs-enterprise).
+  telemetry.** Same scoping — see [Open vs Enterprise](../concepts/open-vs-enterprise.mdx).
 
 ## Last cycle's deliverables
 
-A reverse-chronological record lives in [`CHANGELOG.md`](CHANGELOG.md).
+A reverse-chronological record lives in [`CHANGELOG.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md).
 Everything that landed in the previous cycle (M1–M15 build through v1.0.0,
 plus the v1.1 in-flight items) is enumerated there with the merging PR's
 commit and test count.
 
 ## Maintaining this file
 
-Edits to `ROADMAP.md` are a tier-3 governance change per
+Edits to this roadmap are a tier-3 governance change per
 [`governance.md`](governance.md) — three of four maintainer roles
 concurring, decision recorded in the quarterly review minutes under
 `docs/engineering-standards-reviews/`. Cycle refresh is one such tier-3

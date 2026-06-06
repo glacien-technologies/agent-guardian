@@ -3,8 +3,8 @@
 Before you start, read:
 
 - [Code of Conduct](./CODE_OF_CONDUCT.md)
-- [Ethics Policy](./ETHICS.md)
-- [Governance](./governance.md)
+- [Ethics Policy](./docs/community/ethics.md)
+- [Governance](./docs/community/governance.md)
 
 ## Welcome
 
@@ -63,9 +63,9 @@ The release-notes generator parses these prefixes to produce CHANGELOG entries a
 
 ## How to add a probe
 
-Before writing code, open a [Probe request issue](.github/ISSUE_TEMPLATE/4-probe-request.yml) so
+Before writing code, open a [Feature request issue](.github/ISSUE_TEMPLATE/2-feature-request.yml) so
 maintainers can align on the failure mode and scoring rubric. Probes must be ethical (see
-[ETHICS.md](./ETHICS.md)): no live exploits against named third-party production systems.
+the [ethics policy](./docs/community/ethics.md)): no live exploits against named third-party production systems.
 
 Probes live under `src/agent_guardian/probes/asiNN/`, one directory per OWASP ASI category. Each probe is a YAML file with the following required fields (per PRD §5.2):
 
@@ -99,7 +99,7 @@ Every new probe must ship with a corresponding golden test under `tests/golden/`
 
 ## How to add a framework adapter
 
-Before writing code, open an [Adapter request issue](.github/ISSUE_TEMPLATE/5-adapter-request.yml)
+Before writing code, open a [Feature request issue](.github/ISSUE_TEMPLATE/2-feature-request.yml)
 to confirm scope and ownership. Adapters live under `src/agent_guardian/adapters/<framework>.py`
 against the `BaseAdapter` protocol, register in `FRAMEWORK_ADAPTERS` in `cli.py`, and ship with
 a worked example under `examples/<framework>/` and integration tests under

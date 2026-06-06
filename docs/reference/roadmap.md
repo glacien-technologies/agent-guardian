@@ -47,7 +47,7 @@ behaviour for v1.0 users is preserved unless explicitly called out.
 
 ## v1.2 and beyond
 
-Earlier exploratory work tracked in [`ROADMAP.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/ROADMAP.md) at
+Earlier exploratory work tracked in [`docs/community/oss-roadmap.md`](../community/oss-roadmap.md) at
 the repository root. The hosted dashboard architecture is captured in
 [`architecture/hosted-dashboard.md`](../architecture/hosted-dashboard.md);
 ship date follows the v1.1 cycle.
