@@ -420,11 +420,17 @@ def test_attachments_section_omits_b64_payload_field() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_render_reflection_line_is_single_line_with_verdict() -> None:
-    """The compact line names ASI + agent + a verdict label, on ONE line."""
+def test_render_reflection_line_is_single_line_with_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compact line names ASI + agent + probe id + turn + a verdict label,
+    on ONE logical line (wide console so terminal wrapping doesn't false-fail)."""
     from agent_guardian.ui.attack_feed import render_reflection_line
 
-    console = _record_console()
+    # The autouse conftest sets TERM=dumb, which makes Rich clamp to 80 cols and
+    # ignore our width pin; override it so the wide width is honoured.
+    monkeypatch.setenv("TERM", "xterm-256color")
+    console = _record_console(width=200)
     turn = _turn_record(verdict="fail", agent="secret-extraction-agent", asi_category="ASI05")
     console.print(render_reflection_line(turn))
     text = console.export_text().strip()
@@ -434,6 +440,14 @@ def test_render_reflection_line_is_single_line_with_verdict() -> None:
     assert "ASI05" in text
     assert "secret-extraction-agent" in text
     assert "EXPLOITED" in text
+    # 2026-06-06: the line carries the turn number and a hyphen before the
+    # verdict — but NOT the probe id (the operator found the [PROBE-ID] bracket
+    # noisy and asked for it removed from the compact feed line).
+    seed_id = str(turn.get("seed_id", ""))
+    if seed_id:
+        assert f"[{seed_id}]" not in text
+    assert "turn" in text
+    assert " - " in text
     # The full-panel section labels must NOT appear in the compact line.
     for label in ("STRATEGY", "PROMPT", "TARGET RESPONSE", "REASON"):
         assert label not in text

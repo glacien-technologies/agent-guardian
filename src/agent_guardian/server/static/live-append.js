@@ -302,6 +302,10 @@
     if (rawTurn != null) { turnNum = parseInt(rawTurn, 10) || 0; }
     var isTurn =
       kind === "agent_start" || kind === "agent_progress" || kind === "reflection";
+    // The "WHAT WE LEARNED" one-liner — the judge reasoning carried on a
+    // reflection event. Populated into the summary column when this turn rolls
+    // the row verdict up to a new worst.
+    var reasoning = safeStr(payload.reasoning || p.reasoning);
     return {
       kind: kind,
       agent: agent,
@@ -311,7 +315,36 @@
       ts: ts,
       isTurn: isTurn,
       turnNum: turnNum,
+      reasoning: reasoning,
     };
+  }
+
+  // Probes-table ordering (mirrors server ``_probe_group_sort_key``): recon
+  // first, then by ASI number, then agent name. Returns a comparable [a,b,c].
+  function probeSortKey(asi, agent) {
+    if (agent === "recon-agent") { return [0, 0, ""]; }
+    var m = /ASI0*(\d+)/.exec(asi || "");
+    return [1, m ? parseInt(m[1], 10) : 999, agent || ""];
+  }
+  function cmpProbeKey(a, b) {
+    for (var i = 0; i < 3; i++) {
+      if (a[i] < b[i]) { return -1; }
+      if (a[i] > b[i]) { return 1; }
+    }
+    return 0;
+  }
+  /** Insert a freshly built probe row into ``tbody`` at its ASI-sorted slot. */
+  function insertProbeRowSorted(tbody, row) {
+    var key = probeSortKey(row.getAttribute("data-asi"), row.getAttribute("data-probe-group"));
+    var rows = tbody.querySelectorAll(".exec-probes-table__row[data-probe-group]");
+    for (var i = 0; i < rows.length; i++) {
+      var k = probeSortKey(rows[i].getAttribute("data-asi"), rows[i].getAttribute("data-probe-group"));
+      if (cmpProbeKey(key, k) < 0) {
+        tbody.insertBefore(row, rows[i]);
+        return;
+      }
+    }
+    tbody.appendChild(row);
   }
 
   /**
@@ -346,21 +379,25 @@
   }
 
   /**
-   * Set the "strongest evidence: turn N" strap line on a probe row and reveal
-   * its container. Works for both the live-cloned template (which carries a
-   * ``data-slot="run-evidence"`` span inside a hidden ``.exec-run-result``) and
-   * a server-rendered row (matched by the ``.exec-run-result__evidence`` class).
-   * No-ops gracefully when neither is present so an older cached template can't
-   * throw. ``turnNum`` <= 0 is ignored (nothing meaningful to point at).
+   * Fill the EVIDENCE column ("turn N") on a probe row. The evidence is now its
+   * own column (was a strap line under the verdict), so we just set the
+   * ``data-slot="run-evidence"`` span text — matching the server-rendered cell.
+   * No-ops gracefully when the slot is absent (older cached template) and when
+   * ``turnNum`` <= 0 (nothing meaningful to point at).
    */
   function setProbeRunEvidence(row, turnNum) {
     if (!row || !turnNum || turnNum <= 0) { return; }
     var ev = row.querySelector('[data-slot="run-evidence"]')
       || row.querySelector(".exec-run-result__evidence");
     if (!ev) { return; }
-    ev.textContent = "strongest evidence: turn " + turnNum;
-    var box = row.querySelector(".exec-run-result");
-    if (box && box.hasAttribute("hidden")) { box.removeAttribute("hidden"); }
+    ev.classList.remove("exec-run-result__evidence--empty");
+    ev.textContent = "turn " + turnNum;
+  }
+
+  /** Fill the "WHAT WE LEARNED" summary column on a probe row (no-op if empty). */
+  function setProbeSummary(row, text) {
+    if (!row || !text) { return; }
+    fillSlot(row, "summary", text);
   }
 
   /**
@@ -391,6 +428,7 @@
     row.setAttribute("role", "button");
     row.setAttribute("data-probe-group", ev.agent);
     row.setAttribute("data-probe-id", ev.probeId);
+    row.setAttribute("data-asi", ev.asi || "");
     if (scanId && ev.agent) {
       row.setAttribute(
         "data-probe-href",
@@ -400,16 +438,17 @@
     var turnCount = ev.turnNum > 0 ? ev.turnNum : (ev.isTurn ? 1 : 0);
     row.setAttribute("data-turn-count", String(turnCount));
     setProbeVerdict(row, ev.verdict);
-    // Seed the strongest-evidence strap line when this first event already
-    // carries a graded verdict on a numbered turn (e.g. a reflection that
-    // arrives before any agent_start).
+    // Placeholder dash matches the server-rendered empty summary until a graded
+    // reflection fills it (the AI summary lands at scan finalization).
+    fillSlot(row, "summary", "—");
+    // Seed the summary when this first event already carries a graded verdict
+    // (e.g. a reflection that arrives before any agent_start).
     if ((VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK.pending || 0)) {
-      setProbeRunEvidence(row, ev.turnNum);
+      setProbeSummary(row, ev.reasoning);
     }
     fillSlot(row, "asi", ev.asi || "—");
     fillSlot(row, "agent", ev.agent || "—");
-    fillSlot(row, "turn", turnCount + (turnCount === 1 ? " turn" : " turns"));
-    fillSlot(row, "timestamp", ev.ts);
+    fillSlot(row, "turn", turnCount + (turnCount === 1 ? " run" : " runs"));
     row.setAttribute(
       "aria-label",
       "Open conversation for " + (ev.agent || "(new agent)")
@@ -591,7 +630,7 @@
         else if (ev.isTurn) { n = cur + 1; }
         if (n !== cur) {
           existing.setAttribute("data-turn-count", String(n));
-          fillSlot(existing, "turn", n + (n === 1 ? " turn" : " turns"));
+          fillSlot(existing, "turn", n + (n === 1 ? " run" : " runs"));
         }
         // Roll the verdict up to the worst outcome seen so far. When it
         // STRICTLY worsens, record the turn that produced the strongest
@@ -612,9 +651,10 @@
           (VERDICT_RANK[ev.verdict] || 0) > (VERDICT_RANK[current] || 0)
         ) {
           setProbeVerdict(existing, ev.verdict);
-          setProbeRunEvidence(existing, ev.turnNum);
+          // The strongest turn owns the provisional live summary (the AI
+          // summary replaces it on the next server render after finalization).
+          setProbeSummary(existing, ev.reasoning);
         }
-        if (ev.ts) { fillSlot(existing, "timestamp", ev.ts); }
         if (ev.probeId && !existing.getAttribute("data-probe-id")) {
           existing.setAttribute("data-probe-id", ev.probeId);
         }
@@ -627,7 +667,9 @@
       // row lands — otherwise it lingers above the streaming rows.
       var er = document.getElementById("exec-probes-empty-row");
       if (er) { er.remove(); }
-      tbody.appendChild(row);
+      // Insert in ASI order (recon first) so the live table matches the
+      // server-rendered ordering instead of arrival order.
+      insertProbeRowSorted(tbody, row);
       updateProbesSummary();
     });
   }

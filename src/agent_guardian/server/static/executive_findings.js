@@ -46,6 +46,7 @@
     needs_followup: "NEEDS FOLLOW-UP",
     defended: "DEFENDED",
     simulated_or_unverified: "UNVERIFIED",
+    recon: "RECON",
   };
   var V2_VERDICT_PILL = {
     fail: "exec-verdict-pill--exploited",
@@ -57,6 +58,7 @@
     inconclusive: "exec-verdict-pill--needs_followup",
     pass: "exec-verdict-pill--defended",
     defended: "exec-verdict-pill--defended",
+    recon: "exec-verdict-pill--recon",
   };
   function v2VerdictLabel(verdict) {
     return V2_VERDICT_LABELS[verdict] || "PENDING";
@@ -387,13 +389,15 @@
       pill.textContent = verdictLabel;
     }
     setText(root.querySelector("[data-slideover-id]"), tpl.getAttribute("data-record-id") || "—");
-    var turn = tpl.getAttribute("data-turn") || "—";
+    var turn = tpl.getAttribute("data-turn") || "";
     // Probe rows get a "turn N" chip; findings have no single turn, so leave the
     // chip empty rather than repeating the finding id (it already shows in the
-    // id chip + the Finding ID metadata row).
+    // id chip + the Finding ID metadata row). Recon groups carry no single turn
+    // (ctx.turn is None → "—"), so suppress the chip there too.
+    var hasTurn = turn && turn !== "—";
     setText(
       root.querySelector("[data-slideover-turn]"),
-      kind === "probe" ? "turn " + turn : "",
+      kind === "probe" && hasTurn ? "turn " + turn : "",
     );
     setText(
       root.querySelector("[data-slideover-time]"),

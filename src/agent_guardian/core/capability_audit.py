@@ -803,10 +803,16 @@ async def _run_time_channel_probe(
     # per-turn); polluting them would skew the profile and break those
     # invariants. Only the latency profile is recorded.
     latencies: list[float] = []
+    # The time-channel probe is ONE logical capability probe that happens to
+    # send N benign pings for a latency measurement. Notify ONCE (not per ping)
+    # so the live recon counter is not inflated past the audit-transcript count
+    # — those pings are intentionally NOT appended to ``result.transcript``
+    # (see the note above), so counting each one made the live "N probes"
+    # spinner overshoot the final ``recon_done probes=<len(transcript)>``.
+    _notify(on_probe, "time-channel probe")
     for seed in seeds:
         if _cancelled(cancel_event):
             break
-        _notify(on_probe, "time-channel probe")
         _reply, _tool_calls, _snap, latency_ms = await _safe_call(target, seed)
         latencies.append(latency_ms)
     if len(latencies) < 2:

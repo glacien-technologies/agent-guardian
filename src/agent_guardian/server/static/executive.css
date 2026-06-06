@@ -168,6 +168,19 @@ body.exec-body {
   color: var(--exec-ink);
 }
 .exec-topbar__right { display: flex; align-items: center; gap: 1rem; }
+.exec-topbar__export {
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--exec-brand);
+  text-decoration: none;
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--exec-brand) 40%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background 120ms ease-out;
+}
+.exec-topbar__export:hover { background: var(--exec-brand-tint); }
 .exec-topbar__locality {
   display: inline-flex;
   align-items: center;
@@ -2459,12 +2472,15 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   margin: 12px 0 4px 0;
 }
 .exec-probe__recon-note {
+  /* Full modal width — the recon description is the whole frame for this
+     slide-over (no finding metadata competes for the line), so let it run the
+     full sheet width rather than capping at a reading measure. */
   margin: 0 0 12px 0;
   font-family: var(--exec-font-sans);
   font-size: 12px;
   line-height: 1.55;
   color: var(--exec-ink-muted);
-  max-width: 64ch;
+  width: 100%;
 }
 .exec-probe__prompt,
 .exec-probe__response {
@@ -3106,18 +3122,60 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--exec-ink-subtle);
-  padding: 10px 12px;
+  /* Equal horizontal gutter on every header cell — matches the body td below
+     so the inter-column spacing is uniform across the whole table. */
+  padding: 10px 16px;
   border-bottom: 1px solid var(--exec-border-subtle);
   background: var(--exec-bg-sunken);
 }
-/* Per-agent grouping (2026-06-03): the PROBE ID column was dropped — the
-   table now renders one row per agent, so the agent name is the row
-   identity and the AGENT column takes the freed width. The TURNS column
-   widened to fit "NN turns". */
-.exec-probes-table__col--agent { width: auto; }
-.exec-probes-table__col--verdict { width: 7rem; }
-.exec-probes-table__col--turn { width: 6rem; }
-.exec-probes-table__col--time { width: 8rem; }
+/* Per-agent grouping (2026-06-03): one row per agent. 2026-06-06: the
+   LAST ACTIVITY column was dropped; the freed width (plus the gap that used
+   to sit empty left of the verdict) now carries a WHAT WE LEARNED summary
+   column (the wide flex column) and a dedicated EVIDENCE column (the
+   strongest-evidence turn, previously a strap line under the verdict). */
+/* 2026-06-06 (rev 2): 3-column layout — AGENT·ASI·RUNS | VERDICT | SUMMARY.
+   The turn count moved INTO the agent cell (next to the ASI badge), the
+   EVIDENCE column folded into the AI summary, and SUMMARY is the wide flex
+   column that carries the AI-written one-liner. */
+.exec-probes-table__col--agent { width: 20rem; }
+.exec-probes-table__col--verdict { width: 8rem; }
+.exec-probes-table__col--summary { width: auto; }  /* the rest of the row */
+/* Header for the agent column mirrors the body cell's 3-part flex so the RUNS
+   label sits directly above the right-aligned run counts. The flex is on this
+   inner wrapper (not the th) so the th stays a table-cell and the fixed column
+   width is preserved under table-layout: fixed. */
+.exec-probes-table__agent-head {
+  display: flex;
+  align-items: center;
+}
+.exec-probes-table__runs-head {
+  margin-left: auto;
+  padding-left: 12px;
+}
+/* RUNS — turn count, right-aligned to the agent column edge so the counts
+   line up vertically across rows (``margin-left: auto`` pushes it right). */
+.exec-probes-table__runs {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  color: var(--exec-ink-subtle);
+  white-space: nowrap;
+}
+/* SUMMARY — the AI one-liner (or live reasoning gloss). Show it IN FULL: wrap
+   onto a second line when the column isn't wide enough rather than truncating
+   with an ellipsis. */
+.exec-probes-table__summary {
+  display: block;
+  max-width: 100%;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  color: var(--exec-ink-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
 
 .exec-probes-table__row {
   cursor: pointer;
@@ -3133,7 +3191,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   background: var(--exec-brand-tint);
 }
 .exec-probes-table__row > td {
-  padding: 10px 12px;
+  /* Same 16px horizontal gutter as the header cells — equal spacing between
+     every column. */
+  padding: 12px 16px;
   vertical-align: middle;
 }
 .exec-probes-table__asi {
@@ -3151,7 +3211,20 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   border-radius: var(--exec-radius-sm);
   margin-right: 6px;
 }
+/* Agent cell is a 3-part row: [ASI badge] [agent name …flex] [runs →right].
+   Flexbox keeps the RUNS count right-aligned to the column edge so it forms a
+   clean vertical line across rows regardless of agent-name length, and the
+   name truncates with an ellipsis rather than shoving RUNS out of alignment. */
+.exec-probes-table__cell--agent {
+  display: flex;
+  align-items: center;
+}
 .exec-probes-table__agent {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--exec-font-sans);
   font-weight: 500;
   color: var(--exec-ink);

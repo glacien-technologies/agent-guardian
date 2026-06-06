@@ -3,6 +3,13 @@
 <section class="scan-header">
   <h1>Export</h1>
   <p class="muted"><a href="/scan/{{ scan_id }}" class="mono">{{ scan_id }}</a></p>
+  <p>
+    <a href="/scan/{{ scan_id }}/export/bundle.zip" class="format-link format-link--bundle"
+       aria-label="Download every report, probe record and raw log as one zip">
+      <span class="format-ext">.zip</span>
+      <span class="format-name">Download all — reports, probe records &amp; raw logs</span>
+    </a>
+  </p>
 </section>
 
 <section class="card">
@@ -33,5 +40,42 @@
     <code>agent-guardian report {{ scan_id }} --output pdf --output-path report.pdf</code>
     (requires a PDF engine such as WeasyPrint or reportlab).
   </p>
+</section>
+
+<section class="card">
+  <h2>Per-agent probe records</h2>
+  {% if probe_files %}
+  <p class="muted">One JSON per agent — all of its turns (with turn numbers), the raw event stream, and the rolled-up verdict. <code>index.json</code> summarises them all.</p>
+  <ul class="format-list">
+    {% for name in probe_files %}
+      <li>
+        <a href="/scan/{{ scan_id }}/probe-file/{{ name }}" class="format-link">
+          <span class="format-ext">.json</span>
+          <span class="format-name mono">{{ name }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No per-agent probe records yet — they appear here when the scan finalizes.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Raw artifacts &amp; logs</h2>
+  {% if raw_files %}
+  <ul class="format-list">
+    {% for f in raw_files %}
+      <li>
+        <a href="/scan/{{ scan_id }}/raw/{{ f.name }}" class="format-link">
+          <span class="format-ext mono">{{ f.name }}</span>
+          <span class="format-name">{{ f.label }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No raw artifacts available yet for this scan.</p>
+  {% endif %}
 </section>
 {% endblock %}

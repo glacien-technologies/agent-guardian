@@ -1,9 +1,12 @@
-"""GET /scan/{id}/export — links + raw report downloads."""
+"""GET /scan/{id}/export — links + raw report / artifact downloads."""
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
@@ -20,23 +23,89 @@ _FORMAT_MEDIATYPES: dict[str, str] = {
     "md": "text/markdown",
 }
 
+# Raw per-scan artifacts the export page links for reference, with their
+# media type + a short human label. Whitelisted by exact name so the download
+# route can never be coerced into serving an arbitrary file.
+_RAW_FILES: dict[str, tuple[str, str]] = {
+    "run.log": ("text/plain; charset=utf-8", "Full raw log (every line)"),
+    "events.jsonl": ("application/x-ndjson", "SSE event stream"),
+    "memory.jsonl": ("application/x-ndjson", "Every turn / finding"),
+    "recon_probes.jsonl": ("application/x-ndjson", "Recon probe log"),
+    "scan.json": ("application/json", "Canonical signed scan"),
+    "scan.raw.json": ("application/json", "Raw scan model dump"),
+    "stats.json": ("application/json", "Scan stats"),
+}
+
 
 @router.get("/scan/{scan_id}/export", response_class=HTMLResponse)
 async def export_index(request: Request, scan_id: str) -> HTMLResponse:
-    """Render the per-format export page (download links)."""
+    """Render the per-scan export page (reports + raw artifacts + probe records)."""
     store = get_scan_store(request)
     templates = get_templates(request)
-    if not store.scan_dir(scan_id).is_dir() and not store.is_running(scan_id):
+    scan_dir = store.scan_dir(scan_id)
+    if not scan_dir.is_dir() and not store.is_running(scan_id):
         raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
     formats = store.list_report_paths(scan_id)
+    # Raw artifacts that actually exist on disk, in the whitelisted order.
+    raw_files = [
+        {"name": name, "label": label}
+        for name, (_mt, label) in _RAW_FILES.items()
+        if (scan_dir / name).is_file()
+    ]
+    # Per-agent probe records (one <agent>.json each) + index/summaries.
+    probe_dir = scan_dir / "probe"
+    probe_files = sorted(p.name for p in probe_dir.glob("*.json")) if probe_dir.is_dir() else []
     return templates.TemplateResponse(
         request,
         "export.html",
         {
             "scan_id": scan_id,
             "formats": sorted(formats.keys()),
+            "raw_files": raw_files,
+            "probe_files": probe_files,
             "page_title": f"Export — {scan_id}",
         },
+    )
+
+
+@router.get("/scan/{scan_id}/export/bundle.zip")
+async def export_bundle(request: Request, scan_id: str) -> Response:
+    """Stream ONE zip with every downloadable artifact for the scan.
+
+    Bundles the rendered reports (``reports/<fmt>.<fmt>``), the per-agent probe
+    records (``probe/<agent>.json``) and the whitelisted raw artifacts +
+    logs (``raw/run.log`` / ``raw/events.jsonl`` / …) so an operator can grab
+    the whole evidence pack in a single click instead of file-by-file.
+
+    Declared BEFORE ``/scan/{scan_id}/export/{fmt}`` so the literal ``bundle.zip``
+    path wins the route match rather than being read as ``fmt="bundle.zip"``.
+    """
+    store = get_scan_store(request)
+    scan_dir = store.scan_dir(scan_id)
+    if not scan_dir.is_dir() and not store.is_running(scan_id):
+        raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # Rendered reports → reports/<fmt>.<fmt> (json.json, sarif.sarif, …).
+        for fmt, path in store.list_report_paths(scan_id).items():
+            if path.is_file():
+                zf.write(path, arcname=f"reports/{fmt}.{fmt}")
+        # Per-agent probe records → probe/<name>.
+        probe_dir = scan_dir / "probe"
+        if probe_dir.is_dir():
+            for p in sorted(probe_dir.glob("*.json")):
+                zf.write(p, arcname=f"probe/{p.name}")
+        # Whitelisted raw artifacts + logs → raw/<name>.
+        for name in _RAW_FILES:
+            p = scan_dir / name
+            if p.is_file():
+                zf.write(p, arcname=f"raw/{name}")
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{scan_id}-bundle.zip"'},
     )
 
 
@@ -55,3 +124,36 @@ async def export_download(request: Request, scan_id: str, fmt: str) -> FileRespo
         media_type=_FORMAT_MEDIATYPES[fmt],
         filename=f"{scan_id}.{fmt}",
     )
+
+
+@router.get("/scan/{scan_id}/raw/{name}")
+async def raw_download(request: Request, scan_id: str, name: str) -> FileResponse:
+    """Stream a whitelisted raw per-scan artifact (run.log / events.jsonl / …)."""
+    store = get_scan_store(request)
+    media = _RAW_FILES.get(name)
+    if media is None:
+        raise HTTPException(status_code=400, detail=f"unknown artifact: {name}")
+    path = store.scan_dir(scan_id) / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"artifact not available: {name}")
+    return FileResponse(path=path, media_type=media[0], filename=f"{scan_id}-{name}")
+
+
+@router.get("/scan/{scan_id}/probe-file/{name}")
+async def probe_file_download(request: Request, scan_id: str, name: str) -> FileResponse:
+    """Stream one per-agent probe JSON from ``<scan_dir>/probe/``.
+
+    ``name`` is reduced to a bare basename and must end in ``.json`` and resolve
+    inside the probe directory — no path traversal.
+    """
+    store = get_scan_store(request)
+    from pathlib import Path
+
+    safe = Path(name).name
+    if not safe.endswith(".json"):
+        raise HTTPException(status_code=400, detail="probe file must be .json")
+    probe_dir = (store.scan_dir(scan_id) / "probe").resolve()
+    path = (probe_dir / safe).resolve()
+    if probe_dir not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"probe record not available: {safe}")
+    return FileResponse(path=path, media_type="application/json", filename=f"{scan_id}-{safe}")

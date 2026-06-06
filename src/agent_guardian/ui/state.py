@@ -95,6 +95,10 @@ class ReconSummary:
 
     goal: str = ""
     target_ref: str = ""
+    # How many capability probes recon fired (audit-transcript length). This is
+    # the number the recon panel surfaces — distinct from the phase-2 attack
+    # probe applicability (``probes_applicable``), which recon does not compute.
+    recon_probes: int = 0
     probes_applicable: int = 0
     probes_skipped: int = 0
     multi_agent: bool = False

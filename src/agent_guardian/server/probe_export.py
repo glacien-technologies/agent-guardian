@@ -22,6 +22,7 @@ DEBUG): a single bad line is skipped, the rest export.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -46,10 +47,6 @@ _VERDICT_RANK: dict[str, int] = {
     "pass": 1,
     "defended": 1,
 }
-
-# Records with no probe id (e.g. recon capability turns) are bucketed under
-# this agent-derived key so the export skips NOTHING.
-_NO_PROBE_PREFIX = "agent:"
 
 
 def _safe_filename(probe_id: str) -> str:
@@ -92,14 +89,16 @@ def _iter_turn_records(scan_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
-def _events_for(scan_dir: Path, probe_id: str) -> list[dict[str, Any]]:
-    """Return every raw event record referencing ``probe_id``, verbatim.
+def _events_for_agent(scan_dir: Path, agent: str) -> list[dict[str, Any]]:
+    """Return every raw event record referencing ``agent``, verbatim.
 
-    Substring match on the raw line (robust across the id's several nested
-    positions: ``probe_id`` / ``seed_id`` / message body) — the same join the
-    ``/events/view`` page uses. No cap: this is the authoritative stream.
+    Substring match on the raw line (captures the agent's own events —
+    agent_start / agent_progress / reflection / agent_done / finding — plus any
+    log line that names it). No cap: this is the authoritative stream.
     """
     out: list[dict[str, Any]] = []
+    if not agent:
+        return out
     for fname in ("events.jsonl", "recon_probes.jsonl"):
         try:
             raw = (scan_dir / fname).read_text(encoding="utf-8")
@@ -107,7 +106,7 @@ def _events_for(scan_dir: Path, probe_id: str) -> list[dict[str, Any]]:
             continue
         for line in raw.splitlines():
             stripped = line.strip()
-            if not stripped or probe_id not in stripped:
+            if not stripped or agent not in stripped:
                 continue
             try:
                 rec = json.loads(stripped)
@@ -115,6 +114,13 @@ def _events_for(scan_dir: Path, probe_id: str) -> list[dict[str, Any]]:
                 continue
             out.append(rec)
     return out
+
+
+def _turn_index(t: dict[str, Any]) -> int:
+    """Sort key = the turn number; turns without one (recon audits) keep their
+    file order via the stable sort."""
+    raw = t.get("turn")
+    return int(raw) if isinstance(raw, int) else 0
 
 
 def _rollup(turns: list[dict[str, Any]]) -> tuple[str, int | None]:
@@ -135,62 +141,65 @@ def _rollup(turns: list[dict[str, Any]]) -> tuple[str, int | None]:
 
 
 def build_probe_exports(scan_dir: Path) -> dict[str, dict[str, Any]]:
-    """Build the authoritative per-probe export map (probe_id → record).
+    """Build the authoritative per-AGENT export map (agent → record).
 
-    Groups every memory.jsonl turn record by its ``seed_id`` (probe id);
-    turns with no probe id are bucketed under ``agent:<agent>`` so nothing is
-    dropped. Each group carries its full turns, the complete raw event stream
-    referencing the id, and the worst-case rolled-up verdict. Never truncates.
+    One entry per agent (matching the dashboard's one-row-per-agent grouping):
+    ALL of an agent's memory.jsonl turn records, ordered by turn number and each
+    carrying its own ``turn`` number + source ``seed_id``, plus the complete raw
+    event stream that names the agent and the worst-case rolled-up verdict. The
+    ``probe_ids`` list records every probe id the agent fired. Never truncates.
     """
     if not scan_dir.is_dir():
         return {}
     groups: dict[str, list[dict[str, Any]]] = {}
     order: list[str] = []
     for turn in _iter_turn_records(scan_dir):
-        seed = str(turn.get("seed_id") or "").strip()
         agent = str(turn.get("agent") or "").strip()
-        key = seed or (f"{_NO_PROBE_PREFIX}{agent}" if agent else "")
-        if not key:
+        if not agent:
             continue
-        if key not in groups:
-            groups[key] = []
-            order.append(key)
-        groups[key].append(turn)
+        if agent not in groups:
+            groups[agent] = []
+            order.append(agent)
+        groups[agent].append(turn)
 
     exports: dict[str, dict[str, Any]] = {}
-    for key in order:
-        turns = groups[key]
+    for agent in order:
+        turns = sorted(groups[agent], key=_turn_index)
         verdict, best_turn = _rollup(turns)
-        agent = next((str(t.get("agent") or "") for t in turns if t.get("agent")), "")
         asi = next((str(t.get("asi_category") or "") for t in turns if t.get("asi_category")), "")
-        is_probe = not key.startswith(_NO_PROBE_PREFIX)
-        events = _events_for(scan_dir, key) if is_probe else []
-        exports[key] = {
-            "probe_id": key if is_probe else "",
-            "group_key": key,
+        probe_ids = sorted({str(t.get("seed_id") or "").strip() for t in turns if t.get("seed_id")})
+        exports[agent] = {
             "agent": agent,
+            "group_key": agent,
             "asi_category": asi,
             "verdict": verdict,
             "turn_count": len(turns),
             "best_evidence_turn": best_turn,
+            "probe_ids": probe_ids,
             "turns": turns,
-            "events": events,
+            "events": _events_for_agent(scan_dir, agent),
         }
     return exports
 
 
 def write_probe_exports(scan_dir: Path) -> Path:
-    """Persist the per-probe exports under ``<scan_dir>/probe/`` and return that
-    directory. Writes one ``<probe_id>.json`` per probe plus an ``index.json``
-    summary. Idempotent (overwrites). Best-effort: a write error on one file is
-    logged and skipped so the rest still land.
+    """Persist the per-AGENT exports under ``<scan_dir>/probe/`` and return that
+    directory. Writes one ``<agent>.json`` per agent (all of its turns) plus an
+    ``index.json`` summary. Idempotent (overwrites). Best-effort: a write error
+    on one file is logged and skipped so the rest still land.
     """
     probe_dir = scan_dir / "probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     exports = build_probe_exports(scan_dir)
     index_rows: list[dict[str, Any]] = []
+    # Track what we write so we can prune stale files (e.g. a re-run after the
+    # per-probe→per-agent layout change, which would otherwise leave the old
+    # ``<probe_id>.json`` files behind). ``summaries.json`` is written by
+    # ``probe_summary`` separately, so never prune it.
+    written: set[str] = {"index.json", "summaries.json"}
     for key, exp in exports.items():
         stem = _safe_filename(key)
+        written.add(f"{stem}.json")
         try:
             (probe_dir / f"{stem}.json").write_text(
                 json.dumps(exp, indent=2, ensure_ascii=False, default=str),
@@ -201,14 +210,14 @@ def write_probe_exports(scan_dir: Path) -> Path:
             continue
         index_rows.append(
             {
-                "probe_id": exp["probe_id"],
+                "agent": exp["agent"],
                 "group_key": exp["group_key"],
                 "file": f"{stem}.json",
-                "agent": exp["agent"],
                 "asi_category": exp["asi_category"],
                 "verdict": exp["verdict"],
                 "turn_count": exp["turn_count"],
                 "best_evidence_turn": exp["best_evidence_turn"],
+                "probe_ids": exp["probe_ids"],
             }
         )
     try:
@@ -218,4 +227,9 @@ def write_probe_exports(scan_dir: Path) -> Path:
         )
     except OSError as exc:  # pragma: no cover — disk-level failure
         _LOG.debug("probe_export: failed to write index.json (%s)", exc)
+    # Prune any stale .json files from a prior layout / run.
+    for old in probe_dir.glob("*.json"):
+        if old.name not in written:
+            with contextlib.suppress(OSError):  # pragma: no cover — best-effort
+                old.unlink()
     return probe_dir

@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import time
 import urllib.parse
 from collections.abc import Iterable, Mapping
@@ -912,6 +913,20 @@ def _rollup_verdict(turns: list[dict[str, Any]]) -> str:
     return best
 
 
+# Probes-table SUMMARY column cap — the one-line gloss is collapsed to a single
+# line and truncated so the row stays scannable; the full reasoning is in the
+# modal. Operator-untrusted text; the template autoescapes every cell.
+_SUMMARY_CAP = 240
+
+
+def _one_line_summary(text: str) -> str:
+    """Collapse judge reasoning to one capped line for the Probes-table summary."""
+    s = " ".join((text or "").split())
+    if len(s) > _SUMMARY_CAP:
+        s = s[: _SUMMARY_CAP - 1].rstrip() + "…"
+    return s
+
+
 def _run_result_view(turns: list[dict[str, Any]]) -> dict[str, Any]:
     """Derive the per-agent run-result view-model from ordered turn records.
 
@@ -948,6 +963,7 @@ def _run_result_view(turns: list[dict[str, Any]]) -> dict[str, Any]:
         "run_confidence_pct": "",
         "best_evidence_turn": None,
         "evaluator_attack": False,
+        "summary": "",
     }
     if not turns:
         return empty
@@ -970,6 +986,9 @@ def _run_result_view(turns: list[dict[str, Any]]) -> dict[str, Any]:
         "run_confidence_pct": _confidence_pct(result.run_confidence),
         "best_evidence_turn": best_turn_no,
         "evaluator_attack": result.evaluator_attack_detected,
+        # Probes-table SUMMARY column — a one-line "what we learned" gloss for
+        # the row, from the strongest-evidence turn's judge reasoning.
+        "summary": _one_line_summary(str(best_record.get("reasoning", ""))),
     }
 
 
@@ -991,8 +1010,40 @@ def _group_key_for(probe: dict[str, Any]) -> str:
     return str(probe.get("agent") or "")
 
 
-def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _load_probe_summaries(scan_dir: Path | None) -> dict[str, str]:
+    """Read the AI-written per-agent summaries (``probe/summaries.json``).
+
+    Written at scan finalization by
+    :func:`agent_guardian.server.probe_summary.write_probe_summaries`. Returns
+    an empty map when the file is absent (e.g. a live scan that hasn't finalized
+    yet) or unreadable — the table then falls back to the reasoning gloss.
+    """
+    if scan_dir is None:
+        return {}
+    path = scan_dir / "probe" / "summaries.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    summaries = data.get("summaries") if isinstance(data, dict) else None
+    if not isinstance(summaries, dict):
+        return {}
+    # Drop truncated / garbled AI summaries (a weak / safety-filtered model can
+    # emit "The target" or "3:** No preamble,") so the row falls back to the
+    # judge-reasoning gloss instead of showing junk.
+    from agent_guardian.server.probe_summary import is_usable_summary
+
+    return {str(k): str(v) for k, v in summaries.items() if is_usable_summary(str(v))}
+
+
+def _assemble_probe_groups(
+    probes_list: list[dict[str, Any]], summaries: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """Collapse the flat per-turn probes list into ONE entry per agent.
+
+    ``summaries`` (optional) maps a group key → the AI-written one-line summary
+    (:func:`_load_probe_summaries`); attached as ``ai_summary`` on each group so
+    the table prefers it over the strongest-turn reasoning gloss.
 
     The flat list (:func:`_assemble_probes_list`) carries one record per
     judged turn — recon alone can produce ~17. This groups those records by
@@ -1064,9 +1115,28 @@ def _assemble_probe_groups(probes_list: list[dict[str, Any]]) -> list[dict[str, 
                 "timestamp_label": timestamp_label,
                 "turns": turns,
                 "run_result": run_result,
+                # AI-written SUMMARY (empty until scan finalization writes it;
+                # the template falls back to the reasoning gloss meanwhile).
+                "ai_summary": (summaries or {}).get(key, ""),
             }
         )
+    # Order rows by ASI number (ASI01 → ASI10) with recon-agent pinned at the
+    # top, then agent name as a stable tiebreak so the two specialists that share
+    # an ASI (e.g. output-handling + trust-exploit on ASI09) sit adjacent.
+    groups.sort(key=_probe_group_sort_key)
     return groups
+
+
+def _probe_group_sort_key(g: dict[str, Any]) -> tuple[int, int, str]:
+    """Sort key for the Probes table: recon first, then by ASI number, then
+    agent name. A non-ASI / unparseable category sorts after the numbered ones."""
+    agent = str(g.get("agent") or "")
+    if agent == "recon-agent":
+        return (0, 0, "")
+    asi = str(g.get("asi_category") or "")
+    m = re.match(r"ASI0*(\d+)", asi)
+    asi_num = int(m.group(1)) if m else 999
+    return (1, asi_num, agent)
 
 
 def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1134,7 +1204,10 @@ def build_probe_group_slideover_ctx(turns: list[dict[str, Any]]) -> dict[str, An
         "attacker_refused": bool(rep.get("attacker_refused") or False),
         "prompt": str(rep.get("prompt") or ""),
         "target_response": str(rep.get("target_response") or ""),
-        "verdict": rollup,
+        # Recon has no graded verdict (no probe_id / ASI). Surface the neutral
+        # "recon" sentinel so the header pill reads RECON — matching the table
+        # row — instead of falling through the empty-string path to PENDING.
+        "verdict": "recon" if is_recon else rollup,
         "confidence": rep.get("confidence"),
         "panel_votes": rep.get("panel_votes") or [],
         "reasoning": str(rep.get("reasoning") or ""),
@@ -1416,7 +1489,9 @@ def build_dashboard_context(
     # report exporter) don't have to re-derive the join.
     _probes_list_for_evidence = _assemble_probes_list(scan_dir)
     _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
-    _probe_groups = _assemble_probe_groups(_probes_list_for_evidence)
+    _probe_groups = _assemble_probe_groups(
+        _probes_list_for_evidence, _load_probe_summaries(scan_dir)
+    )
     # QA-066 (2026-06-04) — PROBES KPI tile. "How many probes did we actually
     # run." ``completeness.turns_used`` is the authoritative, uncapped count of
     # probe turns sent (one turn == one probe); the assembled ``probes_list``

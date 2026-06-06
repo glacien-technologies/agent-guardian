@@ -276,11 +276,11 @@ _VERDICT_GLYPH: dict[str, tuple[str, str]] = {
 def render_reflection_line(turn: Mapping[str, Any]) -> Text:
     """Render ONE reflection as a single compact terminal line (QA-072).
 
-    Shape: ``<glyph> <ASI> · <agent> · <label> (conf 0.xx)`` — the default
-    scan-feed surface. Far quieter than the full :func:`render_reflection_block`
-    panel (one line vs. a seven-row box) while still naming the agent, the ASI
-    category, and the outcome. Colour is keyed off the verdict, matching the
-    panel's border semantics.
+    Shape: ``<glyph> <ASI> <agent> turn <N> - <label> (conf 0.xx)`` — the
+    default scan-feed surface. Far quieter than the full
+    :func:`render_reflection_block` panel (one line vs. a seven-row box) while
+    naming the agent, the ASI category, the turn number, and the outcome.
+    Colour is keyed off the verdict, matching the panel's border semantics.
     """
     verdict = str(turn.get("verdict", "")).strip()
     glyph, label = _VERDICT_GLYPH.get(verdict, ("·", verdict or "pending"))
@@ -288,13 +288,18 @@ def render_reflection_line(turn: Mapping[str, Any]) -> Text:
     asi = str(turn.get("asi_category", "—")) or "—"
     asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"
     agent = str(turn.get("agent", "agent"))
+    turn_no = turn.get("turn")
 
     line = Text()
     line.append(f"{glyph} ", style=style)
     line.append(f"{asi:<6}", style=asi_style)
     line.append("  ")
     line.append(agent, style="status.running")
-    line.append("  ·  ")
+    # Turn number after the agent name.
+    if isinstance(turn_no, (int, float)) and int(turn_no) > 0:
+        line.append(f"  turn {int(turn_no)}", style="status.pending")
+    # Hyphen separator before the judge verdict.
+    line.append("  -  ")
     line.append(label, style=style)
     confidence = turn.get("confidence")
     if isinstance(confidence, (int, float)):

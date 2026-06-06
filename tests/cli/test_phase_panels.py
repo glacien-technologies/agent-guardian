@@ -77,8 +77,7 @@ def test_recon_panel_running_with_partial_summary() -> None:
     state.recon_summary = ReconSummary(
         goal="hijack PII flow",
         target_ref="https://x",
-        probes_applicable=8,
-        probes_skipped=2,
+        recon_probes=8,
         multi_agent=False,
         duration_seconds=0.0,
         status="running",
@@ -88,7 +87,7 @@ def test_recon_panel_running_with_partial_summary() -> None:
     text = _text(build_recon_panel(state))
     assert "running" in text
     assert "hijack PII flow" in text
-    assert "8 probes apply" in text or "8 probes" in text
+    assert "8 capability probes" in text
 
 
 def test_recon_panel_done_full() -> None:
@@ -97,16 +96,14 @@ def test_recon_panel_done_full() -> None:
     state.recon_summary = ReconSummary(
         goal="capability audit",
         target_ref="https://x",
-        probes_applicable=13,
-        probes_skipped=3,
+        recon_probes=13,
         multi_agent=False,
         duration_seconds=90.0,
         status="done",
     )
     text = _text(build_recon_panel(state))
     assert "capability audit" in text
-    assert "13 probes" in text or "13" in text
-    assert "3 skipped" in text or "skipped" in text
+    assert "13 capability probes" in text
 
 
 def test_recon_panel_collapsed_when_parallel_active() -> None:

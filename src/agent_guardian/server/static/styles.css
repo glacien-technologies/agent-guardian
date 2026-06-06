@@ -830,6 +830,18 @@ code, .mono {
   text-decoration: none;
   color: var(--text-strong);
 }
+/* The "download all" bundle link — the primary CTA on the export page, so it
+   reads as a filled accent row rather than a peer of the per-file rows. */
+.format-link--bundle {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
+}
+.format-link--bundle:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+}
 .format-ext {
   font-family: var(--font-mono);
   font-weight: 700;

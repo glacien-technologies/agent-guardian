@@ -12,8 +12,12 @@
     <span class="exec-topbar__title">AgentGuardian</span>
   </span>
   <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
-</div>  
+</div>
   <div class="exec-topbar__right">
+    {# Export / Files — reports, per-agent probe records, and raw logs
+       (run.log / events.jsonl / memory.jsonl) for download + reference. #}
+    <a class="exec-topbar__export" href="/scan/{{ scan_id }}/export"
+       aria-label="Export reports, probe records and raw logs">Export / Files</a>
     <div class="exec-topbar__locality exec-topbar__locality--{{ 'local' if is_local else 'hosted' }}"
          aria-label="{{ locality_label }}">
       <span class="exec-topbar__locality-dot" aria-hidden="true"></span>

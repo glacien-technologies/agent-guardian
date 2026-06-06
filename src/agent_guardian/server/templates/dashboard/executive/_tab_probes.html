@@ -51,12 +51,6 @@
          tabindex="0"
          hidden>
   <h2 class="exec-section-title">Probe attempts</h2>
-  <p class="exec-section-lede">
-    <span id="exec-probes-summary">{{ probe_groups | length }} agent{{ '' if probe_groups | length == 1 else 's' }} across {{ probes_list | length }} turn{{ '' if probes_list | length == 1 else 's' }}</span>
-    &middot; each row opens the agent's full turn-by-turn conversation —
-    verbatim prompts, target responses, judge verdicts, and a one-click
-    reproduce command.
-  </p>
   {% include "dashboard/executive/_probes_table.html" %}
   {% set kind = "probe" %}
   {% include "dashboard/executive/_finding_slideover.html" %}
@@ -88,22 +82,17 @@
       <td class="exec-probes-table__cell--agent">
         <code class="exec-probes-table__asi" data-slot="asi"></code>
         <span class="exec-probes-table__agent" data-slot="agent"></span>
+        {# RUNS — turn count lives next to the ASI badge now (no far-right column). #}
+        <span class="exec-probes-table__runs" data-slot="turn"></span>
       </td>
       <td class="exec-probes-table__cell--verdict">
         <span class="exec-verdict-pill" data-slot="verdict-pill"></span>
-        {# Judge v2 (M5 / Stage D) — strongest-evidence strap line, mirrors the
-           server-rendered row in ``_probes_table.html``. Hidden until a graded
-           reflection rolls the verdict up; ``live-append.js:setProbeRunEvidence``
-           fills + reveals it so the live row matches the snapshot. #}
-        <span class="exec-run-result" data-slot="run-result" hidden>
-          <span class="exec-run-result__evidence" data-slot="run-evidence"></span>
-        </span>
       </td>
-      <td class="exec-probes-table__cell--turn">
-        <span class="exec-probes-table__turn" data-slot="turn"></span>
-      </td>
-      <td class="exec-probes-table__cell--time">
-        <time class="exec-probes-table__time" data-slot="timestamp"></time>
+      {# SUMMARY — the AI one-liner lands at scan finalization (server-rendered).
+         While live, ``live-append.js`` fills it from the strongest-evidence
+         reflection's judge reasoning as the verdict rolls up. #}
+      <td class="exec-probes-table__cell--summary">
+        <span class="exec-probes-table__summary" data-slot="summary"></span>
       </td>
     </tr>
   </template>

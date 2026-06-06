@@ -58,11 +58,10 @@
          aria-labelledby="tab-findings"
          tabindex="0"
          hidden>
-  <h2 class="exec-section-title">All findings so far.</h2>
-  <p class="exec-section-lede">
-    <span data-live="findings-total">{{ findings_total }}</span> findings &middot; sorted by criticality, then ASI.
-    Click any row to inspect the full finding, metadata, and evidence drawer.
-  </p>
+  <h2 class="exec-section-title">Findings</h2>
+  {# Live finding-count target for live-append.js (kept, hidden) — the verbose
+     "N findings · sorted by criticality … click any row" lede was removed. #}
+  <span data-live="findings-total" hidden>{{ findings_total }}</span>
 
   {% if findings_total == 0 %}
     <p class="exec-empty">Nothing flagged yet.</p>

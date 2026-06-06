@@ -62,6 +62,8 @@
   {%- set _verdict_label = 'DEFENDED' -%}
 {%- elif _verdict == 'inconclusive' -%}
   {%- set _verdict_label = 'INCONCLUSIVE' -%}
+{%- elif _verdict == 'recon' -%}
+  {%- set _verdict_label = 'RECON' -%}
 {%- else -%}
   {%- set _verdict_label = 'PENDING' -%}
 {%- endif -%}

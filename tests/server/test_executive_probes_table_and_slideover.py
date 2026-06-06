@@ -173,19 +173,20 @@ def test_executive_probes_renders_table_not_card_list(client: TestClient, store:
 # ---------------------------------------------------------------------------
 
 
-def test_executive_probes_table_has_4_columns(client: TestClient, store: ScanStore) -> None:
-    # Per-agent grouping (2026-06-03) dropped the PROBE ID column: the table
-    # renders one row per agent (its conversation), so the agent name is the
-    # row identity and the TURNS column counts the agent's turns.
+def test_executive_probes_table_has_3_columns(client: TestClient, store: ScanStore) -> None:
+    # 2026-06-06 rev2: 3 columns — AGENT·ASI·RUNS | VERDICT | SUMMARY. The turn
+    # count moved next to the ASI badge, EVIDENCE folded into the AI SUMMARY,
+    # and LAST ACTIVITY was dropped.
     scan = _make_scan()
     scan_dir = _persist(store, scan)
     _seed_memory_jsonl(scan_dir, count=2)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    for header in ("AGENT", "VERDICT", "TURNS", "LAST ACTIVITY"):
+    for header in ("AGENT", "VERDICT", "SUMMARY"):
         assert header in pane, f"missing header {header!r}"
-    # The PROBE ID header is gone.
-    assert "PROBE ID" not in pane
+    # Dropped / renamed headers are gone.
+    for absent in ("PROBE ID", "LAST ACTIVITY", "EVIDENCE", "WHAT WE LEARNED"):
+        assert absent not in pane, f"header {absent!r} should be gone"
 
 
 def test_executive_probes_table_columns_use_locked_widths(
@@ -199,10 +200,16 @@ def test_executive_probes_table_columns_use_locked_widths(
     for cls in (
         "exec-probes-table__col--agent",
         "exec-probes-table__col--verdict",
-        "exec-probes-table__col--turn",
-        "exec-probes-table__col--time",
+        "exec-probes-table__col--summary",
     ):
         assert cls in pane, f"missing column class {cls!r}"
+    # The dropped columns' classes are gone.
+    for absent in (
+        "exec-probes-table__col--time",
+        "exec-probes-table__col--evidence",
+        "exec-probes-table__col--turn",
+    ):
+        assert absent not in pane, f"column class {absent!r} should be gone"
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +282,8 @@ def test_executive_probes_no_initial_payload_leak(client: TestClient, store: Sca
     assert "data-probe-payload" not in pane, (
         "per-row data-probe-payload attribute leaked the probe blob"
     )
-    # The verbatim probe text never appears in the initial Probes pane.
+    # The verbatim attacker prompt + target response never appear in the
+    # initial Probes pane — those big payloads stay lazy-loaded via the drawer.
     for turn in turns:
         assert turn["prompt"] not in pane, (
             f"prompt {turn['prompt']!r} leaked into initial Probes HTML"
@@ -283,7 +291,31 @@ def test_executive_probes_no_initial_payload_leak(client: TestClient, store: Sca
         assert turn["target_response"] not in pane, (
             "target_response leaked into initial Probes HTML"
         )
-        assert turn["reasoning"] not in pane, "reasoning leaked into initial Probes HTML"
+
+    # 2026-06-06: judge reasoning IS now intentionally surfaced — but only as a
+    # CAPPED one-line "WHAT WE LEARNED" gloss (``_one_line_summary``, ≤180
+    # chars). A long reasoning must be truncated, never dumped verbatim.
+    long_scan = _make_scan()
+    long_dir = _persist(store, long_scan)
+    long_turn = {
+        "agent": "long-agent",
+        "asi_category": "ASI01",
+        "turn": 1,
+        "prompt": "p",
+        "target_response": "r",
+        "verdict": "fail",
+        "reasoning": "LEAKHEAD " + ("x" * 400) + " LEAKTAIL",
+        "seed_id": "PROBE-LONG",
+    }
+    (long_dir / "memory.jsonl").write_text(
+        json.dumps({"record_type": "reflection", "payload": {"content": json.dumps(long_turn)}})
+        + "\n",
+        encoding="utf-8",
+    )
+    long_pane = _probes_pane(client.get(f"/scan/{long_scan.id}?theme=executive").text)
+    assert "LEAKHEAD" in long_pane, "the capped summary should surface the reasoning head"
+    assert "LEAKTAIL" not in long_pane, "full reasoning must be truncated, not dumped verbatim"
+    assert "…" in long_pane, "a truncated summary should carry the ellipsis"
 
 
 def test_executive_probes_row_has_drawer_href(client: TestClient, store: ScanStore) -> None:
@@ -449,8 +481,9 @@ def test_executive_probes_groups_one_row_per_agent(client: TestClient, store: Sc
     # Exactly one data row (the live-append <template> skeleton is NOT
     # counted — it carries no ``data-action`` token).
     assert pane.count('data-action="probe-row-click"') == 1
-    # The single row shows the rolled-up turn count, not "turn 1".
-    assert "17 turns" in pane
+    # The single row shows the rolled-up run count (next to the ASI badge),
+    # not "turn 1".
+    assert "17 runs" in pane
     # Row href targets the per-agent group endpoint.
     assert f'data-probe-href="/scan/{scan.id}/probe?group=recon"' in pane
 
@@ -483,6 +516,42 @@ def test_probe_drawer_group_renders_full_conversation(client: TestClient, store:
     for t in turns:
         assert t["prompt"] in body, f"missing prompt for {t['turn']}"
         assert t["target_response"] in body, f"missing response for {t['turn']}"
+
+
+def test_recon_agent_slideover_renders_recon_not_pending(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The recon-agent group slide-over shows a RECON pill, not PENDING.
+
+    Recon has no graded verdict (no probe_id / ASI), so the rollup is empty.
+    The ctx builder must surface the neutral ``recon`` sentinel so the header
+    pill reads RECON — matching the table row — instead of falling through the
+    empty-string path to PENDING.
+    """
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_single_agent_multi_turn(scan_dir, agent="recon-agent", turns=4)
+    resp = client.get(f"/scan/{scan.id}/probe?group=recon-agent")
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'data-verdict="recon"' in body
+    assert 'data-verdict-label="RECON"' in body
+    assert 'data-verdict-label="PENDING"' not in body
+
+
+def test_recon_agent_slideover_suppresses_turn_chip(client: TestClient, store: ScanStore) -> None:
+    """Recon groups carry no single turn, so the header ``data-turn`` is "—".
+
+    The JS suppresses the "turn N" chip for an em-dash turn; the template must
+    emit the em-dash placeholder (not a real turn number) for recon so that
+    suppression fires.
+    """
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_single_agent_multi_turn(scan_dir, agent="recon-agent", turns=4)
+    resp = client.get(f"/scan/{scan.id}/probe?group=recon-agent")
+    assert resp.status_code == 200
+    assert 'data-turn="—"' in resp.text
 
 
 def test_probe_drawer_group_unknown_agent_renders_empty(
@@ -615,12 +684,15 @@ def test_executive_probes_table_scroll_budget(client: TestClient, store: ScanSto
     # initial render.
     assert len(pane) < 150_000, f"probes pane HTML too large: {len(pane)} bytes for 100 probes"
 
-    # Cross-check: legacy card markup is absent and no probe text leaks.
+    # Cross-check: legacy card markup is absent and the big verbatim payloads
+    # (attacker prompt + target response) still never leak into the initial
+    # render. (2026-06-06: a CAPPED judge-reasoning one-liner is intentionally
+    # surfaced in the WHAT WE LEARNED column — bounded by ``_SUMMARY_CAP``, so
+    # the size budget above still holds.)
     assert '<ol class="exec-probes-list"' not in pane
     assert 'class="exec-probe"' not in pane
     assert "verbatim attacker prompt 0" not in pane
     assert "target response text 0" not in pane
-    assert "judge reasoning sample 0" not in pane
 
 
 # ---------------------------------------------------------------------------
