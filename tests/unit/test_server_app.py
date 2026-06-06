@@ -226,7 +226,7 @@ def test_transcripts_view_404_for_unknown_finding(client: TestClient, store: Sca
 def test_export_index_page_is_removed(client: TestClient, store: ScanStore) -> None:
     """The standalone Export / Files listing page was retired (2026-06-06).
 
-    Operator feedback: the "Download all" zip on the scan page replaces the
+    Operator feedback: the "Export scan data" zip on the scan page replaces the
     per-file listing, so ``GET /scan/{id}/export`` no longer resolves to a page
     (only the ``/export/bundle.zip`` + ``/export/{fmt}`` download routes remain).
     """
