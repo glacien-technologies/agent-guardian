@@ -712,3 +712,30 @@ def test_executive_findings_slideover_js_loaded(client: TestClient) -> None:
     assert "exec-slideover-root" in body
     # QA-049: row activation contract.
     assert "probe-row-click" in body
+
+
+# ---------------------------------------------------------------------------
+# 11. Topbar "Download" button — direct zip, no detour through /export
+# ---------------------------------------------------------------------------
+
+
+def test_executive_topbar_download_button_targets_bundle_zip(
+    client: TestClient, store: ScanStore
+) -> None:
+    """The scan-page topbar button downloads the zip directly.
+
+    Operator feedback (2026-06-06): clicking the button should pull the whole
+    evidence pack straight down, not navigate to the Export / Files listing
+    first. So the topbar anchor points at ``/export/bundle.zip`` and carries a
+    ``download`` attribute (the route's Content-Disposition forces the save
+    either way, but the hint keeps the current tab put).
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert f'href="/scan/{scan.id}/export/bundle.zip"' in body
+    # The anchor advertises a download (not a navigation).
+    start = body.find(f'href="/scan/{scan.id}/export/bundle.zip"')
+    anchor = body[body.rfind("<a", 0, start) : body.find("</a>", start)]
+    assert "download" in anchor
