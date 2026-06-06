@@ -343,3 +343,46 @@ async def test_real_attacker_turns_keep_attacker_active(tmp_path: Path) -> None:
     assert cov["noop_attacker_turns"] == 0
     assert cov["attacker_active"] is True
     assert cov["attacker_refusal_rate"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# not-tested events are excluded from attempt accounting
+# ---------------------------------------------------------------------------
+
+
+def test_coverage_excludes_attacker_refused_not_tested_turns(tmp_path: Path) -> None:
+    """``event="attacker_refused"`` markers must not count as adversarial attempts.
+
+    They are not-tested turns (the probe was the attacker LLM's own refusal and
+    never reached the target) — the same exclusion as ``egress_refused``.
+    """
+    scan_dir = tmp_path / "cov-attref"
+    scan_dir.mkdir(parents=True)
+    real_turn = {
+        "agent": "trust-exploit-agent",
+        "asi_category": "ASI09",
+        "turn": 1,
+        "seed_id": "ASI09-X-001",
+        "verdict": "defended",
+        "prompt": "a genuine attack prompt",
+    }
+    not_tested = {
+        "agent": "trust-exploit-agent",
+        "asi_category": "ASI09",
+        "event": "attacker_refused",
+        "outcome": "not_tested",
+        "prompt": "Sorry, I cannot fulfill your request to generate adversarial inputs.",
+    }
+    lines = [
+        MemoryRecord(
+            record_type="reflection",
+            scan_id="cov-attref",
+            timestamp=datetime.now(tz=UTC),
+            payload={"agent": t["agent"], "content": json.dumps(t)},
+        ).model_dump_json()
+        for t in (real_turn, not_tested)
+    ]
+    (scan_dir / "memory.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    cov = compute_coverage_from_memory(_stub_scan("cov-attref"), root_dir=tmp_path)
+    # Only the genuine turn counts; the attacker-refused marker is excluded.
+    assert cov["attempts_total"] == 1

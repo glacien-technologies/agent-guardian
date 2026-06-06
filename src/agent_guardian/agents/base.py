@@ -67,6 +67,7 @@ from agent_guardian.strategies.base import (
     StrategyContext,
     StrategyDone,
     Turn,
+    is_attacker_refusal,
     render_pair_preamble,
 )
 
@@ -1477,6 +1478,45 @@ class AsiAgent(ABC):
                 est_tokens,
                 _prompt_body,
             )
+
+            # Defense-in-depth against attacker self-refusal contamination: if
+            # the probe a strategy handed us is itself the attacker LLM's refusal
+            # ("Sorry, I cannot fulfill your request to generate adversarial…"),
+            # never send it to the target and never grade it. The primary guard
+            # is ``attacker_complete``'s refusal fallback at the strategy layer;
+            # this is a strategy-independent backstop so a refusal can never be
+            # scored as an exploit. Treated as NOT-TESTED (the turn carried no
+            # real attack), mirroring the egress-refused path below.
+            if is_attacker_refusal(result.text):
+                not_tested_turns += 1
+                _LOG.debug(
+                    "agent %s turn %d: probe is an attacker self-refusal (not tested) — skipping",
+                    agent_name,
+                    turns + 1,
+                )
+                try:
+                    await memory.write_reflection(
+                        agent_name,
+                        json.dumps(
+                            {
+                                "agent": agent_name,
+                                "asi_category": self.asi_category.value,
+                                "event": "attacker_refused",
+                                "outcome": "not_tested",
+                                "prompt": result.text,
+                                "reason": "attacker self-refusal — probe not dispatched",
+                            }
+                        ),
+                        embed=False,
+                    )
+                except Exception as werr:  # pragma: no cover — defensive
+                    _LOG.warning(
+                        "agent %s: attacker-refusal reflection write failed (%s) — continuing",
+                        agent_name,
+                        werr,
+                    )
+                response = None
+                continue
 
             try:
                 target_response = await target.call(result.text, session=session_id)

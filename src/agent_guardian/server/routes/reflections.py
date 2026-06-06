@@ -30,6 +30,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from agent_guardian.core.coverage import NOT_TESTED_EVENTS
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store
 
@@ -84,6 +85,12 @@ def _safe_decode_reflection(line: str) -> dict[str, Any] | None:
         content = content_raw
     else:
         content = {}
+    # Not-tested lifecycle markers (egress_refused / attacker_refused) carry no
+    # verdict and never reached the target — don't surface them as a live
+    # reflection card (same exclusion as coverage / probe export / the batch
+    # probe list). The raw events_view keeps them; this is the probe-facing feed.
+    if isinstance(content, dict) and content.get("event") in NOT_TESTED_EVENTS:
+        return None
     if isinstance(content, dict) and "agent" not in content and agent:
         content["agent"] = agent
     return {

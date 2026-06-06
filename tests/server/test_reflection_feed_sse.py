@@ -117,6 +117,29 @@ def test_safe_decode_skips_non_dict_payload() -> None:
     assert _safe_decode_reflection(json.dumps(record)) is None
 
 
+@pytest.mark.parametrize("event", ["attacker_refused", "egress_refused"])
+def test_safe_decode_skips_not_tested_markers(event: str) -> None:
+    """Not-tested markers must not surface as a live reflection card.
+
+    They carry no verdict and never reached the target — the same exclusion as
+    coverage, the per-agent probe export, and the batch probe list.
+    """
+    turn = {
+        "agent": "trust-exploit-agent",
+        "asi_category": "ASI09",
+        "event": event,
+        "outcome": "not_tested",
+        "prompt": "Sorry, I cannot fulfill your request to generate adversarial inputs.",
+    }
+    record = {
+        "record_type": "reflection",
+        "scan_id": "abc",
+        "timestamp": "2026-05-30T12:00:00+00:00",
+        "payload": {"agent": turn["agent"], "content": json.dumps(turn)},
+    }
+    assert _safe_decode_reflection(json.dumps(record)) is None
+
+
 def test_safe_decode_handles_none_content() -> None:
     """A reflection with ``payload.content=None`` decodes to an empty
     turn dict rather than crashing."""

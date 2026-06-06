@@ -29,6 +29,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from agent_guardian.core.coverage import NOT_TESTED_EVENTS
+
 __all__ = ["build_probe_exports", "write_probe_exports"]
 
 _LOG = logging.getLogger(__name__)
@@ -85,6 +87,11 @@ def _iter_turn_records(scan_dir: Path) -> list[dict[str, Any]]:
         except (json.JSONDecodeError, ValueError):
             continue
         if isinstance(turn, dict):
+            # Skip not-tested lifecycle markers (egress_refused / attacker_refused):
+            # they carry no verdict and never reached the target, so they must not
+            # surface as a junk turn-0 row or inflate the agent's run count.
+            if turn.get("event") in NOT_TESTED_EVENTS:
+                continue
             out.append(turn)
     return out
 

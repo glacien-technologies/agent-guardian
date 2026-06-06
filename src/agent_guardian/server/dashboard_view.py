@@ -42,6 +42,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
+from agent_guardian.core.coverage import NOT_TESTED_EVENTS
 from agent_guardian.core.run_aggregator import aggregate_run_verdicts
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
@@ -2093,6 +2094,11 @@ def _parse_reflection_line(raw: str) -> dict[str, Any] | None:
             decoded = None
         if isinstance(decoded, dict):
             turn = decoded
+    # Not-tested lifecycle markers (egress_refused / attacker_refused) carry no
+    # verdict and never reached the target — drop them so they don't render as a
+    # junk turn-0 row in the Probes tab (matches coverage + probe-export).
+    if turn.get("event") in NOT_TESTED_EVENTS:
+        return None
     timestamp_label = _timestamp_label(rec.get("timestamp"))
     seed_id = turn.get("seed_id")
     probe_id = str(seed_id) if seed_id else ""
