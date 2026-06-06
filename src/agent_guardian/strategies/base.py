@@ -299,16 +299,40 @@ def render_surface_brief(
     return "\n".join(lines)
 
 
+# A leading politeness preamble that real refusals open with before the actual
+# refusal marker ("Sorry, I cannot…", "Apologies, I'm unable…"). ``REFUSAL_MARKERS_RE``
+# is ``^``-anchored, so without stripping this first the marker sits past the
+# string start and the refusal slips through — the contamination bug where
+# "Sorry, I cannot fulfill your request…" was sent to the target as a probe.
+_REFUSAL_PREAMBLE_RE = re.compile(
+    r"^\s*(?:(?:i'?m|i\s+am)\s+)?"
+    r"(?:sorry|apologies|my\s+apologies|unfortunately|regrettably|"
+    r"i'?m\s+afraid|i\s+am\s+afraid)"
+    r"[\s,.!:;-]+",
+    re.IGNORECASE,
+)
+
+
 def is_attacker_refusal(text: str) -> bool:
     """Heuristic: did the attacker LLM refuse to generate the attack?
 
     An empty / extremely-short response is also treated as a refusal — the
     real-world failure mode for Gemini is either a refusal sentence or a
     single-token apology, both of which produce a useless next-prompt.
+
+    Refusals frequently open with a politeness preamble ("Sorry, I cannot…");
+    because :data:`REFUSAL_MARKERS_RE` is ``^``-anchored, we strip one leading
+    apology and re-test so the marker is seen at the (new) string start. The
+    strip is scoped to a recognised preamble, so refusal markers buried deep in
+    a genuine attack prompt are NOT matched (no false positives).
     """
-    if not text or len(text.strip()) < 5:
+    stripped = (text or "").strip()
+    if len(stripped) < 5:
         return True
-    return bool(REFUSAL_MARKERS_RE.match(text.strip()))
+    if REFUSAL_MARKERS_RE.match(stripped):
+        return True
+    without_preamble = _REFUSAL_PREAMBLE_RE.sub("", stripped, count=1)
+    return without_preamble != stripped and bool(REFUSAL_MARKERS_RE.match(without_preamble))
 
 
 async def attacker_complete(
