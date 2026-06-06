@@ -1,22 +1,28 @@
 <!DOCTYPE html>
-{# AgentGuardian PDF report template (PRD §10.2, M13 + rc1 fidelity pass).
+{# AgentGuardian PDF report — enterprise redesign.
 
-   Renders the full scan layout: cover page, executive summary, AIVSS
-   sub-score table, ASI-by-ASI breakdown with findings, per-finding
-   transcripts, and three appendices per PRD §10.2:
-     A — Triple-framework mapping (ASI → MITRE ATLAS → CSA)
-     B — Methodology and bibliography
-     C — Reproducibility receipt (models, seed-library version, RNG seed,
-         scan timestamp, signature fingerprints)
+   Executive-dashboard light theme (cream paper, purple brand, severity-coded
+   spines). WeasyPrint-safe: block + tables + floats, no JS, no flex page
+   breaks. Fonts are embedded as WOFF2 in this template's fonts/ directory and
+   resolved by WeasyPrint via the template loader's base path.
 
-   Inter and JetBrains Mono are embedded as WOFF2 alongside this template
-   (see ``fonts/`` directory) — WeasyPrint resolves them via the template
-   loader's base path. #}
+   Sections:
+     1. Cover            — product mark, scan id/target/date, big AIVSS + band
+     2. Executive summary — posture paragraph + KPI card row
+     3. Overview          — scan-plan definition tables + ASI coverage table
+     4. Findings          — severity-coded cards with chips + evidence
+     5. Appendices        — A triple-framework map, B methodology, C receipt
+
+   Rendered by reports/pdf.py:_render_weasyprint with: scan, findings,
+   asi_rows, band_colour. Severity counts / KPI values are derived inline. #}
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>AgentGuardian scan {{ scan.id }}</title>
     <style>
+      /* ------------------------------------------------------------------ *
+       * Embedded fonts (do not change names/paths — resolved by WeasyPrint) *
+       * ------------------------------------------------------------------ */
       @font-face {
         font-family: "Inter";
         src: url("fonts/Inter-Regular.woff2") format("woff2");
@@ -35,493 +41,922 @@
         font-weight: 400;
         font-style: normal;
       }
+      {# Source Serif Pro is requested for headlines. If the WOFF2 is not yet
+         dropped into fonts/, WeasyPrint falls back to the serif stack below —
+         layout is unaffected. The @font-face is declared optimistically. #}
+      @font-face {
+        font-family: "Source Serif Pro";
+        src: url("fonts/SourceSerifPro-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "Source Serif Pro";
+        src: url("fonts/SourceSerifPro-SemiBold.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+
+      /* ------------------------------------------------------------------ *
+       * Theme tokens (executive dashboard, light)                          *
+       * ------------------------------------------------------------------ */
+      :root {
+        --exec-bg:        #fafaf7;
+        --card:           #ffffff;
+        --sunken:         #f4f1ea;
+        --ink:            #1a1a1a;
+        --ink-muted:      #525252;
+        --ink-subtle:     #8a8a8a;
+        --border:         #e8e6e0;
+        --border-strong:  #d8d5cc;
+        --brand:          #8b5cf6;
+        --brand-strong:   #7c3aed;
+        --brand-tint:     #f3eeff;
+        --crit:    #b91c1c; --crit-bg: #fef2f2;
+        --high:    #d97706; --high-bg: #fff7ed;
+        --med:     #ca8a04; --med-bg:  #fefce8;
+        --low:     #65a30d; --low-bg:  #f7fee7;
+        --info:    #0ea5e9;
+      }
+
+      /* ------------------------------------------------------------------ *
+       * Paged-media: running footer + page counter                         *
+       * ------------------------------------------------------------------ */
       @page {
         size: Letter;
-        margin: 0.75in 0.75in 1in 0.75in;
-        @bottom-right {
-          content: "AgentGuardian " counter(page) " / " counter(pages);
-          font-family: "Inter", "Helvetica", "Arial", sans-serif;
-          font-size: 9pt;
-          color: #6b7280;
-        }
+        margin: 0.85in 0.75in 0.95in 0.75in;
+        background: #fafaf7;
         @bottom-left {
-          content: "Scan {{ scan.id }}";
-          font-family: "Inter", "Helvetica", "Arial", sans-serif;
-          font-size: 9pt;
-          color: #6b7280;
+          content: "AgentGuardian  ·  Scan {{ scan.id }}";
+          font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+          font-size: 7.5pt;
+          color: #8a8a8a;
+          padding-bottom: 2mm;
+        }
+        @bottom-right {
+          content: counter(page) " / " counter(pages);
+          font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+          font-size: 7.5pt;
+          color: #8a8a8a;
+          padding-bottom: 2mm;
+        }
+        @bottom-center {
+          content: "CONFIDENTIAL — SECURITY ASSESSMENT";
+          font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+          font-size: 6.5pt;
+          letter-spacing: 0.12em;
+          color: #b8b4aa;
+          padding-bottom: 2mm;
         }
       }
       @page :first {
-        @bottom-left { content: ""; }
-        @bottom-right { content: ""; }
+        margin: 0;
+        @bottom-left   { content: ""; }
+        @bottom-right  { content: ""; }
+        @bottom-center { content: ""; }
       }
+
+      /* ------------------------------------------------------------------ *
+       * Base typography                                                    *
+       * ------------------------------------------------------------------ */
+      html { background: var(--exec-bg); }
       body {
-        font-family: "Inter", -apple-system, "Segoe UI", "Helvetica Neue", "Helvetica", "Arial", sans-serif;
-        color: #111827;
-        line-height: 1.45;
-        font-size: 10pt;
+        font-family: "Inter", -apple-system, "Segoe UI", "Helvetica Neue", "Arial", sans-serif;
+        color: var(--ink);
+        background: var(--exec-bg);
+        line-height: 1.55;
+        font-size: 9.5pt;
+        margin: 0;
+        -weasy-hyphens: none;
       }
-      h1, h2, h3 { color: #0f172a; margin-top: 1.2em; }
-      h1 { font-size: 22pt; margin-bottom: 0.2em; }
-      h2 { font-size: 14pt; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.2em; }
-      h3 { font-size: 11pt; }
+      h1, h2, h3, h4 {
+        font-family: "Source Serif Pro", "Georgia", "Times New Roman", serif;
+        color: var(--ink);
+        font-weight: 600;
+        margin: 0;
+      }
+      p { margin: 0 0 0.7em; }
+      a { color: var(--brand-strong); text-decoration: none; }
+      strong { font-weight: 700; }
+
+      .eyebrow {
+        font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+        font-size: 7.5pt;
+        font-weight: 400;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--brand-strong);
+        margin: 0 0 0.5em;
+      }
+      .mono, code, pre {
+        font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+      }
+      .muted { color: var(--ink-muted); }
+      .subtle { color: var(--ink-subtle); }
+
+      /* Section scaffolding */
+      section.block {
+        padding: 0.2in 0 0.05in;
+      }
+      .section-head {
+        border-bottom: 1.5px solid var(--border-strong);
+        padding-bottom: 0.5em;
+        margin-bottom: 1em;
+      }
+      .section-head h2 {
+        font-size: 17pt;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+      }
+      .section-head .lede {
+        margin: 0.35em 0 0;
+        color: var(--ink-muted);
+        font-size: 9.5pt;
+        max-width: 6.3in;
+      }
+
+      /* ------------------------------------------------------------------ *
+       * Cover                                                              *
+       * ------------------------------------------------------------------ */
       .cover {
         page-break-after: always;
-        height: 9in;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        text-align: center;
+        height: 11in;
+        background: var(--exec-bg);
+        position: relative;
+        padding: 0;
       }
-      .cover .badge {
-        font-size: 56pt;
-        font-weight: 700;
-        color: {{ band_colour }};
-        margin: 0.2em 0;
+      .cover-inner {
+        position: absolute;
+        top: 1.1in; left: 0.9in; right: 0.9in; bottom: 0.9in;
       }
-      .cover .band {
-        font-size: 18pt;
+      .cover-rule {
+        height: 4px;
+        background: var(--brand);
+        width: 0.9in;
+        margin-bottom: 0.4in;
+      }
+      .cover-mark {
+        font-family: "JetBrains Mono", "SF Mono", monospace;
+        font-size: 11pt;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: var(--ink);
+        font-weight: 400;
+      }
+      .cover-mark .dot { color: var(--brand); }
+      .cover-kicker {
+        margin-top: 0.18in;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 8pt;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-subtle);
+      }
+      .cover-title {
+        margin-top: 1.5in;
+        font-size: 34pt;
+        line-height: 1.08;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+        max-width: 6in;
+      }
+      .cover-score-wrap {
+        margin-top: 0.55in;
+        padding: 0;
+      }
+      .cover-score {
+        font-family: "Source Serif Pro", "Georgia", serif;
+        font-weight: 600;
+        font-size: 96pt;
+        line-height: 0.9;
         color: {{ band_colour }};
-        letter-spacing: 0.15em;
+        letter-spacing: -0.03em;
+      }
+      .cover-score .denom {
+        font-size: 26pt;
+        color: var(--ink-subtle);
+        letter-spacing: 0;
+      }
+      .cover-band-chip {
+        display: inline-block;
+        margin-top: 0.18in;
+        padding: 0.4em 1.1em;
+        border-radius: 999px;
+        background: {{ band_colour }};
+        color: #ffffff;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11pt;
+        font-weight: 400;
+        letter-spacing: 0.18em;
         text-transform: uppercase;
       }
-      .cover .meta {
-        margin-top: 2em;
-        color: #374151;
-        font-size: 11pt;
+      .cover-score-label {
+        margin-top: 0.16in;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7.5pt;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: var(--ink-subtle);
       }
-      table {
+      .cover-meta {
+        position: absolute;
+        bottom: 0;
+        left: 0; right: 0;
+        border-top: 1px solid var(--border-strong);
+        padding-top: 0.22in;
+      }
+      .cover-meta table { width: 100%; border-collapse: collapse; }
+      .cover-meta td {
+        vertical-align: top;
+        padding: 0 0.3in 0.1in 0;
+        border: none;
+      }
+      .cover-meta .k {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 6.8pt;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-subtle);
+        display: block;
+        margin-bottom: 0.2em;
+      }
+      .cover-meta .v {
+        font-size: 9pt;
+        color: var(--ink);
+      }
+      .cover-meta .v.mono { font-size: 8.2pt; }
+
+      /* ------------------------------------------------------------------ *
+       * KPI card row                                                       *
+       * ------------------------------------------------------------------ */
+      .kpi-table { width: 100%; border-collapse: separate; border-spacing: 7px 0; margin: 0.2em 0 0.4em; }
+      .kpi-table td {
+        width: 16.6%;
+        vertical-align: top;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 11px 12px 12px;
+      }
+      .kpi-label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 6.8pt;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-subtle);
+        margin-bottom: 0.5em;
+      }
+      .kpi-value {
+        font-family: "Source Serif Pro", "Georgia", serif;
+        font-size: 21pt;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--ink);
+        letter-spacing: -0.02em;
+      }
+      .kpi-value .unit { font-size: 11pt; color: var(--ink-subtle); }
+      .kpi-sub {
+        margin-top: 0.55em;
+        font-size: 7.5pt;
+        color: var(--ink-muted);
+        font-family: "JetBrains Mono", monospace;
+        letter-spacing: 0.04em;
+      }
+      /* stacked severity micro-bar inside FINDINGS kpi */
+      .sevbar { margin-top: 0.6em; height: 6px; border-radius: 3px; overflow: hidden; background: var(--sunken); width: 100%; }
+      .sevbar span { display: inline-block; height: 6px; vertical-align: top; }
+      .sevbar .s-crit { background: var(--crit); }
+      .sevbar .s-high { background: var(--high); }
+      .sevbar .s-med  { background: var(--med); }
+      .sevbar .s-low  { background: var(--low); }
+      /* coverage pip grid */
+      .pipgrid { margin-top: 0.6em; }
+      .pip {
+        display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+        background: var(--sunken); border: 1px solid var(--border-strong);
+        margin: 0 2px 0 0;
+      }
+      .pip.on { background: var(--brand); border-color: var(--brand); }
+
+      /* Posture callout */
+      .posture {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-left: 4px solid {{ band_colour }};
+        border-radius: 8px;
+        padding: 16px 18px;
+        margin: 0 0 1.1em;
+      }
+      .posture p { margin: 0; font-size: 10pt; line-height: 1.6; color: var(--ink); }
+      .posture .verdict { font-weight: 700; color: {{ band_colour }}; }
+
+      /* ------------------------------------------------------------------ *
+       * Definition / data tables                                           *
+       * ------------------------------------------------------------------ */
+      .deftable {
         width: 100%;
         border-collapse: collapse;
-        margin: 1em 0;
-        font-size: 9.5pt;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin: 0 0 0.9em;
+        overflow: hidden;
       }
-      th, td {
-        text-align: left;
-        padding: 0.45em 0.6em;
-        border-bottom: 1px solid #e5e7eb;
+      .deftable td {
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--border);
         vertical-align: top;
-      }
-      th { background: #f9fafb; font-weight: 600; }
-      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-      .sev-critical { color: #991b1b; font-weight: 600; }
-      .sev-high { color: #ef4444; font-weight: 600; }
-      .sev-medium { color: #f59e0b; }
-      .sev-low { color: #16a34a; }
-      .pill {
-        display: inline-block;
-        padding: 0.1em 0.55em;
-        border-radius: 999px;
         font-size: 9pt;
-        background: #f3f4f6;
-        color: #111827;
       }
-      .finding {
+      .deftable tr:last-child td { border-bottom: none; }
+      .deftable .k {
+        width: 38%;
+        color: var(--ink-muted);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7.6pt;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .deftable .v { color: var(--ink); }
+      .deftable .v.mono { font-size: 8.4pt; }
+
+      /* two side-by-side plan tables via a layout table */
+      .plan-grid { width: 100%; border-collapse: collapse; }
+      .plan-grid > td { vertical-align: top; padding: 0; border: none; }
+      .plan-grid .gap { width: 14px; padding: 0; border: none; }
+      .plan-cap {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7pt; letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--brand-strong); margin: 0 0 0.4em 0.1em;
+      }
+
+      /* ------------------------------------------------------------------ *
+       * ASI coverage table                                                 *
+       * ------------------------------------------------------------------ */
+      .asi-table {
+        width: 100%; border-collapse: collapse;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px; overflow: hidden;
+        margin: 0 0 0.6em;
+      }
+      .asi-table thead th {
+        background: var(--sunken);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 6.8pt; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-muted); font-weight: 400;
+        text-align: left; padding: 8px 12px;
+        border-bottom: 1px solid var(--border-strong);
+      }
+      .asi-table thead th.num { text-align: right; }
+      .asi-table td {
+        padding: 8px 12px; border-bottom: 1px solid var(--border);
+        vertical-align: middle; font-size: 9pt;
+      }
+      .asi-table tr:last-child td { border-bottom: none; }
+      .asi-table td.id { font-family: "JetBrains Mono", monospace; font-size: 8.4pt; font-weight: 700; color: var(--ink); white-space: nowrap; }
+      .asi-table td.desc { color: var(--ink); }
+      .asi-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .asi-table td.cnt { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-muted); }
+      .asi-table tr.has-find td.cnt { color: var(--ink); font-weight: 700; }
+      /* severity-tinted left edge per row */
+      .asi-table tr.t-crit td:first-child { box-shadow: inset 3px 0 0 var(--crit); background: var(--crit-bg); }
+      .asi-table tr.t-high td:first-child { box-shadow: inset 3px 0 0 var(--high); background: var(--high-bg); }
+      .asi-table tr.t-med  td:first-child { box-shadow: inset 3px 0 0 var(--med);  background: var(--med-bg); }
+      .asi-table tr.t-low  td:first-child { box-shadow: inset 3px 0 0 var(--low);  background: var(--low-bg); }
+      /* per-row score bar */
+      .scorebar-wrap { display: block; width: 1.5in; }
+      .scorebar {
+        height: 6px; border-radius: 3px; background: var(--sunken);
+        width: 100%; overflow: hidden; margin-top: 3px;
+      }
+      .scorebar > span { display: block; height: 6px; background: var(--brand); border-radius: 3px; }
+      .scorebar.hot > span { background: var(--crit); }
+      .scorebar.warm > span { background: var(--high); }
+      .score-num { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+      /* ------------------------------------------------------------------ *
+       * Finding cards                                                      *
+       * ------------------------------------------------------------------ */
+      .find {
         page-break-inside: avoid;
-        margin-bottom: 0.8em;
-        border-left: 3px solid #d1d5db;
-        padding: 0.4em 0.8em;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin: 0 0 13px;
+        overflow: hidden;
       }
-      .finding.crit { border-left-color: #991b1b; }
-      .finding.high { border-left-color: #ef4444; }
-      .finding.med { border-left-color: #f59e0b; }
-      .finding.low { border-left-color: #16a34a; }
-      .findings-detail .finding-detail {
-        margin: 1em 0 1.4em;
-        padding: 0.6em 0.8em;
-        border: 1px solid #e5e7eb;
+      /* severity color spine via left border */
+      .find.sev-critical { border-left: 5px solid var(--crit); }
+      .find.sev-high     { border-left: 5px solid var(--high); }
+      .find.sev-medium   { border-left: 5px solid var(--med); }
+      .find.sev-low      { border-left: 5px solid var(--low); }
+      .find.sev-info     { border-left: 5px solid var(--info); }
+
+      .find-head { padding: 12px 15px 10px; border-bottom: 1px solid var(--border); }
+      .find-eyebrow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7pt; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--ink-subtle); margin-bottom: 0.5em;
+      }
+      .find-title {
+        font-family: "Source Serif Pro", "Georgia", serif;
+        font-size: 12.5pt; font-weight: 600; line-height: 1.25;
+        color: var(--ink); margin: 0;
+      }
+      .find-summary { margin: 0.5em 0 0; font-size: 9pt; color: var(--ink-muted); line-height: 1.55; }
+
+      /* chips */
+      .chip {
+        display: inline-block;
+        padding: 0.18em 0.6em;
         border-radius: 4px;
-        background: #fafafa;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7pt; letter-spacing: 0.04em;
+        margin: 0 4px 4px 0;
+        border: 1px solid var(--border-strong);
+        background: var(--sunken);
+        color: var(--ink-muted);
+        white-space: nowrap;
       }
-      .findings-detail .finding-meta {
-        margin: 0.4em 0 0.6em;
-        font-size: 9pt;
+      .chip .lab { color: var(--ink-subtle); }
+      .chip-sev {
+        border: none; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
       }
-      .findings-detail .finding-meta th {
-        width: 9em;
-        background: transparent;
-        color: #374151;
-        font-weight: 600;
+      .chip-sev.sev-critical { background: var(--crit-bg); color: var(--crit); }
+      .chip-sev.sev-high     { background: var(--high-bg); color: var(--high); }
+      .chip-sev.sev-medium   { background: var(--med-bg);  color: var(--med); }
+      .chip-sev.sev-low      { background: var(--low-bg);  color: var(--low); }
+      .chip-sev.sev-info     { background: #eff6ff;        color: var(--info); }
+      .chip-asi   { background: var(--brand-tint); color: var(--brand-strong); border-color: #e3d9ff; }
+      .chip-verdict { background: #eef2ff; color: #4338ca; border-color: #e0e3f5; }
+      .chip-row { padding: 9px 15px 5px; }
+
+      /* evidence mono block */
+      .evidence { padding: 4px 15px 14px; }
+      .ev-label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 6.8pt; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-subtle); margin: 9px 0 3px;
       }
-      .findings-detail .summary {
-        margin: 0.4em 0;
-        color: #111827;
+      .ev-block {
+        background: var(--sunken);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 11px;
+        font-family: "JetBrains Mono", "Menlo", monospace;
+        font-size: 7.6pt;
+        line-height: 1.5;
+        color: var(--ink);
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 2.6in;
+        overflow: hidden;
       }
-      .findings-detail .transcript-ref {
-        margin: 0.3em 0 0;
-        font-size: 9pt;
-        color: #374151;
+      .ev-block.prompt { border-left: 3px solid var(--brand); }
+      .ev-block.response { border-left: 3px solid var(--ink-subtle); }
+      .ev-empty { font-style: italic; color: var(--ink-subtle); }
+
+      .group-head {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7.5pt; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--ink-muted);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.35em; margin: 1.1em 0 0.8em;
       }
-      .muted { color: #6b7280; font-style: italic; }
-      footer.appendix {
-        margin-top: 2em;
-        font-size: 8.5pt;
-        color: #374151;
+      .group-head .gcount { color: var(--ink-subtle); }
+      .group-head.g-crit { color: var(--crit); }
+      .group-head.g-high { color: var(--high); }
+      .group-head.g-med  { color: var(--med); }
+      .group-head.g-low  { color: var(--low); }
+
+      .empty-state {
+        background: var(--low-bg);
+        border: 1px solid #d9efb5;
+        border-radius: 8px;
+        padding: 18px 20px;
+        color: #3f6212;
+        font-size: 10pt;
       }
-      footer.appendix h2 { color: #0f172a; font-size: 12pt; }
-      footer.appendix table { font-size: 8.5pt; }
-      code, pre, .mono {
-        font-family: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
-        font-size: 9pt;
+
+      /* ------------------------------------------------------------------ *
+       * Appendices                                                         *
+       * ------------------------------------------------------------------ */
+      .appendix { padding-top: 0.2in; }
+      .appendix h2 { font-size: 15pt; }
+      .appendix h3 { font-size: 11pt; margin: 1.1em 0 0.4em; }
+      .appendix p, .appendix li { font-size: 8.8pt; color: var(--ink-muted); line-height: 1.55; }
+      .appendix-tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 7pt; letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--brand-strong); margin-bottom: 0.3em;
       }
+      .map-table { width: 100%; border-collapse: collapse; background: var(--card);
+        border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 0.5em 0 1em; }
+      .map-table thead th {
+        background: var(--sunken);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 6.4pt; letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--ink-muted); font-weight: 400; text-align: left;
+        padding: 7px 10px; border-bottom: 1px solid var(--border-strong);
+      }
+      .map-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 8pt; vertical-align: top; }
+      .map-table tr:last-child td { border-bottom: none; }
+      .map-table td.id { font-family: "JetBrains Mono", monospace; font-weight: 700; white-space: nowrap; }
+      .map-table .mono { font-size: 7.4pt; }
+      .receipt-table { width: 100%; border-collapse: collapse; background: var(--card);
+        border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 0.5em 0 1em; }
+      .receipt-table td { padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 8.4pt; vertical-align: top; }
+      .receipt-table tr:last-child td { border-bottom: none; }
+      .receipt-table .k {
+        width: 34%; font-family: "JetBrains Mono", monospace; font-size: 7.4pt;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted);
+      }
+      .receipt-table code { font-size: 7.8pt; color: var(--ink); }
     </style>
   </head>
   <body>
+
+    {# ---- derive severity counts + KPI values inline from findings ---- #}
+    {% set ns = namespace(crit=0, high=0, med=0, low=0, info=0) %}
+    {% for f in findings %}
+      {% set sv = (f.severity_label if f.severity_label is defined and f.severity_label else f.severity.value)|lower %}
+      {% if sv == 'critical' %}{% set ns.crit = ns.crit + 1 %}
+      {% elif sv == 'high' %}{% set ns.high = ns.high + 1 %}
+      {% elif sv == 'medium' %}{% set ns.med = ns.med + 1 %}
+      {% elif sv == 'low' %}{% set ns.low = ns.low + 1 %}
+      {% else %}{% set ns.info = ns.info + 1 %}{% endif %}
+    {% endfor %}
+    {% set total = findings|length %}
+    {% set asi_covered = (findings | map(attribute='asi') | map(attribute='value') | list | unique | list | length) %}
+    {% set elapsed = scan.duration_seconds | default(0, true) %}
+    {% set mm = (elapsed // 60) | int %}
+    {% set ss = (elapsed % 60) | int %}
+    {% set cost = scan.cost_usd | default(0, true) %}
+    {% set scored = (scan.scoring_valid if scan.scoring_valid is defined else (scan.aivss is not none)) %}
+
+    <!-- ======================== 1. COVER ======================== -->
     <section class="cover">
-      <div>
-        <div style="font-size: 14pt; letter-spacing: 0.4em; color: #6b7280;">
-          AGENT&middot;GUARDIAN
+      <div class="cover-inner">
+        <div class="cover-rule"></div>
+        <div class="cover-mark">AGENT<span class="dot">·</span>GUARDIAN</div>
+        <div class="cover-kicker">Adversarial AI Security Assessment</div>
+
+        <h1 class="cover-title">Agentic Threat Posture Report</h1>
+
+        <div class="cover-score-wrap">
+          <div class="cover-score">{% if scored %}{{ scan.aivss }}<span class="denom"> / 100</span>{% else %}<span class="denom" style="font-size:34pt">N/A</span>{% endif %}</div>
+          <div>
+            <span class="cover-band-chip">{{ scan.band.value }}</span>
+          </div>
+          <div class="cover-score-label">AIVSS · AI Vulnerability Scoring System</div>
         </div>
-        <div class="badge">{{ scan.aivss if scan.scoring_valid else "n/a" }}</div>
-        <div class="band">{{ scan.band.value }}</div>
-        <div class="meta">
-          <div><strong>Scan ID:</strong> <span class="mono">{{ scan.id }}</span></div>
-          <div><strong>Target:</strong> <span class="mono">{{ scan.target_ref }}</span> ({{ scan.target_mode }})</div>
-          <div><strong>Tier:</strong> {{ scan.tier.value }}</div>
-          <div><strong>Generated:</strong> {{ scan.created_at.isoformat() }}</div>
-          <div><strong>Probe library:</strong> {{ scan.probe_library_version }}</div>
-          <div><strong>AIVSS formula:</strong> {{ scan.aivss_formula_version }}</div>
+
+        <div class="cover-meta">
+          <table>
+            <tr>
+              <td>
+                <span class="k">Scan ID</span>
+                <span class="v mono">{{ scan.id }}</span>
+              </td>
+              <td>
+                <span class="k">Target</span>
+                <span class="v mono">{{ scan.target_ref }}</span>
+              </td>
+              <td>
+                <span class="k">Mode</span>
+                <span class="v">{{ scan.target_mode }}</span>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span class="k">Tier</span>
+                <span class="v">{{ scan.tier.value }}</span>
+              </td>
+              <td>
+                <span class="k">Generated</span>
+                <span class="v">{{ scan.created_at.strftime('%Y-%m-%d %H:%M UTC') if scan.created_at.strftime is defined else scan.created_at }}</span>
+              </td>
+              <td>
+                <span class="k">Findings</span>
+                <span class="v">{{ total }}</span>
+              </td>
+            </tr>
+          </table>
         </div>
       </div>
     </section>
 
-    <section>
-      <h2>Executive summary</h2>
-      <p>
-        Scan <span class="mono">{{ scan.id }}</span> finished in
-        {{ "%.2f"|format(scan.duration_seconds) }}s at a cost of
-        ${{ "%.4f"|format(scan.cost_usd) }}. The target was probed with the
-        bundled AgentGuardian corpus and scored
-        {% if scan.scoring_valid %}<strong>{{ scan.aivss }} / 100</strong> ({{ scan.band.value }}){% else %}<strong>NOT EVALUATED</strong> — a non-authoritative (e.g. stub-evaluator) run produces no trustworthy AIVSS{% endif %}.
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>Severity</th>
-            <th class="num">Count</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% set summary = scan.findings_summary() %}
-          <tr><td class="sev-critical">Critical</td><td class="num">{{ summary['critical'] }}</td></tr>
-          <tr><td class="sev-high">High</td><td class="num">{{ summary['high'] }}</td></tr>
-          <tr><td class="sev-medium">Medium</td><td class="num">{{ summary['medium'] }}</td></tr>
-          <tr><td class="sev-low">Low</td><td class="num">{{ summary['low'] }}</td></tr>
-          <tr><td><strong>Total</strong></td><td class="num"><strong>{{ scan.findings|length }}</strong></td></tr>
-        </tbody>
+    <!-- ==================== 2. EXECUTIVE SUMMARY ==================== -->
+    <section class="block">
+      <div class="section-head">
+        <div class="eyebrow">Section 01 — Executive Summary</div>
+        <h2>Security posture at a glance</h2>
+        <p class="lede">Adversarial swarm assessment of the target's resilience against the OWASP Agentic Security Initiative (ASI) Top&nbsp;10 threat classes, scored on the AI Vulnerability Scoring System.</p>
+      </div>
+
+      <div class="posture">
+        <p>
+          Scan <span class="mono">{{ scan.id }}</span> exercised the target across the bundled
+          AgentGuardian adversarial corpus and recorded
+          <strong>{{ total }}</strong> confirmed finding{{ '' if total == 1 else 's' }}
+          {% if total %}({{ ns.crit }} critical, {{ ns.high }} high, {{ ns.med }} medium, {{ ns.low }} low){% endif %}.
+          {% if scored %}
+            The composite AIVSS posture is
+            <span class="verdict">{{ scan.aivss }} / 100 — {{ scan.band.value }}</span>.
+            {% if ns.crit %}Critical exposures demand remediation before this agent is exposed to untrusted input.
+            {% elif ns.high %}High-severity exposures should be remediated prior to production use.
+            {% elif total %}The remaining findings are lower severity but should be triaged.
+            {% else %}The target defended every adversarial attempt within the configured budget.{% endif %}
+          {% else %}
+            <span class="verdict">AIVSS NOT EVALUATED</span> — this run used a non-authoritative
+            (e.g. stub) evaluator and produces no trustworthy composite score.
+          {% endif %}
+        </p>
+      </div>
+
+      {# KPI card row — 6 tiles #}
+      <table class="kpi-table">
+        <tr>
+          <td>
+            <div class="kpi-label">AIVSS</div>
+            <div class="kpi-value">{% if scored %}{{ scan.aivss }}{% else %}—{% endif %}</div>
+            <div class="kpi-sub">{{ scan.band.value }}</div>
+          </td>
+          <td>
+            <div class="kpi-label">Findings</div>
+            <div class="kpi-value">{{ total }}</div>
+            <div class="sevbar">
+              {% if total %}
+                <span class="s-crit" style="width:{{ (ns.crit / total * 100) | round(1) }}%"></span><span class="s-high" style="width:{{ (ns.high / total * 100) | round(1) }}%"></span><span class="s-med" style="width:{{ (ns.med / total * 100) | round(1) }}%"></span><span class="s-low" style="width:{{ (ns.low / total * 100) | round(1) }}%"></span>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <div class="kpi-label">Critical / High</div>
+            <div class="kpi-value">{{ ns.crit }}<span class="unit"> / {{ ns.high }}</span></div>
+            <div class="kpi-sub">{{ ns.med }} med · {{ ns.low }} low</div>
+          </td>
+          <td>
+            <div class="kpi-label">Coverage</div>
+            <div class="kpi-value">{{ asi_covered }}<span class="unit"> / 10</span></div>
+            <div class="pipgrid">
+              {% for i in range(10) %}<span class="pip {{ 'on' if i < asi_covered else '' }}"></span>{% endfor %}
+            </div>
+          </td>
+          <td>
+            <div class="kpi-label">Cost</div>
+            <div class="kpi-value"><span class="unit">$</span>{{ "%.2f"|format(cost) }}</div>
+            <div class="kpi-sub">{{ "{:,}".format(scan.tokens_total) if scan.tokens_total is defined and scan.tokens_total else '—' }} tok</div>
+          </td>
+          <td>
+            <div class="kpi-label">Elapsed</div>
+            <div class="kpi-value">{{ "%d:%02d"|format(mm, ss) }}</div>
+            <div class="kpi-sub">{{ "%.1f"|format(elapsed) }}s wall-clock</div>
+          </td>
+        </tr>
       </table>
     </section>
 
-    <section>
-      <h2>AIVSS sub-scores</h2>
-      <table>
-        <thead>
-          <tr><th>Sub-score</th><th class="num">Value</th></tr>
-        </thead>
-        <tbody>
-          {% for key, value in scan.sub_scores.items() %}
-          <tr>
-            <td><span class="mono">{{ key }}</span></td>
-            <td class="num">{{ "%.1f"|format(value) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
+    <!-- ======================== 3. OVERVIEW ======================== -->
+    <section class="block">
+      <div class="section-head">
+        <div class="eyebrow">Section 02 — Overview</div>
+        <h2>Scan plan &amp; attack-surface coverage</h2>
+        <p class="lede">The configuration that produced this assessment, followed by per-category exposure across the OWASP ASI Top&nbsp;10.</p>
+      </div>
 
-    <section>
-      <h2>OWASP ASI breakdown</h2>
-      <table>
+      {# scan-plan definition tables, two columns via layout table #}
+      <table class="plan-grid">
+        <td>
+          <div class="plan-cap">Target &amp; Mode</div>
+          <table class="deftable">
+            <tr><td class="k">Target</td><td class="v mono">{{ scan.target_ref }}</td></tr>
+            <tr><td class="k">Mode</td><td class="v">{{ scan.target_mode }}</td></tr>
+            <tr><td class="k">Run mode</td><td class="v">{{ scan.mode | default('—', true) }}</td></tr>
+            <tr><td class="k">Tier</td><td class="v">{{ scan.tier.value }}</td></tr>
+            <tr><td class="k">Reachable</td><td class="v">{{ '✓ reachable' if scored else '—' }}</td></tr>
+          </table>
+
+          <div class="plan-cap">Models</div>
+          <table class="deftable">
+            <tr><td class="k">Attacker</td><td class="v mono">{{ scan.engine.get('attacker', '—') if scan.engine else '—' }}</td></tr>
+            <tr><td class="k">Evaluator</td><td class="v mono">{{ scan.engine.get('evaluator', '—') if scan.engine else '—' }}</td></tr>
+            <tr><td class="k">Commander</td><td class="v mono">{{ scan.engine.get('commander', '—') if scan.engine else '—' }}</td></tr>
+          </table>
+        </td>
+        <td class="gap"></td>
+        <td>
+          <div class="plan-cap">Budget</div>
+          <table class="deftable">
+            <tr><td class="k">Run mode</td><td class="v">{{ scan.mode | default('—', true) }}</td></tr>
+            <tr><td class="k">Wall-clock cap</td><td class="v">uncapped</td></tr>
+            <tr><td class="k">USD cap</td><td class="v">uncapped</td></tr>
+            <tr><td class="k">Actual cost</td><td class="v">${{ "%.4f"|format(cost) }}</td></tr>
+            <tr><td class="k">Tokens</td><td class="v">{{ "{:,}".format(scan.tokens_total) if scan.tokens_total is defined and scan.tokens_total else '—' }}</td></tr>
+          </table>
+
+          <div class="plan-cap">Safety Guards</div>
+          <table class="deftable">
+            <tr><td class="k">RoE blocklist</td><td class="v">none observed</td></tr>
+            <tr><td class="k">Authorization</td><td class="v">n/a</td></tr>
+            <tr><td class="k">Egress policy</td><td class="v">unrestricted</td></tr>
+            <tr><td class="k">Output format</td><td class="v mono">json</td></tr>
+          </table>
+        </td>
+      </table>
+
+      {# ASI coverage table #}
+      <div class="plan-cap" style="margin-top:0.5em;">OWASP ASI Top 10 — Attack-Surface Coverage</div>
+      <table class="asi-table">
         <thead>
           <tr>
-            <th>ASI</th>
-            <th>Description</th>
-            <th class="num">Score</th>
-            <th class="num">Findings</th>
+            <th style="width:12%">ASI</th>
+            <th>Threat class</th>
+            <th class="num" style="width:24%">Resilience score</th>
+            <th class="num" style="width:12%">Findings</th>
           </tr>
         </thead>
         <tbody>
           {% for row in asi_rows %}
-          <tr>
-            <td><span class="mono">{{ row.id }}</span></td>
-            <td>{{ row.description }}</td>
-            <td class="num">{{ "%.1f"|format(row.score) }}</td>
-            <td class="num">{{ row.count }}</td>
+          {# severity tint: derive worst finding severity in this row #}
+          {% set rns = namespace(tier='') %}
+          {% if row.findings %}
+            {% for fd in row.findings %}
+              {% set fsv = (fd.severity_label if fd.severity_label is defined and fd.severity_label else fd.severity.value)|lower %}
+              {% if fsv == 'critical' and rns.tier != 'crit' %}{% set rns.tier = 'crit' %}
+              {% elif fsv == 'high' and rns.tier not in ['crit','high'] %}{% set rns.tier = 'high' %}
+              {% elif fsv == 'medium' and rns.tier not in ['crit','high','med'] %}{% set rns.tier = 'med' %}
+              {% elif fsv == 'low' and rns.tier == '' %}{% set rns.tier = 'low' %}{% endif %}
+            {% endfor %}
+          {% endif %}
+          {% set sc = row.score | default(0, true) %}
+          <tr class="{{ 'has-find ' if row.count else '' }}{{ 't-' ~ rns.tier if rns.tier else '' }}">
+            <td class="id">{{ row.id }}</td>
+            <td class="desc">{{ row.description }}</td>
+            <td class="num">
+              <span class="score-num">{{ "%.1f"|format(sc) }}</span>
+              <span class="scorebar-wrap">
+                <span class="scorebar {{ 'hot' if sc < 40 else ('warm' if sc < 70 else '') }}"><span style="width:{{ sc | round(0) }}%"></span></span>
+              </span>
+            </td>
+            <td class="cnt">{{ row.count }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      <p class="subtle" style="font-size:7.6pt; margin-top:0.4em;">Resilience score is the per-category AIVSS sub-score (0–100, higher = stronger / less exposed; a bar turning amber or red flags weaker resilience). Row tint reflects the most severe finding in that class.</p>
     </section>
 
-    {% for row in asi_rows if row.findings %}
-    <section>
-      <h2>{{ row.id }} &mdash; {{ row.description }}</h2>
-      {% for finding in row.findings %}
-      <div class="finding {{ finding.severity.value[:4] }}">
-        <h3>
-          <span class="sev-{{ finding.severity.value }}">[{{ finding.severity.value|upper }}]</span>
-          <span class="mono">{{ finding.probe_id }}</span> &mdash; {{ finding.summary }}
-        </h3>
-        <p>
-          <span class="pill">CSA: {{ finding.csa_category.value }}</span>
-          {% for technique in finding.mitre_atlas %}
-          <span class="pill">ATLAS: {{ technique }}</span>
+    <!-- ======================== 4. FINDINGS ======================== -->
+    <section class="block">
+      <div class="section-head">
+        <div class="eyebrow">Section 03 — Findings</div>
+        <h2>Confirmed exposures</h2>
+        <p class="lede">Each card records a judge-confirmed adversarial outcome with its framework classification and the triggering evidence. Findings are grouped by severity, then ordered by ASI category.</p>
+      </div>
+
+      {% if findings %}
+        {# Group by severity in fixed order, then ASI. #}
+        {% set order = [('critical','g-crit','Critical'), ('high','g-high','High'), ('medium','g-med','Medium'), ('low','g-low','Low'), ('info','','Informational')] %}
+        {% for sev_key, gcls, sev_name in order %}
+          {# collect findings in this severity bucket (inline filter) #}
+          {% set matched = [] %}
+          {% for f in findings %}
+            {% set sv = (f.severity_label if f.severity_label is defined and f.severity_label else f.severity.value)|lower %}
+            {% if sv == sev_key or (sev_key == 'info' and sv not in ['critical','high','medium','low']) %}
+              {% set _ = matched.append(f) %}
+            {% endif %}
           {% endfor %}
-          <span class="pill">conf {{ "%.2f"|format(finding.confidence) }}</span>
-          <span class="pill">{{ finding.attempt_count }} attempt(s)</span>
-          <span class="pill">success: {{ finding.success }}</span>
-        </p>
-      </div>
-      {% endfor %}
-    </section>
-    {% endfor %}
+          {% if matched %}
+          <div class="group-head {{ gcls }}">{{ sev_name }} severity <span class="gcount">· {{ matched|length }} finding{{ '' if matched|length == 1 else 's' }}</span></div>
 
-    {% if findings %}
-    <section class="findings-detail">
-      <h2>Finding transcripts</h2>
-      {% for f in findings %}
-      <div class="finding-detail" style="page-break-inside: avoid; page-break-before: auto;">
-        <h3>{{ f.id }} &mdash; {{ f.asi.value }} / {{ f.severity.value }}</h3>
-        <table class="finding-meta">
-          <tr><th>ASI category</th><td>{{ f.asi.value }}</td></tr>
-          <tr><th>Probe ID</th><td><span class="mono">{{ f.probe_id }}</span></td></tr>
-          <tr><th>MITRE ATLAS</th><td>{{ f.mitre_atlas | join(', ') }}</td></tr>
-          <tr><th>CSA category</th><td>{{ f.csa_category.value }}</td></tr>
-          <tr><th>Severity</th><td><span class="sev-{{ f.severity.value }}">{{ f.severity.value }}</span></td></tr>
-          <tr><th>Judge confidence</th><td>{{ "%.2f" | format(f.confidence) }}</td></tr>
-          <tr><th>Attempts</th><td>{{ f.attempt_count }}</td></tr>
-        </table>
-        <p class="summary">{{ f.summary }}</p>
-        {% if f.transcript_ref %}
-        <p class="transcript-ref">Full transcript: <code>{{ f.transcript_ref }}</code></p>
-        {% else %}
-        <p class="transcript-ref muted">Transcript not stored (PII-redacted scans omit per-turn transcripts by default).</p>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </section>
-    {% else %}
-    <section class="findings-detail">
-      <h2>Finding transcripts</h2>
-      <p class="muted">No findings &mdash; the target defended every attack within budget.</p>
-    </section>
-    {% endif %}
+          {% for f in (matched | sort(attribute='asi.value')) %}
+            {% set sevc = 'sev-' ~ ((f.severity_label if f.severity_label is defined and f.severity_label else f.severity.value)|lower) %}
+            {% if sevc not in ['sev-critical','sev-high','sev-medium','sev-low','sev-info'] %}{% set sevc = 'sev-info' %}{% endif %}
+          <div class="find {{ sevc }}">
+            <div class="find-head">
+              <div class="find-eyebrow">{{ f.asi.value }} · {{ f.csa_category.value if f.csa_category else 'uncategorized' }}</div>
+              <h3 class="find-title">{{ f.title if f.title is defined and f.title else (f.summary if f.summary else 'Adversarial outcome confirmed') }}</h3>
+              {% if f.summary and (f.title is not defined or not f.title or f.title != f.summary) %}
+              <p class="find-summary">{{ f.summary }}</p>
+              {% endif %}
+            </div>
 
-    <footer class="appendix">
-      <h2>Appendix A &mdash; Triple-framework mapping</h2>
+            <div class="chip-row">
+              <span class="chip chip-sev {{ sevc }}">{{ (f.severity_label if f.severity_label is defined and f.severity_label else f.severity.value)|upper }}</span>
+              <span class="chip chip-asi">{{ f.asi.value }}</span>
+              {% if f.csa_category %}<span class="chip"><span class="lab">CSA</span> {{ f.csa_category.value }}</span>{% endif %}
+              {% for technique in (f.mitre_atlas or []) %}<span class="chip"><span class="lab">ATLAS</span> {{ technique }}</span>{% endfor %}
+              {% if f.verdict_v2 is defined and f.verdict_v2 %}<span class="chip chip-verdict">{{ f.verdict_v2 }}</span>{% endif %}
+              {% if f.confidence is defined and f.confidence is not none %}<span class="chip"><span class="lab">CONF</span> {{ "%.2f"|format(f.confidence) }}</span>{% endif %}
+            </div>
+
+            <div class="evidence">
+              <div class="ev-label">Trigger prompt</div>
+              {% if f.trigger_prompt %}
+                <div class="ev-block prompt">{{ f.trigger_prompt }}</div>
+              {% else %}
+                <div class="ev-block prompt ev-empty">No prompt captured (PII-redacted scan).</div>
+              {% endif %}
+              <div class="ev-label">Target response</div>
+              {% if f.trigger_response %}
+                <div class="ev-block response">{{ f.trigger_response }}</div>
+              {% else %}
+                <div class="ev-block response ev-empty">No response captured (PII-redacted scan).</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <div class="empty-state">
+          <strong>No findings.</strong> The target defended every adversarial attempt within the configured budget. This is a strong signal, though absence of findings is not proof of absence of vulnerability — re-run at a higher tier for deeper coverage.
+        </div>
+      {% endif %}
+    </section>
+
+    <!-- ======================== 5. APPENDICES ======================== -->
+    <section class="block appendix">
+      <div class="section-head">
+        <div class="appendix-tag">Appendix A</div>
+        <h2>Triple-framework mapping</h2>
+      </div>
       <p>
-        AgentGuardian tags every finding against three industry frameworks:
-        OWASP ASI 2026 (Top 10 for Agentic Applications), MITRE ATLAS v5.4.0
-        (Adversarial Threat Landscape for AI Systems), and the CSA Agentic AI
-        Red Teaming Guide (Huang et al., 2025-05-28). The mapping below shows
-        the primary ATLAS techniques and CSA categories each ASI bucket exercises.
+        AgentGuardian tags every finding against three industry frameworks: OWASP ASI 2026
+        (Top 10 for Agentic Applications), MITRE ATLAS v5.4.0 (Adversarial Threat Landscape for
+        AI Systems), and the CSA Agentic AI Red Teaming Guide (Huang et al., 2025-05-28). The
+        mapping below shows the primary ATLAS techniques and CSA categories each ASI bucket exercises.
       </p>
-      <table>
+      <table class="map-table">
         <thead>
-          <tr>
-            <th>ASI</th>
-            <th>OWASP category</th>
-            <th>Primary MITRE ATLAS technique(s)</th>
-            <th>CSA category</th>
-          </tr>
+          <tr><th style="width:10%">ASI</th><th style="width:22%">OWASP category</th><th>Primary MITRE ATLAS technique(s)</th><th style="width:24%">CSA category</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td><span class="mono">ASI01</span></td>
-            <td>Goal Hijack</td>
-            <td><span class="mono">AML.T0051</span>, <span class="mono">AML.T0054</span></td>
-            <td>goal-instruction-manipulation</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI02</span></td>
-            <td>Tool Misuse</td>
-            <td><span class="mono">AML.T0053</span>, Publish Poisoned AI Agent Tool</td>
-            <td>authorization-control-hijacking</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI03</span></td>
-            <td>Privilege Abuse</td>
-            <td><span class="mono">AML.T0049</span>, Escape to Host</td>
-            <td>authorization-control-hijacking</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI04</span></td>
-            <td>Supply Chain</td>
-            <td><span class="mono">AML.T0010</span>, <span class="mono">AML.T0011</span></td>
-            <td>supply-chain-dependency</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI05</span></td>
-            <td>Code Execution</td>
-            <td><span class="mono">AML.T0050</span>, Escape to Host</td>
-            <td>agent-critical-system-interaction</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI06</span></td>
-            <td>Memory Poisoning</td>
-            <td><span class="mono">AML.T0070</span>, AI Agent Context Poisoning</td>
-            <td>memory-context-manipulation</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI07</span></td>
-            <td>Agent-to-Agent (A2A)</td>
-            <td><span class="mono">AML.T0048</span>, Inter-Agent Manipulation</td>
-            <td>multi-agent-exploitation</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI08</span></td>
-            <td>Cascading Failures</td>
-            <td><span class="mono">AML.T0034</span>, <span class="mono">AML.T0029</span></td>
-            <td>impact-chain-blast-radius</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI09</span></td>
-            <td>Trust Exploitation</td>
-            <td><span class="mono">AML.T0051.000</span>, <span class="mono">AML.T0052</span></td>
-            <td>checker-out-of-the-loop</td>
-          </tr>
-          <tr>
-            <td><span class="mono">ASI10</span></td>
-            <td>Rogue Agents (drift)</td>
-            <td><span class="mono">AML.T0046</span>, AI Agent Goal Drift</td>
-            <td>hallucination-exploitation</td>
-          </tr>
+          <tr><td class="id">ASI01</td><td>Goal Hijack</td><td><span class="mono">AML.T0051</span>, <span class="mono">AML.T0054</span></td><td>goal-instruction-manipulation</td></tr>
+          <tr><td class="id">ASI02</td><td>Tool Misuse</td><td><span class="mono">AML.T0053</span>, Publish Poisoned AI Agent Tool</td><td>authorization-control-hijacking</td></tr>
+          <tr><td class="id">ASI03</td><td>Privilege Abuse</td><td><span class="mono">AML.T0049</span>, Escape to Host</td><td>authorization-control-hijacking</td></tr>
+          <tr><td class="id">ASI04</td><td>Supply Chain</td><td><span class="mono">AML.T0010</span>, <span class="mono">AML.T0011</span></td><td>supply-chain-dependency</td></tr>
+          <tr><td class="id">ASI05</td><td>Code Execution</td><td><span class="mono">AML.T0050</span>, Escape to Host</td><td>agent-critical-system-interaction</td></tr>
+          <tr><td class="id">ASI06</td><td>Memory Poisoning</td><td><span class="mono">AML.T0070</span>, AI Agent Context Poisoning</td><td>memory-context-manipulation</td></tr>
+          <tr><td class="id">ASI07</td><td>Agent-to-Agent (A2A)</td><td><span class="mono">AML.T0048</span>, Inter-Agent Manipulation</td><td>multi-agent-exploitation</td></tr>
+          <tr><td class="id">ASI08</td><td>Cascading Failures</td><td><span class="mono">AML.T0034</span>, <span class="mono">AML.T0029</span></td><td>impact-chain-blast-radius</td></tr>
+          <tr><td class="id">ASI09</td><td>Trust Exploitation</td><td><span class="mono">AML.T0051.000</span>, <span class="mono">AML.T0052</span></td><td>checker-out-of-the-loop</td></tr>
+          <tr><td class="id">ASI10</td><td>Rogue Agents (drift)</td><td><span class="mono">AML.T0046</span>, AI Agent Goal Drift</td><td>hallucination-exploitation</td></tr>
         </tbody>
       </table>
 
-      <h2>Appendix B &mdash; Methodology and bibliography</h2>
+      <div class="section-head" style="margin-top:1.4em;">
+        <div class="appendix-tag">Appendix B</div>
+        <h2>Methodology &amp; bibliography</h2>
+      </div>
       <p>
-        Each of the 10 ASI specialist agents extends its seed probes
-        dynamically using four published adversarial strategies. Selection
-        is bandit-driven: AgentGuardian's strategy router keeps the
-        per-(target, ASI) success rates in shared memory and biases later
+        Each of the 10 ASI specialist agents extends its seed probes dynamically using four
+        published adversarial strategies. Selection is bandit-driven: AgentGuardian's strategy
+        router keeps the per-(target, ASI) success rates in shared memory and biases later
         attempts toward strategies that succeeded earlier in the run.
       </p>
       <ul>
-        <li><strong>TAP</strong> &mdash; Tree of Attacks with Pruning. Tree-of-thoughts
-          jailbreak with on-topic pruning (Mehrotra et al., 2024).</li>
-        <li><strong>Crescendo</strong> &mdash; Multi-turn benign-to-harmful ramp
-          (Russinovich et al., 2025).</li>
-        <li><strong>MAD-MAX</strong> &mdash; Multi-agent adversarial dialogue with mode
-          exploitation (Schoepf et al., 2025).</li>
-        <li><strong>PAIR</strong> &mdash; Prompt Automatic Iterative Refinement; attacker
-          LLM critiques and rewrites (Chao et al., 2023).</li>
+        <li><strong>TAP</strong> — Tree of Attacks with Pruning; tree-of-thoughts jailbreak with on-topic pruning (Mehrotra et al., 2024).</li>
+        <li><strong>Crescendo</strong> — Multi-turn benign-to-harmful ramp (Russinovich et al., 2025).</li>
+        <li><strong>MAD-MAX</strong> — Multi-agent adversarial dialogue with mode exploitation (Schoepf et al., 2025).</li>
+        <li><strong>PAIR</strong> — Prompt Automatic Iterative Refinement; attacker LLM critiques and rewrites (Chao et al., 2023).</li>
       </ul>
       <p>
-        The Layer-2 judge LLM evaluates each transcript against a
-        category-specific rubric and emits a structured verdict;
-        agreement with human reviewers is calibrated against the
-        evaluation harness described in Chen et al. (2024). For the full
-        bibliography and per-probe references see
-        <code>docs/arxiv-preprint.md</code>.
+        The Layer-2 judge LLM evaluates each transcript against a category-specific rubric and
+        emits a structured verdict; agreement with human reviewers is calibrated against the
+        evaluation harness described in Chen et al. (2024). For the full bibliography and
+        per-probe references see <code>docs/arxiv-preprint.md</code>.
       </p>
 
-      <h2>Appendix C &mdash; Reproducibility receipt</h2>
+      <div class="section-head" style="margin-top:1.4em;">
+        <div class="appendix-tag">Appendix C</div>
+        <h2>Reproducibility receipt</h2>
+      </div>
       <p>
-        This receipt records the exact configuration that produced the
-        scan above. Re-running AgentGuardian with these inputs against
-        the same target should produce a deterministic AIVSS score
-        (modulo non-determinism in third-party LLM endpoints).
+        This receipt records the configuration that produced the scan above. Re-running
+        AgentGuardian with these inputs against the same target should produce a deterministic
+        AIVSS score (modulo non-determinism in third-party LLM endpoints).
       </p>
-      <table>
-        <tbody>
-          <tr>
-            <th>Package version</th>
-            <td><code>{{ scan.package_version }}</code></td>
-          </tr>
-          <tr>
-            <th>AIVSS formula version</th>
-            <td><code>{{ scan.aivss_formula_version }}</code></td>
-          </tr>
-          <tr>
-            <th>Probe library version</th>
-            <td><code>{{ scan.probe_library_version }}</code></td>
-          </tr>
-          <tr>
-            <th>Scan timestamp</th>
-            <td><code>{{ scan.created_at.isoformat() }}</code></td>
-          </tr>
-          <tr>
-            <th>Target mode</th>
-            <td><code>{{ scan.target_mode }}</code></td>
-          </tr>
-          <tr>
-            <th>Target ref</th>
-            <td><code>{{ scan.target_ref }}</code></td>
-          </tr>
-          <tr>
-            <th>Tier</th>
-            <td><code>{{ scan.tier.value }}</code></td>
-          </tr>
-          {# Commander / attacker / evaluator model identifiers and the RNG
-             seed are surfaced by the runtime metadata block planned for
-             v1.1. Until the Scan model carries that field they render as
-             "not recorded" — full wiring tracked in CHANGELOG. The Pydantic
-             Scan model uses ``extra="forbid"`` so a direct attribute access
-             would raise; we go through ``model_fields`` to detect a future
-             ``metadata`` field without touching the M2/M8 contract. #}
-          {% set meta = scan.metadata if ('metadata' in scan.__class__.model_fields) else None %}
-          <tr>
-            <th>Commander model</th>
-            <td>
-              {% if meta and meta.get('commander_model') %}
-                <code>{{ meta['commander_model'] }}</code>
-              {% else %}
-                <span class="muted">not recorded; see docs/operator-checklist.md (wiring lands in v1.1)</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>Attacker model</th>
-            <td>
-              {% if meta and meta.get('attacker_model') %}
-                <code>{{ meta['attacker_model'] }}</code>
-              {% else %}
-                <span class="muted">not recorded; wiring lands in v1.1</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>Evaluator model</th>
-            <td>
-              {% if meta and meta.get('evaluator_model') %}
-                <code>{{ meta['evaluator_model'] }}</code>
-              {% else %}
-                <span class="muted">not recorded; wiring lands in v1.1</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>RNG seed</th>
-            <td>
-              {% if meta and meta.get('rng_seed') is not none %}
-                <code>{{ meta['rng_seed'] }}</code>
-              {% else %}
-                <span class="muted">not recorded; wiring lands in v1.1</span>
-              {% endif %}
-            </td>
-          </tr>
-          <tr>
-            <th>Signature algorithm</th>
-            <td><code>Ed25519 + HMAC-SHA256</code></td>
-          </tr>
-          <tr>
-            <th>Ed25519 fingerprint (Base32)</th>
-            <td>
-              {% if meta and meta.get('ed25519_fingerprint') %}
-                <code>{{ meta['ed25519_fingerprint'] }}</code>
-              {% else %}
-                <span class="muted">verify via <code>agent-guardian verify &lt;report.json&gt;</code></span>
-              {% endif %}
-            </td>
-          </tr>
-        </tbody>
+      <table class="receipt-table">
+        <tr><td class="k">Scan ID</td><td><code>{{ scan.id }}</code></td></tr>
+        <tr><td class="k">Scan timestamp</td><td><code>{{ scan.created_at.isoformat() if scan.created_at.isoformat is defined else scan.created_at }}</code></td></tr>
+        <tr><td class="k">Target mode</td><td><code>{{ scan.target_mode }}</code></td></tr>
+        <tr><td class="k">Target ref</td><td><code>{{ scan.target_ref }}</code></td></tr>
+        <tr><td class="k">Tier</td><td><code>{{ scan.tier.value }}</code></td></tr>
+        <tr><td class="k">Run mode</td><td><code>{{ scan.mode | default('—', true) }}</code></td></tr>
+        <tr><td class="k">Commander model</td><td><code>{{ scan.engine.get('commander', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
+        <tr><td class="k">Attacker model</td><td><code>{{ scan.engine.get('attacker', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
+        <tr><td class="k">Evaluator model</td><td><code>{{ scan.engine.get('evaluator', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
+        <tr><td class="k">Signature algorithm</td><td><code>Ed25519 + HMAC-SHA256</code></td></tr>
       </table>
       <p>
         This PDF is a visualisation of the canonical JSON report. Use
-        <code>agent-guardian verify &lt;report.json&gt;</code> to verify
-        the HMAC-SHA256 and Ed25519 signatures on the source artefact.
+        <code>agent-guardian verify &lt;report.json&gt;</code> to verify the HMAC-SHA256 and
+        Ed25519 signatures on the source artefact.
       </p>
-    </footer>
+    </section>
+
   </body>
 </html>

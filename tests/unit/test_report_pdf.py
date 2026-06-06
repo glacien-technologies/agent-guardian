@@ -92,3 +92,56 @@ def test_write_pdf_weasyprint_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 def test_write_pdf_rejects_unknown_engine(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         write_pdf(make_scan(), tmp_path / "report.pdf", engine="parchment")
+
+
+# ---------------------------------------------------------------------------
+# Enterprise template render (engine-independent — no WeasyPrint needed)
+# ---------------------------------------------------------------------------
+
+
+def test_report_template_renders_enterprise_sections() -> None:
+    """The redesigned PDF template renders Overview + Findings, themed.
+
+    Exercises ``render_report_html`` directly (the Jinja half of the WeasyPrint
+    path) so the enterprise template has coverage on a bare runner.
+    """
+    from agent_guardian.models.asi import AsiCategory
+    from agent_guardian.reports.pdf import render_report_html
+
+    # asi_scores: ASI01=40 (warm), ASI02=60 (warm); add a <40 to exercise 'hot'.
+    scan = make_scan(
+        aivss=43,
+        asi_scores={cat: 90.0 for cat in AsiCategory}
+        | {
+            AsiCategory.ASI01: 30.0,  # < 40 -> hot
+            AsiCategory.ASI02: 60.0,  # < 70 -> warm
+        },
+    )
+    html = render_report_html(scan, redact=True)
+
+    # Cover + the three content sections an enterprise report must carry.
+    assert "Agentic Threat Posture Report" in html
+    assert str(scan.aivss) in html
+    assert scan.band.value in html
+    for heading in ("Executive Summary", "Overview", "Findings"):
+        assert heading in html, f"missing section: {heading}"
+    # Overview must surface the scan plan (target + models).
+    assert scan.target_ref in html
+    # Dashboard theme: brand purple + severity coding present in the stylesheet.
+    assert "#8b5cf6" in html
+    # Resilience score wording is correct (higher = stronger, not "greater exposure").
+    assert "greater exposure" not in html
+    assert "higher = stronger" in html
+    # Score-bar severity classes fire for low resilience.
+    assert "scorebar hot" in html
+    assert "scorebar warm" in html
+
+
+def test_report_template_handles_zero_findings() -> None:
+    """A clean scan renders without error and shows no findings gracefully."""
+    from agent_guardian.reports.pdf import render_report_html
+
+    scan = make_scan(aivss=100, findings=[])
+    html = render_report_html(scan, redact=True)
+    assert "Agentic Threat Posture Report" in html
+    assert "100" in html

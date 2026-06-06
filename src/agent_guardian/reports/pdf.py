@@ -36,6 +36,7 @@ __all__ = [
     "PDF_ENV_VAR",
     "PdfFeatureUnavailable",
     "available_pdf_engines",
+    "render_report_html",
     "write_pdf",
 ]
 
@@ -151,11 +152,16 @@ def _build_asi_rows(findings: list[Finding], scan: Scan) -> list[dict[str, Any]]
     return rows
 
 
-def _render_weasyprint(
-    scan: Scan, path: Path, *, redact: bool
-) -> None:  # pragma: no cover — needs native libs
+def render_report_html(scan: Scan, *, redact: bool = True) -> str:
+    """Render the enterprise PDF report template to an HTML string.
+
+    Engine-independent (no WeasyPrint): redacts PII/credential shapes from the
+    findings, then renders ``pdf/report.html.jinja`` with the locked template
+    vars (``scan`` / ``findings`` / ``asi_rows`` / ``band_colour``). The PDF
+    engines wrap this; exposing it directly makes the template content testable
+    without the native WeasyPrint stack.
+    """
     from jinja2 import Environment, FileSystemLoader, select_autoescape
-    from weasyprint import HTML  # type: ignore[import-not-found,import-untyped,unused-ignore]
 
     # Scrub PII + credential shapes from finding text before it reaches the
     # template (Jinja autoescape handles HTML escaping; redaction handles
@@ -167,12 +173,20 @@ def _render_weasyprint(
         autoescape=select_autoescape(["html", "jinja"]),
     )
     template = env.get_template("pdf/report.html.jinja")
-    html_str = template.render(
+    return template.render(
         scan=scan,
         findings=findings,
         asi_rows=_build_asi_rows(findings, scan),
         band_colour=colour_for_band(scan.band),
     )
+
+
+def _render_weasyprint(
+    scan: Scan, path: Path, *, redact: bool
+) -> None:  # pragma: no cover — needs native libs
+    from weasyprint import HTML  # type: ignore[import-not-found,import-untyped,unused-ignore]
+
+    html_str = render_report_html(scan, redact=redact)
     path.parent.mkdir(parents=True, exist_ok=True)
     HTML(string=html_str).write_pdf(str(path))
 
