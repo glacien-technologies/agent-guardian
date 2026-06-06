@@ -110,7 +110,8 @@ def test_tool_abuse_enriched_names_real_tool() -> None:
     rich = agent.build_attack_specialization(_enriched())
     assert len(rich) > len(bare)
     assert "wire_transfer" in rich
-    assert "ARGUMENT-INJECTION" in rich
+    # issue #76 (A4): de-jargoned ARGUMENT-INJECTION -> ARGUMENT-SCOPE.
+    assert "ARGUMENT-SCOPE" in rich
 
 
 def test_identity_leak_enriched_names_real_read_tool() -> None:

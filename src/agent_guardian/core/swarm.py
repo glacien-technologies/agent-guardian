@@ -1335,6 +1335,12 @@ class SwarmCommander:
             # keeps the public AsiAgent API stable.
             if self.config.probes_per_category is not None:
                 agent._mode_probe_cap = self.config.probes_per_category  # type: ignore[attr-defined]
+            # D1 (issue #76) — FULL-mode repeat-trials. Re-run each confirmed
+            # success once more (2 total) and record ``reproduced_n_of_m`` so a
+            # 1/2 flake reads weaker than a 2/2 reproduction (OWASP consistency
+            # bar). FAST/SMART stay single-pass. Same private-attribute
+            # indirection as the probe cap to keep the public AsiAgent API stable.
+            agent._retrials = 1 if (self.config.mode or ScanMode.FULL) is ScanMode.FULL else 0  # type: ignore[attr-defined]
             # M2 roadmap #1 -- propagate the pretext-framing toggle onto the
             # agent; it reads ``_enable_pretext`` when building its
             # StrategyContext (same private-attribute indirection as the probe

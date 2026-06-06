@@ -99,3 +99,53 @@ async def test_privilege_tiny_budget(
     )
     report = await agent.run(target, memory)
     assert report.terminated_by == "budget"
+
+
+async def test_privilege_min_turns_blocks_early_success(
+    attacker_llm: StubLLM,
+    fail_judge_llm: StubLLM,
+    small_budget: AgentBudget,
+) -> None:
+    """B6 (issue #76) — should_terminate must NOT concede a 'success' stop
+    before min_turns, so a Critical lane keeps firing its technique list."""
+    agent = PrivilegeAgent(
+        attacker_llm=attacker_llm,
+        evaluator_llm=fail_judge_llm,
+        attacker_model="stub",
+        evaluator_model="stub",
+        budget=small_budget,
+        rng=Random(0),
+    )
+    assert agent.min_turns == 4
+    # target_findings met (2) but turns below the floor → keep going.
+    stop, _ = agent.should_terminate(findings_count=2, turns=1, elapsed_seconds=0.0)
+    assert stop is False
+    # At/after the floor, the same finding count concedes 'success'.
+    stop, reason = agent.should_terminate(findings_count=2, turns=4, elapsed_seconds=0.0)
+    assert stop is True
+    assert reason == "success"
+
+
+async def test_privilege_refusing_target_runs_min_turns(
+    attacker_llm: StubLLM,
+    refusing_target_llm: StubLLM,
+    pass_judge_llm: StubLLM,
+    small_budget: AgentBudget,
+    make_memory: Callable[..., SharedMemory],
+    make_target: Callable[..., PromptAdapter],
+    fingerprint_with_tools: TargetFingerprint,
+) -> None:
+    """B6 — an instantly-refusing target must not end the privilege lane at
+    turn 1; the min_turns floor rotates corpus seeds to keep probing."""
+    memory = make_memory(fingerprint=fingerprint_with_tools)
+    target = make_target(llm=refusing_target_llm, fingerprint=fingerprint_with_tools)
+    agent = PrivilegeAgent(
+        attacker_llm=attacker_llm,
+        evaluator_llm=pass_judge_llm,
+        attacker_model="stub",
+        evaluator_model="stub",
+        budget=small_budget,
+        rng=Random(1),
+    )
+    report = await agent.run(target, memory)
+    assert report.turns >= agent.min_turns

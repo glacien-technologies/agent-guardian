@@ -86,6 +86,8 @@ def finding_property_bag(finding: Finding) -> dict[str, Any]:
         "severity": finding.severity.value,
         "verdict_v2": finding.verdict_v2,
         "evidence_types": list(finding.evidence_types or []),
+        "evidence_quote": finding.evidence_quote or "",
+        "reproduced_n_of_m": finding.reproduced_n_of_m,
         "success": finding.success,
         "confidence": finding.confidence,
         "attempt_count": finding.attempt_count,

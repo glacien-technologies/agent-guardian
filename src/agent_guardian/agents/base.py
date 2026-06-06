@@ -603,6 +603,33 @@ def _render_tool_trace(target: TargetAdapter, target_response: str) -> str:
     return "\n".join(lines)
 
 
+_TOOL_TRACE_NAME_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
+_BLACK_BOX_TRACE = "(none — black-box target)"
+
+
+def _merge_tool_trace_tags(
+    base_tags: list[str], tool_trace: str, verdict: JudgeVerdict
+) -> list[str]:
+    """Augment a finding's evidence_types with tool-trace-derived tags (C1).
+
+    When the judge saw a non-black-box tool trace (e.g. ``force_wire_transfer({…})``)
+    this adds a ``tool_call:<name>`` tag per invoked tool plus ``observable`` when
+    the judge flagged an observable compromise — so the highest-severity findings
+    stop shipping empty ``evidence_types``. Deterministic, order-preserving,
+    de-duplicated. Black-box traces add nothing.
+    """
+    tags = list(base_tags)
+    trace = (tool_trace or "").strip()
+    if trace and trace != _BLACK_BOX_TRACE:
+        for name in _TOOL_TRACE_NAME_RE.findall(trace):
+            tag = f"tool_call:{name}"
+            if tag not in tags:
+                tags.append(tag)
+    if verdict.observable_compromise and "observable" not in tags:
+        tags.append("observable")
+    return tags
+
+
 def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
     """Extract the ``scenarios`` list from a goal-specific generation reply.
 
@@ -715,6 +742,13 @@ class AsiAgent(ABC):
 
     # Termination knobs.
     target_findings: ClassVar[int] = 3
+    # Issue #76 (B6) — minimum adversarial turns before the lane may concede.
+    # 0 = no floor (default). High-value lanes (privilege, identity) raise this
+    # so a single target refusal can't end the lane at turn 1 before the agent's
+    # full technique list has been fired. Honored in ``should_terminate`` (no
+    # early "success") and in the run loop (a strategy that gives up before
+    # ``min_turns`` rotates to a fresh corpus seed instead of stopping).
+    min_turns: ClassVar[int] = 0
     no_progress_seconds: ClassVar[int] = 60
 
     def __init__(
@@ -967,7 +1001,11 @@ class AsiAgent(ABC):
         * ``self.budget.tokens_remaining <= 0`` → ``"budget"``
         * ``elapsed_seconds >= self.budget.wall_seconds_remaining`` → ``"budget"``
         """
-        if findings_count >= self.effective_target_findings:
+        # B6 — don't concede a "success" stop before min_turns: a high-value
+        # lane must keep firing its technique list even after the target-finding
+        # count is met, so a Critical surface isn't under-tested. The max-turns
+        # and budget guards below always win (they are hard ceilings).
+        if findings_count >= self.effective_target_findings and turns >= self.min_turns:
             return True, "success"
         if turns >= self.budget.max_turns:
             return True, "exhausted"
@@ -1340,6 +1378,10 @@ class AsiAgent(ABC):
         # updated after each ``strategy.generate_next`` result so the next
         # turn's progress event names the probe the previous turn fired.
         current_probe_id: str | None = None
+        # B6 (issue #76) — cursor into the corpus-seed pool for the min_turns
+        # floor: when a strategy concedes (refused/exhausted) before min_turns,
+        # the loop rotates to the next unused seed here instead of ending the lane.
+        _min_turns_cursor = 0
         # Judge v2 (M0.5) — verify-on-needs_followup pending state. When the
         # previous turn's verdict was ``needs_followup`` with a non-empty
         # ``followup_probe`` (and the per-run verify budget remained), this holds
@@ -1451,14 +1493,41 @@ class AsiAgent(ABC):
                     break
 
             if isinstance(result, StrategyDone):
-                terminated_by = result.reason
-                _LOG.debug(
-                    "agent %s: strategy reported done (reason=%s) at turn %d",
-                    agent_name,
-                    result.reason,
-                    turns,
-                )
-                break
+                # B6 — high-value lanes must exercise their full technique list
+                # before conceding. If the strategy gives up (refused/exhausted)
+                # before min_turns, rotate to the next unused corpus seed and keep
+                # probing rather than ending the lane at turn 1. error/cancelled
+                # reasons always stop (they are not "the target held").
+                if (
+                    result.reason in ("refused", "exhausted")
+                    and turns < self.min_turns
+                    and _min_turns_cursor < len(combined_seeds)
+                ):
+                    _seed = combined_seeds[_min_turns_cursor]
+                    _min_turns_cursor += 1
+                    _LOG.info(
+                        "agent %s: strategy done (%s) at turn %d < min_turns=%d — "
+                        "rotating to corpus seed %s to exhaust the technique list",
+                        agent_name,
+                        result.reason,
+                        turns,
+                        self.min_turns,
+                        _seed.probe_id,
+                    )
+                    result = NextPrompt(
+                        text=_seed.text,
+                        rationale=f"min-turns floor: technique-list seed {_seed.probe_id}",
+                        metadata={"seed_id": _seed.probe_id, "min_turns_fallback": True},
+                    )
+                else:
+                    terminated_by = result.reason
+                    _LOG.debug(
+                        "agent %s: strategy reported done (reason=%s) at turn %d",
+                        agent_name,
+                        result.reason,
+                        turns,
+                    )
+                    break
 
             assert isinstance(result, NextPrompt)
             # SSE Phase 2 Step 2.3 — update the rolling probe id so the
@@ -1911,12 +1980,22 @@ class AsiAgent(ABC):
             # the design DP). ``Finding.success`` rides the binary projection
             # (True only for exploited/info_leak) so AIVSS scoring is unchanged.
             if verdict.verdict in _FINDING_VERDICTS:
+                # D1 — repeat-trial only confirmed successes (exploited/info_leak)
+                # in FULL mode (gated on _retrials); weakness_observed findings
+                # are informational and not worth the extra target calls.
+                reproduced_n_of_m = None
+                if verdict_to_success(verdict.verdict):
+                    reproduced_n_of_m = await self._reproduce_finding(
+                        target, result.text, session_id
+                    )
                 finding = self._build_finding(
                     prompt=result.text,
                     response=target_response,
                     verdict=verdict,
                     attempt_count=turns,
                     strategy_metadata=strat_meta,
+                    tool_trace=tool_trace_str,
+                    reproduced_n_of_m=reproduced_n_of_m,
                 )
                 try:
                     await memory.write_finding(finding)
@@ -2226,6 +2305,50 @@ class AsiAgent(ABC):
             "total": a.total_tokens + e.total_tokens,
         }
 
+    async def _reproduce_finding(
+        self, target: TargetAdapter, prompt: str, session_id: str
+    ) -> str | None:
+        """D1 — re-run this exact trigger N times and report repeat-trial
+        consistency as ``"<reproduced>/<total>"``.
+
+        OWASP red-teaming treats LLM output as stochastic: a single-pass success
+        is weaker evidence than one reproduced across independent attempts. Gated
+        on ``_retrials`` (set per scan-mode by the swarm: FULL>=1, LITE/FAST=0),
+        so the default path is unchanged. The original success counts as the
+        first of N; each retrial dispatches in a fresh session and re-judges.
+        Best-effort — a dispatch/judge error simply does not count as a
+        reproduction and never breaks the run.
+        """
+        retrials = int(getattr(self, "_retrials", 0))
+        if retrials <= 0:
+            return None
+        reproduced = 1  # the original turn already produced a success verdict
+        total = 1 + retrials
+        for i in range(retrials):
+            try:
+                resp = await target.call(prompt, session=f"{session_id}-retrial-{i}")
+                tt = self._augment_tool_trace(_render_tool_trace(target, resp))
+                if self.panel_judge is not None:
+                    v = await self.panel_judge.verdict(prompt, resp, conversation="", tool_trace=tt)
+                else:
+                    v = await self.judge.verdict(prompt, resp, conversation="", tool_trace=tt)
+                if verdict_to_success(v.verdict):
+                    reproduced += 1
+            except Exception as exc:  # pragma: no cover — best-effort, never fatal
+                _LOG.debug(
+                    "agent %s: repeat-trial %d errored (%s) — not counted",
+                    self.name or type(self).__name__,
+                    i,
+                    exc,
+                )
+        _LOG.info(
+            "agent %s: repeat-trial consistency %d/%d for confirmed finding",
+            self.name or type(self).__name__,
+            reproduced,
+            total,
+        )
+        return f"{reproduced}/{total}"
+
     def _build_finding(
         self,
         *,
@@ -2234,6 +2357,8 @@ class AsiAgent(ABC):
         verdict: JudgeVerdict,
         attempt_count: int,
         strategy_metadata: dict[str, object] | None = None,
+        tool_trace: str = "",
+        reproduced_n_of_m: str | None = None,
     ) -> Finding:
         """Construct a :class:`Finding` from a successful attack turn.
 
@@ -2347,7 +2472,18 @@ class AsiAgent(ABC):
             trigger_prompt=prompt,
             verdict_v2=verdict.verdict,
             trigger_response=trigger_response,
-            evidence_types=self._derive_evidence_tags(prompt, response, verdict),
+            # C1 — the agent-specific tags, plus base-level tool-trace tags so
+            # wire/drop/close exploits carry a `tool_call:<name>` signal instead
+            # of shipping empty evidence_types (merged here so the 12 subclass
+            # overrides keep their 3-arg signature unchanged).
+            evidence_types=_merge_tool_trace_tags(
+                self._derive_evidence_tags(prompt, response, verdict), tool_trace, verdict
+            ),
+            # C1 — persist the judge's quoted span so the finding is auditable
+            # from the report, not only from memory.jsonl.
+            evidence_quote=(verdict.evidence or "").strip()[:2048],
+            # D1 — FULL-mode repeat-trial consistency ("3/3"), or None.
+            reproduced_n_of_m=reproduced_n_of_m,
             created_at=_utcnow(),
         )
 
