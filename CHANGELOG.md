@@ -3,11 +3,29 @@
 ## [Unreleased]
 
 ### Added
-- **`--log-agent-io` — full per-agent LLM I/O in `run.log` for troubleshooting + prompt fine-tuning (PRs #74, #75).** Opt-in flag (or `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`) that writes every LLM agent's complete input and raw output to the scan's `run.log` as role-tagged `agent-io [<role>]` blocks — **recon, commander, attacker, and judge** — so a single file reconstructs the whole reasoning chain (grep by role, e.g. `grep -A12 "agent-io [attacker]" run.log`). The attacker block folds its red-team system prompt into the logged input, and the recon/commander blocks are logged *before* parsing so unparseable or provider-refused outputs are still captured. Secrets and control characters are redacted via `sanitize_for_log`. Documented in `docs/reference/cli.md` + `cli.mdx`.
 
 ### Changed
 
 ### Fixed
+
+## [1.0.0rc9] — 2026-06-06
+
+### Added
+- **`--log-agent-io` — full per-agent LLM I/O in `run.log` for troubleshooting + prompt fine-tuning (PRs #74, #75, #77).** Opt-in flag (or `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`) that writes every LLM agent's complete input and raw output to the scan's `run.log` as role-tagged `agent-io [<role>]` blocks — **recon, commander, attacker, and judge** — so a single file reconstructs the whole reasoning chain (grep by role, e.g. `grep -A12 "agent-io [attacker]" run.log`). The attacker block folds its red-team system prompt into the logged input, and the recon/commander blocks are logged *before* parsing so unparseable or provider-refused outputs are still captured. Secrets and control characters are redacted via `sanitize_for_log`. Documented in `docs/reference/cli.md` + `cli.mdx`.
+- **Enterprise, dashboard-themed PDF report via `--output pdf` (#71).** A reader-friendly, executive-styled PDF — overview, ASI attack-surface coverage, and full findings with untruncated trigger responses — following the dashboard colour theme (WeasyPrint primary, reportlab fallback).
+- **Report-format parity (#73).** SARIF, JUnit, Markdown, and GitLab outputs now carry the same posture/config/finding metadata as the JSON/PDF reports (verdict_v2, evidence types, evaluation mode, coverage grade, per-finding properties), with JSON remaining the lossless signed reference.
+- **Per-agent probe records + AI summaries + export bundle (#60, #57).** Per-agent probe rows with authoritative per-probe JSON export, AI-generated summaries, and a one-step export bundle, plus recon-modal polish.
+
+### Changed
+- **One-click "Export scan data" from the scan page (#61, #63, #62).** The scan page downloads a single zip of logs, probes, and report artefacts directly (renamed from "Download all"); the standalone Files/Export page was removed.
+- **Scan-lifecycle status pill (#64, #68).** The dashboard shows In progress (spinner) / Completed / Pending (for interrupted scans) and drops the redundant LIVE freshness dot.
+- **CI hardening (#72, #70).** Release attestations + fuzzing targets added; semgrep annotations kept non-blocking.
+- **Docs reorg (#67, #69, #65).** Root documentation reorganised, AgentGuardian domains corrected, issue templates simplified.
+
+### Fixed
+- **Attacker self-refusals no longer graded as findings (#66).** An attacker LLM's own refusal is recorded as a not-tested marker and excluded from coverage, probe export, and the dashboard — it is not a target compromise.
+- **Judge collateral-leak discipline (#58).** Tool-abuse / cascade / memory-poison verdicts no longer claim an unrelated system-prompt leak as their own win.
+- **Stale "done" scan status (#57, #54).** Completed scans no longer render as still-running; consolidated live probe-row verdicts.
 
 ## [1.0.0rc8] — 2026-06-05
 
