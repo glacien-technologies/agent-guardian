@@ -62,7 +62,7 @@ jobs:
             listed in [MAINTAINERS.md](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md#on-call-rotation).
             cc @glacien-technologies/maintainers
 
-            Cadence policy: https://agentguardian.io/community/release-cadence
+            Cadence policy: https://docs.agentguardian.io/community/release-cadence
           close-issue-message: |
             Closing as inactive — 42 days with no maintainer or
             reporter activity. This is not a verdict on the bug; it is

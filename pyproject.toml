@@ -245,14 +245,9 @@ dev = [
   "tomli>=2.0; python_version<'3.11'",
 ]
 
-# Until the ``agentguardian.ai`` apex DNS lands we point every PyPI URL slot at
-# either the GitHub canonical view of the file or the Cloud Run mirror — both
-# return HTTP 200 today. Once the apex propagates we flip Homepage/Documentation
-# back to ``https://agentguardian.ai`` in a single commit; the other three URLs
-# stay on github.com because that's where the source actually lives.
 [project.urls]
-Homepage = "https://github.com/glacien-technologies/agent-guardian"
-Documentation = "https://github.com/glacien-technologies/agent-guardian/blob/main/docs/index.md"
+Homepage = "https://agentguardian.io"
+Documentation = "https://docs.agentguardian.io"
 Repository = "https://github.com/glacien-technologies/agent-guardian"
 Issues = "https://github.com/glacien-technologies/agent-guardian/issues"
 Changelog = "https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md"

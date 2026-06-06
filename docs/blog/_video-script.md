@@ -129,7 +129,7 @@ Voiceover:
 Static slide. Three lines:
 
 - `pip install agent-guardian`
-- `agentguardian.io/quickstart`
+- `docs.agentguardian.io/quickstart`
 - `github.com/glacien-technologies/agent-guardian`
 
 Voiceover:
@@ -158,8 +158,8 @@ In this 90-second demo:
 Try it:
   pip install agent-guardian
 
-Docs: https://agentguardian.io
-Quickstart: https://agentguardian.io/quickstart
+Docs: https://docs.agentguardian.io
+Quickstart: https://docs.agentguardian.io/quickstart
 Source: https://github.com/glacien-technologies/agent-guardian
 Testbench: https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app
 

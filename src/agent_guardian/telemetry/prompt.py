@@ -132,7 +132,7 @@ What we NEVER send:
 Schema source:
   https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/telemetry/events.py
 Aggregates published at:
-  https://agentguardian.ai/analytics  (k>=50 enforced on every cell)
+  https://agentguardian.io/analytics  (k>=50 enforced on every cell)
 """
 
 

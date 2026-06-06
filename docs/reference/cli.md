@@ -7,7 +7,7 @@ run `agent-guardian <command> --help`.
 Coming soon: this Markdown page is a stable redirect target for the
 v1.0 IA. The fully-rendered reference lives in
 [`docs/reference/cli.mdx`](./cli.mdx) and is published via the Mintlify
-site at [https://docs.agentguardian.dev/reference/cli](https://docs.agentguardian.dev/reference/cli). This `.md` stub
+site at [https://docs.agentguardian.io/reference/cli](https://docs.agentguardian.io/reference/cli). This `.md` stub
 exists so the v1.0 docs URL (`docs/reference/cli.md`) keeps resolving
 for inbound links and so the CLI-coverage test can assert that every
 flag landing in `cli.py` is named here.

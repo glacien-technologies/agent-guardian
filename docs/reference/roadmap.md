@@ -2,7 +2,7 @@
 
 What is shipped, what is in flight, and what is planned for
 AgentGuardian, with semver windows. The detail-rich rendered version
-lives in [`docs/reference/roadmap.mdx`](https://docs.agentguardian.dev/reference/roadmap) on the Mintlify
+lives in [`docs/reference/roadmap.mdx`](https://docs.agentguardian.io/reference/roadmap) on the Mintlify
 site; this Markdown stub pins the legacy URL
 (`docs/reference/roadmap.md`) and is the single source of truth the
 GA-narrative guard reads.
