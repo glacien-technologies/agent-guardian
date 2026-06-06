@@ -14,13 +14,14 @@
   <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
 </div>
   <div class="exec-topbar__right">
-    {# Scan-lifecycle status — distinct from the SSE freshness dot (which only
-       tracks stream health). Three states: a spinner + "In progress" while the
-       swarm runs; a check + "Completed" only when a terminal scan exists; and a
-       neutral "Pending" otherwise (a scan that never started or was interrupted
-       before producing a terminal scan.json — it must NOT read as Completed).
-       The inline ``scan_done`` SSE handler in layout.html flips running →
-       Completed without a reload. Server-rendered so a reload lands correctly. #}
+    {# Scan-lifecycle status — the single topbar status indicator (the SSE
+       "LIVE/STALE" freshness dot was retired as a confusing second status).
+       Three states: a spinner + "In progress" while the swarm runs; a check +
+       "Completed" only when a terminal scan exists; and a neutral "Pending"
+       otherwise (a scan that never started or was interrupted before producing
+       a terminal scan.json — it must NOT read as Completed). The inline
+       ``scan_done`` SSE handler in layout.html flips running → Completed without
+       a reload. Server-rendered so a reload lands correctly. #}
     {%- if is_running -%}{%- set _scan_status = 'running' -%}
     {%- elif is_terminal -%}{%- set _scan_status = 'done' -%}
     {%- else -%}{%- set _scan_status = 'pending' -%}{%- endif -%}

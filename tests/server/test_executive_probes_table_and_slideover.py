@@ -796,3 +796,18 @@ def test_topbar_scan_status_pending_when_started_but_not_terminal(
     body = client.get(f"/scan/{scan_id}?theme=executive").text
     assert 'data-scan-status="pending"' in body
     assert 'data-scan-status="done"' not in body
+
+
+def test_dashboard_has_no_live_freshness_dot(client: TestClient, store: ScanStore) -> None:
+    """The 'LIVE/STALE' SSE freshness dot was retired (operator feedback 2026-06-06).
+
+    It read as a confusing second status next to the scan-lifecycle pill ("LIVE"
+    beside "Completed"). The scan-status pill is now the single indicator, so the
+    page must not load freshness-dot.js or mount the dot.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    assert "freshness-dot.js" not in body
+    assert "AGFreshnessDot" not in body
+    assert "exec-freshness-dot" not in body

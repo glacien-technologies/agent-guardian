@@ -53,15 +53,11 @@
      ``prefers-reduced-motion`` users fall back cleanly to the server's
      ``elapsed_label`` refresh (critic patch G20/P20). #}
   <script src="/static/elapsed-ticker.js?v={{ package_version }}" defer></script>
-  {# SSE Phase 1, Step 5 — peripheral-vision freshness dot + reconnect
-     banner. ONE shared four-state machine driven by EventSource
-     ``readyState`` and ``Date.now() - lastEventAt``; replaces the empty
-     ``onerror`` at ``layout.html:166`` (below), the CLOSED-only branch
-     at ``swarm.js:176-182``, and the identical empty pattern at
-     ``reflections.js:284``. Uses ``event: heartbeat`` (NOT the ``:``
-     keepalive comment — EventSource ``onmessage`` does not fire on
-     comments; critic patch G14/P5). #}
-  <script src="/static/freshness-dot.js?v={{ package_version }}" defer></script>
+  {# The SSE "LIVE/STALE/OFFLINE" freshness dot was retired — it tracked event-
+     stream health, which read as a confusing second status next to the scan
+     lifecycle pill ("LIVE" beside "Completed"). The topbar's scan-status pill
+     (In progress / Completed / Pending) is now the single status indicator.
+     The live-update EventSource wiring below is unaffected. #}
   {# SSE Phase 1, Step 6 — tab-bar badge bus. Owns the
      ``<span class="exec-tab__badge" data-badge>`` chip on every tab
      button. Public API ``window.AGTabBadgeBus.{bump,clear,get}``;
@@ -155,15 +151,13 @@
      ``elapsed-ticker.js`` removes the anchor in that branch. #}
   <script>
   (function () {
-    // The SSE bootstrap MUST run AFTER the deferred enhancer modules
-    // (``freshness-dot.js``, ``live-append.js``) have executed —
-    // otherwise ``window.AGFreshnessDot`` / ``window.AGLiveAppend`` are
-    // still undefined when we call ``.attach()`` and the wiring is
-    // silently skipped (the live dot stays OFFLINE and no event rows
-    // append until an F5; 2026-06-03 operator bug). Deferred scripts run
-    // before ``DOMContentLoaded`` and in order, so gating on that event
-    // guarantees both modules are present. ``boot()`` runs immediately
-    // when the document is already parsed (re-entrant / cached case).
+    // The SSE bootstrap MUST run AFTER the deferred ``live-append.js``
+    // module has executed — otherwise ``window.AGLiveAppend`` is still
+    // undefined when we call ``.attach()`` and the wiring is silently
+    // skipped (no event rows append until an F5; 2026-06-03 operator bug).
+    // Deferred scripts run before ``DOMContentLoaded`` and in order, so
+    // gating on that event guarantees the module is present. ``boot()`` runs
+    // immediately when the document is already parsed (re-entrant / cached).
     function boot() {
     var body = document.body;
     var scanId = body.getAttribute('data-scan-id');
@@ -233,20 +227,9 @@
       });
       return source;
     }
-    // SSE Phase 1, Step 5 — share this EventSource's readyState +
-    // ``heartbeat`` arrivals with the freshness dot, and hand it a
-    // ``reconnect`` factory so the Retry button reopens AND rewires the
-    // stream. No per-handler onerror: the shared ``window.AGFreshnessDot``
-    // reads ``es.readyState`` on every requestAnimationFrame tick and
-    // drives the four-state LIVE/STALE/RECONNECTING/DEAD machine.
-    var es = wire(new EventSource(url));
-    if (window.AGFreshnessDot &&
-        typeof window.AGFreshnessDot.attach === 'function') {
-      window.AGFreshnessDot.attach(es, {
-        url: url,
-        reconnect: function () { return wire(new EventSource(url)); },
-      });
-    }
+    // Open the snapshot stream. (The freshness-dot health indicator was
+    // retired; the EventSource itself still drives live KPI patches.)
+    wire(new EventSource(url));
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);
@@ -295,19 +278,10 @@
       });
       return source;
     }
-    var es = wire(new EventSource(url));
-    // Share this stream's readyState + heartbeats with the freshness dot
-    // too, so a healthy event stream keeps the dot LIVE even when the
-    // snapshot stream is momentarily quiet (and vice-versa via the
-    // aggregate-readyState machine). The ``reconnect`` factory lets the
-    // Retry button reopen this stream with its handlers intact.
-    if (window.AGFreshnessDot &&
-        typeof window.AGFreshnessDot.attach === 'function') {
-      window.AGFreshnessDot.attach(es, {
-        url: url,
-        reconnect: function () { return wire(new EventSource(url)); },
-      });
-    }
+    // Open the events stream (drives live-append row inserts). The
+    // freshness-dot health indicator was retired; the stream itself is
+    // unaffected.
+    wire(new EventSource(url));
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);
