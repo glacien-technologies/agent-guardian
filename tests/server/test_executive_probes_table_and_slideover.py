@@ -776,3 +776,23 @@ def test_topbar_scan_status_shows_in_progress_when_running(
     assert 'data-scan-status="running"' in body
     assert "In progress" in body
     assert "exec-scan-status__spinner" in body
+
+
+def test_topbar_scan_status_pending_when_started_but_not_terminal(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A scan that started but never produced a terminal scan.json shows Pending.
+
+    Regression: an interrupted scan (scan_dir exists, partial artifacts, no
+    scan.json, not registered as running) was wrongly labelled 'Completed'
+    because the pill only checked is_running. It must read neither 'In progress'
+    nor 'Completed'.
+    """
+    scan_id = "cli-interrupted"
+    sd = store.scan_dir(scan_id)
+    sd.mkdir(parents=True, exist_ok=True)
+    # Partial artifact, but NO terminal scan.json and NOT registered running.
+    (sd / "events.jsonl").write_text('{"kind":"recon_start"}\n', encoding="utf-8")
+    body = client.get(f"/scan/{scan_id}?theme=executive").text
+    assert 'data-scan-status="pending"' in body
+    assert 'data-scan-status="done"' not in body

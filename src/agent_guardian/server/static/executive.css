@@ -191,6 +191,19 @@ body.exec-body {
   background: color-mix(in srgb, var(--exec-sev-low, #22c55e) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--exec-sev-low, #22c55e) 35%, transparent);
 }
+/* Pending / interrupted — never started or died before a terminal scan.json.
+   Neutral grey (no spinner, no check) so it never reads as done. */
+.exec-scan-status--pending {
+  color: var(--exec-ink-muted);
+  background: var(--exec-bg-sunken);
+  border: 1px solid var(--exec-border-subtle);
+}
+.exec-scan-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--exec-ink-subtle);
+}
 .exec-scan-status__spinner {
   width: 11px;
   height: 11px;
