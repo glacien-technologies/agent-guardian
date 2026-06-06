@@ -263,6 +263,44 @@ def test_narration_prints_durable_sections_in_order_once_each(
     assert text.count("never produce findings by design") == 1
 
 
+def test_recon_bands_print_one_durable_line_each(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each recon activity (band) prints ONE durable scrollback line, in order,
+    instead of the live spinner overwriting each band in place. The previous
+    band flushes when the activity changes; the last flushes on recon_done."""
+    console = _record_console(width=140)
+    monkeypatch.setattr("agent_guardian.logging_setup._CONSOLE", console)
+
+    async def _run() -> None:
+        tui = ScanTUI(scan_id="scan-1", target_ref="testbench", tier="auto", console=console)
+        async with tui:
+            tui.handle_event(_make_event("phase_start", payload={"phase": "recon"}))
+            for activity, sent in [
+                ("purpose probe", 1),
+                ("capability probe", 2),
+                ("capability probe", 3),  # same band — must NOT print twice
+                ("memory claim", 5),
+                ("time-channel probe", 6),
+            ]:
+                tui.handle_event(
+                    _make_event(
+                        "recon_progress",
+                        agent="recon-agent",
+                        payload={"probes_sent": sent, "activity": activity},
+                    )
+                )
+            tui.handle_event(_make_event("recon_done", agent="recon-agent"))
+
+    asyncio.run(_run())
+    text = console.export_text()
+    # One durable line per distinct band, in arrival order.
+    for band in ("purpose probe", "capability probe", "memory claim", "time-channel probe"):
+        assert f"— {band} ·" in text, f"missing durable recon band line for {band!r}"
+    # The repeated "capability probe" band prints exactly once (dedup).
+    assert text.count("— capability probe ·") == 1
+
+
 def test_live_region_includes_final_aivss_after_scan_done(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

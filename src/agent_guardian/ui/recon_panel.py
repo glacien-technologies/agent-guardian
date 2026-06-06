@@ -133,10 +133,7 @@ def _collapsed_panel(summary: ReconSummary) -> Panel:
         (_STATUS_GLYPH[summary.status] + " ", _STATUS_STYLE[summary.status]),
         (f"({_format_duration(summary.duration_seconds)})", "brand.dim"),
         " · ",
-        (f"{summary.probes_applicable} probes apply", "status.done"),
-        (f" · {summary.probes_skipped} skipped", "brand.dim")
-        if summary.probes_skipped
-        else ("", ""),
+        (f"{summary.recon_probes} capability probes", "status.done"),
         (" · multi-agent" if summary.multi_agent else "", "brand.dim"),
     )
     return Panel(line, border_style="brand.dim", padding=(0, 1))
@@ -150,10 +147,7 @@ def _full_panel(summary: ReconSummary, *, elapsed: float | None) -> Panel:
     grid.add_row(Text("goal", style="brand.dim"), Text(goal_text))
     grid.add_row(Text("target", style="brand.dim"), Text(summary.target_ref or "—"))
     multi = "yes" if summary.multi_agent else "no"
-    what_we_found = (
-        f"{summary.probes_applicable} probes apply · "
-        f"{summary.probes_skipped} skipped · multi-agent: {multi}"
-    )
+    what_we_found = f"{summary.recon_probes} capability probes · multi-agent: {multi}"
     grid.add_row(Text("what we found", style="brand.dim"), Text(what_we_found))
     if summary.notes:
         grid.add_row(Text("notes", style="brand.dim"), Text(summary.notes))

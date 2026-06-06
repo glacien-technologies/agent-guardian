@@ -210,15 +210,12 @@ def test_probes_row_template_slots(client: TestClient, store: ScanStore) -> None
     for slot in (
         "asi",
         "agent",
-        "verdict-pill",
+        # RUNS — turn count, now in the agent cell next to the ASI badge.
         "turn",
-        "timestamp",
-        # Strongest-evidence strap line — populated live by
-        # ``live-append.js:setProbeRunEvidence`` when a per-turn reflection rolls
-        # the row verdict up (so the live row matches the server-rendered one
-        # instead of freezing on turn 1's verdict).
-        "run-result",
-        "run-evidence",
+        "verdict-pill",
+        # SUMMARY column (2026-06-06 rev2) — AI one-liner (or live reasoning
+        # gloss); the evidence column folded into it.
+        "summary",
     ):
         assert f'data-slot="{slot}"' in tpl, f"probe row template missing data-slot='{slot}'"
 

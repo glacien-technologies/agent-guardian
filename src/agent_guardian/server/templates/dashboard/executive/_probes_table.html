@@ -44,15 +44,29 @@
 <table class="exec-probes-table" role="table" aria-label="Probe attempts by agent">
   <thead>
     <tr>
-      <th scope="col" class="exec-probes-table__col--agent">AGENT &middot; ASI</th>
+      <th scope="col" class="exec-probes-table__col--agent">
+        {# Inner flex wrapper mirrors the body cell: "AGENT · ASI" left, "RUNS"
+           pushed right so the header label sits directly above the
+           right-aligned run counts. Wrapper (not the th itself) so the th stays
+           a table-cell and the fixed column width is preserved. #}
+        <span class="exec-probes-table__agent-head">
+          <span>AGENT &middot; ASI</span>
+          <span class="exec-probes-table__runs-head">RUNS</span>
+        </span>
+      </th>
       <th scope="col" class="exec-probes-table__col--verdict">VERDICT</th>
-      <th scope="col" class="exec-probes-table__col--turn">TURNS</th>
-      <th scope="col" class="exec-probes-table__col--time">LAST ACTIVITY</th>
+      <th scope="col" class="exec-probes-table__col--summary">SUMMARY</th>
     </tr>
   </thead>
   <tbody>
     {% for g in probe_groups %}
       {% set _verdict = g.verdict or 'unknown' %}
+      {% set _rr = g.run_result %}
+      {# SUMMARY — the AI-written one-liner (synthesised from all of this agent's
+         turns + its rolled-up verdict) when available; falls back to the
+         strongest-turn judge-reasoning gloss while a live scan is still running
+         (the AI summary is generated at scan finalization). #}
+      {% set _summary = g.ai_summary or (_rr.summary if _rr and _rr.has_run_result else '') %}
       <tr class="exec-probes-table__row"
           data-action="probe-row-click"
           data-probe-group="{{ g.group_key }}"
@@ -67,6 +81,8 @@
         <td class="exec-probes-table__cell--agent">
           <code class="exec-probes-table__asi">{{ g.asi_category or '—' }}</code>
           <span class="exec-probes-table__agent">{{ g.agent or '—' }}</span>
+          {# RUNS — turn count moved next to the ASI badge (was a far-right column). #}
+          <span class="exec-probes-table__runs">{{ g.turn_count }} run{{ '' if g.turn_count == 1 else 's' }}</span>
         </td>
         <td class="exec-probes-table__cell--verdict">
           {# Worst-case rollup pill — same single source of truth as the Findings
@@ -84,27 +100,15 @@
             {%- else -%}PENDING
             {%- endif -%}
           </span>
-          {# Judge v2 (M5 / Stage D) — strongest-evidence run-result strap line.
-             Additive + defensive: rendered only when the aggregator found a
-             graded turn (``has_run_result``). Surfaces the operator-facing
-             "strongest evidence: turn N" and an evaluator-attack marker when the
-             attacker tried to manipulate the judge on some turn. #}
-          {% set _rr = g.run_result %}
-          {% if _rr and _rr.has_run_result %}
-            <span class="exec-run-result">
-              {% if _rr.best_evidence_turn is not none %}
-                <span class="exec-run-result__evidence">strongest evidence: turn {{ _rr.best_evidence_turn }}</span>
-              {% endif %}
-              {% if _rr.evaluator_attack %}
-                <span class="exec-evaluator-attack" title="An attacker prompt tried to manipulate the judge on this run — not a target exploit.">⚠ evaluator-attack</span>
-              {% endif %}
-            </span>
+        </td>
+        <td class="exec-probes-table__cell--summary">
+          <span class="exec-probes-table__summary">{{ _summary or '—' }}</span>
+          {% if _rr and _rr.has_run_result and _rr.evaluator_attack %}
+            <span class="exec-evaluator-attack" title="An attacker prompt tried to manipulate the judge on this run — not a target exploit.">⚠ evaluator-attack</span>
           {% endif %}
         </td>
-        <td class="exec-probes-table__cell--turn"><span class="exec-probes-table__turn">{{ g.turn_count }} turn{{ '' if g.turn_count == 1 else 's' }}</span></td>
-        <td class="exec-probes-table__cell--time"><time class="exec-probes-table__time">{{ g.timestamp_label }}</time></td>
       </tr>
     {% endfor %}
-    {% if probe_groups | length == 0 %}<tr id="exec-probes-empty-row" class="exec-probes-table__empty-row"><td colspan="4" class="exec-empty">No probe attempts recorded yet — they appear here as the swarm runs.</td></tr>{% endif %}
+    {% if probe_groups | length == 0 %}<tr id="exec-probes-empty-row" class="exec-probes-table__empty-row"><td colspan="3" class="exec-empty">No probe attempts recorded yet — they appear here as the swarm runs.</td></tr>{% endif %}
   </tbody>
 </table>

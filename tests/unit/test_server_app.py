@@ -259,6 +259,99 @@ def test_export_download_404_when_report_missing(client: TestClient, store: Scan
     assert resp.status_code == 404
 
 
+def test_export_index_lists_raw_logs_and_probe_records(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    sd = store.scan_dir(scan.id)
+    (sd / "run.log").write_text("hello log", encoding="utf-8")
+    (sd / "events.jsonl").write_text('{"kind":"x"}\n', encoding="utf-8")
+    (sd / "probe").mkdir()
+    (sd / "probe" / "goal-hijack-agent.json").write_text('{"agent":"goal-hijack-agent"}', "utf-8")
+    resp = client.get(f"/scan/{scan.id}/export")
+    assert resp.status_code == 200
+    assert "run.log" in resp.text
+    assert "events.jsonl" in resp.text
+    assert "goal-hijack-agent.json" in resp.text
+
+
+def test_raw_download_serves_whitelisted_file(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    (store.scan_dir(scan.id) / "run.log").write_text("the full trace", encoding="utf-8")
+    resp = client.get(f"/scan/{scan.id}/raw/run.log")
+    assert resp.status_code == 200
+    assert resp.text == "the full trace"
+
+
+def test_raw_download_rejects_non_whitelisted(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    (store.scan_dir(scan.id) / "secrets.txt").write_text("nope", encoding="utf-8")
+    resp = client.get(f"/scan/{scan.id}/raw/secrets.txt")
+    assert resp.status_code == 400
+
+
+def test_probe_file_download_and_traversal_guard(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    sd = store.scan_dir(scan.id)
+    (sd / "probe").mkdir()
+    (sd / "probe" / "tool-abuse-agent.json").write_text('{"agent":"tool-abuse-agent"}', "utf-8")
+    ok = client.get(f"/scan/{scan.id}/probe-file/tool-abuse-agent.json")
+    assert ok.status_code == 200
+    assert json.loads(ok.text)["agent"] == "tool-abuse-agent"
+    # Path traversal is reduced to a basename → never escapes probe/.
+    bad = client.get(f"/scan/{scan.id}/probe-file/..%2F..%2Fscan.json")
+    assert bad.status_code in (400, 404)
+
+
+def test_export_bundle_zip_contains_reports_probes_and_raw(
+    client: TestClient, store: ScanStore
+) -> None:
+    """``/export/bundle.zip`` streams ONE zip with reports + probes + raw logs."""
+    import io
+    import zipfile
+
+    scan = _make_scan()
+    _persist(store, scan)
+    sd = store.scan_dir(scan.id)
+    (sd / "run.log").write_text("the full trace", encoding="utf-8")
+    (sd / "events.jsonl").write_text('{"kind":"x"}\n', encoding="utf-8")
+    (sd / "probe").mkdir()
+    (sd / "probe" / "tool-abuse-agent.json").write_text('{"agent":"tool-abuse-agent"}', "utf-8")
+
+    resp = client.get(f"/scan/{scan.id}/export/bundle.zip")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert scan.id in resp.headers.get("content-disposition", "")
+
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = set(zf.namelist())
+    # The canonical JSON report (always present via scan.json fallback).
+    assert any(n.endswith(".json") and "report" in n for n in names) or "reports/json.json" in names
+    # Raw artifacts land under raw/, probe records under probe/.
+    assert "raw/run.log" in names
+    assert "raw/events.jsonl" in names
+    assert "probe/tool-abuse-agent.json" in names
+    # Contents survive the round-trip.
+    assert zf.read("raw/run.log").decode() == "the full trace"
+
+
+def test_export_bundle_zip_404_for_unknown_scan(client: TestClient, store: ScanStore) -> None:
+    resp = client.get("/scan/does-not-exist/export/bundle.zip")
+    assert resp.status_code == 404
+
+
+def test_export_index_links_bundle_zip(client: TestClient, store: ScanStore) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}/export")
+    assert resp.status_code == 200
+    assert f"/scan/{scan.id}/export/bundle.zip" in resp.text
+
+
 def test_home_lists_completed_scans(client: TestClient, store: ScanStore) -> None:
     scan = _make_scan()
     _persist(store, scan)

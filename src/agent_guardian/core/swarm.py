@@ -899,7 +899,15 @@ class SwarmCommander:
                 "phase_label": "Reconnaissance",
                 "duration_seconds": recon_duration,
                 "summary": {
-                    "probes_applicable": 0,  # filled by phase_decompose
+                    # How many capability probes recon actually fired (the audit
+                    # transcript length — the number the operator sees as recon
+                    # "iterations"). This is the recon-phase count; the count of
+                    # applicable ATTACK probes is the next phase's concern (see
+                    # ``_phase_parallel``'s ``phase_start`` payload), so the
+                    # legacy ``probes_applicable`` placeholder (always 0 here) is
+                    # no longer surfaced in the recon panel.
+                    "recon_probes": int(getattr(fingerprint, "recon_probe_count", 0) or 0),
+                    "probes_applicable": 0,  # phase-2 concern; not shown in recon panel
                     "probes_skipped": 0,
                     "multi_agent": bool(fingerprint.is_multi_agent),
                     "notes": (fingerprint.notes or "")[:200],

@@ -4480,6 +4480,25 @@ async def _run_scan_inner(
         write_probe_exports(scan_dir)
     except Exception as exc:  # pragma: no cover — defensive, never fail a scan
         typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
+    # AI-write the per-agent Probes-table SUMMARY (one LLM call per agent, run
+    # concurrently) from each agent's full turns + verdict, persisted to
+    # ``probe/summaries.json``. The run-scope evaluator clients are already
+    # closed above, so build a fresh one from the same model spec. Best-effort:
+    # never fail (or noticeably slow) a scan on summary generation.
+    try:
+        from agent_guardian.server.probe_summary import awrite_probe_summaries
+
+        _summary_model = _normalise_model_name(eff_evaluator)
+        _summary_llm = build_llm(eff_evaluator, role="evaluator")
+        try:
+            # We are inside ``async def _run_scan_inner`` — await directly
+            # (asyncio.run() would raise "cannot be called from a running loop").
+            await awrite_probe_summaries(scan_dir, _summary_llm, model=_summary_model)
+        finally:
+            with contextlib.suppress(Exception):
+                await _summary_llm.aclose()
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
@@ -4521,11 +4540,18 @@ async def _run_scan_inner(
         f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
         f"report={output_path}"
     )
-    # QA-072 — point the operator at the full raw trace. The terminal stays
-    # quiet during the scan (board + compact attack feed); the per-call model
-    # log lives here. To stderr so it never pollutes a ``--debug-format json``
-    # stdout pipeline.
-    typer.echo(f"full log: {partial_scan_dir / 'run.log'}", err=True)
+    # QA-072 — point the operator at the full raw trace + the structured
+    # artifacts for reference / post-processing. The terminal stays quiet during
+    # the scan (board + compact attack feed); these all live on disk. To stderr
+    # so they never pollute a ``--debug-format json`` stdout pipeline.
+    typer.echo(f"full log:   {partial_scan_dir / 'run.log'}", err=True)
+    typer.echo(f"events:     {partial_scan_dir / 'events.jsonl'}  (SSE event stream)", err=True)
+    typer.echo(f"memory:     {partial_scan_dir / 'memory.jsonl'}  (every turn / finding)", err=True)
+    typer.echo(
+        f"probes:     {partial_scan_dir / 'probe'}/  "
+        "(one <agent>.json per agent — all turns + events + summary, plus index.json)",
+        err=True,
+    )
 
     # QA-049 — prominent dashboard URL banner at scan-end. The plain
     # `▸ Scan … track live at <url>` line that print_scan_urls emits

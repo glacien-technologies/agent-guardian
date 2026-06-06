@@ -69,11 +69,12 @@ def _write_scan(tmp_path: Path) -> Path:
     return scan_dir
 
 
-def test_build_groups_turns_by_probe_and_rolls_up_worst_verdict(tmp_path: Path) -> None:
+def test_build_groups_turns_by_agent_and_rolls_up_worst_verdict(tmp_path: Path) -> None:
     scan_dir = _write_scan(tmp_path)
     exports = build_probe_exports(scan_dir)
-    assert "ASI03-PII-001" in exports
-    exp = exports["ASI03-PII-001"]
+    # One entry per AGENT (not per probe id) — all of the agent's turns in one.
+    assert "identity-leak-agent" in exports
+    exp = exports["identity-leak-agent"]
     assert exp["agent"] == "identity-leak-agent"
     assert exp["asi_category"] == "ASI03"
     assert exp["turn_count"] == 3
@@ -81,37 +82,40 @@ def test_build_groups_turns_by_probe_and_rolls_up_worst_verdict(tmp_path: Path) 
     assert exp["verdict"] == "info_leak"
     assert exp["best_evidence_turn"] == 2
     assert len(exp["turns"]) == 3
+    # Turns are ordered by turn number, each carrying its own number + probe id.
+    assert [t["turn"] for t in exp["turns"]] == [1, 2, 3]
+    assert "ASI03-PII-001" in exp["probe_ids"]
 
 
 def test_export_is_authoritative_untruncated(tmp_path: Path) -> None:
     scan_dir = _write_scan(tmp_path)
     exports = build_probe_exports(scan_dir)
-    exp = exports["ASI03-PII-001"]
+    exp = exports["identity-leak-agent"]
     # The full long response must appear verbatim — nothing elided.
     leaked = next(t for t in exp["turns"] if t["turn"] == 2)
     assert leaked["target_response"] == _LONG_RESPONSE
     assert "…" not in json.dumps(leaked)
 
 
-def test_write_persists_files_under_probe_dir(tmp_path: Path) -> None:
+def test_write_persists_one_file_per_agent(tmp_path: Path) -> None:
     scan_dir = _write_scan(tmp_path)
     probe_dir = write_probe_exports(scan_dir)
     assert probe_dir == scan_dir / "probe"
-    f = probe_dir / "ASI03-PII-001.json"
+    f = probe_dir / "identity-leak-agent.json"
     assert f.is_file()
     data = json.loads(f.read_text(encoding="utf-8"))
     assert data["verdict"] == "info_leak"
     assert data["turn_count"] == 3
     # Full response survived the round-trip to disk untruncated.
     assert _LONG_RESPONSE in f.read_text(encoding="utf-8")
-    # Index lists the probe.
+    # Index lists the agent.
     index = json.loads((probe_dir / "index.json").read_text(encoding="utf-8"))
-    ids = {row["probe_id"] for row in index["probes"]}
-    assert "ASI03-PII-001" in ids
+    agents = {row["agent"] for row in index["probes"]}
+    assert "identity-leak-agent" in agents
 
 
 def test_filename_is_filesystem_safe(tmp_path: Path) -> None:
-    # A fuzz mutant id carries no path separators, but guard slashes anyway.
+    # Agent names are already safe; guard slashes anyway.
     scan_dir = tmp_path / "cli-fs"
     scan_dir.mkdir()
     tr = _turn(
@@ -119,7 +123,7 @@ def test_filename_is_filesystem_safe(tmp_path: Path) -> None:
     )
     (scan_dir / "memory.jsonl").write_text(_reflection_line(tr) + "\n", encoding="utf-8")
     probe_dir = write_probe_exports(scan_dir)
-    assert (probe_dir / "ASI02-FUZZ-TYPE-01-mutant-fuzz.json").is_file()
+    assert (probe_dir / "fuzzing-agent.json").is_file()
 
 
 def test_missing_scan_dir_is_safe(tmp_path: Path) -> None:

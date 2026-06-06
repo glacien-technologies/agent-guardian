@@ -150,6 +150,14 @@ class ScanTUI:
         # and the Live region holds only a thin current-status line. This set
         # tracks which durable sections have already been emitted (print-once).
         self._printed_sections: set[str] = set()
+        # Recon bands already printed durably to scrollback (one line per
+        # activity) so the recon progression reads top-to-bottom instead of the
+        # live spinner overwriting each band in place.
+        self._recon_bands_printed: set[str] = set()
+        # Cumulative probe count when the CURRENT recon band started, so each
+        # band's durable line can report ITS OWN probe count (delta) rather than
+        # the running cumulative total.
+        self._recon_band_start_count: int = 0
 
     # ------------------------------------------------------------------
     # Attachment + lifecycle
@@ -240,6 +248,25 @@ class ScanTUI:
             self._printed_sections.add("phase2_table")
             self._console.print(build_red_team_panel(self._state))
 
+    def _emit_recon_band(self, activity: str, count: int) -> None:
+        """Print ONE durable scrollback line for a completed recon band, showing
+        the number of probes THAT band fired (not the running cumulative), so the
+        per-band counts sum to the recon total. Print-once per activity; no-op
+        under the legacy board or before the Live region is up."""
+        if self._legacy_board or self._live is None:
+            return
+        if not activity or activity in self._recon_bands_printed:
+            return
+        self._recon_bands_printed.add(activity)
+        n = max(count, 0)
+        el = _fmt_mmss(self._state.elapsed_seconds)
+        self._console.print(
+            Text(
+                f" Phase 1 · Reconnaissance — {activity} · {n} probe{'' if n == 1 else 's'} ({el})",
+                style="status.running",
+            )
+        )
+
     async def __aenter__(self) -> ScanTUI:
         self._start = time.monotonic()
         self._state.elapsed_seconds = 0.0
@@ -293,6 +320,7 @@ class ScanTUI:
             self._state.recon_summary = ReconSummary(
                 goal=str(summary.get("inferred_goal", "")),
                 target_ref=self._state.target_ref,
+                recon_probes=int(summary.get("recon_probes", 0) or 0),
                 probes_applicable=int(summary.get("probes_applicable", 0) or 0),
                 probes_skipped=int(summary.get("probes_skipped", 0) or 0),
                 multi_agent=bool(summary.get("multi_agent", False)),
@@ -340,14 +368,27 @@ class ScanTUI:
             # (probe counter + current activity) during the otherwise-silent
             # audit so the operator sees recon is working, not frozen.
             payload = event.payload if isinstance(event.payload, dict) else {}
+            activity = payload.get("activity")
+            if isinstance(activity, str) and activity and activity != self._state.recon_activity:
+                # Band changed → print the PREVIOUS band as a durable scrollback
+                # line showing ITS OWN probe count (cumulative-at-end minus
+                # cumulative-at-start), so bands read one-after-another and their
+                # counts sum to the total. The live spinner then switches bands.
+                if self._state.recon_activity:
+                    band_count = self._state.recon_probes_sent - self._recon_band_start_count
+                    self._emit_recon_band(self._state.recon_activity, band_count)
+                self._state.recon_activity = activity
+                self._recon_band_start_count = self._state.recon_probes_sent
             sent = payload.get("probes_sent")
             if isinstance(sent, int):
                 self._state.recon_probes_sent = sent
-            activity = payload.get("activity")
-            if isinstance(activity, str) and activity:
-                self._state.recon_activity = activity
         elif kind == "recon_done":
             self._state.agent_status[_RECON_AGENT] = "done"
+            # Flush the last (current) band durably — it never saw a "next band"
+            # to trigger its print.
+            if self._state.recon_activity:
+                band_count = self._state.recon_probes_sent - self._recon_band_start_count
+                self._emit_recon_band(self._state.recon_activity, band_count)
         elif kind == "agent_start" and agent:
             self._state.agent_status[agent] = "running"
             new_status = "running"

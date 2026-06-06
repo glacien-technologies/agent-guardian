@@ -368,23 +368,25 @@ def test_executive_default_tab_is_overview(client: TestClient, store: ScanStore)
 def test_executive_findings_tab_contains_locked_heading(
     client: TestClient, store: ScanStore
 ) -> None:
-    """The verbatim ``All findings so far.`` string is in the Findings tabpanel."""
+    """The Findings tabpanel carries the ``Findings`` section heading.
+
+    2026-06-06: the verbose "All findings so far. / N findings · sorted by … /
+    click any row …" heading + lede were replaced by a clean ``Findings``
+    heading (the lede was removed).
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert resp.status_code == 200
-    # Locked literal — same string the other 4 themes carry.
-    assert "All findings so far." in body
+    assert "All findings so far." not in body
     # Specifically inside the Findings tabpanel block.
     idx = body.find('id="tabpanel-findings"')
     assert idx >= 0
-    # The heading appears after the tabpanel opening tag, before the
-    # next tabpanel (Probes) opens.
     next_panel_idx = body.find('id="tabpanel-probes"', idx)
     assert next_panel_idx >= 0
     findings_pane = body[idx:next_panel_idx]
-    assert "All findings so far." in findings_pane
+    assert '<h2 class="exec-section-title">Findings</h2>' in findings_pane
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +628,7 @@ def test_stale_theme_query_param_renders_executive(
     resp = client.get(f"/scan/{scan.id}?theme={stale_theme}")
     assert resp.status_code == 200, resp.text[:500]
     assert 'data-theme="executive"' in resp.text
-    assert "All findings so far." in resp.text
+    assert '<h2 class="exec-section-title">Findings</h2>' in resp.text
 
 
 # ---------------------------------------------------------------------------
