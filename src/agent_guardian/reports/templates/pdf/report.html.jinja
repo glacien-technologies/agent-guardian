@@ -258,6 +258,14 @@
         text-transform: uppercase;
         color: var(--ink-subtle);
       }
+      .cover-explain {
+        margin: 0.34in 0 0;
+        max-width: 5.4in;
+        font-size: 10.5pt;
+        line-height: 1.6;
+        color: var(--ink-muted);
+      }
+      .cover-explain strong { color: var(--ink); font-weight: 700; }
       .cover-meta {
         position: absolute;
         bottom: 0;
@@ -321,7 +329,27 @@
         color: var(--ink-muted);
         font-family: "JetBrains Mono", monospace;
         letter-spacing: 0.04em;
+        white-space: nowrap;
       }
+      /* stacked, legible severity breakdown (replaces the cramped one-liner) */
+      .sev-stack { margin-top: 0.45em; }
+      .sev-stack .srow {
+        display: block;
+        font-size: 8pt;
+        line-height: 1.65;
+        color: var(--ink-muted);
+        white-space: nowrap;
+      }
+      .sev-stack .srow b { color: var(--ink); font-weight: 700; }
+      .sev-stack .d {
+        display: inline-block;
+        width: 7px; height: 7px; border-radius: 2px;
+        margin-right: 5px; vertical-align: middle;
+      }
+      .sev-stack .d-crit { background: var(--crit); }
+      .sev-stack .d-high { background: var(--high); }
+      .sev-stack .d-med  { background: var(--med); }
+      .sev-stack .d-low  { background: var(--low); }
       /* stacked severity micro-bar inside FINDINGS kpi */
       .sevbar { margin-top: 0.6em; height: 6px; border-radius: 3px; overflow: hidden; background: var(--sunken); width: 100%; }
       .sevbar span { display: inline-block; height: 6px; vertical-align: top; }
@@ -420,10 +448,6 @@
       .asi-table td.cnt { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-muted); }
       .asi-table tr.has-find td.cnt { color: var(--ink); font-weight: 700; }
       /* severity-tinted left edge per row */
-      .asi-table tr.t-crit td:first-child { box-shadow: inset 3px 0 0 var(--crit); background: var(--crit-bg); }
-      .asi-table tr.t-high td:first-child { box-shadow: inset 3px 0 0 var(--high); background: var(--high-bg); }
-      .asi-table tr.t-med  td:first-child { box-shadow: inset 3px 0 0 var(--med);  background: var(--med-bg); }
-      .asi-table tr.t-low  td:first-child { box-shadow: inset 3px 0 0 var(--low);  background: var(--low-bg); }
       /* per-row score bar */
       .scorebar-wrap { display: block; width: 1.5in; }
       .scorebar {
@@ -443,7 +467,7 @@
         background: var(--card);
         border: 1px solid var(--border);
         border-radius: 12px;
-        margin: 0 0 13px;
+        margin: 0 0 18px;
         overflow: hidden;
       }
       /* severity color spine via left border */
@@ -503,15 +527,13 @@
         background: var(--sunken);
         border: 1px solid var(--border);
         border-radius: 8px;
-        padding: 9px 11px;
+        padding: 10px 12px;
         font-family: "JetBrains Mono", "Menlo", monospace;
-        font-size: 7.6pt;
-        line-height: 1.5;
+        font-size: 8pt;
+        line-height: 1.55;
         color: var(--ink);
         white-space: pre-wrap;
         word-break: break-word;
-        max-height: 2.6in;
-        overflow: hidden;
       }
       .ev-block.prompt { border-left: 3px solid var(--brand); }
       .ev-block.response { border-left: 3px solid var(--ink-subtle); }
@@ -612,27 +634,37 @@
           <div class="cover-score-label">AIVSS · AI Vulnerability Scoring System</div>
         </div>
 
+        {# Plain-language explanation of what the score + band mean. #}
+        {% set bk = (scan.band.value | lower) %}
+        <p class="cover-explain">
+          AIVSS rates this agent's resilience from <strong>0</strong> (fully exploitable) to
+          <strong>100</strong> (fully defended) — higher is safer.
+          {% if scored %}
+            A score of <strong>{{ scan.aivss }}</strong> puts it in the <strong>{{ scan.band.value }}</strong> band:
+            {% if bk == 'excellent' %}strong resilience — it defended nearly every adversarial attempt.
+            {% elif bk == 'good' %}solid resilience, with a few gaps worth closing.
+            {% elif bk == 'warning' %}notable weaknesses that need attention before broad use.
+            {% elif bk == 'poor' %}serious, exploitable weaknesses — fix these before exposing this agent to untrusted input.
+            {% elif bk == 'critical' %}severe, readily exploitable weaknesses — do not expose this agent to untrusted input until fixed.
+            {% else %}see the findings below for per-category detail.{% endif %}
+          {% else %}
+            This run used a non-authoritative evaluator, so no trustworthy composite score was produced — see the findings below.
+          {% endif %}
+        </p>
+
         <div class="cover-meta">
           <table>
             <tr>
-              <td>
-                <span class="k">Scan ID</span>
-                <span class="v mono">{{ scan.id }}</span>
-              </td>
               <td>
                 <span class="k">Target</span>
                 <span class="v mono">{{ scan.target_ref }}</span>
               </td>
               <td>
-                <span class="k">Mode</span>
-                <span class="v">{{ scan.target_mode }}</span>
-              </td>
-            </tr>
-            <tr>
-              <td>
                 <span class="k">Tier</span>
                 <span class="v">{{ scan.tier.value }}</span>
               </td>
+            </tr>
+            <tr>
               <td>
                 <span class="k">Generated</span>
                 <span class="v">{{ scan.created_at.strftime('%Y-%m-%d %H:%M UTC') if scan.created_at.strftime is defined else scan.created_at }}</span>
@@ -655,26 +687,6 @@
         <p class="lede">Adversarial swarm assessment of the target's resilience against the OWASP Agentic Security Initiative (ASI) Top&nbsp;10 threat classes, scored on the AI Vulnerability Scoring System.</p>
       </div>
 
-      <div class="posture">
-        <p>
-          Scan <span class="mono">{{ scan.id }}</span> exercised the target across the bundled
-          AgentGuardian adversarial corpus and recorded
-          <strong>{{ total }}</strong> confirmed finding{{ '' if total == 1 else 's' }}
-          {% if total %}({{ ns.crit }} critical, {{ ns.high }} high, {{ ns.med }} medium, {{ ns.low }} low){% endif %}.
-          {% if scored %}
-            The composite AIVSS posture is
-            <span class="verdict">{{ scan.aivss }} / 100 — {{ scan.band.value }}</span>.
-            {% if ns.crit %}Critical exposures demand remediation before this agent is exposed to untrusted input.
-            {% elif ns.high %}High-severity exposures should be remediated prior to production use.
-            {% elif total %}The remaining findings are lower severity but should be triaged.
-            {% else %}The target defended every adversarial attempt within the configured budget.{% endif %}
-          {% else %}
-            <span class="verdict">AIVSS NOT EVALUATED</span> — this run used a non-authoritative
-            (e.g. stub) evaluator and produces no trustworthy composite score.
-          {% endif %}
-        </p>
-      </div>
-
       {# KPI card row — 6 tiles #}
       <table class="kpi-table">
         <tr>
@@ -693,9 +705,13 @@
             </div>
           </td>
           <td>
-            <div class="kpi-label">Critical / High</div>
-            <div class="kpi-value">{{ ns.crit }}<span class="unit"> / {{ ns.high }}</span></div>
-            <div class="kpi-sub">{{ ns.med }} med · {{ ns.low }} low</div>
+            <div class="kpi-label">By severity</div>
+            <div class="sev-stack">
+              <span class="srow"><i class="d d-crit"></i><b>{{ ns.crit }}</b> Critical</span>
+              <span class="srow"><i class="d d-high"></i><b>{{ ns.high }}</b> High</span>
+              <span class="srow"><i class="d d-med"></i><b>{{ ns.med }}</b> Medium</span>
+              <span class="srow"><i class="d d-low"></i><b>{{ ns.low }}</b> Low</span>
+            </div>
           </td>
           <td>
             <div class="kpi-label">Coverage</div>
@@ -749,7 +765,6 @@
         <td>
           <div class="plan-cap">Budget</div>
           <table class="deftable">
-            <tr><td class="k">Run mode</td><td class="v">{{ scan.mode | default('—', true) }}</td></tr>
             <tr><td class="k">Wall-clock cap</td><td class="v">uncapped</td></tr>
             <tr><td class="k">USD cap</td><td class="v">uncapped</td></tr>
             <tr><td class="k">Actual cost</td><td class="v">${{ "%.4f"|format(cost) }}</td></tr>
@@ -779,19 +794,8 @@
         </thead>
         <tbody>
           {% for row in asi_rows %}
-          {# severity tint: derive worst finding severity in this row #}
-          {% set rns = namespace(tier='') %}
-          {% if row.findings %}
-            {% for fd in row.findings %}
-              {% set fsv = (fd.severity_label if fd.severity_label is defined and fd.severity_label else fd.severity.value)|lower %}
-              {% if fsv == 'critical' and rns.tier != 'crit' %}{% set rns.tier = 'crit' %}
-              {% elif fsv == 'high' and rns.tier not in ['crit','high'] %}{% set rns.tier = 'high' %}
-              {% elif fsv == 'medium' and rns.tier not in ['crit','high','med'] %}{% set rns.tier = 'med' %}
-              {% elif fsv == 'low' and rns.tier == '' %}{% set rns.tier = 'low' %}{% endif %}
-            {% endfor %}
-          {% endif %}
           {% set sc = row.score | default(0, true) %}
-          <tr class="{{ 'has-find ' if row.count else '' }}{{ 't-' ~ rns.tier if rns.tier else '' }}">
+          <tr class="{{ 'has-find' if row.count else '' }}">
             <td class="id">{{ row.id }}</td>
             <td class="desc">{{ row.description }}</td>
             <td class="num">
@@ -805,7 +809,7 @@
           {% endfor %}
         </tbody>
       </table>
-      <p class="subtle" style="font-size:7.6pt; margin-top:0.4em;">Resilience score is the per-category AIVSS sub-score (0–100, higher = stronger / less exposed; a bar turning amber or red flags weaker resilience). Row tint reflects the most severe finding in that class.</p>
+      <p class="subtle" style="font-size:7.6pt; margin-top:0.4em;">Resilience score is the per-category AIVSS sub-score (0–100, higher = stronger / less exposed). The score bar turns amber below 70 and red below 40 to flag weaker resilience.</p>
     </section>
 
     <!-- ======================== 4. FINDINGS ======================== -->
@@ -837,8 +841,12 @@
           <div class="find {{ sevc }}">
             <div class="find-head">
               <div class="find-eyebrow">{{ f.asi.value }} · {{ f.csa_category.value if f.csa_category else 'uncategorized' }}</div>
-              <h3 class="find-title">{{ f.title if f.title is defined and f.title else (f.summary if f.summary else 'Adversarial outcome confirmed') }}</h3>
-              {% if f.summary and (f.title is not defined or not f.title or f.title != f.summary) %}
+              {% set f_title = (f.title if f.title is defined and f.title else None) %}
+              <h3 class="find-title">{{ f_title or f.summary or 'Adversarial outcome confirmed' }}</h3>
+              {# Only show the summary as a sub-line when it is genuinely distinct
+                 from the title (the Finding model usually carries only `summary`,
+                 so rendering both would duplicate the same sentence). #}
+              {% if f_title and f.summary and f.summary != f_title %}
               <p class="find-summary">{{ f.summary }}</p>
               {% endif %}
             </div>
@@ -848,20 +856,18 @@
               <span class="chip chip-asi">{{ f.asi.value }}</span>
               {% if f.csa_category %}<span class="chip"><span class="lab">CSA</span> {{ f.csa_category.value }}</span>{% endif %}
               {% for technique in (f.mitre_atlas or []) %}<span class="chip"><span class="lab">ATLAS</span> {{ technique }}</span>{% endfor %}
-              {% if f.verdict_v2 is defined and f.verdict_v2 %}<span class="chip chip-verdict">{{ f.verdict_v2 }}</span>{% endif %}
-              {% if f.confidence is defined and f.confidence is not none %}<span class="chip"><span class="lab">CONF</span> {{ "%.2f"|format(f.confidence) }}</span>{% endif %}
             </div>
 
             <div class="evidence">
-              <div class="ev-label">Trigger prompt</div>
+              <div class="ev-label">Attacker prompt</div>
               {% if f.trigger_prompt %}
-                <div class="ev-block prompt">{{ f.trigger_prompt }}</div>
+                <div class="ev-block prompt">{{ f.trigger_prompt | truncate(700, True, ' …') }}</div>
               {% else %}
                 <div class="ev-block prompt ev-empty">No prompt captured (PII-redacted scan).</div>
               {% endif %}
               <div class="ev-label">Target response</div>
               {% if f.trigger_response %}
-                <div class="ev-block response">{{ f.trigger_response }}</div>
+                <div class="ev-block response">{{ f.trigger_response | truncate(700, True, ' …') }}</div>
               {% else %}
                 <div class="ev-block response ev-empty">No response captured (PII-redacted scan).</div>
               {% endif %}
