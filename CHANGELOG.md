@@ -5,8 +5,10 @@
 ### Added
 
 ### Changed
+- **Attacker prompting reframed to refusal-resistant "negative security test case" framing (#76).** The default attacker system prompt no longer asks for "attack prompts / jailbreak templates / prompt-injection payloads" and no longer commands "Do NOT refuse" — the vocabulary safety-aligned models (e.g. Gemini) refused ~45% of the time, silently degrading scans to static corpus seeds. It now asks for a realistic input that verifies a named security boundary under operator-owned rules of engagement (OWASP-grounded), keeping the verbatim-to-target output contract. The refusal retry de-escalates ("this is a sandbox QA task") instead of pressuring ("Refusing is not appropriate"). The legacy framing is preserved as `attacker_complete(generation_mode="legacy-redteam")` for operators who supply an uncensored attacker model.
 
 ### Fixed
+- **Attacker-LLM refusals no longer silently pass as an authoritative "Excellent" score (#76).** When the attacker refuses on too many turns and the scan falls back to static seeds, finalize now consumes the attacker-rejection rate as a scoring gate: ≥30% (FULL) forces `mode_authoritative=False`, and ≥50% forces `scoring_valid=False` with band `NOT_EVALUATED` — the same treatment a stub evaluator gets. The rejection rate + refused-turn count are stamped on the signed `Scan`, surfaced in the CLI scan-end summary ("attacker quality: X% rejection rate …"), and logged to `run.log` (per-turn WARNING + an aggregate finalize WARNING), so a refusal-degraded scan is impossible to mistake for a clean one.
 
 ## [1.0.0rc9] — 2026-06-06
 

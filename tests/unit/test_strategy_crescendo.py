@@ -475,9 +475,12 @@ async def test_crescendo_reads_judge_verdict_from_both_ctx_and_history_metadata(
 
 
 async def test_red_team_system_prompt_is_used(tmp_path: Path) -> None:
-    """The attacker LLM must receive the red-team system message."""
+    """The attacker LLM must receive the attacker base system message
+    (issue #76: safe-testcase framing by default)."""
     from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
-    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+    from agent_guardian.strategies.safe_testcase_prompting import (
+        SAFE_TESTCASE_SYSTEM_PROMPT,
+    )
 
     captured: list[LLMRequest] = []
 
@@ -496,6 +499,6 @@ async def test_red_team_system_prompt_is_used(tmp_path: Path) -> None:
     await s.generate_next([], None)
     assert captured, "attacker LLM was not called"
     msgs = captured[0].messages
-    # The first message must be a system message containing the red-team framing.
+    # The first message must be a system message containing the attacker framing.
     assert msgs[0].role == "system"
-    assert RED_TEAM_SYSTEM_PROMPT in msgs[0].content
+    assert SAFE_TESTCASE_SYSTEM_PROMPT in msgs[0].content

@@ -3079,6 +3079,35 @@ def _resolve_safety_row(
 # ---------------------------------------------------------------------------
 
 
+def _attacker_quality_lines(scan_result: Scan) -> list[str]:
+    """Build the scan-end attacker-quality (rejection) summary line(s).
+
+    Issue #76: surfaces attacker-LLM rejections so an operator can't mistake a
+    refusal-degraded scan for a clean one. Returns ``[]`` for a healthy scan
+    (no refusals, attacker active), one warning line when the attacker refused
+    on any turn, and an extra NON-AUTHORITATIVE sub-line when a high rejection
+    rate downgraded the scan. Pure (no I/O) so it is unit-testable.
+    """
+    rate = scan_result.attacker_rejection_rate
+    refused = scan_result.attacker_refused_turns
+    if refused <= 0 and scan_result.attacker_active:
+        return []
+    degraded = rate >= 0.30 or not scan_result.attacker_active
+    marker = "⚠ " if degraded else ""
+    lines = [
+        f"{marker}attacker quality: {rate * 100:.0f}% rejection rate "
+        f"({refused} turn(s) refused) — attacker fell back to corpus seeds; "
+        "the score reflects seed coverage, not adaptive attacks, on those turns."
+    ]
+    if degraded and scan_result.mode_authoritative is False:
+        lines.append(
+            "  → high attacker-rejection rate marked this scan NON-AUTHORITATIVE "
+            "(see banner above); consider an attacker model with weaker safety "
+            "alignment, or re-run."
+        )
+    return lines
+
+
 @app.command()
 def scan(
     target: str | None = typer.Argument(
@@ -4569,6 +4598,14 @@ async def _run_scan_inner(
         "(one <agent>.json per agent — all turns + events + summary, plus index.json)",
         err=True,
     )
+
+    # Issue #76 — attacker-quality (rejection) line(s). When the attacker LLM
+    # refused on some turns (and the strategy fell back to static corpus
+    # seeds), make it impossible to miss: the headline AIVSS reflects seed
+    # coverage, not adaptive attacks, on those turns. Emitted to stderr so it
+    # never pollutes a ``--debug-format json`` stdout pipeline.
+    for _line in _attacker_quality_lines(scan_result):
+        typer.echo(_line, err=True)
 
     # QA-049 — prominent dashboard URL banner at scan-end. The plain
     # `▸ Scan … track live at <url>` line that print_scan_urls emits

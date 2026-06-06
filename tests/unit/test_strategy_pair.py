@@ -491,9 +491,12 @@ async def test_pair_dedup_forces_rotation_on_repeat(tmp_path: Path) -> None:
 
 
 async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:
-    """PAIR critique calls must include the red-team system message."""
+    """PAIR critique calls must include the attacker base system message
+    (issue #76: now the safe-testcase framing by default)."""
     from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
-    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+    from agent_guardian.strategies.safe_testcase_prompting import (
+        SAFE_TESTCASE_SYSTEM_PROMPT,
+    )
 
     captured: list[LLMRequest] = []
 
@@ -516,4 +519,4 @@ async def test_red_team_system_prompt_in_pair(tmp_path: Path) -> None:
     assert captured, "no LLM call captured"
     last = captured[-1]
     assert last.messages[0].role == "system"
-    assert RED_TEAM_SYSTEM_PROMPT in last.messages[0].content
+    assert SAFE_TESTCASE_SYSTEM_PROMPT in last.messages[0].content
