@@ -3,7 +3,8 @@ name: Publish container to GHCR
 # Standard §4.4 / §4.5 — every ``v*.*.*`` tag publishes a multi-arch
 # (linux/amd64, linux/arm64) container image to GitHub Container
 # Registry. The image is tagged with both the exact release tag (e.g.
-# ``v1.0.0``) and ``latest``.
+# ``v1.0.0``) and ``latest``. Each published image also receives a
+# Sigstore-backed GitHub provenance attestation tied to the pushed digest.
 #
 # Pull pattern after publish:
 #   docker run --rm ghcr.io/glacien-technologies/agent-guardian:latest doctor
@@ -27,6 +28,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
@@ -54,17 +57,27 @@ jobs:
           echo "image=ghcr.io/${repo,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push multi-arch image
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: true
+          sbom: true
           tags: |
             ${{ steps.ref.outputs.image }}:${{ github.ref_name }}
             ${{ steps.ref.outputs.image }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest published image provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661  # v3
+        with:
+          subject-name: ${{ steps.ref.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
       - name: Smoke test the published image
         # Pull the freshly-pushed amd64 variant and run ``doctor`` to

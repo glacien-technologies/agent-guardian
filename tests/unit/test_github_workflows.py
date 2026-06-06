@@ -82,6 +82,21 @@ def test_docker_publish_requires_packages_write() -> None:
     assert perms.get("packages") == "write", "GHCR push needs packages:write"
 
 
+def test_docker_publish_attests_image_provenance() -> None:
+    data = _load_workflow("docker-publish.yml")
+    job = data["jobs"]["publish"]
+    perms = job.get("permissions") or data.get("permissions")
+    assert isinstance(perms, dict)
+    assert perms.get("id-token") == "write", "image provenance needs OIDC"
+    assert perms.get("attestations") == "write", "image provenance needs attestations:write"
+    steps_yaml = yaml.safe_dump(job["steps"])
+    assert "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8" in steps_yaml
+    assert "id: build" in steps_yaml
+    assert "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661" in steps_yaml
+    assert "subject-digest: ${{ steps.build.outputs.digest }}" in steps_yaml
+    assert "push-to-registry: true" in steps_yaml
+
+
 def test_docker_publish_uses_buildx_multi_arch() -> None:
     data = _load_workflow("docker-publish.yml")
     steps_yaml = yaml.safe_dump(data["jobs"]["publish"]["steps"])
@@ -218,3 +233,75 @@ def test_ci_install_step_uses_dev_aws_otel_extras() -> None:
     # No Windows-conditional branch should remain on the test job.
     assert "runner.os == 'Windows'" not in steps_yaml
     assert "pdf-fallback" not in steps_yaml
+
+
+# --------------------------------------------------------------------- publish
+
+
+def test_publish_workflow_attests_release_artifacts() -> None:
+    data = _load_workflow("publish.yml")
+    job = data["jobs"]["sign"]
+    perms = job.get("permissions") or data.get("permissions")
+    assert isinstance(perms, dict)
+    assert perms.get("id-token") == "write", "release artifact attestation needs OIDC"
+    assert perms.get("attestations") == "write", "release artifact attestation needs attestations"
+    steps_yaml = yaml.safe_dump(job["steps"])
+    assert "sigstore/gh-action-sigstore-python" in steps_yaml
+    assert "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661" in steps_yaml
+    assert "subject-path" in steps_yaml
+    assert "dist/*.whl" in steps_yaml
+    assert "dist/*.tar.gz" in steps_yaml
+    assert "dist/*.cdx.json" in steps_yaml
+
+
+# ------------------------------------------------------------- ClusterFuzzLite
+
+
+def test_clusterfuzzlite_workflow_uses_pinned_actions() -> None:
+    data = _load_workflow("clusterfuzzlite.yml")
+    triggers = _triggers(data)
+    assert "pull_request" in triggers
+    assert "schedule" in triggers
+    steps_yaml = yaml.safe_dump(data["jobs"]["fuzz"]["steps"])
+    assert (
+        "google/clusterfuzzlite/actions/build_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05"
+        in steps_yaml
+    )
+    assert (
+        "google/clusterfuzzlite/actions/run_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05"
+        in steps_yaml
+    )
+    assert "github-token: ${{ secrets.GITHUB_TOKEN }}" in steps_yaml
+    assert (
+        "mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}" in steps_yaml
+    )
+    assert "fuzz-seconds: ${{ github.event_name == 'pull_request' && '60' || '600' }}" in steps_yaml
+    assert "sanitizer: ${{ matrix.sanitizer }}" in steps_yaml
+
+
+def test_clusterfuzzlite_project_files_exist() -> None:
+    assert (REPO_ROOT / ".clusterfuzzlite" / "project.yaml").is_file()
+    assert (REPO_ROOT / ".clusterfuzzlite" / "Dockerfile").is_file()
+    build_sh = REPO_ROOT / ".clusterfuzzlite" / "build.sh"
+    assert build_sh.is_file()
+    build_script = build_sh.read_text(encoding="utf-8")
+    assert "python3 -m pip install ." in build_script
+    assert 'fuzzer_package="${target}.pkg"' in build_script
+    assert (
+        'pyinstaller --distpath "$OUT" --onefile --name "$fuzzer_package" "$fuzzer"' in build_script
+    )
+    assert 'exec "\\$this_dir/${fuzzer_package}" "\\$@"' in build_script
+    dockerfile = (REPO_ROOT / ".clusterfuzzlite" / "Dockerfile").read_text(encoding="utf-8")
+    assert "COPY .clusterfuzzlite/build.sh $SRC/build.sh" in dockerfile
+
+
+def test_clusterfuzzlite_fuzzer_targets_cover_security_parsers() -> None:
+    fuzzer_dir = REPO_ROOT / "fuzzers"
+    targets = {path.name for path in fuzzer_dir.glob("*_fuzzer.py")}
+    assert {
+        "probe_yaml_fuzzer.py",
+        "contract_parser_fuzzer.py",
+        "report_emitters_fuzzer.py",
+        "redaction_fuzzer.py",
+        "http_response_parser_fuzzer.py",
+    }.issubset(targets)
