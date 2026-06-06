@@ -51,7 +51,7 @@ from agent_guardian.core.roe import EgressRefused
 from agent_guardian.core.run_aggregator import aggregate_run_verdicts
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
-from agent_guardian.logging_setup import structured_logging_enabled
+from agent_guardian.logging_setup import log_agent_io, structured_logging_enabled
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -403,6 +403,18 @@ class Judge:
             )
         )
         parsed = _parse_verdict_payload(resp.text)
+        # Full judge I/O for troubleshooting (the prompt + raw output already
+        # carry the reasoning; surface verdict/confidence as grep-able fields).
+        log_agent_io(
+            _LOG,
+            "judge",
+            model=self._model,
+            input_text=message,
+            output_text=resp.text,
+            category=self._rubric.category.value,
+            verdict=(parsed.verdict if parsed is not None else "unparsed"),
+            confidence=(parsed.confidence if parsed is not None else None),
+        )
         if parsed is not None:
             return parsed
         # Heuristic fallback.

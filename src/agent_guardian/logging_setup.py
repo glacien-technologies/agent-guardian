@@ -237,6 +237,54 @@ def _model_log_full_prompts() -> bool:
     }
 
 
+def full_agent_io_enabled() -> bool:
+    """Whether to log full per-agent I/O to the run log for troubleshooting.
+
+    Covers the attacker meta-prompt + the generated attack, and the judge's
+    prompt + raw output + reasoning — the gaps the bounded per-turn preview and
+    the provider request/response logs leave. Same opt-in as the full-prompt
+    model dumps: ``AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`` or the CLI
+    ``--log-agent-io`` flag (which sets that env var).
+    """
+    return _model_log_full_prompts()
+
+
+# Cap for the full agent-I/O troubleshooting lines: large enough to read a real
+# attacker meta-prompt or judge prompt + reasoning, but bounded so a runaway
+# response can't write megabytes per turn into the log.
+AGENT_IO_LOG_CAP = 16000
+
+
+def log_agent_io(
+    logger: logging.Logger,
+    role: str,
+    *,
+    model: str | None = None,
+    input_text: object = "",
+    output_text: object = "",
+    **fields: object,
+) -> None:
+    """Emit a role-tagged DEBUG line with one agent's full input + output.
+
+    No-op unless :func:`full_agent_io_enabled`. The attacker path and the judge
+    call this so an operator can grep ``agent-io [attacker]`` / ``agent-io
+    [judge]`` in ``run.log`` and read the exact prompt, the generated attack /
+    raw verdict, and the reasoning. Text is secret-redacted + control-stripped
+    via :func:`sanitize_for_log` and capped at :data:`AGENT_IO_LOG_CAP`.
+    """
+    if not full_agent_io_enabled():
+        return
+    extra = " ".join(f"{k}={v}" for k, v in fields.items() if v is not None)
+    logger.debug(
+        "agent-io [%s]%s%s\n  --- input ---\n%s\n  --- output ---\n%s",
+        role,
+        f" model={model}" if model else "",
+        f" {extra}" if extra else "",
+        sanitize_for_log(input_text, max_len=AGENT_IO_LOG_CAP),
+        sanitize_for_log(output_text, max_len=AGENT_IO_LOG_CAP),
+    )
+
+
 def _tail_preview(text: str, cap: int) -> str:
     """Return the last *cap* chars of *text* (where appended turns accrue).
 
