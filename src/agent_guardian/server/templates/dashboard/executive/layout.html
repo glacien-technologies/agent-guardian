@@ -91,6 +91,30 @@
       data-started-at-unix="{{ started_at_unix if started_at_unix is not none else '' }}">
 
   {% include "dashboard/executive/_topbar.html" %}
+  {# Scan-status pill driver — flip the topbar status from "In progress" to
+     "Completed" when either SSE stream reports ``scan_done``. Idempotent so
+     both streams (snapshot + events) can call it. #}
+  <script>
+  window.AGScanStatus = window.AGScanStatus || {
+    markComplete: function () {
+      var pill = document.querySelector('[data-scan-status]');
+      if (!pill || pill.getAttribute('data-scan-status') === 'done') { return; }
+      pill.setAttribute('data-scan-status', 'done');
+      pill.classList.remove('exec-scan-status--running');
+      pill.classList.add('exec-scan-status--done');
+      var spinner = pill.querySelector('.exec-scan-status__spinner');
+      if (spinner) {
+        var check = document.createElement('span');
+        check.className = 'exec-scan-status__check';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        spinner.replaceWith(check);
+      }
+      var label = pill.querySelector('[data-scan-status-label]');
+      if (label) { label.textContent = 'Completed'; }
+    },
+  };
+  </script>
   {# The four-phase strip (RECON / DECOMPOSE / PARALLEL / FINALISE) was
      retired — it exposed framework-internal phases to end users. The
      ElapsedTicker now seeds its anchor from the body's
@@ -203,7 +227,10 @@
           });
         } catch (err) { /* swallow */ }
       });
-      source.addEventListener('scan_done', function () { source.close(); });
+      source.addEventListener('scan_done', function () {
+        if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
+        source.close();
+      });
       return source;
     }
     // SSE Phase 1, Step 5 — share this EventSource's readyState +
@@ -262,7 +289,10 @@
     // attach is idempotent per source via its own marker attribute).
     function wire(source) {
       window.AGLiveAppend.attach(source);
-      source.addEventListener('scan_done', function () { source.close(); });
+      source.addEventListener('scan_done', function () {
+        if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
+        source.close();
+      });
       return source;
     }
     var es = wire(new EventSource(url));

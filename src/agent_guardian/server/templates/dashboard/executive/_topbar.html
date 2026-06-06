@@ -14,6 +14,22 @@
   <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
 </div>
   <div class="exec-topbar__right">
+    {# Scan-lifecycle status — distinct from the SSE freshness dot (which only
+       tracks stream health). Shows a spinner + "In progress" while the swarm
+       runs; the inline ``scan_done`` SSE handler in layout.html flips it to
+       "Completed" without a reload. Server-rendered so a reload of a finished
+       scan lands straight on "Completed". #}
+    <span class="exec-scan-status exec-scan-status--{{ 'running' if is_running else 'done' }}"
+          data-scan-status="{{ 'running' if is_running else 'done' }}"
+          role="status" aria-live="polite">
+      {% if is_running %}
+      <span class="exec-scan-status__spinner" aria-hidden="true"></span>
+      <span class="exec-scan-status__label" data-scan-status-label>In progress</span>
+      {% else %}
+      <span class="exec-scan-status__check" aria-hidden="true">✓</span>
+      <span class="exec-scan-status__label" data-scan-status-label>Completed</span>
+      {% endif %}
+    </span>
     {# Primary action: export the whole scan data set (reports + per-agent probe
        records + raw logs) as one zip, straight from the scan page. The
        ``download`` attr keeps the current tab put; the route's

@@ -168,6 +168,44 @@ body.exec-body {
   color: var(--exec-ink);
 }
 .exec-topbar__right { display: flex; align-items: center; gap: 1rem; }
+/* Scan-lifecycle status pill — amber spinner while running, green check when
+   done. Distinct from the SSE freshness dot (stream health). */
+.exec-scan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.exec-scan-status--running {
+  color: var(--exec-sev-medium, #b45309);
+  background: color-mix(in srgb, var(--exec-sev-medium, #f59e0b) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--exec-sev-medium, #f59e0b) 35%, transparent);
+}
+.exec-scan-status--done {
+  color: var(--exec-sev-low, #15803d);
+  background: color-mix(in srgb, var(--exec-sev-low, #22c55e) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--exec-sev-low, #22c55e) 35%, transparent);
+}
+.exec-scan-status__spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--exec-sev-medium, #f59e0b) 35%, transparent);
+  border-top-color: var(--exec-sev-medium, #b45309);
+  animation: exec-scan-status-spin 0.7s linear infinite;
+}
+.exec-scan-status__check { font-weight: 800; line-height: 1; }
+@keyframes exec-scan-status-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .exec-scan-status__spinner { animation: none; }
+}
 /* "Export scan data" CTA — filled brand pill; the sole artifact action in the
    topbar (the standalone Export / Files listing page was retired). */
 .exec-topbar__download {

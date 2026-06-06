@@ -739,3 +739,40 @@ def test_executive_topbar_download_button_targets_bundle_zip(
     start = body.find(f'href="/scan/{scan.id}/export/bundle.zip"')
     anchor = body[body.rfind("<a", 0, start) : body.find("</a>", start)]
     assert "download" in anchor
+
+
+# ---------------------------------------------------------------------------
+# 12. Topbar scan-lifecycle status pill (in-progress spinner / completed)
+# ---------------------------------------------------------------------------
+
+
+def test_topbar_scan_status_shows_completed_when_terminal(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A finished scan shows a 'Completed' status pill in the topbar.
+
+    The freshness dot only reports SSE stream health (LIVE/STALE), not whether
+    the scan itself is done — so a terminal scan needs its own lifecycle pill.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    assert 'data-scan-status="done"' in body
+    assert "Completed" in body
+
+
+def test_topbar_scan_status_shows_in_progress_when_running(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A running scan shows an 'In progress' status pill with a spinner."""
+
+    class FakeSwarm:
+        observer = None
+
+    scan = _make_scan()
+    _persist(store, scan)
+    store.register(scan.id, FakeSwarm())  # type: ignore[arg-type]
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    assert 'data-scan-status="running"' in body
+    assert "In progress" in body
+    assert "exec-scan-status__spinner" in body
