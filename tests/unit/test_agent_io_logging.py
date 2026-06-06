@@ -79,3 +79,63 @@ async def test_attacker_complete_logs_full_io_when_enabled(
     assert "agent-io [attacker]" in joined
     assert "Craft an ASI06 excessive-agency attack" in joined  # the input meta-prompt
     assert "transfer the funds" in joined  # the generated attack (output)
+    # The attacker's system prompt is folded into the logged input so the full
+    # context that produced the generation is reconstructable from run.log.
+    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+
+    assert RED_TEAM_SYSTEM_PROMPT[:40] in joined
+
+
+async def test_recon_tool_extraction_logs_full_io_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The recon agent's LLM reasoning (tool-name extraction) emits a [recon] line."""
+    monkeypatch.setenv("AGENT_GUARDIAN_LOG_FULL_PROMPTS", "1")
+    from agent_guardian.agents.recon import _extract_tool_names
+    from agent_guardian.llm.stub import StubLLM
+
+    llm = StubLLM(default='["search_knowledge_base", "send_email"]')
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.agents.recon"):
+        names = await _extract_tool_names(
+            "I can search our knowledge base and send emails for you.",
+            llm,
+            model="stub",
+        )
+    assert names  # extraction succeeded
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert "agent-io [recon]" in joined
+    assert "search our knowledge base" in joined  # the input reply being analysed
+    assert "search_knowledge_base" in joined  # the extracted output
+
+
+async def test_commander_decompose_logs_full_io_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The commander's goal-decomposition call emits a [commander] line."""
+    monkeypatch.setenv("AGENT_GUARDIAN_LOG_FULL_PROMPTS", "1")
+    from agent_guardian.adapters.base import TargetFingerprint
+    from agent_guardian.adapters.prompt import PromptAdapter
+    from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+    from agent_guardian.llm.stub import StubLLM, StubScript
+
+    target = PromptAdapter(
+        "You are a helpful test assistant.",
+        llm=StubScript().default("ok").build(),
+        model="stub",
+    )
+    commander = StubScript().default("not-valid-json — forces uniform fallback").build()
+    config = SwarmConfig(scan_id="scan-io", target_goal="exfiltrate user PII")
+    swarm = SwarmCommander(
+        config=config,
+        target=target,
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.core.swarm"):
+        await swarm._phase_decompose_with_llm()
+    joined = "\n".join(r.getMessage() for r in caplog.records)
+    assert "agent-io [commander]" in joined
+    assert "exfiltrate user PII" in joined  # the decomposition goal in the input
+    assert "uniform fallback" in joined  # the raw commander output

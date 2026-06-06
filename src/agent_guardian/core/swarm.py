@@ -83,6 +83,7 @@ from agent_guardian.core.tiering import detect_tier
 from agent_guardian.cost import lookup_price
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+from agent_guardian.logging_setup import log_agent_io
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -1035,6 +1036,14 @@ class SwarmCommander:
                     max_tokens=8000,
                     temperature=0.2,
                 )
+            )
+            log_agent_io(
+                _LOG,
+                "commander",
+                model=self.config.commander_model,
+                input_text=f"{_COMMANDER_SYSTEM_PROMPT}\n\n{user_msg}",
+                output_text=resp.text,
+                task="goal_decomposition",
             )
         except Exception as exc:
             _LOG.warning(

@@ -36,6 +36,7 @@ from agent_guardian.core.memory import SharedMemory
 from agent_guardian.core.profiler import TargetProfile, profile_from_audit, profile_from_material
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+from agent_guardian.logging_setup import log_agent_io
 
 if TYPE_CHECKING:
     from agent_guardian.core.recon_probe_log import ProbeLog
@@ -260,19 +261,25 @@ async def _extract_tool_names(reply: str, llm: BaseLLM, model: str) -> list[str]
     """
     names: list[str] = []
     try:
+        _user_content = _TOOL_EXTRACTION_USER.format(reply=reply[:2000])
         resp = await llm.complete(
             LLMRequest(
                 messages=[
                     LLMMessage(role="system", content=_TOOL_EXTRACTION_SYSTEM),
-                    LLMMessage(
-                        role="user",
-                        content=_TOOL_EXTRACTION_USER.format(reply=reply[:2000]),
-                    ),
+                    LLMMessage(role="user", content=_user_content),
                 ],
                 model=model,
                 max_tokens=200,
                 temperature=0.0,
             )
+        )
+        log_agent_io(
+            _LOG,
+            "recon",
+            model=model,
+            input_text=f"{_TOOL_EXTRACTION_SYSTEM}\n\n{_user_content}",
+            output_text=resp.text,
+            task="tool_extraction",
         )
         names = _parse_tool_list(resp.text)
     except Exception as exc:  # pragma: no cover — defensive; recon must not abort
