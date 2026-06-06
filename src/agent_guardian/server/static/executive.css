@@ -181,6 +181,29 @@ body.exec-body {
   transition: background 120ms ease-out;
 }
 .exec-topbar__export:hover { background: var(--exec-brand-tint); }
+/* Primary "Download all" CTA — filled brand pill so it reads as the main
+   action next to the secondary outlined "Files" link. */
+.exec-topbar__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--exec-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--exec-on-brand, #fff);
+  text-decoration: none;
+  padding: 5px 14px;
+  border: 1px solid var(--exec-brand);
+  background: var(--exec-brand);
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+.exec-topbar__download:hover {
+  background: var(--exec-brand-strong);
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--exec-brand) 35%, transparent);
+}
+.exec-topbar__download-icon { font-weight: 700; line-height: 1; }
 .exec-topbar__locality {
   display: inline-flex;
   align-items: center;

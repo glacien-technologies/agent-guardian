@@ -14,10 +14,18 @@
   <span class="exec-topbar__crumb">/ Scan <code>{{ scan_id }}</code></span>
 </div>
   <div class="exec-topbar__right">
-    {# Export / Files — reports, per-agent probe records, and raw logs
-       (run.log / events.jsonl / memory.jsonl) for download + reference. #}
+    {# Primary action: download EVERYTHING (reports + per-agent probe records +
+       raw logs) as one zip, straight from the scan page — no detour through the
+       Export / Files listing. The ``download`` attr keeps the current tab put;
+       the route's Content-Disposition forces the save regardless. #}
+    <a class="exec-topbar__download" href="/scan/{{ scan_id }}/export/bundle.zip"
+       download aria-label="Download all reports, probe records and raw logs as a zip">
+      <span class="exec-topbar__download-icon" aria-hidden="true">↓</span>
+      Download all
+    </a>
+    {# Secondary: the per-file Export / Files listing, for grabbing one artifact. #}
     <a class="exec-topbar__export" href="/scan/{{ scan_id }}/export"
-       aria-label="Export reports, probe records and raw logs">Export / Files</a>
+       aria-label="Browse individual reports, probe records and raw logs">Files</a>
     <div class="exec-topbar__locality exec-topbar__locality--{{ 'local' if is_local else 'hosted' }}"
          aria-label="{{ locality_label }}">
       <span class="exec-topbar__locality-dot" aria-hidden="true"></span>
