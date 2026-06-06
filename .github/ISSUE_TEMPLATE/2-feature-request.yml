@@ -1,67 +1,96 @@
-name: Feature or probe request
-description: Propose a new feature, probe, adapter, report format, or behaviour change.
+name: Feature request
+description: Propose a product improvement, probe, adapter, report format, CI integration, or behavior change.
 title: "[feat] <short summary>"
 labels: ["kind/feature", "kind/roadmap-candidate", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Use this form for concrete proposals. For open-ended direction-setting, start a [Roadmap Discussion](https://github.com/glacien-technologies/agent-guardian/discussions/categories/roadmap) instead.
+        Use this form for concrete, actionable proposals.
 
-        See [`ROADMAP.md`](../../ROADMAP.md) for the current 90-day cycle's themes before filing — your idea may already be in flight.
+        For open-ended ideas, roadmap discussion, or early feedback, start in [Discussions](https://github.com/glacien-technologies/agent-guardian/discussions) first. For exploitable security vulnerabilities, use [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new), not a public issue.
   - type: dropdown
     id: surface
     attributes:
-      label: Which surface does this touch?
+      label: Surface
+      description: Which part of AgentGuardian would change?
       options:
-        - Probe (corpus, ASI category)
-        - ASI agent / strategy
-        - Adapter (framework or transport)
-        - LLM provider
-        - Report writer (SARIF / JSON / JUnit / Markdown / PDF / bundle)
-        - CLI flag / UX
-        - Live dashboard / server
-        - CI integration (GitHub Actions / GitLab CI / etc.)
+        - CLI / user experience
+        - Python API / library
+        - Probe corpus / ASI coverage
+        - ASI agent / attack strategy
+        - Adapter / transport / framework support
+        - LLM provider support
+        - Report output / export format
+        - Live dashboard / local server
+        - GitHub Action / CI integration
+        - Packaging / release process
         - Documentation
-        - Other (specify below)
+        - Other
     validations:
       required: true
   - type: textarea
-    id: motivation
+    id: problem
     attributes:
-      label: Motivation
-      description: What problem does this solve? Who hits it, how often, and what do they do today?
+      label: Problem
+      description: What user problem does this solve? Who hits it, and what do they do today?
+      placeholder: |
+        When scanning ..., users currently have to ...
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposal
-      description: Concrete change — new flag, new probe ID, new function signature, new report field, etc. Sketches and pseudocode are welcome.
+      label: Proposed solution
+      description: Describe the concrete behavior, API, probe, adapter, command, report field, or workflow you want.
+      placeholder: |
+        Add ...
+        Example command/API:
+        ...
     validations:
       required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or references
+      description: Link prior art, standards, papers, framework docs, screenshots, or sample output.
+      placeholder: |
+        - OWASP ASI category:
+        - CSA category:
+        - MITRE ATLAS technique:
+        - Framework docs:
   - type: textarea
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: What does "done" look like? Tests, docs, CHANGELOG entry, etc.
+      description: What must be true for this to be considered done?
       placeholder: |
-        - [ ] New flag documented in CLI --help and `docs/`.
-        - [ ] Unit tests covering the success and failure paths.
-        - [ ] CHANGELOG entry under [Unreleased].
+        - [ ] Behavior is covered by unit or integration tests.
+        - [ ] CLI help / docs are updated.
+        - [ ] Report output remains backward compatible or includes a migration note.
+    validations:
+      required: true
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Are you willing to contribute this?
+      options:
+        - "Yes, I can open a PR"
+        - "Maybe, with maintainer guidance"
+        - "No, request only"
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives considered (optional)
-      description: Other approaches you rejected and why.
+      label: Alternatives considered
+      description: Optional, but helpful for maintainer review.
   - type: checkboxes
     id: confirmations
     attributes:
       label: Confirmations
       options:
-        - label: I read `ROADMAP.md` and checked this is not already in flight.
+        - label: I searched existing Issues, Discussions, and `ROADMAP.md`.
           required: true
-        - label: This is a feature request, not a vulnerability report.
+        - label: This request does not disclose a private security vulnerability.
           required: true

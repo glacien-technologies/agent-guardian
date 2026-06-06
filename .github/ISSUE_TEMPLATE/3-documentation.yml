@@ -1,0 +1,61 @@
+name: Documentation issue
+description: Report inaccurate, missing, confusing, or broken documentation.
+title: "[docs] <short summary>"
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for improving the docs. Use this for documentation only.
+
+        If the docs exposed a security vulnerability or sensitive operational detail, use [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new) instead of a public issue.
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location
+      description: Paste the page URL or repo path.
+      placeholder: "https://agentguardian.io/docs/... or docs/quickstart.mdx"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Issue type
+      options:
+        - Inaccurate or out of date
+        - Missing information
+        - Confusing wording
+        - Broken link
+        - Code example does not work
+        - Typo or formatting issue
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong?
+      description: Describe the problem and why it matters.
+      placeholder: |
+        The page says ..., but the current CLI behavior is ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should it say or show instead?
+      description: Suggest the corrected wording, example, command, link, or section.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Add version, command output, screenshots, or links if helpful.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I checked the current `main` branch or latest published docs before filing.
+          required: true
+        - label: This is a documentation issue, not a product bug or security vulnerability.
+          required: true

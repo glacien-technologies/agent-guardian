@@ -1,30 +1,49 @@
 name: Bug report
-description: Report a defect in agent-guardian (CLI, library, server, adapter, probe, report writer).
+description: Report a reproducible defect in the CLI, library, server, adapters, probes, dashboard, or reports.
 title: "[bug] <short summary>"
 labels: ["kind/bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug. A few notes before you start:
+        Thanks for taking the time to report a bug.
 
-        - **Security issues do not go here.** Use [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new) per [SECURITY.md](../SECURITY.md).
-        - **Questions go to [Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)**, not Issues.
-        - The more specific the reproduction, the faster the fix.
+        Before filing:
+        - **Do not report exploitable vulnerabilities here.** Use [GitHub Security Advisories](https://github.com/glacien-technologies/agent-guardian/security/advisories/new) or the process in [`SECURITY.md`](../../SECURITY.md).
+        - **Usage questions belong in Discussions**, not Issues.
+        - **Redact secrets and customer data** from prompts, responses, logs, reports, and screenshots before attaching them.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Pick the closest product surface.
+      options:
+        - CLI scan
+        - Python API / library
+        - Probe / ASI agent behavior
+        - Adapter / transport
+        - Report output (JSON / SARIF / Markdown / JUnit / PDF)
+        - Live dashboard / local server
+        - GitHub Action / CI integration
+        - Packaging / installation
+        - Documentation site build
+        - Other
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
-      label: agent-guardian version
-      description: Output of `agent-guardian --version`.
-      placeholder: "1.1.0"
+      label: AgentGuardian version
+      description: Output of `agent-guardian --version`, or the git commit SHA if running from source.
+      placeholder: "agent-guardian 1.1.0"
     validations:
       required: true
   - type: input
     id: python
     attributes:
       label: Python version
-      description: Output of `python --version`.
-      placeholder: "3.11.9"
+      description: Output of `python --version` or `python3 --version`.
+      placeholder: "Python 3.11.9"
     validations:
       required: true
   - type: dropdown
@@ -32,10 +51,10 @@ body:
     attributes:
       label: Operating system
       options:
-        - Linux
         - macOS
+        - Linux
         - Windows
-        - Other (specify in description)
+        - Other
     validations:
       required: true
   - type: dropdown
@@ -46,50 +65,89 @@ body:
         - pip
         - pipx
         - uv
-        - Docker (Dockerfile / compose)
-        - From source (git clone)
-        - Other (specify in description)
+        - Docker
+        - GitHub Action
+        - From source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or API call
+      description: Paste the exact command, workflow step, or Python snippet that triggered the bug.
+      placeholder: |
+        agent-guardian scan --url https://example.test/chat --mode full --model ...
+      render: shell
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Reproduction steps
-      description: The exact commands, configuration, and (if relevant) target setup that triggers the bug. Minimal repro is best.
+      label: Minimal reproduction
+      description: Include setup, target shape, config, and the shortest steps that reproduce the problem.
       placeholder: |
-        1. pip install agent-guardian==1.1.0
-        2. echo "You are a helpful bot." > prompt.txt
-        3. agent-guardian scan --system-prompt prompt.txt --model stub --mode fast
-        4. ...
-      render: bash
+        1. Install ...
+        2. Configure ...
+        3. Run ...
+        4. Observe ...
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behaviour
-      description: What you expected to happen.
+      label: Expected behavior
+      description: What should have happened?
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Actual behaviour
-      description: What actually happened. Paste full stack traces inside a ``` block.
+      label: Actual behavior
+      description: What happened instead? Include full stack traces inside a fenced code block.
     validations:
       required: true
   - type: textarea
+    id: artifacts
+    attributes:
+      label: Scan artifacts
+      description: If this came from a scan, paste relevant paths or redacted excerpts.
+      placeholder: |
+        scan_id: cli-...
+        report.json: ...
+        events.jsonl: ...
+        memory.jsonl: ...
+        probe/<agent>.json: ...
+      render: text
+  - type: textarea
     id: logs
     attributes:
-      label: Logs / scan output (optional)
-      description: Relevant excerpts from the scan transcript, server logs, or SARIF / JSON report. Redact secrets first.
-      render: shell
+      label: Logs and screenshots
+      description: Add redacted `run.log` excerpts, screenshots, or dashboard errors if useful.
+      render: text
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Is this a regression?
+      options:
+        - "No / unknown"
+        - "Yes, worked in a previous release"
+    validations:
+      required: true
+  - type: input
+    id: last-known-good
+    attributes:
+      label: Last known good version
+      description: If this is a regression, which version or commit worked?
+      placeholder: "1.0.0 or commit SHA"
   - type: checkboxes
     id: confirmations
     attributes:
       label: Confirmations
       options:
-        - label: I searched existing issues and Discussions for this bug.
+        - label: I searched existing Issues and Discussions before filing.
           required: true
-        - label: I am not reporting a security vulnerability here (those go through GitHub Security Advisories).
+        - label: I have redacted secrets, API keys, customer data, and private target details.
+          required: true
+        - label: This is not an exploitable vulnerability report.
           required: true
