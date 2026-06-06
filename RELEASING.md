@@ -20,7 +20,7 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Pushing the tag triggers `.github/workflows/publish.yml`. The workflow handles everything — build, SBOM, Sigstore signing, GitHub Release, PyPI publish. **Watch the run, don't touch PyPI manually.**
+Pushing the tag triggers `.github/workflows/publish.yml`. The workflow handles everything — build, SBOM, Sigstore signing, GitHub artifact attestations, GitHub Release, PyPI publish. **Watch the run, don't touch PyPI manually.**
 
 ---
 
@@ -151,7 +151,7 @@ The workflow runs 4 jobs in sequence:
 | Job | What it does | Duration |
 |---|---|---|
 | `build` | `uv build` (reproducible via `SOURCE_DATE_EPOCH`) + CycloneDX SBOM | ~1 min |
-| `sign` | Sigstore keyless OIDC signing (Fulcio + Rekor) | ~30s |
+| `sign` | Sigstore keyless OIDC signing (Fulcio + Rekor) + GitHub artifact attestations | ~30s |
 | `release` | Creates GitHub Release with auto-generated notes + attaches wheel + sdist + SBOM + signatures | ~10s |
 | `publish` | Uploads to PyPI via Trusted Publisher (OIDC), attaches PEP 740 attestations | ~30s |
 
@@ -174,6 +174,12 @@ uv venv /tmp/release-smoke --python 3.12
 # GitHub Release exists + has all artefacts
 gh release view v1.0.0rc3
 # Should show wheel, sdist, SBOM, .sigstore signatures
+
+# GitHub artifact attestation exists for the released wheel/sdist/SBOM
+gh attestation verify /path/to/agent_guardian-1.0.0rc3-py3-none-any.whl \
+  --repo glacien-technologies/agent-guardian
+gh attestation verify /path/to/agent_guardian-1.0.0rc3.tar.gz \
+  --repo glacien-technologies/agent-guardian
 ```
 
 Cleanup:
@@ -186,7 +192,8 @@ rm -rf /tmp/release-smoke
 
 ## Verifying provenance (post-release)
 
-The publish workflow attaches Sigstore signatures + PEP 740 attestations. Anyone — including consumers — can verify them:
+The publish workflow attaches Sigstore signatures, GitHub artifact attestations,
+and PyPI PEP 740 attestations. Anyone — including consumers — can verify them:
 
 ```bash
 pip install sigstore
@@ -200,6 +207,14 @@ This proves:
 - The artefact was built by `glacien-technologies/agent-guardian` on GitHub Actions
 - It came from the `publish.yml` workflow (not a different workflow)
 - It was signed in the Rekor transparency log (publicly auditable)
+
+GitHub's attestation API gives the same provenance signal without requiring
+the separate `.sigstore` bundle:
+
+```bash
+gh attestation verify /path/to/agent_guardian-1.0.0rc3-py3-none-any.whl \
+  --repo glacien-technologies/agent-guardian
+```
 
 This is the cryptographic substitute for trusting a long-lived signing key.
 

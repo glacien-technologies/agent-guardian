@@ -6,8 +6,9 @@ name: Publish to PyPI
 #   1. Build sdist + wheel reproducibly.
 #   2. Generate a CycloneDX SBOM for the locked dependency tree.
 #   3. Sign every artifact with Sigstore (keyless OIDC via Fulcio + Rekor).
-#   4. Attach SBOM + signatures + wheels to the GitHub Release.
-#   5. Publish to PyPI via Trusted Publishing (OIDC; no API tokens).
+#   4. Generate GitHub artifact attestations for wheel, sdist, and SBOM provenance.
+#   5. Attach SBOM + signatures + wheels to the GitHub Release.
+#   6. Publish to PyPI via Trusted Publishing (OIDC; no API tokens).
 #
 # Failure of ANY step halts the release — no half-published versions.
 
@@ -64,12 +65,13 @@ jobs:
           path: dist/
 
   sign:
-    name: Sigstore-sign artifacts
+    name: Sigstore-sign and attest artifacts
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write  # OIDC token for keyless Sigstore signing
+      attestations: write  # GitHub artifact attestations for release provenance
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
@@ -83,6 +85,18 @@ jobs:
         uses: sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46  # v3.0.0
         with:
           inputs: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.cdx.json
+
+      - name: Attest release artifact provenance
+        # OpenSSF Scorecard Signed-Releases recognises GitHub artifact
+        # attestations. Keep this alongside Sigstore signatures and PyPI
+        # PEP 740 attestations so future releases carry verifiable provenance
+        # at GitHub, PyPI, and standalone artifact levels.
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661  # v3
+        with:
+          subject-path: |
             dist/*.whl
             dist/*.tar.gz
             dist/*.cdx.json

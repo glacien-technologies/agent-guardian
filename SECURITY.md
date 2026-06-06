@@ -64,7 +64,7 @@ please open a private advisory via the channel at the top of this file.
 
 ## Supply-chain integrity
 
-Every release wheel and sdist is signed via Sigstore (keyless OIDC through GitHub Actions). The publish workflow attaches the signatures, a CycloneDX SBOM, and PEP-740 attestations to the corresponding GitHub Release. See [`docs/security/reproducible-builds.md`](docs/security/reproducible-builds.md) for the byte-for-byte rebuild protocol.
+Every release wheel and sdist is signed via Sigstore (keyless OIDC through GitHub Actions). The publish workflow attaches the signatures, a CycloneDX SBOM, GitHub artifact attestations, and PEP-740 attestations to the corresponding GitHub Release. GHCR images are also published with provenance attestations. See [`docs/security/reproducible-builds.md`](docs/security/reproducible-builds.md) for the byte-for-byte rebuild protocol.
 
 If your reproducibility verification fails — i.e., a wheel on PyPI does not match what you can rebuild from the tagged source — treat it as a supply-chain incident and report via this policy.
 

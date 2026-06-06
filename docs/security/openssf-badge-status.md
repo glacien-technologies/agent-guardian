@@ -26,6 +26,20 @@ When the project ID is issued, update the three "_pending_" rows above, edit
 `README.md` to add the badge image (see "README badge snippet" below), and
 record the change in `CHANGELOG.md` under `[Unreleased]`.
 
+## Scorecard automation added in-repo
+
+The following OpenSSF Scorecard evidence is now automated by repository files.
+These changes improve future scans once they are merged and observed by
+Scorecard; historical unsigned releases can still depress the live
+`Signed-Releases` score until a new release is cut, re-issued, or old release
+artifacts are removed.
+
+| Scorecard check | Repo evidence | Notes |
+|---|---|---|
+| Signed-Releases | `.github/workflows/publish.yml`, `.github/workflows/docker-publish.yml` | Future PyPI/GitHub release artifacts and GHCR images receive GitHub artifact attestations in addition to existing Sigstore/PEP 740 provenance. |
+| Fuzzing | `.github/workflows/clusterfuzzlite.yml`, `.clusterfuzzlite/`, `fuzzers/` | ClusterFuzzLite runs Python fuzz targets for probe YAML, contract parsing, report emitters, redaction, and HTTP response parsing. |
+| CII Best Practices | This file + operator runbook | Still requires external registration at `bestpractices.dev`; no repository-only change can issue the project ID. |
+
 ## Operator runbook
 
 Estimated time: ~30 minutes once the operator is logged in.
@@ -80,7 +94,7 @@ written.
 | Security | Vulnerability response process | `SECURITY.md` (90-day coordinated disclosure) |
 | Analysis | Static-analysis tool used | Bandit + Semgrep + Gitleaks (`.github/workflows/ci.yml`), Scorecard (`scorecard.yml`) |
 | Analysis | Findings from analysis are fixed | `CHANGELOG.md` `Fixed` / `Security` sections |
-| Analysis | Dynamic-analysis tool used (if relevant) | `pytest` + hypothesis property tests (`.hypothesis/`) |
+| Analysis | Dynamic-analysis tool used (if relevant) | `pytest`, Hypothesis property tests, ClusterFuzzLite (`.github/workflows/clusterfuzzlite.yml`, `fuzzers/`) |
 
 ## README badge snippet
 
@@ -101,4 +115,4 @@ Promotion to Silver or Gold is **not** a current cycle goal — see
 
 ---
 
-*Last revised: 2026-06-01. Owner: Security Lead.*
+*Last revised: 2026-06-06. Owner: Security Lead.*
