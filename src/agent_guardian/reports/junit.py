@@ -18,17 +18,44 @@ string concatenation, no XML-injection vectors via summary text.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 from xml.etree import ElementTree as ET
 
 from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import AsiCategory, asi_description
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
+from agent_guardian.reports.scan_props import finding_property_bag, scan_property_bag
 
 __all__ = ["emit_junit", "write_junit"]
 
 _SUITE_NAME = "agent-guardian"
+
+# Scan-level posture/honesty signals surfaced on <testsuites> properties so a CI
+# gate can fail-under on band / refuse a non-authoritative (stub/fast) run
+# without parsing failure text.
+_SCAN_PROPERTY_KEYS = (
+    "aivss",
+    "band",
+    "tier",
+    "mode",
+    "mode_authoritative",
+    "evaluation_mode",
+    "scoring_valid",
+    "coverage_grade",
+    "cost_usd",
+    "tokens_total",
+    "duration_seconds",
+)
+
+# Non-sensitive per-finding evidence-chain keys surfaced as <testcase> properties
+# (machine-parseable, unlike the human-readable <failure> body).
+_FINDING_PROPERTY_KEYS = (
+    "finding_id",
+    "success",
+    "verdict_v2",
+    "evidence_types",
+    "created_at",
+)
 
 # RoE / contract audit keys mirrored into the <testsuites> properties so the
 # canonical CI artifact carries the same provenance as the signed JSON / SARIF.
@@ -59,6 +86,17 @@ def _testcase_for(finding: Finding) -> ET.Element:
             "time": "0",
         },
     )
+    # Machine-parseable evidence-chain fields (finding_id / verdict / success /
+    # evidence_types / created_at) as a <properties> child — the <failure> body
+    # below stays human-readable.
+    bag = finding_property_bag(finding)
+    case_props = ET.SubElement(case, "properties")
+    for key in _FINDING_PROPERTY_KEYS:
+        value = bag.get(key)
+        if value is None:
+            continue
+        rendered = ",".join(str(v) for v in value) if isinstance(value, list) else str(value)
+        ET.SubElement(case_props, "property", {"name": key, "value": rendered})
     # Every reported finding is a failing test (agrees with JSON/SARIF/Markdown).
     failure = ET.SubElement(
         case,
@@ -82,14 +120,22 @@ def _testcase_for(finding: Finding) -> ET.Element:
     return case
 
 
-def _append_audit_properties(suites: ET.Element, audit: dict[str, Any]) -> None:
-    """Mirror the RoE / contract audit envelope into <testsuites> properties."""
-    present = [(k, audit.get(k)) for k in _AUDIT_PROPERTY_KEYS if audit.get(k) is not None]
-    if not present:
+def _append_suites_properties(suites: ET.Element, scan: Scan) -> None:
+    """Mirror scan posture/honesty signals + the RoE audit envelope into a single
+    <testsuites><properties> block (so a CI gate can read band / mode_authoritative
+    without parsing failure text)."""
+    bag = scan_property_bag(scan)
+    posture = [(k, bag.get(k)) for k in _SCAN_PROPERTY_KEYS if bag.get(k) is not None]
+    audit = scan.audit or {}
+    audit_pairs = [
+        (f"audit.{k}", audit.get(k)) for k in _AUDIT_PROPERTY_KEYS if audit.get(k) is not None
+    ]
+    pairs = posture + audit_pairs
+    if not pairs:
         return
     props = ET.SubElement(suites, "properties")
-    for name, value in present:
-        ET.SubElement(props, "property", {"name": f"audit.{name}", "value": str(value)})
+    for name, value in pairs:
+        ET.SubElement(props, "property", {"name": name, "value": str(value)})
 
 
 def emit_junit(scan: Scan, *, redact: bool = True) -> ET.Element:
@@ -110,8 +156,7 @@ def emit_junit(scan: Scan, *, redact: bool = True) -> ET.Element:
             "time": f"{scan.duration_seconds:.3f}",
         },
     )
-    if scan.audit is not None:
-        _append_audit_properties(suites, scan.audit)
+    _append_suites_properties(suites, scan)
 
     for category in AsiCategory:
         findings = grouped[category]

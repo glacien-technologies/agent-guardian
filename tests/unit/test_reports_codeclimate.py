@@ -15,8 +15,11 @@ def test_one_finding_yields_one_valid_entry() -> None:
     entries = emit_codeclimate(scan)
     assert len(entries) == 1
     entry = entries[0]
-    # GitLab Code Quality requires exactly these keys.
-    assert set(entry) == {"description", "check_name", "fingerprint", "severity", "location"}
+    # GitLab Code Quality requires these keys (GitLab ignores the extra open
+    # ``properties`` bag we add for the evidence chain + scan posture).
+    assert {"description", "check_name", "fingerprint", "severity", "location"} <= set(entry)
+    assert "properties" in entry
+    assert entry["properties"]["finding_id"]  # evidence chain present
     assert entry["description"] == "Agent leaked secret to external tool."
     assert entry["check_name"] == "ASI01-GH-007"
     assert entry["severity"] in {"info", "minor", "major", "critical", "blocker"}
