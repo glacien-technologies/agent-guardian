@@ -36,9 +36,17 @@ from typing import Any
 
 from agent_guardian.models.scan import Scan
 
-__all__ = ["compute_coverage_from_memory", "default_memory_path"]
+__all__ = ["NOT_TESTED_EVENTS", "compute_coverage_from_memory", "default_memory_path"]
 
 _LOG = logging.getLogger(__name__)
+
+# Per-turn lifecycle markers for turns that never reached the target (#4). They
+# are persisted as reflections so the raw stream is complete, but they are NOT
+# adversarial attempts and must be excluded from attempt accounting (coverage)
+# and from the per-agent probe turn list (export). ``egress_refused``: the
+# egress gate dropped the prompt before send; ``attacker_refused``: the probe
+# was the attacker LLM's own refusal and was never dispatched.
+NOT_TESTED_EVENTS: frozenset[str] = frozenset({"egress_refused", "attacker_refused"})
 
 
 def default_memory_path(scan_id: str, root_dir: Path | None = None) -> Path:
@@ -197,9 +205,9 @@ def compute_coverage_from_memory(
         # check let ~47% recon traffic inflate attempts_total).
         if turn.get("event") in ("recon_audit", "recon_probe"):
             continue
-        # The egress-refused marker (#4) is a not-tested turn — it never
-        # reached the target, so it must not count as an adversarial attempt.
-        if turn.get("event") == "egress_refused":
+        # Not-tested markers (#4) never reached the target, so they must not
+        # count as adversarial attempts (egress_refused / attacker_refused).
+        if turn.get("event") in NOT_TESTED_EVENTS:
             continue
         attempts += 1
         agent = turn.get("agent") or payload.get("agent")

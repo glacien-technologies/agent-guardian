@@ -134,3 +134,28 @@ def test_missing_scan_dir_is_safe(tmp_path: Path) -> None:
     probe_dir = write_probe_exports(empty)
     index = json.loads((probe_dir / "index.json").read_text(encoding="utf-8"))
     assert index["probes"] == []
+
+
+def test_attacker_refused_marker_is_not_a_turn(tmp_path: Path) -> None:
+    """A not-tested ``attacker_refused`` reflection must not surface as a probe turn.
+
+    It carries no verdict and never reached the target, so including it would
+    show a junk turn-0 row and inflate the agent's run count.
+    """
+    scan_dir = tmp_path / "cli-attref"
+    scan_dir.mkdir()
+    real = _turn("trust-exploit-agent", "ASI09", "ASI09-X-001", 1, "defended", "I cannot.")
+    marker = {
+        "agent": "trust-exploit-agent",
+        "asi_category": "ASI09",
+        "event": "attacker_refused",
+        "outcome": "not_tested",
+        "prompt": "Sorry, I cannot fulfill your request to generate adversarial inputs.",
+    }
+    (scan_dir / "memory.jsonl").write_text(
+        "\n".join(_reflection_line(t) for t in (real, marker)) + "\n", encoding="utf-8"
+    )
+    exports = build_probe_exports(scan_dir)
+    group = exports["trust-exploit-agent"]
+    assert group["turn_count"] == 1
+    assert all(t.get("event") != "attacker_refused" for t in group["turns"])
