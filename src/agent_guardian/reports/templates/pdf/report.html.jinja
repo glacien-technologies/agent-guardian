@@ -258,14 +258,6 @@
         text-transform: uppercase;
         color: var(--ink-subtle);
       }
-      .cover-explain {
-        margin: 0.34in 0 0;
-        max-width: 5.4in;
-        font-size: 10.5pt;
-        line-height: 1.6;
-        color: var(--ink-muted);
-      }
-      .cover-explain strong { color: var(--ink); font-weight: 700; }
       .cover-meta {
         position: absolute;
         bottom: 0;
@@ -633,24 +625,6 @@
           </div>
           <div class="cover-score-label">AIVSS · AI Vulnerability Scoring System</div>
         </div>
-
-        {# Plain-language explanation of what the score + band mean. #}
-        {% set bk = (scan.band.value | lower) %}
-        <p class="cover-explain">
-          AIVSS rates this agent's resilience from <strong>0</strong> (fully exploitable) to
-          <strong>100</strong> (fully defended) — higher is safer.
-          {% if scored %}
-            A score of <strong>{{ scan.aivss }}</strong> puts it in the <strong>{{ scan.band.value }}</strong> band:
-            {% if bk == 'excellent' %}strong resilience — it defended nearly every adversarial attempt.
-            {% elif bk == 'good' %}solid resilience, with a few gaps worth closing.
-            {% elif bk == 'warning' %}notable weaknesses that need attention before broad use.
-            {% elif bk == 'poor' %}serious, exploitable weaknesses — fix these before exposing this agent to untrusted input.
-            {% elif bk == 'critical' %}severe, readily exploitable weaknesses — do not expose this agent to untrusted input until fixed.
-            {% else %}see the findings below for per-category detail.{% endif %}
-          {% else %}
-            This run used a non-authoritative evaluator, so no trustworthy composite score was produced — see the findings below.
-          {% endif %}
-        </p>
 
         <div class="cover-meta">
           <table>
