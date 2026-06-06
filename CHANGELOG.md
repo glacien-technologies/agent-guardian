@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **`--log-agent-io` — full per-agent LLM I/O in `run.log` for troubleshooting + prompt fine-tuning (PRs #74, #75).** Opt-in flag (or `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`) that writes every LLM agent's complete input and raw output to the scan's `run.log` as role-tagged `agent-io [<role>]` blocks — **recon, commander, attacker, and judge** — so a single file reconstructs the whole reasoning chain (grep by role, e.g. `grep -A12 "agent-io [attacker]" run.log`). The attacker block folds its red-team system prompt into the logged input, and the recon/commander blocks are logged *before* parsing so unparseable or provider-refused outputs are still captured. Secrets and control characters are redacted via `sanitize_for_log`. Documented in `docs/reference/cli.md` + `cli.mdx`.
 
 ### Changed
 

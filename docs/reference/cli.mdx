@@ -502,6 +502,7 @@ removed in v1.2.
 | --- | --- | --- |
 | `--debug` | off | Stream per-agent reflections (prompt + response + verdict). Count-style: `--debug` for truncated panels, `--debug --debug` to disable truncation. |
 | `--debug-format` | `text` | `text` (Rich panels) or `json` (NDJSON, one record per line). `json` implicitly disables the Live region. |
+| `--log-agent-io` | off | Troubleshooting: write every LLM agent's full I/O — recon, commander, attacker, and judge — to the scan's `run.log`. Each `agent-io [<role>]` block carries the folded system prompt + input and the raw model output, so a single file reconstructs the whole reasoning chain (grep by role, e.g. `grep -A12 "agent-io \[attacker\]" run.log`). Secrets and control characters are redacted. Equivalent to `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`. |
 
 #### Dashboard URL emission + auto-serve
 
