@@ -284,6 +284,30 @@ def test_parse_reflection_line_handles_unparseable_content_string() -> None:
     assert parsed["agent"] == "x"
 
 
+@pytest.mark.parametrize("event", ["attacker_refused", "egress_refused"])
+def test_parse_reflection_line_drops_not_tested_markers(event: str) -> None:
+    """Not-tested lifecycle markers must not surface as dashboard probe rows.
+
+    ``attacker_refused`` / ``egress_refused`` reflections carry no verdict and
+    never reached the target; including them would show a junk turn-0 row in the
+    Probes tab (same exclusion as coverage + the per-agent probe export).
+    """
+    turn = {
+        "agent": "trust-exploit-agent",
+        "asi_category": "ASI09",
+        "event": event,
+        "outcome": "not_tested",
+        "prompt": "Sorry, I cannot fulfill your request to generate adversarial inputs.",
+    }
+    raw = json.dumps(
+        {
+            "record_type": "reflection",
+            "payload": {"agent": turn["agent"], "content": json.dumps(turn)},
+        }
+    )
+    assert _parse_reflection_line(raw) is None
+
+
 # ---------------------------------------------------------------------------
 # logs_tail helpers
 # ---------------------------------------------------------------------------
