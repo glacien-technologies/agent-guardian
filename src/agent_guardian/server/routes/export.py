@@ -6,10 +6,10 @@ import io
 import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, Response
 
 from agent_guardian.server.auth import require_dashboard_auth
-from agent_guardian.server.routes._deps import get_scan_store, get_templates
+from agent_guardian.server.routes._deps import get_scan_store
 
 __all__ = ["router"]
 
@@ -35,37 +35,6 @@ _RAW_FILES: dict[str, tuple[str, str]] = {
     "scan.raw.json": ("application/json", "Raw scan model dump"),
     "stats.json": ("application/json", "Scan stats"),
 }
-
-
-@router.get("/scan/{scan_id}/export", response_class=HTMLResponse)
-async def export_index(request: Request, scan_id: str) -> HTMLResponse:
-    """Render the per-scan export page (reports + raw artifacts + probe records)."""
-    store = get_scan_store(request)
-    templates = get_templates(request)
-    scan_dir = store.scan_dir(scan_id)
-    if not scan_dir.is_dir() and not store.is_running(scan_id):
-        raise HTTPException(status_code=404, detail=f"unknown scan: {scan_id}")
-    formats = store.list_report_paths(scan_id)
-    # Raw artifacts that actually exist on disk, in the whitelisted order.
-    raw_files = [
-        {"name": name, "label": label}
-        for name, (_mt, label) in _RAW_FILES.items()
-        if (scan_dir / name).is_file()
-    ]
-    # Per-agent probe records (one <agent>.json each) + index/summaries.
-    probe_dir = scan_dir / "probe"
-    probe_files = sorted(p.name for p in probe_dir.glob("*.json")) if probe_dir.is_dir() else []
-    return templates.TemplateResponse(
-        request,
-        "export.html",
-        {
-            "scan_id": scan_id,
-            "formats": sorted(formats.keys()),
-            "raw_files": raw_files,
-            "probe_files": probe_files,
-            "page_title": f"Export — {scan_id}",
-        },
-    )
 
 
 @router.get("/scan/{scan_id}/export/bundle.zip")
