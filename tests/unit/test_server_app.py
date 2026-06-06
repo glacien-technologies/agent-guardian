@@ -223,15 +223,17 @@ def test_transcripts_view_404_for_unknown_finding(client: TestClient, store: Sca
     assert resp.status_code == 404
 
 
-def test_export_index_renders_format_links(client: TestClient, store: ScanStore) -> None:
+def test_export_index_page_is_removed(client: TestClient, store: ScanStore) -> None:
+    """The standalone Export / Files listing page was retired (2026-06-06).
+
+    Operator feedback: the "Download all" zip on the scan page replaces the
+    per-file listing, so ``GET /scan/{id}/export`` no longer resolves to a page
+    (only the ``/export/bundle.zip`` + ``/export/{fmt}`` download routes remain).
+    """
     scan = _make_scan()
     _persist(store, scan)
-    # Write a couple of pretend report files.
-    (store.scan_dir(scan.id) / "report.sarif").write_text("{}", encoding="utf-8")
-    (store.scan_dir(scan.id) / "report.junit").write_text("<x/>", encoding="utf-8")
     resp = client.get(f"/scan/{scan.id}/export")
-    assert resp.status_code == 200
-    assert "/sarif" in resp.text or "report.sarif" in resp.text
+    assert resp.status_code == 404
 
 
 def test_export_download_serves_file(client: TestClient, store: ScanStore) -> None:
@@ -257,23 +259,6 @@ def test_export_download_404_when_report_missing(client: TestClient, store: Scan
     # SARIF was never written.
     resp = client.get(f"/scan/{scan.id}/export/sarif")
     assert resp.status_code == 404
-
-
-def test_export_index_lists_raw_logs_and_probe_records(
-    client: TestClient, store: ScanStore
-) -> None:
-    scan = _make_scan()
-    _persist(store, scan)
-    sd = store.scan_dir(scan.id)
-    (sd / "run.log").write_text("hello log", encoding="utf-8")
-    (sd / "events.jsonl").write_text('{"kind":"x"}\n', encoding="utf-8")
-    (sd / "probe").mkdir()
-    (sd / "probe" / "goal-hijack-agent.json").write_text('{"agent":"goal-hijack-agent"}', "utf-8")
-    resp = client.get(f"/scan/{scan.id}/export")
-    assert resp.status_code == 200
-    assert "run.log" in resp.text
-    assert "events.jsonl" in resp.text
-    assert "goal-hijack-agent.json" in resp.text
 
 
 def test_raw_download_serves_whitelisted_file(client: TestClient, store: ScanStore) -> None:
@@ -342,14 +327,6 @@ def test_export_bundle_zip_contains_reports_probes_and_raw(
 def test_export_bundle_zip_404_for_unknown_scan(client: TestClient, store: ScanStore) -> None:
     resp = client.get("/scan/does-not-exist/export/bundle.zip")
     assert resp.status_code == 404
-
-
-def test_export_index_links_bundle_zip(client: TestClient, store: ScanStore) -> None:
-    scan = _make_scan()
-    _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}/export")
-    assert resp.status_code == 200
-    assert f"/scan/{scan.id}/export/bundle.zip" in resp.text
 
 
 def test_home_lists_completed_scans(client: TestClient, store: ScanStore) -> None:
@@ -447,14 +424,6 @@ def test_analytics_view_has_no_forbidden_open_branding(client: TestClient) -> No
     resp = client.get("/analytics")
     assert resp.status_code == 200
     assert "<em>Open</em>" not in resp.text
-
-
-def test_export_view_has_no_stale_m13_footnote(client: TestClient, store: ScanStore) -> None:
-    scan = _make_scan()
-    _persist(store, scan)
-    resp = client.get(f"/scan/{scan.id}/export")
-    assert resp.status_code == 200
-    assert "lands in M13" not in resp.text
 
 
 # ---------------------------------------------------------------------------

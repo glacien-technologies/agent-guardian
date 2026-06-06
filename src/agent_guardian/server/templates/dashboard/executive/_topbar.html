@@ -23,9 +23,6 @@
       <span class="exec-topbar__download-icon" aria-hidden="true">↓</span>
       Download all
     </a>
-    {# Secondary: the per-file Export / Files listing, for grabbing one artifact. #}
-    <a class="exec-topbar__export" href="/scan/{{ scan_id }}/export"
-       aria-label="Browse individual reports, probe records and raw logs">Files</a>
     <div class="exec-topbar__locality exec-topbar__locality--{{ 'local' if is_local else 'hosted' }}"
          aria-label="{{ locality_label }}">
       <span class="exec-topbar__locality-dot" aria-hidden="true"></span>
