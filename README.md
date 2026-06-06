@@ -11,9 +11,9 @@ Open-source, local-first adversarial security testing for AI agents, RAG systems
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/glacien-technologies/agent-guardian/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/glacien-technologies/agent-guardian/badge)](https://api.securityscorecards.dev/projects/github.com/glacien-technologies/agent-guardian)
-[![Docs](https://img.shields.io/badge/docs-agentguardian.io-1f6feb.svg)](https://agentguardian.io)
+[![Docs](https://img.shields.io/badge/docs-docs.agentguardian.io-1f6feb.svg)](https://docs.agentguardian.io)
 
-[Docs](https://agentguardian.io) · [Quickstart](./docs/quickstart.mdx) · [Try the demo agent](./docs/start-here/try-the-demo-agent.mdx) · [Attack library](./docs/attacks/overview.mdx) · [CI/CD](./docs/ci-cd/overview.mdx) · [Sample report](./docs/_assets/sample-report.html)
+[Docs](https://docs.agentguardian.io) · [Quickstart](https://docs.agentguardian.io/quickstart) · [Try the demo agent](https://docs.agentguardian.io/start-here/try-the-demo-agent) · [Attack library](https://docs.agentguardian.io/attacks/overview) · [CI/CD](https://docs.agentguardian.io/ci-cd/overview) · [Sample report](./docs/_assets/sample-report.html)
 
 </div>
 
@@ -257,7 +257,7 @@ The exact probe-to-standard mapping lives in [`docs/reports/owasp-mapping.mdx`](
 
 ## Docs
 
-- [Docs home](https://agentguardian.io)
+- [Docs home](https://docs.agentguardian.io)
 - [`docs/quickstart.mdx`](./docs/quickstart.mdx)
 - [`docs/attacks/overview.mdx`](./docs/attacks/overview.mdx)
 - [`docs/concepts/target-adapters.mdx`](./docs/concepts/target-adapters.mdx)

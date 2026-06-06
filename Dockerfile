@@ -22,7 +22,8 @@
 # CMD ["--help"]
 # ---------------------------------------------------------------------------
 
-FROM python@sha256:67e6a6053f28db54c173ad84a4bf88fdd4e338793dc09672e87ee38e3b1b378c  # 3.11-slim
+# Pinned python:3.11-slim base image.
+FROM python:3.11-slim@sha256:67e6a6053f28db54c173ad84a4bf88fdd4e338793dc09672e87ee38e3b1b378c
 
 # Native libraries required by WeasyPrint for PDF report rendering, plus
 # default fonts so generated PDFs look reasonable out of the box.

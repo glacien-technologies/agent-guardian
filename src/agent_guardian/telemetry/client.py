@@ -1,6 +1,6 @@
 """Collector HTTP client.
 
-Posts telemetry envelopes to ``telemetry.agentguardian.ai/v1/events``
+Posts telemetry envelopes to ``telemetry.agentguardian.io/v1/events``
 (configurable via ``AGENT_GUARDIAN_TELEMETRY_URL``). Failures are
 swallowed and the envelope is left in the local buffer for retry.
 
@@ -43,7 +43,7 @@ __all__ = ["DEFAULT_COLLECTOR_URL", "TelemetryClient", "emit"]
 
 _LOG = logging.getLogger(__name__)
 
-DEFAULT_COLLECTOR_URL = "https://telemetry.agentguardian.ai/v1/events"
+DEFAULT_COLLECTOR_URL = "https://telemetry.agentguardian.io/v1/events"
 
 # Env-var opt-out values. Kept in sync with prompt._ENV_OFF -- duplicated
 # here so the emit() fast-path does not need to import the prompt

@@ -93,7 +93,7 @@ def _validate_sarif(payload: dict[str, Any]) -> None:
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"
-SARIF_INFO_URI = "https://agentguardian.ai"
+SARIF_INFO_URI = "https://agentguardian.io"
 
 
 _SEVERITY_TO_LEVEL = {

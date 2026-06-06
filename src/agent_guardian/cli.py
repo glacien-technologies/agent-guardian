@@ -1733,7 +1733,7 @@ def calibrate(
                             "driver": {
                                 "name": "agent-guardian-calibrate",
                                 "version": __version__,
-                                "informationUri": "https://agentguardian.ai",
+                                "informationUri": "https://agentguardian.io",
                                 "rules": [],
                             }
                         },

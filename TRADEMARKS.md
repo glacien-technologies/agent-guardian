@@ -15,7 +15,7 @@ The Apache License, Version 2.0, Section 6, explicitly does not grant trademark 
 
 - Ship a derivative product or service called "AgentGuardian" (including suffixed variants such as "AgentGuardian Pro", "AgentGuardian Enterprise", "AgentGuardian for X") without prior written permission from Glacien Pte. Ltd.
 - Use the AgentGuardian logo or trade dress in your derivative work.
-- Use the AIVSS badge endpoint at `badge.agentguardian.ai` for derivative tools.
+- Use the AIVSS badge endpoint at `badge.agentguardian.io` for derivative tools.
 - Imply that your fork is endorsed or maintained by Glacien.
 
 ## Contact

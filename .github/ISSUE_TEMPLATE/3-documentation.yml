@@ -14,7 +14,7 @@ body:
     attributes:
       label: Documentation location
       description: Paste the page URL or repo path.
-      placeholder: "https://agentguardian.io/docs/... or docs/quickstart.mdx"
+      placeholder: "https://docs.agentguardian.io/... or docs/quickstart.mdx"
     validations:
       required: true
   - type: dropdown

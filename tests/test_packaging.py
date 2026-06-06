@@ -11,10 +11,9 @@ What we pin:
    matrix), and the documented keyword expansion (prompt-injection, jailbreak,
    ai-safety, ai-security, llm-security, genai-security, sarif, cybersecurity,
    ai-red-team).
-2. **URLs reach actual content** — the ``[project.urls]`` block must NOT point
-   at ``agentguardian.ai`` until the apex DNS lands; every URL slot must be a
-   ``github.com/glacien-technologies/agent-guardian`` path (or a documented
-   working alias). Shipping dead URLs to PyPI is the single most common
+2. **URLs reach actual content** — the ``[project.urls]`` block must point
+   at the canonical product and documentation domains, or at GitHub source
+   paths for repository-owned artifacts. Shipping dead URLs to PyPI is the single most common
    "the package looks abandoned" complaint we want to head off.
 3. **Runtime dependency hygiene** — declared base deps must actually be
    imported somewhere under ``src/agent_guardian`` (no ghost deps that pad the
@@ -182,18 +181,17 @@ def test_discoverability_keywords_present() -> None:
 # --------------------------------------------------------------------- urls
 
 
-def test_project_urls_have_no_dead_apex_dns() -> None:
-    """``agentguardian.ai`` apex DNS has not landed; PyPI must not list it."""
+def test_project_urls_have_no_retired_domain() -> None:
+    """PyPI metadata must not list the retired ``agentguardian.ai`` domain."""
 
     urls = _load_pyproject()["project"]["urls"]  # type: ignore[index]
     assert isinstance(urls, dict)
     for slot, url in urls.items():
         assert isinstance(url, str)
-        # Allow only working targets: github.com paths or the Cloud Run mirror.
-        # Once apex DNS propagates, this test will need updating to allow it.
+        # Allow only working targets.
         assert "agentguardian.ai" not in url, (
-            f"[project.urls].{slot} still points at unresolved apex DNS: {url}. "
-            f"Repoint to github.com or the Cloud Run docs URL until DNS lands."
+            f"[project.urls].{slot} still points at retired apex DNS: {url}. "
+            f"Use agentguardian.io, docs.agentguardian.io, or GitHub."
         )
         assert url.startswith(("https://github.com/", "https://")), (
             f"[project.urls].{slot} is not a working URL: {url}"

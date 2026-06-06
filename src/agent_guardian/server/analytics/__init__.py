@@ -1,7 +1,7 @@
 """Server-side telemetry aggregator.
 
 This is the code that runs on Glacien's collector backend at
-``telemetry.agentguardian.ai``. It's shipped in the OSS package so
+``telemetry.agentguardian.io``. It's shipped in the OSS package so
 anyone can audit what would happen with the data they send (Standard
 §9.4 -- telemetry transparency).
 
