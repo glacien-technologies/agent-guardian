@@ -252,6 +252,7 @@ or duplicate spellings).
 | `--publish` | Publish the scan bundle to the configured dashboard. |
 | `--debug` | Enable debug-level logging. |
 | `--debug-format` | Debug-log format (`text` / `json`). |
+| `--log-agent-io` | Troubleshooting: write every agent's full LLM I/O (recon, commander, attacker, judge — system prompt + input + raw output) to the scan's `run.log`. Secrets are redacted. Equivalent to `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`. |
 | `--no-serve` | Do not auto-start the local dashboard during the scan. |
 | `--serve-grace-seconds` | How long to keep the local dashboard alive after the scan finishes. |
 | `--open` / `--no-open` | Open the scan-specific dashboard URL in the default browser once the scan completes. Auto-skipped under CI / SSH / non-TTY environments. |
