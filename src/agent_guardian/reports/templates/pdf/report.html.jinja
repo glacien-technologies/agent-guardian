@@ -291,7 +291,7 @@
        * ------------------------------------------------------------------ */
       .kpi-table { width: 100%; border-collapse: separate; border-spacing: 7px 0; margin: 0.2em 0 0.4em; }
       .kpi-table td {
-        width: 16.6%;
+        width: 20%;
         vertical-align: top;
         background: var(--card);
         border: 1px solid var(--border);
@@ -407,6 +407,11 @@
       /* only the long mono URL should break mid-token; short prose values
          ("unrestricted", "none observed") must stay whole. */
       .deftable .v.mono { font-size: 8.4pt; word-break: break-word; }
+      /* the single full-width scan-plan key/value table is long (~19 rows);
+         tighten rows so Section 1 + Section 2 fit together on page 2. */
+      .plan-kv td { padding: 3.4px 13px; font-size: 8.6pt; }
+      .plan-kv .k { font-size: 7.4pt; }
+      .plan-kv .v.mono { font-size: 8pt; }
 
       /* two side-by-side plan tables via a layout table */
       /* fixed equal halves so the long target URL in the left table can't
@@ -563,40 +568,6 @@
         font-size: 10pt;
       }
 
-      /* ------------------------------------------------------------------ *
-       * Appendices                                                         *
-       * ------------------------------------------------------------------ */
-      .appendix { padding-top: 0.2in; }
-      .appendix h2 { font-size: 15pt; }
-      .appendix h3 { font-size: 11pt; margin: 1.1em 0 0.4em; }
-      .appendix p, .appendix li { font-size: 8.8pt; color: var(--ink-muted); line-height: 1.55; }
-      .appendix-tag {
-        font-family: "JetBrains Mono", monospace;
-        font-size: 7pt; letter-spacing: 0.2em; text-transform: uppercase;
-        color: var(--brand-strong); margin-bottom: 0.3em;
-      }
-      .map-table { width: 100%; border-collapse: collapse; background: var(--card);
-        border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 0.5em 0 1em; }
-      .map-table thead th {
-        background: var(--sunken);
-        font-family: "JetBrains Mono", monospace;
-        font-size: 6.4pt; letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--ink-muted); font-weight: 400; text-align: left;
-        padding: 7px 10px; border-bottom: 1px solid var(--border-strong);
-      }
-      .map-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 8pt; vertical-align: top; }
-      .map-table tr:last-child td { border-bottom: none; }
-      .map-table td.id { font-family: "JetBrains Mono", monospace; font-weight: 700; white-space: nowrap; }
-      .map-table .mono { font-size: 7.4pt; }
-      .receipt-table { width: 100%; border-collapse: collapse; background: var(--card);
-        border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 0.5em 0 1em; }
-      .receipt-table td { padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 8.4pt; vertical-align: top; }
-      .receipt-table tr:last-child td { border-bottom: none; }
-      .receipt-table .k {
-        width: 34%; font-family: "JetBrains Mono", monospace; font-size: 7.4pt;
-        letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted);
-      }
-      .receipt-table code { font-size: 7.8pt; color: var(--ink); }
     </style>
   </head>
   <body>
@@ -698,13 +669,6 @@
             </div>
           </td>
           <td>
-            <div class="kpi-label">Coverage</div>
-            <div class="kpi-value">{{ asi_covered }}<span class="unit"> / 10</span></div>
-            <div class="pipgrid">
-              {% for i in range(10) %}<span class="pip {{ 'on' if i < asi_covered else '' }}"></span>{% endfor %}
-            </div>
-          </td>
-          <td>
             <div class="kpi-label">Cost</div>
             <div class="kpi-value"><span class="unit">$</span>{{ "%.2f"|format(cost) }}</div>
             <div class="kpi-sub">{{ "{:,}".format(scan.tokens_total) if scan.tokens_total is defined and scan.tokens_total else '—' }} tok</div>
@@ -718,55 +682,46 @@
       </table>
     </section>
 
-    <!-- ======================== 3. OVERVIEW ======================== -->
+    <!-- ======================== 2. OVERVIEW ======================== -->
     <section class="block">
       <div class="section-head">
         <div class="eyebrow">Section 02 — Overview</div>
-        <h2>Scan plan &amp; attack-surface coverage</h2>
-        <p class="lede">The configuration that produced this assessment, followed by per-category exposure across the OWASP ASI Top&nbsp;10.</p>
+        <h2>Scan plan &amp; configuration</h2>
+        <p class="lede">The exact configuration that produced this assessment, plus the receipt needed to reproduce and verify it.</p>
       </div>
 
-      {# scan-plan definition tables, two columns via layout table #}
-      <table class="plan-grid">
-        <td>
-          <div class="plan-cap">Target &amp; Mode</div>
-          <table class="deftable">
-            <tr><td class="k">Target</td><td class="v mono">{{ scan.target_ref }}</td></tr>
-            <tr><td class="k">Mode</td><td class="v">{{ scan.target_mode }}</td></tr>
-            <tr><td class="k">Run mode</td><td class="v">{{ scan.mode | default('—', true) }}</td></tr>
-            <tr><td class="k">Tier</td><td class="v">{{ scan.tier.value }}</td></tr>
-            <tr><td class="k">Reachable</td><td class="v">{{ '✓ reachable' if scored else '—' }}</td></tr>
-          </table>
-
-          <div class="plan-cap">Models</div>
-          <table class="deftable">
-            <tr><td class="k">Attacker</td><td class="v mono">{{ scan.engine.get('attacker', '—') if scan.engine else '—' }}</td></tr>
-            <tr><td class="k">Evaluator</td><td class="v mono">{{ scan.engine.get('evaluator', '—') if scan.engine else '—' }}</td></tr>
-            <tr><td class="k">Commander</td><td class="v mono">{{ scan.engine.get('commander', '—') if scan.engine else '—' }}</td></tr>
-          </table>
-        </td>
-        <td class="gap"></td>
-        <td>
-          <div class="plan-cap">Budget</div>
-          <table class="deftable">
-            <tr><td class="k">Wall-clock cap</td><td class="v">uncapped</td></tr>
-            <tr><td class="k">USD cap</td><td class="v">uncapped</td></tr>
-            <tr><td class="k">Actual cost</td><td class="v">${{ "%.4f"|format(cost) }}</td></tr>
-            <tr><td class="k">Tokens</td><td class="v">{{ "{:,}".format(scan.tokens_total) if scan.tokens_total is defined and scan.tokens_total else '—' }}</td></tr>
-          </table>
-
-          <div class="plan-cap">Safety Guards</div>
-          <table class="deftable">
-            <tr><td class="k">RoE blocklist</td><td class="v">none observed</td></tr>
-            <tr><td class="k">Authorization</td><td class="v">n/a</td></tr>
-            <tr><td class="k">Egress policy</td><td class="v">unrestricted</td></tr>
-            <tr><td class="k">Output format</td><td class="v mono">json</td></tr>
-          </table>
-        </td>
+      {# single key / value scan-plan table #}
+      <table class="deftable plan-kv">
+        <tr><td class="k">Target</td><td class="v mono">{{ scan.target_ref }}</td></tr>
+        <tr><td class="k">Mode</td><td class="v">{{ scan.target_mode }}</td></tr>
+        <tr><td class="k">Reachable</td><td class="v">{{ '✓ reachable' if scored else '—' }}</td></tr>
+        <tr><td class="k">Tier</td><td class="v">{{ scan.tier.value }}</td></tr>
+        <tr><td class="k">Run mode</td><td class="v">{{ scan.mode | default('—', true) }}</td></tr>
+        <tr><td class="k">Attacker model</td><td class="v mono">{{ scan.engine.get('attacker', '—') if scan.engine else '—' }}</td></tr>
+        <tr><td class="k">Evaluator model</td><td class="v mono">{{ scan.engine.get('evaluator', '—') if scan.engine else '—' }}</td></tr>
+        <tr><td class="k">Commander model</td><td class="v mono">{{ scan.engine.get('commander', '—') if scan.engine else '—' }}</td></tr>
+        <tr><td class="k">Wall-clock cap</td><td class="v">uncapped</td></tr>
+        <tr><td class="k">USD cap</td><td class="v">uncapped</td></tr>
+        <tr><td class="k">Actual cost</td><td class="v">${{ "%.4f"|format(cost) }}</td></tr>
+        <tr><td class="k">Tokens</td><td class="v">{{ "{:,}".format(scan.tokens_total) if scan.tokens_total is defined and scan.tokens_total else '—' }}</td></tr>
+        <tr><td class="k">RoE blocklist</td><td class="v">none observed</td></tr>
+        <tr><td class="k">Authorization</td><td class="v">n/a</td></tr>
+        <tr><td class="k">Egress policy</td><td class="v">unrestricted</td></tr>
+        <tr><td class="k">Output format</td><td class="v mono">json</td></tr>
+        <tr><td class="k">Scan ID</td><td class="v mono">{{ scan.id }}</td></tr>
+        <tr><td class="k">Scan timestamp</td><td class="v mono">{{ scan.created_at.isoformat() if scan.created_at.isoformat is defined else scan.created_at }}</td></tr>
+        <tr><td class="k">Signature algorithm</td><td class="v mono">Ed25519 + HMAC-SHA256</td></tr>
       </table>
+      <p class="subtle" style="font-size:7.6pt; margin-top:0.5em;">Signed JSON report — verify the Ed25519 + HMAC-SHA256 signatures with <code>agent-guardian verify &lt;report.json&gt;</code>.</p>
+    </section>
 
-      {# ASI coverage table #}
-      <div class="plan-cap" style="margin-top:0.5em;">OWASP ASI Top 10 — Attack-Surface Coverage</div>
+    <!-- ============ ATTACK-SURFACE COVERAGE (own page) ============ -->
+    <section class="block" style="page-break-before: always;">
+      <div class="section-head">
+        <div class="eyebrow">OWASP ASI Top 10 — Attack-Surface Coverage</div>
+        <h2>Attack-surface coverage</h2>
+        <p class="lede">Per-category resilience across the ten OWASP Agentic Security Initiative threat classes.</p>
+      </div>
       <table class="asi-table">
         <thead>
           <tr>
@@ -796,8 +751,8 @@
       <p class="subtle" style="font-size:7.6pt; margin-top:0.4em;">Resilience score is the per-category AIVSS sub-score (0–100, higher = stronger / less exposed). The score bar turns amber below 70 and red below 40 to flag weaker resilience.</p>
     </section>
 
-    <!-- ======================== 4. FINDINGS ======================== -->
-    <section class="block">
+    <!-- ================= 3. FINDINGS (own page) ================= -->
+    <section class="block" style="page-break-before: always;">
       <div class="section-head">
         <div class="eyebrow">Section 03 — Findings</div>
         <h2>Confirmed exposures</h2>
@@ -845,13 +800,13 @@
             <div class="evidence">
               <div class="ev-label">Attacker prompt</div>
               {% if f.trigger_prompt %}
-                <div class="ev-block prompt">{{ f.trigger_prompt | truncate(700, True, ' …') }}</div>
+                <div class="ev-block prompt">{{ f.trigger_prompt }}</div>
               {% else %}
                 <div class="ev-block prompt ev-empty">No prompt captured (PII-redacted scan).</div>
               {% endif %}
               <div class="ev-label">Target response</div>
               {% if f.trigger_response %}
-                <div class="ev-block response">{{ f.trigger_response | truncate(700, True, ' …') }}</div>
+                <div class="ev-block response">{{ f.trigger_response }}</div>
               {% else %}
                 <div class="ev-block response ev-empty">No response captured (PII-redacted scan).</div>
               {% endif %}
@@ -867,86 +822,6 @@
       {% endif %}
     </section>
 
-    <!-- ======================== 5. APPENDICES ======================== -->
-    <section class="block appendix">
-      <div class="section-head">
-        <div class="appendix-tag">Appendix A</div>
-        <h2>Triple-framework mapping</h2>
-      </div>
-      <p>
-        AgentGuardian tags every finding against three industry frameworks: OWASP ASI 2026
-        (Top 10 for Agentic Applications), MITRE ATLAS v5.4.0 (Adversarial Threat Landscape for
-        AI Systems), and the CSA Agentic AI Red Teaming Guide (Huang et al., 2025-05-28). The
-        mapping below shows the primary ATLAS techniques and CSA categories each ASI bucket exercises.
-      </p>
-      <table class="map-table">
-        <thead>
-          <tr><th style="width:10%">ASI</th><th style="width:22%">OWASP category</th><th>Primary MITRE ATLAS technique(s)</th><th style="width:24%">CSA category</th></tr>
-        </thead>
-        <tbody>
-          <tr><td class="id">ASI01</td><td>Goal Hijack</td><td><span class="mono">AML.T0051</span>, <span class="mono">AML.T0054</span></td><td>goal-instruction-manipulation</td></tr>
-          <tr><td class="id">ASI02</td><td>Tool Misuse</td><td><span class="mono">AML.T0053</span>, Publish Poisoned AI Agent Tool</td><td>authorization-control-hijacking</td></tr>
-          <tr><td class="id">ASI03</td><td>Privilege Abuse</td><td><span class="mono">AML.T0049</span>, Escape to Host</td><td>authorization-control-hijacking</td></tr>
-          <tr><td class="id">ASI04</td><td>Supply Chain</td><td><span class="mono">AML.T0010</span>, <span class="mono">AML.T0011</span></td><td>supply-chain-dependency</td></tr>
-          <tr><td class="id">ASI05</td><td>Code Execution</td><td><span class="mono">AML.T0050</span>, Escape to Host</td><td>agent-critical-system-interaction</td></tr>
-          <tr><td class="id">ASI06</td><td>Memory Poisoning</td><td><span class="mono">AML.T0070</span>, AI Agent Context Poisoning</td><td>memory-context-manipulation</td></tr>
-          <tr><td class="id">ASI07</td><td>Agent-to-Agent (A2A)</td><td><span class="mono">AML.T0048</span>, Inter-Agent Manipulation</td><td>multi-agent-exploitation</td></tr>
-          <tr><td class="id">ASI08</td><td>Cascading Failures</td><td><span class="mono">AML.T0034</span>, <span class="mono">AML.T0029</span></td><td>impact-chain-blast-radius</td></tr>
-          <tr><td class="id">ASI09</td><td>Trust Exploitation</td><td><span class="mono">AML.T0051.000</span>, <span class="mono">AML.T0052</span></td><td>checker-out-of-the-loop</td></tr>
-          <tr><td class="id">ASI10</td><td>Rogue Agents (drift)</td><td><span class="mono">AML.T0046</span>, AI Agent Goal Drift</td><td>hallucination-exploitation</td></tr>
-        </tbody>
-      </table>
-
-      <div class="section-head" style="margin-top:1.4em;">
-        <div class="appendix-tag">Appendix B</div>
-        <h2>Methodology &amp; bibliography</h2>
-      </div>
-      <p>
-        Each of the 10 ASI specialist agents extends its seed probes dynamically using four
-        published adversarial strategies. Selection is bandit-driven: AgentGuardian's strategy
-        router keeps the per-(target, ASI) success rates in shared memory and biases later
-        attempts toward strategies that succeeded earlier in the run.
-      </p>
-      <ul>
-        <li><strong>TAP</strong> — Tree of Attacks with Pruning; tree-of-thoughts jailbreak with on-topic pruning (Mehrotra et al., 2024).</li>
-        <li><strong>Crescendo</strong> — Multi-turn benign-to-harmful ramp (Russinovich et al., 2025).</li>
-        <li><strong>MAD-MAX</strong> — Multi-agent adversarial dialogue with mode exploitation (Schoepf et al., 2025).</li>
-        <li><strong>PAIR</strong> — Prompt Automatic Iterative Refinement; attacker LLM critiques and rewrites (Chao et al., 2023).</li>
-      </ul>
-      <p>
-        The Layer-2 judge LLM evaluates each transcript against a category-specific rubric and
-        emits a structured verdict; agreement with human reviewers is calibrated against the
-        evaluation harness described in Chen et al. (2024). For the full bibliography and
-        per-probe references see <code>docs/arxiv-preprint.md</code>.
-      </p>
-
-      <div class="section-head" style="margin-top:1.4em;">
-        <div class="appendix-tag">Appendix C</div>
-        <h2>Reproducibility receipt</h2>
-      </div>
-      <p>
-        This receipt records the configuration that produced the scan above. Re-running
-        AgentGuardian with these inputs against the same target should produce a deterministic
-        AIVSS score (modulo non-determinism in third-party LLM endpoints).
-      </p>
-      <table class="receipt-table">
-        <tr><td class="k">Scan ID</td><td><code>{{ scan.id }}</code></td></tr>
-        <tr><td class="k">Scan timestamp</td><td><code>{{ scan.created_at.isoformat() if scan.created_at.isoformat is defined else scan.created_at }}</code></td></tr>
-        <tr><td class="k">Target mode</td><td><code>{{ scan.target_mode }}</code></td></tr>
-        <tr><td class="k">Target ref</td><td><code>{{ scan.target_ref }}</code></td></tr>
-        <tr><td class="k">Tier</td><td><code>{{ scan.tier.value }}</code></td></tr>
-        <tr><td class="k">Run mode</td><td><code>{{ scan.mode | default('—', true) }}</code></td></tr>
-        <tr><td class="k">Commander model</td><td><code>{{ scan.engine.get('commander', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
-        <tr><td class="k">Attacker model</td><td><code>{{ scan.engine.get('attacker', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
-        <tr><td class="k">Evaluator model</td><td><code>{{ scan.engine.get('evaluator', 'not recorded') if scan.engine else 'not recorded' }}</code></td></tr>
-        <tr><td class="k">Signature algorithm</td><td><code>Ed25519 + HMAC-SHA256</code></td></tr>
-      </table>
-      <p>
-        This PDF is a visualisation of the canonical JSON report. Use
-        <code>agent-guardian verify &lt;report.json&gt;</code> to verify the HMAC-SHA256 and
-        Ed25519 signatures on the source artefact.
-      </p>
-    </section>
 
   </body>
 </html>
