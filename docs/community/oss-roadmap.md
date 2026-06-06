@@ -22,7 +22,9 @@ It tracks the **current 90-day thematic cycle** only.
 - **Time-bucketed, not version-locked.** We do not promise that a given item ships in v1.1, v1.2, or by any specific date. We commit to the *theme* for the cycle.
 - **Cycle length: ~90 days.** The current cycle refreshes on each tier-3 governance review per [`governance.md`](governance.md). Previous cycles' deliverables are visible in [`CHANGELOG.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md) and the git log.
 - **No timelines inside the cycle.** Within a cycle, items move from "Now" to "Next" to "Later" as they get picked up, but there is no week-by-week schedule.
-- **Influence the roadmap.** Open a [Discussion in Ideas](https://github.com/glacien-technologies/agent-guardian/discussions/categories/ideas), file an issue with the `kind/roadmap-candidate` label, or — most effective — ship a PR.
+- **Influence the roadmap.** File a
+  [roadmap-candidate issue](https://github.com/glacien-technologies/agent-guardian/issues?q=is%3Aissue%20label%3Akind%2Froadmap-candidate)
+  or — most effective — ship a PR.
 
 ## Current cycle — 2026-Q3 (June – August 2026)
 
