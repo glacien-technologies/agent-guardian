@@ -383,14 +383,20 @@
         overflow: hidden;
       }
       .deftable td {
-        padding: 7px 12px;
+        padding: 7px 13px;
         border-bottom: 1px solid var(--border);
         vertical-align: top;
         font-size: 9pt;
+        line-height: 1.4;
       }
       .deftable tr:last-child td { border-bottom: none; }
       .deftable .k {
-        width: 38%;
+        /* shrink the key column to its content (one line) so labels never wrap
+           and values start right after — no fixed % that's too wide for short
+           labels yet too narrow for "WALL-CLOCK CAP". */
+        width: 1%;
+        white-space: nowrap;
+        padding-right: 20px;
         color: var(--ink-muted);
         font-family: "JetBrains Mono", monospace;
         font-size: 7.6pt;
@@ -398,12 +404,16 @@
         text-transform: uppercase;
       }
       .deftable .v { color: var(--ink); }
-      .deftable .v.mono { font-size: 8.4pt; }
+      /* only the long mono URL should break mid-token; short prose values
+         ("unrestricted", "none observed") must stay whole. */
+      .deftable .v.mono { font-size: 8.4pt; word-break: break-word; }
 
       /* two side-by-side plan tables via a layout table */
-      .plan-grid { width: 100%; border-collapse: collapse; }
-      .plan-grid > td { vertical-align: top; padding: 0; border: none; }
-      .plan-grid .gap { width: 14px; padding: 0; border: none; }
+      /* fixed equal halves so the long target URL in the left table can't
+         steal width from the right table (which made its values wrap). */
+      .plan-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .plan-grid > td { width: 49%; vertical-align: top; padding: 0; border: none; }
+      .plan-grid .gap { width: 2%; padding: 0; border: none; }
       .plan-cap {
         font-family: "JetBrains Mono", monospace;
         font-size: 7pt; letter-spacing: 0.16em; text-transform: uppercase;
