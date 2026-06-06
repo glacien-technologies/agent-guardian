@@ -3345,6 +3345,17 @@ def scan(
             "jq-clean. Has no effect without --debug."
         ),
     ),
+    log_agent_io: bool = typer.Option(
+        False,
+        "--log-agent-io",
+        help=(
+            "Troubleshooting: write the FULL per-agent I/O to run.log — the "
+            "attacker's meta-prompt + generated attack, and the judge's full "
+            "prompt + raw verdict + reasoning. Grep 'agent-io [attacker]' / "
+            "'agent-io [judge]'. Verbose; equivalent to setting "
+            "AGENT_GUARDIAN_LOG_FULL_PROMPTS=1."
+        ),
+    ),
     no_serve: bool = typer.Option(
         False,
         "--no-serve",
@@ -3433,6 +3444,12 @@ def scan(
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG) from None
+    # --log-agent-io: opt into full per-agent I/O in run.log (attacker
+    # meta-prompt + generated attack, judge prompt + raw verdict + reasoning).
+    # Drives the same gate the model clients read, so it must be set before the
+    # swarm starts making calls.
+    if log_agent_io:
+        os.environ["AGENT_GUARDIAN_LOG_FULL_PROMPTS"] = "1"
     # Clamp debug level to 0/1/2 — Typer counts unbounded but we only
     # publish two non-zero modes (truncated / full).
     debug_level = max(0, min(2, int(debug)))

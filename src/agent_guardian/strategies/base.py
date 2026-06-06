@@ -37,6 +37,7 @@ Two helpers in this module are reused by every concrete strategy:
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from abc import ABC, abstractmethod
@@ -46,6 +47,9 @@ from typing import Literal
 
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.logging_setup import log_agent_io
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "PAIR_ROLEPLAY_PREAMBLE",
@@ -384,6 +388,15 @@ async def attacker_complete(
     first_text = first_resp.text.strip()
 
     if not is_attacker_refusal(first_text):
+        log_agent_io(
+            _LOG,
+            "attacker",
+            model=model,
+            input_text=prompt,
+            output_text=first_text,
+            attempt=1,
+            refused=False,
+        )
         return first_text, False
 
     retry_req = LLMRequest(
@@ -400,7 +413,17 @@ async def attacker_complete(
     retry_resp = await llm.complete(retry_req)
     retry_text = retry_resp.text.strip()
 
-    if not is_attacker_refusal(retry_text):
+    refused = is_attacker_refusal(retry_text)
+    log_agent_io(
+        _LOG,
+        "attacker",
+        model=model,
+        input_text=RED_TEAM_RETRY_PREAMBLE + prompt,
+        output_text=retry_text,
+        attempt=2,
+        refused=refused,
+    )
+    if not refused:
         return retry_text, False
     # Surface the second refusal text so the caller can persist it for forensics.
     return retry_text, True
