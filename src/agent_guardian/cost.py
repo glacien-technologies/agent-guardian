@@ -194,7 +194,7 @@ def estimate_scan_cost(
     commander_model: str,
     attacker_model: str,
     evaluator_model: str,
-    total_tokens: int = 2_000_000,
+    total_tokens: int = 10_000_000,
 ) -> float:
     """Estimate the USD cost of a single scan.
 

@@ -40,7 +40,7 @@ def test_swarm_budget_defaults() -> None:
     # --budget-seconds or by setting the field in their contract file.
     b = SwarmBudgetConfig()
     assert b.wall_seconds is None
-    assert b.max_total_tokens == 2_000_000
+    assert b.max_total_tokens == 10_000_000
 
 
 def test_swarm_config_defaults() -> None:

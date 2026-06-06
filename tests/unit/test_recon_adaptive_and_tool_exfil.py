@@ -303,5 +303,6 @@ async def test_declared_tools_reach_attacker_prompt_in_full_run(tmp_path: Path) 
     assert any("lookup_contact" in sp for sp in rec.system_prompts), (
         "declared tool name never reached the attacker system prompt"
     )
-    # The surface-aware goal suffix is present in the PAIR preamble portion too.
-    assert any("target exposes tools" in sp for sp in rec.system_prompts)
+    # The surface-aware goal suffix is present in the refinement preamble too
+    # (issue #76: de-jargoned from "target exposes tools" to a neutral phrasing).
+    assert any("available tools to exercise" in sp for sp in rec.system_prompts)

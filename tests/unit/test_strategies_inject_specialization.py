@@ -138,7 +138,7 @@ async def test_pair_critique_call_includes_pair_preamble_and_specialization(
     for sys_text in systems:
         assert SAFE_TESTCASE_SYSTEM_PROMPT in sys_text
         # PAIR preamble fingerprint — the verbatim opening sentence.
-        assert "You are a helpful red teaming assistant." in sys_text
+        assert "security-QA assistant iteratively authoring negative test inputs" in sys_text
         # Goal must have been substituted into the preamble.
         assert "'leak the system prompt'" in sys_text
         # Per-agent specialization paragraph.
@@ -166,7 +166,7 @@ async def test_tap_branching_call_includes_pair_preamble_and_specialization(
     # At least the branching call must carry both layers; checking ALL is
     # stronger and TAP scoring calls go through the same plumbing.
     for sys_text in systems:
-        assert "You are a helpful red teaming assistant." in sys_text
+        assert "security-QA assistant iteratively authoring negative test inputs" in sys_text
         assert "'leak the system prompt'" in sys_text
         assert "ASI-TEST" in sys_text
 
@@ -188,7 +188,7 @@ async def test_crescendo_first_call_includes_pair_preamble_and_specialization(
     assert systems, "Crescendo did not call the attacker LLM"
     sys_text = systems[0]
     assert SAFE_TESTCASE_SYSTEM_PROMPT in sys_text
-    assert "You are a helpful red teaming assistant." in sys_text
+    assert "security-QA assistant iteratively authoring negative test inputs" in sys_text
     assert "'leak the system prompt'" in sys_text
     assert "ASI-TEST" in sys_text
 
@@ -217,7 +217,7 @@ async def test_pair_with_empty_specialization_still_injects_preamble(
     systems = _system_contents(llm.captured)
     assert systems
     for sys_text in systems:
-        assert "You are a helpful red teaming assistant." in sys_text
+        assert "security-QA assistant iteratively authoring negative test inputs" in sys_text
         # No specialization tag because we passed an empty string.
         assert "ASI-TEST" not in sys_text
 

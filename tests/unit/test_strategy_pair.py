@@ -41,7 +41,7 @@ def _scripted_llm() -> StubLLM:
     return (
         StubScript()
         .respond_to(
-            "rewrite it to be more effective",
+            "more effectively press the boundary",
             json.dumps({"critique": "too direct", "rewrite": "smarter attack"}),
         )
         .default("{}")
@@ -135,7 +135,7 @@ async def test_malformed_json_falls_back_to_corpus_seed(tmp_path: Path) -> None:
     """
     llm = (
         StubScript()
-        .respond_to("rewrite it to be more effective", "not json {")
+        .respond_to("more effectively press the boundary", "not json {")
         .default("{}")
         .build()
     )
@@ -241,7 +241,9 @@ async def test_non_json_prose_does_not_reach_target(tmp_path: Path) -> None:
     the next attack. The strategy must instead reach into the corpus seeds.
     """
     prose = "Sure! Here is a great rewrite for you to try."
-    llm = StubScript().respond_to("rewrite it to be more effective", prose).default("{}").build()
+    llm = (
+        StubScript().respond_to("more effectively press the boundary", prose).default("{}").build()
+    )
     ctx = _ctx(tmp_path, llm=llm, seeds=["CORPUS-PROBE-X", "CORPUS-PROBE-Y"])
     p = PAIRStrategy(ctx)
     first = await p.generate_next([], None)
@@ -265,14 +267,14 @@ def _capture_refine_msg(captured: list[object]) -> str:
     """Return the user-message content of the PAIR refine call (escalate or refine).
 
     Both the escalate and defend directives carry the ``Judge verdict on your
-    previous attack:`` block, so we key on that to find the refine round.
+    previous test input:`` block, so we key on that to find the refine round.
     """
     from agent_guardian.llm.base import LLMRequest
 
     for req in captured:
         assert isinstance(req, LLMRequest)
         for msg in req.messages:
-            if msg.role == "user" and "Judge verdict on your previous attack" in msg.content:
+            if msg.role == "user" and "Judge verdict on your previous test input" in msg.content:
                 return msg.content
     return ""
 
@@ -324,7 +326,7 @@ async def test_pair_reads_judge_verdict_from_both_ctx_and_history_metadata(
 
     refine_user_msg = _capture_refine_msg(captured)
     assert refine_user_msg, "expected a refine call to the attacker LLM"
-    assert "Judge verdict on your previous attack: exploited" in refine_user_msg
+    assert "Judge verdict on your previous test input: exploited" in refine_user_msg
     assert "leaked system prompt" in refine_user_msg
     # Escalate branch — must instruct capitalize, not rewrite-away.
     assert "do NOT rewrite away from this" in refine_user_msg
@@ -359,9 +361,9 @@ async def test_pair_escalate_branch_on_exploited(tmp_path: Path) -> None:
     assert second.rationale.startswith("pair-escalate")
     msg = _capture_refine_msg(captured)
     assert "Escalate this foothold" in msg
-    # The escalate branch must NOT carry the "rewrite it to be more effective"
+    # The escalate branch must NOT carry the "more effectively press the boundary"
     # defend phrasing.
-    assert "rewrite it to be more effective" not in msg
+    assert "more effectively press the boundary" not in msg
 
 
 async def test_pair_refine_branch_on_defended(tmp_path: Path) -> None:
@@ -392,7 +394,7 @@ async def test_pair_refine_branch_on_defended(tmp_path: Path) -> None:
     assert isinstance(second, NextPrompt)
     assert second.rationale.startswith("pair-refine")
     msg = _capture_refine_msg(captured)
-    assert "rewrite it to be more effective" in msg
+    assert "more effectively press the boundary" in msg
     assert "Escalate this foothold" not in msg
 
 

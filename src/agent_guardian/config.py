@@ -49,7 +49,7 @@ class SwarmBudgetConfig(BaseModel):
     # clock cap via the CLI flag (--budget-seconds) or by setting this
     # field explicitly in the contract file.
     wall_seconds: int | None = Field(default=None, ge=1)
-    max_total_tokens: int = Field(default=2_000_000, ge=1)
+    max_total_tokens: int = Field(default=10_000_000, ge=1)
     model_config = ConfigDict(extra="forbid")
 
 

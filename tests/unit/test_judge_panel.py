@@ -30,10 +30,20 @@ from agent_guardian.models.judge import JudgeVerdict
 
 
 class _FakeJudge:
-    def __init__(self, verdict: str, confidence: float, reasoning: str = "fake") -> None:
+    def __init__(
+        self,
+        verdict: str,
+        confidence: float,
+        reasoning: str = "fake",
+        *,
+        followup_probe: str = "",
+        evidence: str = "",
+    ) -> None:
         self._v = verdict
         self._c = confidence
         self._r = reasoning
+        self._fp = followup_probe
+        self._ev = evidence
 
     async def verdict(
         self,
@@ -43,7 +53,13 @@ class _FakeJudge:
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
     ) -> JudgeVerdict:
-        return JudgeVerdict(verdict=self._v, confidence=self._c, reasoning=self._r)  # type: ignore[arg-type]
+        return JudgeVerdict(
+            verdict=self._v,  # type: ignore[arg-type]
+            confidence=self._c,
+            reasoning=self._r,
+            followup_probe=self._fp,
+            evidence=self._ev,
+        )
 
 
 class _RaisingJudge:
@@ -365,3 +381,27 @@ async def test_panel_emits_structured_dispatch_info_line(
     # No raw __repr__ leakage.
     assert " object at 0x" not in line
     assert "<Judge" not in line
+
+
+async def test_panel_forwards_followup_probe_from_best_majority_seat() -> None:
+    """Issue #76 (B1) — the panel must forward the verify drill-down probe +
+    evidence from the highest-confidence majority-agreeing seat, so the run
+    loop's verify-on-needs_followup lane can arm. Previously the panel dropped
+    followup_probe and 0 needs_followup turns ever resolved."""
+    specs = _specs(["openai", "anthropic", "google"])
+    panel = PanelJudge(specs)
+    _patch_panel(
+        panel,
+        [
+            _FakeJudge("needs_followup", 0.6, followup_probe="weak probe", evidence="e1"),
+            _FakeJudge(
+                "needs_followup", 0.9, followup_probe="strong drill-down probe", evidence="e2"
+            ),
+            _FakeJudge("defended", 0.5),  # minority — must not win the forward
+        ],
+    )
+    v = await panel.verdict("p", "r")
+    assert v.verdict == "needs_followup"
+    # Highest-confidence majority seat (0.9) supplies the forwarded fields.
+    assert v.followup_probe == "strong drill-down probe"
+    assert v.evidence == "e2"

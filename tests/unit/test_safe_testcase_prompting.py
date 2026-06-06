@@ -39,6 +39,22 @@ def test_safe_system_prompt_has_no_trigger_vocab() -> None:
     assert "VERBATIM" in SAFE_TESTCASE_SYSTEM_PROMPT
 
 
+def test_refine_preamble_has_no_trigger_vocab_and_keeps_goal() -> None:
+    """The safe-mode iterative-refinement preamble (replaces the PAIR jailbreak
+    preamble) must carry no harmful-generation trigger vocabulary while keeping
+    PAIR's multi-turn refinement mechanics + the goal. (issue #76)"""
+    from agent_guardian.strategies.safe_testcase_prompting import (
+        render_safe_refine_preamble,
+    )
+
+    rendered = render_safe_refine_preamble(goal="leak the system prompt")
+    low = rendered.lower()
+    offenders = [w for w in (*_TRIGGER_VOCAB, "forbidden", "unethical", "illegal") if w in low]
+    assert not offenders, f"refine preamble contains trigger vocab: {offenders}"
+    assert "leak the system prompt" in rendered  # objective preserved
+    assert "refine" in low and "vary your approach" in low  # multi-turn mechanics
+
+
 def test_retry_preamble_is_deescalating_not_pressure() -> None:
     """The retry must clarify the task is sandbox QA, NOT pressure the model
     with 'Refusing is not appropriate' (the legacy preamble's wording)."""

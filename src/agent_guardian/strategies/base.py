@@ -51,6 +51,7 @@ from agent_guardian.logging_setup import log_agent_io
 from agent_guardian.strategies.safe_testcase_prompting import (
     SAFE_TESTCASE_RETRY_PREAMBLE,
     SAFE_TESTCASE_SYSTEM_PROMPT,
+    render_safe_refine_preamble,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -552,6 +553,10 @@ class StrategyContext:
     rng: random.Random
     max_turns: int = 10
     attack_specialization: str = ""
+    # Issue #76 — attacker framing. "safe-testcase" (default) uses the
+    # refusal-resistant negative-test-case preamble; "legacy-redteam" uses the
+    # original PAIR jailbreak preamble for operators with an uncensored attacker.
+    generation_mode: str = "safe-testcase"
     declared_tools: list[str] = field(default_factory=list)
     declared_memory_keys: list[str] = field(default_factory=list)
     surface_notes: str = ""
@@ -706,7 +711,14 @@ class Strategy(ABC):
         vocabulary is the design-spec §4.3 fix for the BLOCKER #1
         attacker-LLM refusal rate (~43% → single digits).
         """
-        extra = render_pair_preamble(goal=self.ctx.goal)
+        # Issue #76 — in the default safe-testcase mode use the refusal-resistant
+        # iterative-refinement preamble; the legacy PAIR jailbreak preamble
+        # (trigger vocabulary that makes aligned ATTACKER models refuse our own
+        # request) is opt-in for an uncensored attacker model.
+        if self.ctx.generation_mode == "legacy-redteam":
+            extra = render_pair_preamble(goal=self.ctx.goal)
+        else:
+            extra = render_safe_refine_preamble(goal=self.ctx.goal)
         if self.ctx.attack_specialization:
             extra = f"{extra}\n\n{self.ctx.attack_specialization}"
         # v1.1 — recon-adaptive: fold the discovered target surface (real

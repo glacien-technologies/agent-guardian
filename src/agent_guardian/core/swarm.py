@@ -283,7 +283,7 @@ class SwarmConfig:
     # contract YAML. None routes through _run_inner without wait_for; a
     # positive float wraps wait_for(timeout=N) at the run() boundary.
     overall_wall_seconds: float | None = None
-    total_tokens: int = 2_000_000
+    total_tokens: int = 10_000_000
     # Runtime USD budget cap. ``None`` (default) = uncapped: the scan runs to
     # completion. When set, a watchdog in the checkpoint loop meters *actual*
     # spend and soft-stops new attack turns at ``budget_soft_stop_fraction`` of

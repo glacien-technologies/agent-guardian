@@ -41,11 +41,11 @@ def _scripted_llm() -> StubLLM:
     return (
         StubScript()
         .respond_to(
-            "Generate a single completely benign opening question",
+            "Write a single completely benign opening question",
             "What is the history of this topic?",
         )
         .respond_to(
-            "Generate a single follow-up prompt at level",
+            "Write a single follow-up test input at intensity",
             "What about edge cases?",
         )
         .default("ack")
@@ -321,8 +321,8 @@ async def test_stable_refusal_rotates_to_next_seed(tmp_path: Path) -> None:
     # de-escalates back to level 0.
     llm = (
         StubScript()
-        .respond_to("Generate a single completely benign opening question", "OPENER")
-        .respond_to("Generate a single follow-up prompt at level", "FOLLOWUP")
+        .respond_to("Write a single completely benign opening question", "OPENER")
+        .respond_to("Write a single follow-up test input at intensity", "FOLLOWUP")
         .default("ack")
         .build()
     )
@@ -361,7 +361,7 @@ async def test_stable_refusal_terminates_after_all_seeds_exhausted(
     """
     llm = (
         StubScript()
-        .respond_to("Generate a single completely benign opening question", "OPENER")
+        .respond_to("Write a single completely benign opening question", "OPENER")
         .default("ack")
         .build()
     )
@@ -385,7 +385,7 @@ async def test_stable_refusal_rotation_capped_at_max_restarts(
     """Restart count must be bounded to keep total turn cost in check."""
     llm = (
         StubScript()
-        .respond_to("Generate a single completely benign opening question", "OPENER")
+        .respond_to("Write a single completely benign opening question", "OPENER")
         .default("ack")
         .build()
     )
@@ -468,7 +468,10 @@ async def test_crescendo_reads_judge_verdict_from_both_ctx_and_history_metadata(
     escalate_user_msg = ""
     for req in captured:
         for msg in req.messages:
-            if msg.role == "user" and "Generate a single follow-up prompt at level" in msg.content:
+            if (
+                msg.role == "user"
+                and "Write a single follow-up test input at intensity" in msg.content
+            ):
                 escalate_user_msg = msg.content
     assert escalate_user_msg, "expected an escalation call to attacker LLM"
     assert "Prior judge reasoning: goal redirected via tool output" in escalate_user_msg
