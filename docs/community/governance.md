@@ -10,7 +10,7 @@ That said: every line of code, every probe, and every documented practice is Apa
 
 ## Roles
 
-There are four maintainer roles. Per [`MAINTAINERS.md`](MAINTAINERS.md):
+There are four maintainer roles. Per [`MAINTAINERS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md):
 
 - **Tech Lead** — sets architectural direction; final say on engine, agent, and strategy design.
 - **Security Lead** — owns SECURITY.md, the disclosure history, and the security-sensitive code paths listed in `.github/CODEOWNERS`.
@@ -50,7 +50,7 @@ We commit to public, written rationale for any tier-3 decision so that future co
 
 ## Code of Conduct enforcement
 
-The [Contributor Covenant v2.1](CODE_OF_CONDUCT.md) applies in all project spaces (GitHub, Discord, project email). Reports go to `conduct@glacien.ai` and are handled by a rotating Code of Conduct committee per the file's escalation path.
+The [Contributor Covenant v2.1](https://github.com/glacien-technologies/agent-guardian/blob/main/CODE_OF_CONDUCT.md) applies in all project spaces (GitHub, Discord, project email). Reports go to `conduct@glacien.ai` and are handled by a rotating Code of Conduct committee per the file's escalation path.
 
 ## Removal of maintainers
 
@@ -65,7 +65,7 @@ Removal is recorded in `MAINTAINERS.md` and the quarterly review minutes.
 
 ## Forks and downstream distributions
 
-Forks are encouraged. The Apache-2.0 licence permits redistribution. The [`TRADEMARKS.md`](TRADEMARKS.md) policy applies — the AgentGuardian name and mark are Glacien property and may not be used in fork names or marketing without permission.
+Forks are encouraged. The Apache-2.0 licence permits redistribution. The [`TRADEMARKS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/TRADEMARKS.md) policy applies — the AgentGuardian name and mark are Glacien property and may not be used in fork names or marketing without permission.
 
 ## This document
 

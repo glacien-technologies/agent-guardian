@@ -8,9 +8,8 @@ AgentGuardian is community-supported open source. There is no paid support tier 
 |----------------------------------------------|------------------------------------------------------------------------------------------|
 | To report a bug                              | [GitHub Issues — Bug report](https://github.com/glacien-technologies/agent-guardian/issues/new?template=1-bug-report.yml) |
 | To request a feature                         | [GitHub Issues — Feature request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=2-feature-request.yml) |
-| To propose a new probe                       | [GitHub Issues — Probe request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=4-probe-request.yml) |
-| To propose a new framework adapter           | [GitHub Issues — Adapter request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=5-adapter-request.yml) |
-| To fix or extend the docs                    | [GitHub Issues — Documentation](https://github.com/glacien-technologies/agent-guardian/issues/new?template=6-documentation.yml) |
+| To propose a new probe or adapter            | [GitHub Issues — Feature request](https://github.com/glacien-technologies/agent-guardian/issues/new?template=2-feature-request.yml) |
+| To fix or extend the docs                    | [GitHub Issues — Documentation](https://github.com/glacien-technologies/agent-guardian/issues/new?template=3-documentation.yml) |
 | To chat with maintainers in real time        | [Discord](https://discord.gg/h4FRgxvr) — probe and adapter design, informal Q&A, roadmap chat |
 | To ask a usage question                      | [GitHub Discussions › Q&A](https://github.com/glacien-technologies/agent-guardian/discussions/categories/q-a) |
 | To share what you built                      | [GitHub Discussions › Show and tell](https://github.com/glacien-technologies/agent-guardian/discussions/categories/show-and-tell) |
@@ -21,7 +20,7 @@ AgentGuardian is community-supported open source. There is no paid support tier 
 
 Maintainers triage issues on a best-effort weekly cadence. Security reports are prioritised
 per the SLA in [SECURITY.md](./SECURITY.md). Feature requests are reviewed against the
-[ROADMAP](./ROADMAP.md) at each minor-version planning cycle.
+[`OSS roadmap`](./docs/community/oss-roadmap.md) at each minor-version planning cycle.
 
 ## Commercial support
 

@@ -90,7 +90,7 @@ body:
     attributes:
       label: Confirmations
       options:
-        - label: I searched existing Issues, Discussions, and `ROADMAP.md`.
+        - label: I searched existing Issues, Discussions, and the OSS roadmap.
           required: true
         - label: This request does not disclose a private security vulnerability.
           required: true

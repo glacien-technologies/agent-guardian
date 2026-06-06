@@ -22,7 +22,7 @@ find — and fix — failure modes in agents *they own or are explicitly authori
 ## Reporting misuse
 
 If you believe AgentGuardian is being used against systems without authorisation, or to produce
-real-world harm, please contact `security@glacien.tech` (PGP key in [SECURITY.md](./SECURITY.md)).
+real-world harm, please contact `security@glacien.tech` (PGP key in [SECURITY.md](https://github.com/glacien-technologies/agent-guardian/blob/main/SECURITY.md)).
 
 ## Responsible disclosure of new probes
 
