@@ -168,7 +168,7 @@ body.exec-body {
   color: var(--exec-ink);
 }
 .exec-topbar__right { display: flex; align-items: center; gap: 1rem; }
-/* "Download all" CTA — filled brand pill; the sole artifact action in the
+/* "Export scan data" CTA — filled brand pill; the sole artifact action in the
    topbar (the standalone Export / Files listing page was retired). */
 .exec-topbar__download {
   display: inline-flex;
