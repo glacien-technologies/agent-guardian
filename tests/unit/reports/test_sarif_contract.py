@@ -140,14 +140,22 @@ def test_no_audit_means_no_invocations() -> None:
 def test_no_audit_leaves_properties_unchanged() -> None:
     log = emit_sarif(make_scan())
     props = log["runs"][0]["properties"]
-    assert set(props) == {
+    # Posture + run config + honesty signals + version pins are always present.
+    assert {
         "aivss",
         "band",
         "tier",
         "asi_scores",
+        "target_ref",
+        "mode",
+        "evaluation_mode",
+        "mode_authoritative",
         "aivss_formula_version",
         "probe_library_version",
-    }
+    } <= set(props)
+    # But with no scan.audit, the contract-provenance keys must NOT leak in.
+    assert "contract_sha256" not in props
+    assert "authorization_ref" not in props
 
 
 def test_audit_none_is_byte_for_byte_identical_to_baseline() -> None:

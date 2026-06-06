@@ -30,8 +30,23 @@ from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import Severity
+from agent_guardian.reports.scan_props import finding_property_bag, scan_property_bag
 
 __all__ = ["emit_codeclimate", "write_codeclimate"]
+
+# Scan-level posture keys folded into every entry's open ``properties`` bag —
+# GitLab Code Quality is a flat array with no scan-level slot, so posture must
+# ride along per-entry (GitLab ignores unknown keys; other consumers can read them).
+_SCAN_POSTURE_KEYS = (
+    "scan_id",
+    "aivss",
+    "band",
+    "tier",
+    "mode",
+    "mode_authoritative",
+    "evaluation_mode",
+    "coverage_grade",
+)
 
 # AgentGuardian severity -> GitLab Code Quality severity. GitLab's allowed
 # values are info | minor | major | critical | blocker. We reserve ``blocker``
@@ -62,7 +77,9 @@ def _fingerprint(finding: Finding) -> str:
     ``probe_id``/``ASI``/``severity`` keeps a recurring finding collapsed to a
     single widget row across merge-request updates.
     """
-    key = f"{finding.probe_id}|{finding.asi.value}|{finding.severity.value}"
+    # Include ``success`` so a successful compromise does NOT collapse into the
+    # same widget row as a merely-reachable weakness of the same probe/ASI/severity.
+    key = f"{finding.probe_id}|{finding.asi.value}|{finding.severity.value}|{finding.success}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -74,13 +91,18 @@ def _location(finding: Finding) -> dict[str, Any]:
     }
 
 
-def _entry(finding: Finding) -> dict[str, Any]:
+def _entry(finding: Finding, scan_posture: dict[str, Any]) -> dict[str, Any]:
+    # GitLab reads only the top-level keys below; the open ``properties`` bag
+    # carries the evidence chain (finding_id / verdict_v2 / success / CSA / MITRE)
+    # + scan posture so a non-GitLab consumer can recover the full context.
+    properties = {**finding_property_bag(finding), **scan_posture}
     return {
         "description": finding.summary,
         "check_name": finding.probe_id,
         "fingerprint": _fingerprint(finding),
         "severity": _cq_severity(finding),
         "location": _location(finding),
+        "properties": properties,
     }
 
 
@@ -92,8 +114,10 @@ def emit_codeclimate(scan: Scan, *, redact: bool = True) -> list[dict[str, Any]]
     captured secrets into the MR widget). The entries are sorted by fingerprint
     so the output is deterministic across runs.
     """
+    bag = scan_property_bag(scan)
+    scan_posture = {k: bag[k] for k in _SCAN_POSTURE_KEYS if bag.get(k) is not None}
     findings = [redact_finding(f, enabled=redact) for f in scan.findings]
-    entries = [_entry(f) for f in findings]
+    entries = [_entry(f, scan_posture) for f in findings]
     entries.sort(key=lambda e: e["fingerprint"])
     return entries
 

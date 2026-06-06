@@ -32,6 +32,7 @@ from agent_guardian.core.redact import redact_finding
 from agent_guardian.models.asi import asi_description
 from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
+from agent_guardian.reports.scan_props import scan_property_bag
 
 __all__ = [
     "SARIF_INFO_URI",
@@ -146,7 +147,13 @@ def _build_result(finding: Finding) -> dict[str, Any]:
         "success": finding.success,
         "attempt_count": finding.attempt_count,
         "finding_id": finding.id,
+        # Evidence-chain fields (non-sensitive — no trigger text): the judge
+        # verdict + corroboration signals + timestamp for post-hoc analysis.
+        "evidence_types": list(finding.evidence_types or []),
+        "created_at": finding.created_at.isoformat() if finding.created_at else None,
     }
+    if finding.verdict_v2 is not None:
+        props["verdict_v2"] = finding.verdict_v2
     # M2 Pattern 10 — surface the PoV reference + reliability when present so
     # downstream evidence-pack tooling can locate the reproducer. Omitted for
     # v1 findings that predate the PoV harness (fields are None).
@@ -241,10 +248,10 @@ def emit_sarif(scan: Scan, *, redact: bool = True, validate: bool = True) -> dic
         "automationDetails": {"id": scan.id},
         "results": [_build_result(f) for f in findings],
         "properties": {
-            "aivss": scan.aivss,
-            "band": scan.band.value,
-            "tier": scan.tier.value,
-            "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
+            # Full scan-level context (target / mode / engine / cost / tokens /
+            # duration / honesty signals + posture) so a SARIF consumer can
+            # recover the run without the parallel JSON report.
+            **scan_property_bag(scan),
             "aivss_formula_version": scan.aivss_formula_version,
             "probe_library_version": scan.probe_library_version,
         },

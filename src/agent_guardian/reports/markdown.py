@@ -119,6 +119,12 @@ def _top_findings_section(findings: list[Finding], top_n: int) -> str:
     if not ranked:
         return "## Top findings\n\n_No findings — this scan came back clean._\n"
     body: list[str] = [f"## Top {len(ranked)} findings\n"]
+    # Don't let "top N" silently hide the rest — say how many were elided.
+    if len(findings) > len(ranked):
+        body.append(
+            f"_Showing the top {len(ranked)} of {len(findings)} findings by severity. "
+            f"See the JSON or PDF report for the full inventory._\n"
+        )
     for finding in ranked:
         # HTML-escape every finding-supplied string: the layout embeds them in
         # raw <details>/<summary>/<code> HTML, so a <script> in a summary must
@@ -126,7 +132,7 @@ def _top_findings_section(findings: list[Finding], top_n: int) -> str:
         summary = _html_escape(finding.summary)
         probe_id = _html_escape(finding.probe_id)
         finding_id = _html_escape(finding.id)
-        body.append(
+        block = [
             f"<details>\n"
             f"<summary>{_SEVERITY_BADGE[finding.severity]} "
             f"<code>{probe_id}</code> — {summary}</summary>\n\n"
@@ -138,9 +144,24 @@ def _top_findings_section(findings: list[Finding], top_n: int) -> str:
             f"- **Confidence:** {finding.confidence:.2f} "
             f"&nbsp;|&nbsp; **Attempts:** {finding.attempt_count} "
             f"&nbsp;|&nbsp; **Success:** {finding.success}\n"
-            f"- **Finding ID:** `{finding_id}`\n"
-            f"</details>\n"
-        )
+        ]
+        if finding.verdict_v2:
+            block.append(f"- **Verdict:** `{_html_escape(finding.verdict_v2)}`\n")
+        if finding.evidence_types:
+            tags = ", ".join(f"`{_html_escape(t)}`" for t in finding.evidence_types)
+            block.append(f"- **Evidence types:** {tags}\n")
+        block.append(f"- **Finding ID:** `{finding_id}`\n")
+        # Triggering evidence (already PII-redacted upstream; HTML-escaped here).
+        if finding.trigger_prompt:
+            block.append(
+                f"\n**Attacker prompt**\n\n```\n{_html_escape(finding.trigger_prompt)}\n```\n"
+            )
+        if finding.trigger_response:
+            block.append(
+                f"\n**Target response**\n\n```\n{_html_escape(finding.trigger_response)}\n```\n"
+            )
+        block.append("</details>\n")
+        body.append("".join(block))
     return "\n".join(body) + "\n"
 
 
@@ -170,16 +191,33 @@ def _audit_section(audit: dict[str, Any]) -> str:
 def emit_markdown(scan: Scan, *, top_n: int = TOP_FINDINGS_DEFAULT, redact: bool = True) -> str:
     """Render a Markdown report string for ``scan``."""
     findings = [redact_finding(f, enabled=redact) for f in scan.findings]
+    models = scan.engine or {}
     parts = [
         f"# AgentGuardian scan `{scan.id}`\n",
         f"{_badge_line(scan)}\n",
         f"- **Target:** `{scan.target_ref}` ({scan.target_mode})\n",
+        f"- **Mode:** `{scan.mode}` "
+        f"&nbsp;|&nbsp; **Evaluation:** `{scan.evaluation_mode}` "
+        f"&nbsp;|&nbsp; **Tokens:** `{scan.tokens_total:,}`\n",
+        f"- **Models:** attacker `{models.get('attacker', '—')}` "
+        f"· evaluator `{models.get('evaluator', '—')}` "
+        f"· commander `{models.get('commander', '—')}`\n",
         f"- **Duration:** {scan.duration_seconds:.2f}s "
         f"&nbsp;|&nbsp; **Cost:** ${scan.cost_usd:.4f}\n",
         f"- **Probe library:** `{scan.probe_library_version}` "
         f"&nbsp;|&nbsp; **AIVSS formula:** `{scan.aivss_formula_version}`\n",
         f"- **Generated:** `{scan.created_at.isoformat()}`\n",
     ]
+    # The single most important honesty signal: a non-authoritative run (stub /
+    # fast / early-stop) must not read as a gate-able posture.
+    if not scan.mode_authoritative:
+        parts.append(
+            "\n> [!IMPORTANT]\n"
+            "> This scan is **non-authoritative** — the run mode or evaluator was "
+            "not exhaustive (e.g. a FAST/SMART early-stop or a stub evaluator), so "
+            "the AIVSS score must not be used as a release gate. Re-run with "
+            "`--mode full` and a real model for an authoritative assessment.\n"
+        )
     undertested_notice = _undertested_badge_line(scan)
     if undertested_notice:
         parts.append("\n")
