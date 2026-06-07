@@ -40,11 +40,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # build artefacts back out — the image just runs the installed console
 # script.
 COPY . /tmp/agent-guardian
-RUN pip install --no-cache-dir uv \
+# Install uv from a hash-pinned requirements file (Scorecard PinnedDependenciesID).
+COPY .github/requirements/docker-bootstrap.txt /tmp/docker-bootstrap.txt
+# `pip install dist/*.whl` installs THIS project from a locally-built wheel — it
+# is not a PyPI download and cannot carry a stable PyPI hash, so its Scorecard
+# PinnedDependenciesID alert is dismissed as a local build artifact. Its runtime
+# dependencies resolve from PyPI here exactly as before this change (fully
+# hash-pinning the runtime closure is a separate, larger hardening step).
+RUN pip install --require-hashes --no-deps -r /tmp/docker-bootstrap.txt \
     && cd /tmp/agent-guardian \
     && uv build \
     && pip install dist/*.whl \
-    && rm -rf /tmp/agent-guardian /root/.cache
+    && rm -rf /tmp/agent-guardian /root/.cache /tmp/docker-bootstrap.txt
 
 # Run as a non-root user with a writable HOME for the local cache.
 RUN useradd -m -u 1000 ag
