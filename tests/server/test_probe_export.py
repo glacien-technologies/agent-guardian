@@ -47,8 +47,8 @@ def _write_scan(tmp_path: Path) -> Path:
     scan_dir.mkdir()
     turns = [
         _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 1, "defended", "I cannot do that."),
-        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 2, "info_leak", _LONG_RESPONSE),
-        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 3, "info_leak", "More leaked data."),
+        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 2, "exploited", _LONG_RESPONSE),
+        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 3, "exploited", "More leaked data."),
     ]
     (scan_dir / "memory.jsonl").write_text(
         "\n".join(_reflection_line(t) for t in turns) + "\n", encoding="utf-8"
@@ -78,8 +78,8 @@ def test_build_groups_turns_by_agent_and_rolls_up_worst_verdict(tmp_path: Path) 
     assert exp["agent"] == "identity-leak-agent"
     assert exp["asi_category"] == "ASI03"
     assert exp["turn_count"] == 3
-    # Worst-case wins — a single info_leak turn is never hidden behind defended.
-    assert exp["verdict"] == "info_leak"
+    # Worst-case wins — a single exploited turn is never hidden behind defended.
+    assert exp["verdict"] == "exploited"
     assert exp["best_evidence_turn"] == 2
     assert len(exp["turns"]) == 3
     # Turns are ordered by turn number, each carrying its own number + probe id.
@@ -104,7 +104,7 @@ def test_write_persists_one_file_per_agent(tmp_path: Path) -> None:
     f = probe_dir / "identity-leak-agent.json"
     assert f.is_file()
     data = json.loads(f.read_text(encoding="utf-8"))
-    assert data["verdict"] == "info_leak"
+    assert data["verdict"] == "exploited"
     assert data["turn_count"] == 3
     # Full response survived the round-trip to disk untruncated.
     assert _LONG_RESPONSE in f.read_text(encoding="utf-8")
@@ -118,9 +118,7 @@ def test_filename_is_filesystem_safe(tmp_path: Path) -> None:
     # Agent names are already safe; guard slashes anyway.
     scan_dir = tmp_path / "cli-fs"
     scan_dir.mkdir()
-    tr = _turn(
-        "fuzzing-agent", "ASI02", "ASI02-FUZZ-TYPE-01-mutant-fuzz", 1, "weakness_observed", "x"
-    )
+    tr = _turn("fuzzing-agent", "ASI02", "ASI02-FUZZ-TYPE-01-mutant-fuzz", 1, "vulnerable", "x")
     (scan_dir / "memory.jsonl").write_text(_reflection_line(tr) + "\n", encoding="utf-8")
     probe_dir = write_probe_exports(scan_dir)
     assert (probe_dir / "fuzzing-agent.json").is_file()

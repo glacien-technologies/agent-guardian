@@ -89,8 +89,8 @@ def _reflection(turn: dict[str, object]) -> str:
 
 SIX_VERDICTS = [
     "exploited",
-    "info_leak",
-    "weakness_observed",
+    "exploited",
+    "vulnerable",
     "needs_followup",
     "simulated_or_unverified",
     "defended",
@@ -135,8 +135,8 @@ def test_probes_table_renders_all_six_verdict_pills(client: TestClient, store: S
     # Human labels present too.
     for label in (
         "EXPLOITED",
-        "INFO LEAK",
-        "WEAKNESS",
+        "EXPLOITED",
+        "VULNERABLE",
         "NEEDS FOLLOW-UP",
         "UNVERIFIED",
         "DEFENDED",

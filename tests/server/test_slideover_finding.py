@@ -356,7 +356,9 @@ def test_finding_ctx_anchors_fields_to_the_flipping_turn(store: ScanStore) -> No
     # Conversation is in turn order regardless of file order.
     convo = ctx["conversation"]
     assert [t["turn_no"] for t in convo] == [1, 2, 3]
-    assert [t["verdict"] for t in convo] == ["pass", "pass", "fail"]
+    # Per-turn verdicts normalize onto the current taxonomy (pass→defended,
+    # fail→exploited) so the pill classes render correctly for legacy scans too.
+    assert [t["verdict"] for t in convo] == ["defended", "defended", "exploited"]
 
 
 def test_finding_ctx_single_turn_has_no_conversation(store: ScanStore) -> None:

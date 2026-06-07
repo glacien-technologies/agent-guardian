@@ -42,7 +42,7 @@ def _seed(scan_dir: Path) -> None:
     scan_dir.mkdir(parents=True, exist_ok=True)
     rows = [
         _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 1, "defended"),
-        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 2, "info_leak"),
+        _turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 2, "exploited"),
         # recon: no verdict → must be skipped by the summariser.
         {"agent": "recon-agent", "asi_category": "", "turn": 1, "seed_id": "", "verdict": ""},
     ]
@@ -55,11 +55,11 @@ def test_build_summary_prompt_carries_turns_and_verdict() -> None:
     exp = {
         "agent": "identity-leak-agent",
         "asi_category": "ASI03",
-        "verdict": "info_leak",
+        "verdict": "exploited",
         "turns": [_turn("identity-leak-agent", "ASI03", "ASI03-PII-001", 1, "defended")],
     }
     prompt = build_summary_prompt(exp)
-    assert "info_leak" in prompt
+    assert "exploited" in prompt
     assert "ASI03" in prompt
     assert "attacker move 1" in prompt
     assert "target reply 1" in prompt
@@ -108,7 +108,7 @@ def test_probe_groups_sorted_by_asi_recon_first(tmp_path: Path) -> None:
 
     # Seed agents OUT of ASI order, including recon and two ASI09 agents.
     rows = [
-        _turn("trust-exploit-agent", "ASI09", "ASI09-TE-001", 1, "weakness_observed"),
+        _turn("trust-exploit-agent", "ASI09", "ASI09-TE-001", 1, "vulnerable"),
         _turn("goal-hijack-agent", "ASI01", "ASI01-GH-001", 1, "exploited"),
         {"agent": "recon-agent", "asi_category": "", "turn": 1, "seed_id": "", "verdict": ""},
         _turn("output-handling-agent", "ASI09", "ASI09-OH-001", 1, "exploited"),

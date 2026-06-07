@@ -97,9 +97,8 @@
              tab evidence pills. Judge v2 (M5 / Stage D) gives each verdict a
              distinct pill colour via ``exec-verdict-pill--<verdict>``. #}
           <span class="exec-verdict-pill exec-verdict-pill--{{ _verdict }}">
-            {%- if _verdict == 'fail' or _verdict == 'exploited' -%}EXPLOITED
-            {%- elif _verdict == 'info_leak' -%}INFO LEAK
-            {%- elif _verdict == 'weakness_observed' -%}WEAKNESS
+            {%- if _verdict == 'fail' or _verdict == 'exploited' or _verdict == 'info_leak' -%}EXPLOITED
+            {%- elif _verdict == 'vulnerable' -%}VULNERABLE
             {%- elif _verdict == 'needs_followup' -%}NEEDS FOLLOW-UP
             {%- elif _verdict == 'simulated_or_unverified' -%}UNVERIFIED
             {%- elif _verdict == 'pass' or _verdict == 'defended' -%}DEFENDED

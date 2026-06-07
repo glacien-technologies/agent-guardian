@@ -7,7 +7,7 @@ authoritative, **untruncated** per-probe record to disk: every turn for a probe
 (verbatim prompt, full target response, full judge reasoning) grouped from
 ``memory.jsonl``, the complete raw event stream for that probe from
 ``events.jsonl`` / ``recon_probes.jsonl``, and the worst-case rolled-up verdict
-(so a single ``info_leak`` turn is never hidden behind an earlier ``defended``).
+(so a single ``exploited`` turn is never hidden behind an earlier ``defended``).
 
 Layout written under ``<scan_dir>/probe/``::
 
@@ -41,8 +41,7 @@ _LOG = logging.getLogger(__name__)
 _VERDICT_RANK: dict[str, int] = {
     "fail": 6,
     "exploited": 6,
-    "info_leak": 5,
-    "weakness_observed": 4,
+    "vulnerable": 4,
     "simulated_or_unverified": 3,
     "inconclusive": 2,
     "needs_followup": 2,

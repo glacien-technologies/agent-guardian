@@ -499,7 +499,8 @@ def test_executive_probes_group_verdict_is_worst_case(client: TestClient, store:
     pane = _probes_pane(resp.text)
     assert pane.count('data-action="probe-row-click"') == 1
     assert "EXPLOITED" in pane
-    assert 'data-verdict="fail"' in pane
+    # Legacy "fail" normalizes onto the current taxonomy for display.
+    assert 'data-verdict="exploited"' in pane
 
 
 def test_probe_drawer_group_renders_full_conversation(client: TestClient, store: ScanStore) -> None:
@@ -584,15 +585,16 @@ def test_executive_probes_table_renders_verdict_pill_vocab(
     )
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    # Labels — one of each in the table cells.
+    # Labels — legacy seeds normalize onto the current taxonomy for display:
+    # fail→EXPLOITED, pass→DEFENDED, inconclusive→NEEDS FOLLOW-UP, ""→PENDING.
     assert "EXPLOITED" in pane
     assert "DEFENDED" in pane
-    assert "INCONCLUSIVE" in pane
+    assert "NEEDS FOLLOW-UP" in pane
     assert "PENDING" in pane
-    # Matching modifier classes — single source of truth.
-    assert "exec-verdict-pill--fail" in pane
-    assert "exec-verdict-pill--pass" in pane
-    assert "exec-verdict-pill--inconclusive" in pane
+    # Matching modifier classes carry the NORMALIZED verdict value.
+    assert "exec-verdict-pill--exploited" in pane
+    assert "exec-verdict-pill--defended" in pane
+    assert "exec-verdict-pill--needs_followup" in pane
     assert "exec-verdict-pill--unknown" in pane
 
 

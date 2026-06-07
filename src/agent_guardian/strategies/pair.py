@@ -149,8 +149,8 @@ class PAIRStrategy(Strategy):
 
         prev = history[-1]
         # Fix #3 — branch on the v2 verdict DIRECTLY (not projected through
-        # verdict_to_legacy). exploited / info_leak → ESCALATE the foothold;
-        # defended / weakness_observed → critique-and-rewrite; needs_followup /
+        # verdict_to_legacy). exploited / exploited → ESCALATE the foothold;
+        # defended / vulnerable → critique-and-rewrite; needs_followup /
         # simulated / empty → fall through to the plain refine (Stage A owns the
         # verify turn). We still render a human-readable verdict word INTO the
         # prompt text so the attacker LLM sees why it is escalating / refining.
@@ -168,14 +168,14 @@ class PAIRStrategy(Strategy):
         transcript = self._render_transcript(history, latest_response=safe_response)
 
         header = _REFINE_HEADER.format(goal=self.ctx.goal, transcript=transcript)
-        if has_verdict and v2_verdict in {"exploited", "info_leak"}:
+        if has_verdict and v2_verdict in {"exploited"}:
             directive = _REFINE_DIRECTIVE_ESCALATE.format(
                 verdict=v2_verdict,
                 confidence=ctx_confidence,
                 reasoning=ctx_reasoning,
             )
             rationale_kind = "escalate"
-        elif has_verdict and v2_verdict in {"defended", "weakness_observed"}:
+        elif has_verdict and v2_verdict in {"defended", "vulnerable"}:
             directive = _REFINE_DIRECTIVE_DEFENDED.format(
                 verdict=v2_verdict,
                 confidence=ctx_confidence,

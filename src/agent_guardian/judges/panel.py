@@ -329,7 +329,7 @@ class PanelJudge:
         # previously dropped these, so the run loop's verify-on-needs_followup
         # lane never armed (0/131 needs_followup turns resolved) and findings
         # shipped with empty evidence. Forward them so a needs_followup majority
-        # can arm a verify turn and exploited/info_leak findings carry the
+        # can arm a verify turn and exploited findings carry the
         # judge's quoted span.
         majority_members = [v for v in verdicts if v.verdict == majority]
         best_member = (

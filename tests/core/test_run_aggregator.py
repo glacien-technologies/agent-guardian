@@ -15,12 +15,11 @@ def _rec(verdict: str, confidence: float = 0.5, **extra: object) -> dict[str, ob
 
 
 def test_priority_table_order() -> None:
-    # exploited > info_leak > weakness_observed > simulated > defended >
-    # needs_followup > inconclusive.
+    # exploited > vulnerable > simulated > defended > needs_followup >
+    # inconclusive. (info_leak was merged into exploited 2026-06.)
     assert (
         VERDICT_PRIORITY["exploited"]
-        > VERDICT_PRIORITY["info_leak"]
-        > VERDICT_PRIORITY["weakness_observed"]
+        > VERDICT_PRIORITY["vulnerable"]
         > VERDICT_PRIORITY["simulated_or_unverified"]
         > VERDICT_PRIORITY["defended"]
         > VERDICT_PRIORITY["needs_followup"]
@@ -41,7 +40,7 @@ def test_picks_highest_priority_turn_not_first() -> None:
     # "EXPLOITED @ 0.60 early turn buried the real proof" failure.
     records = [
         _rec("defended", 0.9),
-        _rec("weakness_observed", 0.7),
+        _rec("vulnerable", 0.7),
         _rec("exploited", 0.95),
     ]
     res = aggregate_run_verdicts(records)
@@ -53,26 +52,26 @@ def test_picks_highest_priority_turn_not_first() -> None:
 
 def test_tie_breaks_on_highest_confidence() -> None:
     records = [
-        _rec("weakness_observed", 0.4),
-        _rec("weakness_observed", 0.8),
-        _rec("weakness_observed", 0.6),
+        _rec("vulnerable", 0.4),
+        _rec("vulnerable", 0.8),
+        _rec("vulnerable", 0.6),
     ]
     res = aggregate_run_verdicts(records)
-    assert res.run_verdict == "weakness_observed"
+    assert res.run_verdict == "vulnerable"
     assert res.best_evidence_turn == 1  # the 0.8 turn
     assert res.run_confidence == pytest.approx(0.8)
     assert res.confirmed_exploited is False
 
 
-def test_simulated_never_outranks_info_leak() -> None:
+def test_simulated_never_outranks_exploited() -> None:
     # The hard rule: a claimed-but-unverifiable side-effect (simulated, even at
-    # high confidence) must NOT bury a real observable info_leak.
+    # high confidence) must NOT bury a real observable exploited.
     records = [
         _rec("simulated_or_unverified", 0.99),
-        _rec("info_leak", 0.55),
+        _rec("exploited", 0.55),
     ]
     res = aggregate_run_verdicts(records)
-    assert res.run_verdict == "info_leak"
+    assert res.run_verdict == "exploited"
     assert res.best_evidence_turn == 1
     assert res.confirmed_exploited is True
 
