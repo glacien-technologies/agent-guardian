@@ -1752,9 +1752,9 @@ def build_dashboard_context(
             f"{_probes_agents} agent" if _probes_agents == 1 else f"{_probes_agents} agents"
         ),
         "tokens_label": _humanise_int(scan.tokens_total if scan is not None else 0),
-        "tokens_cap_label": "2 M",
+        "tokens_cap_label": "10 M",
         "tokens_pct": _fmt_pct(
-            ((scan.tokens_total / 2_000_000.0) * 100.0) if scan is not None else 0.0
+            ((scan.tokens_total / 10_000_000.0) * 100.0) if scan is not None else 0.0
         ),
         "usd_label": f"$ {scan.cost_usd:.2f}" if scan is not None else "$ 0.00",
         "usd_cap_label": "$ 5.00",

@@ -3079,6 +3079,35 @@ def _resolve_safety_row(
 # ---------------------------------------------------------------------------
 
 
+def _attacker_quality_lines(scan_result: Scan) -> list[str]:
+    """Build the scan-end attacker-quality (rejection) summary line(s).
+
+    Issue #76: surfaces attacker-LLM rejections so an operator can't mistake a
+    refusal-degraded scan for a clean one. Returns ``[]`` for a healthy scan
+    (no refusals, attacker active), one warning line when the attacker refused
+    on any turn, and an extra NON-AUTHORITATIVE sub-line when a high rejection
+    rate downgraded the scan. Pure (no I/O) so it is unit-testable.
+    """
+    rate = scan_result.attacker_rejection_rate
+    refused = scan_result.attacker_refused_turns
+    if refused <= 0 and scan_result.attacker_active:
+        return []
+    degraded = rate >= 0.30 or not scan_result.attacker_active
+    marker = "⚠ " if degraded else ""
+    lines = [
+        f"{marker}attacker quality: {rate * 100:.0f}% rejection rate "
+        f"({refused} turn(s) refused) — attacker fell back to corpus seeds; "
+        "the score reflects seed coverage, not adaptive attacks, on those turns."
+    ]
+    if degraded and scan_result.mode_authoritative is False:
+        lines.append(
+            "  → high attacker-rejection rate marked this scan NON-AUTHORITATIVE "
+            "(see banner above); consider an attacker model with weaker safety "
+            "alignment, or re-run."
+        )
+    return lines
+
+
 @app.command()
 def scan(
     target: str | None = typer.Argument(
@@ -3214,6 +3243,16 @@ def scan(
         None, "--config", help="Override the default config file location."
     ),
     seed: int = typer.Option(0, "--seed", help="RNG seed for determinism."),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turns",
+        help=(
+            "Per-agent turn cap, applied uniformly to every agent across all "
+            "strategies. Overrides the mode default (full/smart=20, fast=4). "
+            "Raise for deeper multi-turn coverage (e.g. --max-turns 30); pair "
+            "with a larger --budget-usd / token budget."
+        ),
+    ),
     goal: str | None = typer.Option(
         None,
         "--goal",
@@ -3492,6 +3531,7 @@ def scan(
                 no_tui=effective_no_tui,
                 config_path=config_path,
                 seed=seed,
+                max_turns=max_turns,
                 goal=goal,
                 mode=mode,
                 pov_gate=pov_gate,
@@ -3545,6 +3585,7 @@ async def _run_scan(
     no_tui: bool,
     config_path: Path | None,
     seed: int,
+    max_turns: int | None = None,
     goal: str | None = None,
     mode: str = "full",
     pov_gate: bool = False,
@@ -3981,6 +4022,7 @@ async def _run_scan(
             output_path=output_path,
             no_tui=no_tui,
             seed=seed,
+            max_turns=max_turns,
             goal=goal,
             mode=mode,
             pov_gate=pov_gate,
@@ -4044,6 +4086,7 @@ async def _run_scan_inner(
     output_path: Path | None,
     no_tui: bool,
     seed: int,
+    max_turns: int | None,
     goal: str | None,
     mode: str,
     pov_gate: bool,
@@ -4175,6 +4218,10 @@ async def _run_scan_inner(
         tier_override=tier_override,
         target_goal=goal,
         mode=resolved_mode,
+        # --max-turns (issue #76): when set, forces the per-agent turn cap for
+        # every agent in every mode/strategy (overrides the mode preset). When
+        # None, the mode preset / AgentBudget default (20) applies.
+        max_turns_per_agent=max_turns,
         # M2 capabilities (all default-off; flags above turn them on).
         enable_pov_gate=pov_gate or critic,
         enable_critic_rubric=critic,
@@ -4516,6 +4563,17 @@ async def _run_scan_inner(
                 await _summary_llm.aclose()
     except Exception as exc:  # pragma: no cover — defensive, never fail a scan
         typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
+    # D2 (issue #76) — seal the forensic record: write a signed manifest of the
+    # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
+    # probe/*.json so any post-hoc edit to the evidence trail is detectable
+    # (OWASP immutable-logging bar). Best-effort: never fail a scan on this.
+    try:
+        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
+
+        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
+        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
@@ -4569,6 +4627,14 @@ async def _run_scan_inner(
         "(one <agent>.json per agent — all turns + events + summary, plus index.json)",
         err=True,
     )
+
+    # Issue #76 — attacker-quality (rejection) line(s). When the attacker LLM
+    # refused on some turns (and the strategy fell back to static corpus
+    # seeds), make it impossible to miss: the headline AIVSS reflects seed
+    # coverage, not adaptive attacks, on those turns. Emitted to stderr so it
+    # never pollutes a ``--debug-format json`` stdout pipeline.
+    for _line in _attacker_quality_lines(scan_result):
+        typer.echo(_line, err=True)
 
     # QA-049 — prominent dashboard URL banner at scan-end. The plain
     # `▸ Scan … track live at <url>` line that print_scan_urls emits

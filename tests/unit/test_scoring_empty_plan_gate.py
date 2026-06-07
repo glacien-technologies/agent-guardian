@@ -124,7 +124,7 @@ def test_build_completeness_corpus_exhausted_reads_full() -> None:
     assert c.pct == 100.0
     # turns_used / turns_planned retained as informational detail.
     assert c.turns_used == 22
-    assert c.turns_planned == 4 * (cmd.config.max_turns_per_agent or 12)
+    assert c.turns_planned == 4 * (cmd.config.max_turns_per_agent or 20)
 
 
 def test_build_completeness_framework_cut_short_reduces_pct() -> None:

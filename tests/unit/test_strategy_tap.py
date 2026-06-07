@@ -277,9 +277,12 @@ async def test_attacker_refusal_synthesises_candidates_from_seeds(tmp_path: Path
 
 
 async def test_red_team_system_prompt_is_used_in_tap(tmp_path: Path) -> None:
-    """Branching call must include the red-team system message."""
+    """Branching call must include the attacker base system message
+    (issue #76: safe-testcase framing by default)."""
     from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
-    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+    from agent_guardian.strategies.safe_testcase_prompting import (
+        SAFE_TESTCASE_SYSTEM_PROMPT,
+    )
 
     captured: list[LLMRequest] = []
 
@@ -301,6 +304,6 @@ async def test_red_team_system_prompt_is_used_in_tap(tmp_path: Path) -> None:
     await tap.generate_next(history, "No.")
     # At least the branching call must carry the system prompt.
     assert any(
-        msgs[0].role == "system" and RED_TEAM_SYSTEM_PROMPT in msgs[0].content
+        msgs[0].role == "system" and SAFE_TESTCASE_SYSTEM_PROMPT in msgs[0].content
         for msgs in (req.messages for req in captured)
     )

@@ -296,6 +296,11 @@ def seeds_for_asi_with_provenance(asi: AsiCategory) -> list[ProbeSeed]:
                     severity=probe.severity.value,
                     mitre_atlas=tuple(probe.mitre_atlas),
                     csa_category=probe.csa_category.value,
+                    # D3 — thread the per-probe judging metadata through so the
+                    # judge + finding can use it (previously expected_evidence
+                    # was parsed but dropped here, i.e. dead corpus metadata).
+                    expected_evidence=probe.expected_evidence,
+                    expected_safe_behavior=probe.expected_safe_behavior,
                 )
             )
     # Phase A.A3 — log the unique MITRE technique IDs threaded through

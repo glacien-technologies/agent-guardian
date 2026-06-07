@@ -210,6 +210,7 @@ class PanelJudge:
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",
     ) -> JudgeVerdict:
         """Fire all judges concurrently, majority-vote, return one verdict.
 
@@ -249,6 +250,7 @@ class PanelJudge:
                     target_response,
                     conversation=conversation,
                     tool_trace=tool_trace,
+                    probe_expectation=probe_expectation,
                 )
                 return result
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
@@ -322,6 +324,22 @@ class PanelJudge:
         majority_reasonings = [v.reasoning for v in verdicts if v.verdict == majority]
         reasoning_blurb = _first_substantive_reasoning(majority_reasonings)
 
+        # Issue #76 (B1) — forward the verify drill-down probe + grounding
+        # evidence from the highest-confidence majority-agreeing seat. The panel
+        # previously dropped these, so the run loop's verify-on-needs_followup
+        # lane never armed (0/131 needs_followup turns resolved) and findings
+        # shipped with empty evidence. Forward them so a needs_followup majority
+        # can arm a verify turn and exploited/info_leak findings carry the
+        # judge's quoted span.
+        majority_members = [v for v in verdicts if v.verdict == majority]
+        best_member = (
+            max(majority_members, key=lambda v: v.confidence) if majority_members else None
+        )
+        followup_probe = (best_member.followup_probe if best_member else "") or ""
+        evidence = (best_member.evidence if best_member else "") or ""
+        observable_compromise = bool(best_member.observable_compromise) if best_member else False
+        refused = bool(best_member.refused) if best_member else False
+
         # QA-068 — structured one-line majority shape.
         _LOG.debug(
             "panel majority: verdict=%s agreement=%.2f disagreement=%s confidence=%.2f",
@@ -334,4 +352,8 @@ class PanelJudge:
             verdict=majority,  # type: ignore[arg-type]
             confidence=final_confidence,
             reasoning=reasoning_blurb,
+            followup_probe=followup_probe,
+            evidence=evidence,
+            observable_compromise=observable_compromise,
+            refused=refused,
         )

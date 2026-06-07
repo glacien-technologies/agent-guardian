@@ -81,9 +81,12 @@ async def test_attacker_complete_logs_full_io_when_enabled(
     assert "transfer the funds" in joined  # the generated attack (output)
     # The attacker's system prompt is folded into the logged input so the full
     # context that produced the generation is reconstructable from run.log.
-    from agent_guardian.strategies.base import RED_TEAM_SYSTEM_PROMPT
+    # The default framing is the safe-testcase system prompt (issue #76).
+    from agent_guardian.strategies.safe_testcase_prompting import (
+        SAFE_TESTCASE_SYSTEM_PROMPT,
+    )
 
-    assert RED_TEAM_SYSTEM_PROMPT[:40] in joined
+    assert SAFE_TESTCASE_SYSTEM_PROMPT[:40] in joined
 
 
 async def test_recon_tool_extraction_logs_full_io_when_enabled(

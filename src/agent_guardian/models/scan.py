@@ -138,6 +138,17 @@ class Scan(BaseModel):
     # treat such a scan as a failure rather than a pass. Defaults ``True`` so
     # existing real-model scans + fixtures are unaffected.
     scoring_valid: bool = True
+    # Issue #76 — attacker-quality provenance. ``attacker_rejection_rate`` is
+    # the fraction of judged turns on which the attacker LLM produced no real
+    # adversarial content (explicit refusal or stub/no-op) and the strategy fell
+    # back to a static corpus seed. A high rate means the scan's adaptivity was
+    # dampened by the attacker model's safety alignment, so the numeric AIVSS is
+    # not authoritative even though the evaluator was real. ``attacker_active``
+    # is ``False`` when no judged turn carried a real attack. Defaults keep older
+    # Scan JSON deserialising (rate 0.0 / active True read as a healthy scan).
+    attacker_rejection_rate: float = 0.0
+    attacker_refused_turns: int = 0
+    attacker_active: bool = True
     # v1.1 — ASI categories the scan launched but exercised so thinly that the
     # absence of findings is *not* evidence of safety: zero findings + fewer
     # than 5 judged turns + scan mode != FULL. Surfaced as a first-class

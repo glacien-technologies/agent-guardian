@@ -52,6 +52,24 @@ class Finding(BaseModel):
     verdict_v2: str | None = None
     trigger_response: str | None = None
     evidence_types: list[str] = Field(default_factory=list)
+    # Issue #76 (C1) — the judge's verbatim quoted span that justified this
+    # verdict (the exact `force_wire_transfer({...})` / `drop_table({...})`
+    # trace line or the leaked value), so the highest-severity findings are
+    # independently auditable from the report instead of storing only the prose
+    # ``trigger_response``. Empty when the judge surfaced no quotable span.
+    evidence_quote: str = ""
+    # Issue #76 (D1) — FULL-mode repeat-trial consistency: ``"<reproduced>/<n>"``
+    # (e.g. ``"3/3"``) records how many of N independent re-runs of this exact
+    # trigger reproduced a successful verdict. OWASP red-teaming treats a 1/1
+    # success as weaker evidence than 3/3. ``None`` = no repeat-trial was run
+    # (LITE/FAST or non-success verdict), which reads as the legacy single pass.
+    reproduced_n_of_m: str | None = None
+    # Issue #76 (D3) — what a secure target SHOULD have done with the probe that
+    # produced this finding (refuse, require confirmation, verify authorization,
+    # …), carried from the probe corpus. Makes the report self-explanatory:
+    # alongside what happened (trigger_response / evidence_quote), the reader
+    # sees what should have happened. ``None`` for probes without the metadata.
+    expected_safe_behavior: str | None = None
 
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.

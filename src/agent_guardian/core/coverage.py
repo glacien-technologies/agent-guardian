@@ -85,7 +85,7 @@ def _empty_coverage() -> dict[str, Any]:
 
 
 def compute_coverage_from_memory(
-    scan: Scan,
+    scan: Scan | None = None,
     *,
     memory_path: Path | None = None,
     root_dir: Path | None = None,
@@ -96,10 +96,13 @@ def compute_coverage_from_memory(
     ----------
     scan:
         The :class:`Scan` whose ``id`` is used to locate the JSONL when
-        ``memory_path`` is not provided.
+        ``memory_path`` is not provided. May be ``None`` when ``memory_path``
+        is given explicitly — the swarm finalize gate (issue #76) needs the
+        roll-up *before* the :class:`Scan` is constructed, so it passes the
+        memory path directly.
     memory_path:
         Optional explicit JSONL path (used by tests that write to a tmp
-        directory).
+        directory, and by the finalize gate).
     root_dir:
         Optional ``~/.agentguardian/scans``-style root used to derive
         ``memory_path`` from ``scan.id``.
@@ -110,7 +113,11 @@ def compute_coverage_from_memory(
         Coverage roll-up. Returns the empty shape when no memory file is
         found so callers can always emit a stable JSON key.
     """
-    path = memory_path if memory_path is not None else default_memory_path(scan.id, root_dir)
+    if memory_path is None:
+        if scan is None:
+            raise ValueError("compute_coverage_from_memory needs either scan or memory_path")
+        memory_path = default_memory_path(scan.id, root_dir)
+    path = memory_path
     if not path.exists():
         return _empty_coverage()
 
