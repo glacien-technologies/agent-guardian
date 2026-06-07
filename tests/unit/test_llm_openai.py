@@ -195,6 +195,9 @@ async def test_openai_invalid_json() -> None:
 
 @respx.mock
 async def test_openai_custom_base_url() -> None:
+    # Reviewer correction #1: ``base_url`` carries the full path prefix; the
+    # client appends only ``/chat/completions`` (NOT ``/v1/chat/completions``).
+    # A proxy override must therefore include its own ``/v1`` if it needs one.
     respx.post("https://my-proxy.example.com/v1/chat/completions").mock(
         return_value=Response(
             200,
@@ -205,9 +208,30 @@ async def test_openai_custom_base_url() -> None:
             },
         )
     )
-    llm = OpenAIClient(api_key="sk-test", base_url="https://my-proxy.example.com")
+    llm = OpenAIClient(api_key="sk-test", base_url="https://my-proxy.example.com/v1")
     resp = await llm.complete(_req())
     assert resp.text == "x"
+    await llm.aclose()
+
+
+@respx.mock
+async def test_openai_default_base_url_posts_v1_path() -> None:
+    """Regression guard for reviewer correction #1: the default OpenAI URL
+    MUST be ``https://api.openai.com/v1/chat/completions`` (not ``.../chat/...``
+    nor ``.../v1/v1/...``)."""
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "model": "gpt-4o-mini",
+            },
+        )
+    )
+    llm = OpenAIClient(api_key="sk-test")
+    await llm.complete(_req())
+    assert str(route.calls.last.request.url) == "https://api.openai.com/v1/chat/completions"
     await llm.aclose()
 
 

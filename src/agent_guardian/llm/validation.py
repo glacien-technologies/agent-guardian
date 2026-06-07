@@ -120,9 +120,21 @@ KNOWN_MODELS: Final[dict[str, tuple[str, ...]]] = {
     "vertex": (
         "gemini-2.5-flash",
         "gemini-2.5-pro",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
     ),
+    # Azure deployment names are user-defined, so there is no stable corpus to
+    # power a "did you mean" suggestion — kept empty intentionally.
+    "azure": (),
+    # OpenAI-compatible gateway catalogs rotate constantly and use
+    # vendor-namespaced ids; we do not ship a difflib corpus for them. The
+    # probe checks live existence against the gateway's ``/models`` endpoint.
+    "openrouter": (),
+    "groq": (),
+    "together": (),
+    "fireworks": (),
+    "vllm": (),
 }
 
 
@@ -174,35 +186,21 @@ def clear_cache() -> None:
 
 
 def split_spec(spec: str) -> tuple[str, str]:
-    """Split a ``"<provider>:<model>"`` spec into its parts.
+    """Split a ``"<provider>:<model>[+qualifier=value]*"`` spec into its parts.
 
-    Mirrors :func:`agent_guardian.cli.build_llm`'s parsing rules so the
-    validation probe sees the exact same provider/model pair the LLM
-    factory will see at scan time. Heuristic prefixes (``gpt-*``,
-    ``claude-*``, ``gemini-*``, ``ollama-*``) are honoured.
+    Delegates to :func:`agent_guardian.llm.registry.parse_model_spec` so the
+    validation probe sees the EXACT same provider/model pair the LLM factory
+    will see at scan time (single source of truth). Heuristic prefixes
+    (``gpt-*``, ``claude-*``, ``gemini-*``, ``ollama-*``) are honoured, and any
+    ``+qualifier=value`` tail is stripped off the model id.
 
-    Returns ``(provider, model)``. ``provider`` is lower-cased. ``"stub"``
-    and the empty string normalise to ``("stub", "")``.
+    Returns ``(provider, model)``. ``provider`` is lower-cased. ``"stub"`` and
+    the empty string normalise to ``("stub", "")``.
     """
-    raw = (spec or "stub").strip()
-    if raw.lower() == "stub" or raw == "":
-        return ("stub", "")
-    if ":" in raw:
-        provider, _, model = raw.partition(":")
-        return (provider.lower(), model)
-    lowered = raw.lower()
-    if lowered.startswith("gpt-") or lowered.startswith("o1") or lowered.startswith("o3"):
-        return ("openai", raw)
-    if lowered.startswith("claude-"):
-        return ("anthropic", raw)
-    if lowered.startswith("gemini-"):
-        return ("gemini", raw)
-    if lowered.startswith("ollama-"):
-        return ("ollama", raw)
-    # Unknown / inferable — let the LLM factory raise its own error; the
-    # validator returns ``unsupported`` so the CLI doesn't fail-fast on a
-    # spec the factory has not yet rejected.
-    return ("unknown", raw)
+    from agent_guardian.llm.registry import parse_model_spec
+
+    parsed = parse_model_spec(spec)
+    return (parsed.provider, parsed.model)
 
 
 def check_model_exists(
@@ -266,6 +264,14 @@ def check_model_exists(
         result = _probe_ollama(model, timeout_s=effective_timeout, factory=client_factory)
     elif provider == "bedrock":
         result = _probe_bedrock(model)
+    elif provider == "azure":
+        result = _probe_azure(model, timeout_s=effective_timeout, factory=client_factory)
+    elif provider in _GATEWAY_BASE_URLS:
+        result = _probe_openai_compat(
+            provider, model, timeout_s=effective_timeout, factory=client_factory
+        )
+    elif provider == "vllm":
+        result = _probe_vllm(model, timeout_s=effective_timeout, factory=client_factory)
     else:
         # Defensive — split_spec already collapses unknown shapes to
         # "unknown"; this branch only fires if a future provider is added
@@ -664,6 +670,195 @@ def _probe_bedrock(model: str) -> ModelValidationResult:
     )
 
 
+# --- Azure OpenAI -------------------------------------------------------
+
+
+def _probe_azure(
+    model: str,
+    *,
+    timeout_s: float,
+    factory: type[httpx.Client] | None,
+) -> ModelValidationResult:
+    """Azure: confirm the deployment exists at the resource endpoint.
+
+    ``model`` is the Azure *deployment name*. We GET the deployment metadata
+    on the standard dated path (reviewer correction #2):
+    ``{endpoint}/openai/deployments/{deployment}?api-version=...``. A missing
+    endpoint is a definite misconfiguration for a paid provider — fail fast
+    with ``auth_failed`` rather than deferring.
+    """
+    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    api_key = os.environ.get("AGENT_GUARDIAN_AZURE_API_KEY") or os.environ.get(
+        "AZURE_OPENAI_API_KEY"
+    )
+    use_entra = os.environ.get("AZURE_USE_ENTRA") == "1"
+    if not endpoint:
+        return ModelValidationResult(
+            valid=False,
+            status="auth_failed",
+            provider="azure",
+            model=model,
+            message=(
+                "Azure OpenAI endpoint missing. Set AZURE_OPENAI_ENDPOINT "
+                "(e.g. https://my-resource.openai.azure.com) before running the scan."
+            ),
+        )
+    if not api_key and not use_entra:
+        return ModelValidationResult(
+            valid=False,
+            status="auth_failed",
+            provider="azure",
+            model=model,
+            message=(
+                "Azure OpenAI API key missing. Set AGENT_GUARDIAN_AZURE_API_KEY or "
+                "AZURE_OPENAI_API_KEY, or enable Entra auth with AZURE_USE_ENTRA=1."
+            ),
+        )
+    if use_entra:
+        # Minting an Entra token here would require azure-identity + network;
+        # defer existence validation to scan time rather than half-probe.
+        return ModelValidationResult(
+            valid=True,
+            status="unsupported",
+            provider="azure",
+            model=model,
+            message="Azure Entra auth: deferring deployment validation to scan time.",
+        )
+    api_version = os.environ.get("AZURE_OPENAI_API_VERSION") or "2024-12-01-preview"
+    url = f"{endpoint.rstrip('/')}/openai/deployments/{model}"
+    headers = {"api-key": api_key or ""}
+    try:
+        with _new_client(factory, timeout_s=timeout_s) as client:
+            response = client.get(url, params={"api-version": api_version}, headers=headers)
+    except Exception as exc:
+        outcome = _classify_exception(exc)
+    else:
+        outcome = _classify_response(response)
+    return _finalise("azure", model, outcome)
+
+
+# --- OpenAI-compatible gateways -----------------------------------------
+
+
+# Gateway provider → fully-versioned base URL. Kept in lockstep with the
+# registry's ``_GATEWAY_PROVIDERS`` (the probe hits ``{base_url}/models``).
+_GATEWAY_BASE_URLS: Final[dict[str, str]] = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "together": "https://api.together.xyz/v1",
+    "fireworks": "https://api.fireworks.ai/inference/v1",
+}
+
+_GATEWAY_LABELS: Final[dict[str, str]] = {
+    "openrouter": "OpenRouter",
+    "groq": "Groq",
+    "together": "Together AI",
+    "fireworks": "Fireworks AI",
+}
+
+
+def _gateway_api_key(provider: str) -> str | None:
+    namespaced = os.environ.get(f"AGENT_GUARDIAN_{provider.upper()}_API_KEY")
+    if namespaced:
+        return namespaced
+    return os.environ.get(f"{provider.upper()}_API_KEY")
+
+
+def _probe_openai_compat(
+    provider: str,
+    model: str,
+    *,
+    timeout_s: float,
+    factory: type[httpx.Client] | None,
+) -> ModelValidationResult:
+    """Gateway existence check: GET ``{base_url}/models`` and look for ``model``.
+
+    The gateways expose a list endpoint (not a per-model path), so we fetch the
+    catalog once and check membership. A transient/list-parse failure downgrades
+    to ``transient`` (valid=True) so a gateway hiccup never blocks the scan.
+    """
+    base_url = _GATEWAY_BASE_URLS[provider]
+    label = _GATEWAY_LABELS.get(provider, provider)
+    api_key = _gateway_api_key(provider)
+    if not api_key:
+        return ModelValidationResult(
+            valid=False,
+            status="auth_failed",
+            provider=provider,
+            model=model,
+            message=(
+                f"{label} API key missing. Set AGENT_GUARDIAN_{provider.upper()}_API_KEY "
+                f"or {provider.upper()}_API_KEY before running the scan."
+            ),
+        )
+    url = f"{base_url}/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        with _new_client(factory, timeout_s=timeout_s) as client:
+            response = client.get(url, headers=headers)
+    except Exception as exc:
+        return _finalise(provider, model, _classify_exception(exc))
+    if response.status_code in (401, 403):
+        return _finalise(provider, model, _ProbeOutcome(status="auth_failed", detail="HTTP "))
+    if response.status_code >= 400:
+        return _finalise(
+            provider,
+            model,
+            _ProbeOutcome(status="transient", detail=f"HTTP {response.status_code}"),
+        )
+    try:
+        ids = {entry.get("id") for entry in (response.json() or {}).get("data", [])}
+    except Exception as exc:  # pragma: no cover - defensive
+        return _finalise(
+            provider, model, _ProbeOutcome(status="transient", detail=type(exc).__name__)
+        )
+    if model in ids:
+        return _finalise(provider, model, _ProbeOutcome(status="valid"))
+    return _finalise(provider, model, _ProbeOutcome(status="not_found"))
+
+
+def _probe_vllm(
+    model: str,
+    *,
+    timeout_s: float,
+    factory: type[httpx.Client] | None,
+) -> ModelValidationResult:
+    """vLLM: GET ``{base_url}/models`` on the user-supplied (local) server.
+
+    vLLM is self-hosted with an optional key; a daemon-unreachable error
+    downgrades to ``transient`` (valid=True) — same posture as the Ollama probe.
+    """
+    base_url = os.environ.get("VLLM_BASE_URL") or "http://localhost:8000/v1"
+    api_key = os.environ.get("AGENT_GUARDIAN_VLLM_API_KEY") or os.environ.get("VLLM_API_KEY")
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        with _new_client(factory, timeout_s=timeout_s) as client:
+            response = client.get(url, headers=headers)
+    except Exception as exc:
+        return _finalise(
+            "vllm",
+            model,
+            _ProbeOutcome(
+                status="transient",
+                detail=f"vLLM server unreachable at {base_url} ({type(exc).__name__})",
+            ),
+        )
+    if response.status_code >= 400:
+        return _finalise(
+            "vllm", model, _ProbeOutcome(status="transient", detail=f"HTTP {response.status_code}")
+        )
+    try:
+        ids = {entry.get("id") for entry in (response.json() or {}).get("data", [])}
+    except Exception as exc:  # pragma: no cover - defensive
+        return _finalise(
+            "vllm", model, _ProbeOutcome(status="transient", detail=type(exc).__name__)
+        )
+    if model in ids:
+        return _finalise("vllm", model, _ProbeOutcome(status="valid"))
+    return _finalise("vllm", model, _ProbeOutcome(status="not_found"))
+
+
 # ---------------------------------------------------------------------------
 # Outcome → ModelValidationResult mapping (shared by non-gemini providers).
 # ---------------------------------------------------------------------------
@@ -688,6 +883,11 @@ def _finalise(provider: str, model: str, outcome: _ProbeOutcome) -> ModelValidat
             "openai": "AGENT_GUARDIAN_OPENAI_API_KEY (or OPENAI_API_KEY)",
             "anthropic": "AGENT_GUARDIAN_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)",
             "gemini": ("AGENT_GUARDIAN_GEMINI_API_KEY (or GEMINI_API_KEY / GOOGLE_API_KEY)"),
+            "azure": "AGENT_GUARDIAN_AZURE_API_KEY (or AZURE_OPENAI_API_KEY) + AZURE_OPENAI_ENDPOINT",
+            "openrouter": "AGENT_GUARDIAN_OPENROUTER_API_KEY (or OPENROUTER_API_KEY)",
+            "groq": "AGENT_GUARDIAN_GROQ_API_KEY (or GROQ_API_KEY)",
+            "together": "AGENT_GUARDIAN_TOGETHER_API_KEY (or TOGETHER_API_KEY)",
+            "fireworks": "AGENT_GUARDIAN_FIREWORKS_API_KEY (or FIREWORKS_API_KEY)",
         }.get(provider, "the provider's credential env var")
         return ModelValidationResult(
             valid=False,
@@ -704,6 +904,12 @@ def _finalise(provider: str, model: str, outcome: _ProbeOutcome) -> ModelValidat
             "vertex": "Vertex AI",
             "ollama": "Ollama",
             "bedrock": "Amazon Bedrock",
+            "azure": "Azure OpenAI",
+            "openrouter": "OpenRouter",
+            "groq": "Groq",
+            "together": "Together AI",
+            "fireworks": "Fireworks AI",
+            "vllm": "vLLM",
         }.get(provider, provider)
         candidates = KNOWN_MODELS.get(provider, ())
         if suggestion:

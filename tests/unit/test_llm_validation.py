@@ -65,6 +65,22 @@ def _reset_cache_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "AGENT_GUARDIAN_MODEL_PROBE_TIMEOUT",
         "AWS_REGION",
         "AWS_DEFAULT_REGION",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_OPENAI_API_KEY",
+        "AGENT_GUARDIAN_AZURE_API_KEY",
+        "AZURE_OPENAI_API_VERSION",
+        "AZURE_USE_ENTRA",
+        "OPENROUTER_API_KEY",
+        "AGENT_GUARDIAN_OPENROUTER_API_KEY",
+        "GROQ_API_KEY",
+        "AGENT_GUARDIAN_GROQ_API_KEY",
+        "TOGETHER_API_KEY",
+        "AGENT_GUARDIAN_TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "AGENT_GUARDIAN_FIREWORKS_API_KEY",
+        "VLLM_API_KEY",
+        "AGENT_GUARDIAN_VLLM_API_KEY",
+        "VLLM_BASE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
     # Set a dummy key so probes can run without bailing on auth.
@@ -140,7 +156,8 @@ def test_unknown_gemini_with_vertex_available_suggests_vertex_prefix() -> None:
             )
         # Match Vertex AI regional endpoints — exactly `<region>-aiplatform.googleapis.com`
         # — without permitting an arbitrary-prefix substring match.
-        if _VERTEX_HOST_RE.match(host):  # noqa: py/incomplete-url-substring-sanitization  -- anchored regex on `httpx.Request.url.host`, full-string match
+        # codeql[py/incomplete-url-substring-sanitization] -- anchored regex on httpx.Request.url.host (full-string match), not a substring check
+        if _VERTEX_HOST_RE.match(host):
             return httpx.Response(200, json={"name": "publishers/google/models/gemini-3.1-flash"})
         return httpx.Response(500)  # pragma: no cover
 
@@ -783,3 +800,116 @@ def test_gemini_no_difflib_match_uses_stable_hint() -> None:
         "Stable Gemini ids include:" in result.message
         or "Available similarly-named:" in result.message
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-provider probes — Azure, OpenAI-compatible gateways, vLLM.
+# ---------------------------------------------------------------------------
+
+
+def test_azure_missing_endpoint_is_auth_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+    result = check_model_exists("azure:my-deployment")
+    assert result.valid is False
+    assert result.status == "auth_failed"
+    assert "endpoint" in result.message.lower()
+
+
+def test_azure_deployment_exists_probes_dated_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://r.openai.azure.com")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["api-key"] = request.headers.get("api-key", "")
+        return httpx.Response(200, json={"id": "my-deployment"})
+
+    factory = _client_factory_from(handler)
+    result = check_model_exists("azure:my-deployment", client_factory=factory)
+    assert result.valid is True
+    assert result.status == "valid"
+    # Reviewer correction #2 — standard deployment path + api-version query.
+    assert "/openai/deployments/my-deployment" in seen["url"]
+    assert "api-version=" in seen["url"]
+    assert seen["api-key"] == "az-key"
+
+
+def test_azure_deployment_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://r.openai.azure.com")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "DeploymentNotFound"})
+
+    factory = _client_factory_from(handler)
+    result = check_model_exists("azure:typo-deployment", client_factory=factory)
+    assert result.valid is False
+    assert result.status == "not_found"
+
+
+def test_groq_model_in_catalog_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "gq-key")
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers.get("authorization", "")
+        return httpx.Response(200, json={"data": [{"id": "llama-3.3-70b-versatile"}]})
+
+    factory = _client_factory_from(handler)
+    result = check_model_exists("groq:llama-3.3-70b-versatile", client_factory=factory)
+    assert result.valid is True
+    assert result.status == "valid"
+    assert seen["url"] == "https://api.groq.com/openai/v1/models"
+    assert seen["auth"] == "Bearer gq-key"
+
+
+def test_openrouter_model_not_in_catalog_is_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "openai/gpt-5"}]})
+
+    factory = _client_factory_from(handler)
+    result = check_model_exists("openrouter:does/not-exist", client_factory=factory)
+    assert result.valid is False
+    assert result.status == "not_found"
+
+
+def test_gateway_missing_key_is_auth_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_TOGETHER_API_KEY", raising=False)
+    result = check_model_exists("together:deepseek-ai/DeepSeek-V3")
+    assert result.valid is False
+    assert result.status == "auth_failed"
+
+
+def test_vllm_server_unreachable_is_transient(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VLLM_BASE_URL", raising=False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    factory = _client_factory_from(handler)
+    result = check_model_exists(
+        "vllm:NousResearch/Meta-Llama-3-8B-Instruct", client_factory=factory
+    )
+    # Self-hosted server down must NOT fail-fast the scan.
+    assert result.valid is True
+    assert result.status == "transient"
+
+
+def test_split_spec_strips_qualifiers() -> None:
+    assert split_spec("vertex:gemini-2.5-flash+project=p+location=us") == (
+        "vertex",
+        "gemini-2.5-flash",
+    )
+    assert split_spec("openrouter:anthropic/claude-3.5-sonnet") == (
+        "openrouter",
+        "anthropic/claude-3.5-sonnet",
+    )
+    assert split_spec("stub") == ("stub", "")

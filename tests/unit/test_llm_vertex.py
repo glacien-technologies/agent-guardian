@@ -124,15 +124,12 @@ def test_map_vertex_response_malformed_raises() -> None:
         map_vertex_response("m", {"unexpected": "shape"})
 
 
-async def test_vertex_client_complete_raises_not_implemented() -> None:
-    client = VertexClient(project="p", region="us-central1")
-    with pytest.raises(NotImplementedError, match="M9"):
-        await client.complete(
-            LLMRequest(messages=[LLMMessage(role="user", content="hi")], model="m")
-        )
-    await client.aclose()
-
-
 def test_vertex_client_host_template() -> None:
     client = VertexClient(project="p", region="europe-west4")
     assert client.host() == "europe-west4-aiplatform.googleapis.com"
+
+
+def test_vertex_client_global_location_host() -> None:
+    # ``global`` uses the region-less host with a ``locations/global`` path.
+    client = VertexClient(project="p", location="global")
+    assert client.host() == "aiplatform.googleapis.com"
