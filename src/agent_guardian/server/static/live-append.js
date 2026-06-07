@@ -307,10 +307,11 @@
     // the row verdict up to a new worst.
     var reasoning = safeStr(payload.reasoning || p.reasoning);
     // Run status — the per-agent lifecycle signal for the STATUS column.
-    // ``agent_done`` / ``agent_skipped`` are terminal; everything else
+    // ``agent_done`` (attack agent), ``recon_done`` (recon agent — it does NOT
+    // emit agent_done), and ``agent_skipped`` are terminal; everything else
     // (agent_start / agent_progress / reflection) means the agent is running.
     var status = "running";
-    if (kind === "agent_done") { status = "done"; }
+    if (kind === "agent_done" || kind === "recon_done") { status = "done"; }
     else if (kind === "agent_skipped") { status = "skipped"; }
     return {
       kind: kind,
@@ -751,6 +752,9 @@
       "agent_progress",
       "agent_done",
       "agent_skipped",
+      // recon completion — recon does NOT emit agent_done, so without this the
+      // recon row's STATUS pill would stay "Running" after the audit finished.
+      "recon_done",
     ];
     probeKinds.forEach(function (k) {
       source.addEventListener(k, function (e) {

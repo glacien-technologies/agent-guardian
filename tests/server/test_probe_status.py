@@ -46,6 +46,21 @@ def test_lifecycle_collects_done_and_skipped(tmp_path: Path) -> None:
     assert "memory-poison-agent" not in states
 
 
+def test_lifecycle_treats_recon_done_as_completed(tmp_path: Path) -> None:
+    # Recon does NOT emit agent_done — it emits recon_done. Without handling it,
+    # the recon row's STATUS stayed "Running" forever after the audit finished.
+    d = _write_events(
+        tmp_path,
+        [
+            {"kind": "recon_start", "agent": "recon-agent"},
+            {"kind": "recon_progress", "agent": "recon-agent"},
+            {"kind": "recon_done", "agent": "recon-agent"},
+        ],
+    )
+    states = _agent_lifecycle_states(d)
+    assert states["recon-agent"] == "completed"
+
+
 def test_lifecycle_handles_missing_dir_and_file(tmp_path: Path) -> None:
     assert _agent_lifecycle_states(None) == {}
     assert _agent_lifecycle_states(tmp_path / "nope") == {}

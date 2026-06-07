@@ -1041,11 +1041,13 @@ def _agent_lifecycle_states(scan_dir: Path | None) -> dict[str, str]:
     """Map ``agent name -> "completed" | "skipped"`` from ``events.jsonl``.
 
     The authoritative per-agent run-status signal is the terminal SSE event the
-    swarm appended to ``events.jsonl``: ``agent_done`` (finished) or
-    ``agent_skipped`` (not applicable to this target). An agent absent from this
-    map has started but not finished — i.e. it is still running. ``has_run_result``
-    is NOT used here: it is true for any agent with a graded turn, including one
-    mid-run, so it would mark an in-flight agent "done" prematurely.
+    swarm appended to ``events.jsonl``: ``agent_done`` (an attack agent finished),
+    ``recon_done`` (the recon agent finished its capability audit — recon does
+    NOT emit ``agent_done``), or ``agent_skipped`` (not applicable to this
+    target). An agent absent from this map has started but not finished — i.e. it
+    is still running. ``has_run_result`` is NOT used here: it is true for any
+    agent with a graded turn, including one mid-run, so it would mark an in-flight
+    agent "done" prematurely.
 
     Never raises — a missing dir/file or corrupt line yields a partial map.
     """
@@ -1068,7 +1070,7 @@ def _agent_lifecycle_states(scan_dir: Path | None) -> dict[str, str]:
                 if not isinstance(rec, dict):
                     continue
                 kind = rec.get("kind")
-                if kind not in ("agent_done", "agent_skipped"):
+                if kind not in ("agent_done", "agent_skipped", "recon_done"):
                     continue
                 agent = str(rec.get("agent") or "")
                 if not agent:
