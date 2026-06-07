@@ -235,8 +235,7 @@ same finished scan, never a second scan). With `register_scans: true`
 anything; `agent-guardian suite run --dry-run` prints the resolved
 `scan` command for each workload and spawns nothing; `agent-guardian
 suite summary OUT_DIR` re-prints the summary from a prior run. See
-[`examples/suite.yaml`](https://github.com/glacien-technologies/agent-guardian/blob/main/examples/suite.yaml)
-for a complete, commented suite file.
+`examples/suite.yaml` in the repository for a complete, commented suite file.
 
 ## Scan options
 
