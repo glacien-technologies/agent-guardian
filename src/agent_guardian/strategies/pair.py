@@ -99,9 +99,15 @@ class PAIRStrategy(Strategy):
         self,
         ctx: StrategyContext,
         *,
-        max_critiques: int = 5,
+        max_critiques: int | None = None,
     ) -> None:
         super().__init__(ctx)
+        # B5 (issue #76) — default the critique cap to the agent's full turn
+        # budget so PAIR mines all available depth instead of self-capping at 5
+        # (which left ~7 of a 12-20 turn budget unused on live targets). An
+        # explicit value is still honored (tests / tuning).
+        if max_critiques is None:
+            max_critiques = max(1, ctx.max_turns)
         if max_critiques < 1:
             raise ValueError("max_critiques must be >= 1")
         self.max_critiques = max_critiques

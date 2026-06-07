@@ -3243,6 +3243,16 @@ def scan(
         None, "--config", help="Override the default config file location."
     ),
     seed: int = typer.Option(0, "--seed", help="RNG seed for determinism."),
+    max_turns: int | None = typer.Option(
+        None,
+        "--max-turns",
+        help=(
+            "Per-agent turn cap, applied uniformly to every agent across all "
+            "strategies. Overrides the mode default (full/smart=20, fast=4). "
+            "Raise for deeper multi-turn coverage (e.g. --max-turns 30); pair "
+            "with a larger --budget-usd / token budget."
+        ),
+    ),
     goal: str | None = typer.Option(
         None,
         "--goal",
@@ -3521,6 +3531,7 @@ def scan(
                 no_tui=effective_no_tui,
                 config_path=config_path,
                 seed=seed,
+                max_turns=max_turns,
                 goal=goal,
                 mode=mode,
                 pov_gate=pov_gate,
@@ -3574,6 +3585,7 @@ async def _run_scan(
     no_tui: bool,
     config_path: Path | None,
     seed: int,
+    max_turns: int | None = None,
     goal: str | None = None,
     mode: str = "full",
     pov_gate: bool = False,
@@ -4010,6 +4022,7 @@ async def _run_scan(
             output_path=output_path,
             no_tui=no_tui,
             seed=seed,
+            max_turns=max_turns,
             goal=goal,
             mode=mode,
             pov_gate=pov_gate,
@@ -4073,6 +4086,7 @@ async def _run_scan_inner(
     output_path: Path | None,
     no_tui: bool,
     seed: int,
+    max_turns: int | None,
     goal: str | None,
     mode: str,
     pov_gate: bool,
@@ -4204,6 +4218,10 @@ async def _run_scan_inner(
         tier_override=tier_override,
         target_goal=goal,
         mode=resolved_mode,
+        # --max-turns (issue #76): when set, forces the per-agent turn cap for
+        # every agent in every mode/strategy (overrides the mode preset). When
+        # None, the mode preset / AgentBudget default (20) applies.
+        max_turns_per_agent=max_turns,
         # M2 capabilities (all default-off; flags above turn them on).
         enable_pov_gate=pov_gate or critic,
         enable_critic_rubric=critic,
@@ -4545,6 +4563,17 @@ async def _run_scan_inner(
                 await _summary_llm.aclose()
     except Exception as exc:  # pragma: no cover — defensive, never fail a scan
         typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
+    # D2 (issue #76) — seal the forensic record: write a signed manifest of the
+    # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
+    # probe/*.json so any post-hoc edit to the evidence trail is detectable
+    # (OWASP immutable-logging bar). Best-effort: never fail a scan on this.
+    try:
+        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
+
+        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
+        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot

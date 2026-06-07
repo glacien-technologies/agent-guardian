@@ -380,6 +380,13 @@ class SwarmConfig:
             object.__setattr__(self, "probes_per_category", preset["probes_per_category"])
         if self.max_turns_per_agent is None and preset["max_turns_per_agent"] is not None:
             object.__setattr__(self, "max_turns_per_agent", preset["max_turns_per_agent"])
+        if (
+            self.target_findings_per_agent is None
+            and preset.get("target_findings_per_agent") is not None
+        ):
+            object.__setattr__(
+                self, "target_findings_per_agent", preset["target_findings_per_agent"]
+            )
         # The early_stop_variance_threshold field has a non-None default
         # (2.0 — the SMART value), so we only let the preset override it
         # when the caller did not pass it explicitly. We can't easily
@@ -433,19 +440,27 @@ _MODE_PRESETS: dict[ScanMode, dict[str, int | None]] = {
         "min_turns_before_early_stop": 0,
         "probes_per_category": 3,
         "max_turns_per_agent": 4,
+        # B7 (issue #76) — keep the class-default finding cap (None) in
+        # FAST/SMART; only FULL raises it.
+        "target_findings_per_agent": None,
     },
     ScanMode.SMART: {
         "min_turns_before_early_stop": 0,
         "probes_per_category": None,
         "max_turns_per_agent": None,
+        "target_findings_per_agent": None,
     },
     ScanMode.FULL: {
         # Gate any EARLY_STOP decision until every still-running agent
         # has used its full turn budget. 999 is "effectively never opens"
-        # since per-agent max_turns is 12 in current configs.
+        # since per-agent max_turns is 20 in current configs.
         "min_turns_before_early_stop": 999,
         "probes_per_category": None,
         "max_turns_per_agent": None,
+        # B7 — a Critical target deserves deeper mining than the class default
+        # (3, or 2 on some lanes): a FULL scan keeps each agent firing until it
+        # has 5 findings (or hits the 20-turn cap). LITE/FAST keep the default.
+        "target_findings_per_agent": 5,
     },
 }
 
@@ -1788,7 +1803,7 @@ class SwarmCommander:
             # means "never early-stop in this scan, regardless of
             # AIVSS variance." SMART/FAST modes keep the v1.0 behaviour
             # (gate=0 always passes).
-            max_turns_possible = self.config.max_turns_per_agent or 12
+            max_turns_possible = self.config.max_turns_per_agent or 20
             min_turns_gate = self.config.min_turns_before_early_stop or 0
             if min_turns_gate >= max_turns_possible:
                 _LOG.info(
@@ -2058,7 +2073,7 @@ class SwarmCommander:
             1 for r in attack_reports if r.terminated_by not in self._TRUNCATED_TERMINATIONS
         )
         turns_used = sum(r.turns for r in attack_reports)
-        per_agent_max = self.config.max_turns_per_agent or 12
+        per_agent_max = self.config.max_turns_per_agent or 20
         turns_planned = planned * per_agent_max
         # Headline = fraction of the planned applicable agents that ran to
         # completion (corpus-exhausted or succeeded), capped at the planned set.

@@ -152,7 +152,12 @@ class AgentBudget:
     # caps" rule. The recon/red-team loops short-circuit the wall-clock
     # check when this is None.
     wall_seconds_remaining: float | None = None
-    max_turns: int = 12
+    # Default per-agent turn cap. Applies to every agent across every strategy
+    # unless the swarm overrides it per-mode (FAST=4) or the operator sets
+    # ``--max-turns`` (which forces this value for all agents). Raised 12 -> 20
+    # (issue #76) so deeper multi-turn lanes have room; pairs with the 10M token
+    # default and the min_turns floor.
+    max_turns: int = 20
 
     def deduct_tokens(self, n: int) -> bool:
         """Subtract ``n`` tokens. Returns False if the budget would underflow."""

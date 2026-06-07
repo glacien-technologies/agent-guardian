@@ -234,7 +234,7 @@ def test_build_completeness_counts_agents_and_turns() -> None:
     # counts as complete (probe corpora are smaller than the turn cap), so only
     # the cancelled agent reduces it. turns_used / turns_planned are retained as
     # informational detail.
-    assert c.turns_planned == 24
+    assert c.turns_planned == 40  # 2 applicable agents x default max_turns=20 (#76)
     assert c.pct == 50.0  # 1 of 2 applicable agents finished (goal-hijack; tool-abuse cancelled)
 
 

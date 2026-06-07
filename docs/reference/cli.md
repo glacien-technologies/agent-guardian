@@ -240,6 +240,7 @@ or duplicate spellings).
 | `--legacy-board` | Render the legacy swarm board instead of the Executive dashboard. |
 | `--config` | Path to a YAML / TOML config to merge over CLI flags. |
 | `--seed` | RNG seed for deterministic probe sampling and replay. |
+| `--max-turns` | Per-agent turn cap, applied uniformly to every agent across all strategies. Overrides the mode default (`full`/`smart` = 20, `fast` = 4). Raise for deeper multi-turn coverage; pair with a larger token / `--budget-usd` budget. |
 | `--goal` | Free-form natural-language goal passed to the commander. |
 | `--mode` | Scan mode (`fast` / `smart` / `full`). |
 | `--pov-gate` | Enable / disable the point-of-view gate (T3+ contracts). |
