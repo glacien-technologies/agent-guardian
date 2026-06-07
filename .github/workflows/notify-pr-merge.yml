@@ -1,0 +1,38 @@
+name: Notify Slack on PR merge
+
+# Posts a Slack message when a pull request is merged into main. Opt-in: the
+# step no-ops unless a SLACK_WEBHOOK_URL repo secret is configured. Uses a
+# plain curl to a Slack incoming webhook — no third-party action.
+#
+# Untrusted PR fields (title, author login) are passed via env and JSON-escaped
+# with json.dumps before they reach the webhook — never interpolated into the
+# shell or the JSON directly — so a crafted PR title cannot inject anything.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Notify Slack
+    runs-on: ubuntu-latest
+    # Only fire for an actual merge into main (a closed-without-merge does not
+    # count). Fork PRs do not receive secrets, so the step guard skips them.
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    steps:
+      - name: Post PR-merged notification to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          text=$(printf ':twisted_rightwards_arrows: *PR #%s merged* to main by %s: %s — <%s|View PR>' \
+            "$PR_NUMBER" "$PR_AUTHOR" "$PR_TITLE" "$PR_URL")
+          payload=$(printf '{"text": %s}' "$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

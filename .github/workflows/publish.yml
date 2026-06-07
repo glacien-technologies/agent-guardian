@@ -162,3 +162,23 @@ jobs:
         with:
           packages-dir: dist-upload/
           attestations: true  # PEP 740 attestations attached to PyPI
+
+  notify:
+    name: Notify Slack
+    needs: [release, publish]
+    runs-on: ubuntu-latest
+    # Only when the whole release pipeline succeeded. Skips cleanly (the step
+    # guard below) when no SLACK_WEBHOOK_URL secret is configured, so forks and
+    # secret-less environments are never blocked.
+    if: success()
+    steps:
+      - name: Post release notification to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: env.SLACK_WEBHOOK_URL != ''
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+          text=":white_check_mark: *AgentGuardian ${tag}* published — PyPI + GHCR + signed GitHub Release. <${url}|Release notes>"
+          payload=$(printf '{"text": %s}' "$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
