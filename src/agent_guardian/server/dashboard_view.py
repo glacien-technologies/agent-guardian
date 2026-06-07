@@ -116,7 +116,7 @@ _PROBES_LIST_CAP: Final[int] = 500
 # Executive Logs tab now renders every line from ``events.jsonl``. Browser
 # memory is the only limit; the client-side filter toolbar (level chips +
 # search) is the operator's primary tool for navigating large logs.
-_LOGS_TAIL_CAP: Final[int | None] = None  # pyright: ignore[reportUnusedVariable]  # Consumed by test_dashboard_view_module_caps_are_locked — see DESIGN_LOCK §3.3
+_LOGS_TAIL_CAP: Final[int | None] = None  # pyright: ignore[reportUnusedVariable]  # codeql[py/unused-global-variable]  # Consumed by test_dashboard_view_module_caps_are_locked — see DESIGN_LOCK §3.3
 
 __all__ = [
     "DASHBOARD_TEMPLATE",

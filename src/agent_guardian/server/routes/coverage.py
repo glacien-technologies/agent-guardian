@@ -293,7 +293,7 @@ def _build_owasp_row(
         for f in scan.findings:
             findings_by_asi.setdefault(f.asi, []).append(f)
 
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         attempts = _attempts_for_asi(coverage, asi)
         total_attempts += attempts
         raw_score = asi_scores.get(asi)

@@ -447,7 +447,7 @@ def compute_aivss(
     effective_not_covered: set[AsiCategory] = set()
     effective_never_launched: set[AsiCategory] = set()
     effective_launched_no_finding: set[AsiCategory] = set()
-    for cat in AsiCategory:
+    for cat in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         cat_findings = by_category[cat]
         if not cat_findings and cat in not_covered_set:
             asi_scores_map[cat] = _NOT_COVERED_SCORE
@@ -539,7 +539,7 @@ def _tier_weighted_aggregate_excluding(
     numerator = 0.0
     denominator = 0.0
     excluded = set(exclude)
-    for cat in AsiCategory:
+    for cat in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         if cat in excluded:
             continue
         numerator += asi_scores[cat] * weights[cat]

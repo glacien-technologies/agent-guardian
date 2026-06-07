@@ -138,7 +138,7 @@ def _build_asi_rows(findings: list[Finding], scan: Scan) -> list[dict[str, Any]]
     by_asi: dict[AsiCategory, list[Any]] = {cat: [] for cat in AsiCategory}
     for finding in findings:
         by_asi[finding.asi].append(finding)
-    for category in AsiCategory:
+    for category in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         cat_findings = by_asi[category]
         rows.append(
             {

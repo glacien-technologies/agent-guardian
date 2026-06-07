@@ -148,7 +148,7 @@ def test_sdk_dotted_path_non_callable() -> None:
         SdkTransport(f"{__name__}:_A_CONSTANT")
 
 
-_A_CONSTANT = 42
+_A_CONSTANT = 42  # codeql[py/unused-global-variable]
 
 
 def test_sdk_direct_non_callable_rejected() -> None:

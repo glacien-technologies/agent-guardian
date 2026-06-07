@@ -117,7 +117,7 @@ def write_pdf_reportlab(
     c.drawString(72, y - 10, "ASI breakdown")
     c.setFont("Helvetica", 10)
     y -= 28
-    for category in AsiCategory:
+    for category in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         score = scan.asi_scores.get(category, 100.0)
         finding_count = sum(1 for f in scan.findings if f.asi == category)
         c.drawString(
