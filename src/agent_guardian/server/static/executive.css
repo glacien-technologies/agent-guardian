@@ -3183,9 +3183,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--exec-ink-subtle);
-  /* Equal horizontal gutter on every header cell — matches the body td below
-     so the inter-column spacing is uniform across the whole table. */
-  padding: 10px 16px;
+  /* Equal, compact horizontal gutter on every header cell — matches the body
+     td below so the inter-column spacing is uniform AND tight across the table. */
+  padding: 10px 12px;
   border-bottom: 1px solid var(--exec-border-subtle);
   background: var(--exec-bg-sunken);
 }
@@ -3198,9 +3198,59 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
    The turn count moved INTO the agent cell (next to the ASI badge), the
    EVIDENCE column folded into the AI summary, and SUMMARY is the wide flex
    column that carries the AI-written one-liner. */
-.exec-probes-table__col--agent { width: 20rem; }
-.exec-probes-table__col--verdict { width: 8rem; }
+/* Compact fixed columns so SUMMARY (the auto column) gets the bulk of the row.
+   AGENT·ASI·RUNS fits in ~15rem; STATUS holds "Running"/"Skipped"; VERDICT holds
+   the widest pill ("NEEDS FOLLOW-UP"). Everything left over goes to SUMMARY. */
+.exec-probes-table__col--agent { width: 15rem; }
+.exec-probes-table__col--status { width: 5.5rem; }
+.exec-probes-table__col--verdict { width: 7.5rem; }
 .exec-probes-table__col--summary { width: auto; }  /* the rest of the row */
+
+/* Run-status pill (Probes table STATUS column) — completed / running / skipped.
+   Same pill grammar + colour tokens as the ASI compact-status pills so the
+   dashboard reads consistently. "running" carries a soft pulse so a live scan
+   visibly distinguishes in-flight agents from finished ones. */
+.exec-probe-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-family: var(--exec-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-muted);
+  width: max-content;
+}
+.exec-probe-status--done {
+  background: color-mix(in srgb, var(--exec-sev-low) 16%, transparent);
+  color: var(--exec-sev-low);
+}
+.exec-probe-status--running {
+  background: color-mix(in srgb, var(--exec-brand) 16%, transparent);
+  color: var(--exec-brand-strong);
+}
+.exec-probe-status--running::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: exec-probe-status-pulse 1.4s ease-in-out infinite;
+}
+.exec-probe-status--skipped {
+  background: var(--exec-bg-sunken);
+  color: var(--exec-ink-subtle);
+}
+@keyframes exec-probe-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .exec-probe-status--running::before { animation: none; }
+}
 /* Header for the agent column mirrors the body cell's 3-part flex so the RUNS
    label sits directly above the right-aligned run counts. The flex is on this
    inner wrapper (not the th) so the th stays a table-cell and the fixed column
@@ -3252,9 +3302,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   background: var(--exec-brand-tint);
 }
 .exec-probes-table__row > td {
-  /* Same 16px horizontal gutter as the header cells — equal spacing between
-     every column. */
-  padding: 12px 16px;
+  /* Same 12px horizontal gutter as the header cells — equal, tight spacing
+     between every column. */
+  padding: 12px 12px;
   vertical-align: middle;
 }
 .exec-probes-table__asi {
@@ -3461,42 +3511,12 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   white-space: nowrap;
 }
 
-/* Judge v2 (M5 / Stage D) — Evidence quote block in the slide-over. The
- * verbatim span the judge cited as proof of the verdict; rendered as a tinted,
- * monospaced quote distinct from the prose "Judge reasoning" blockquote. */
-.exec-probe__evidence-quote {
-  margin: 4px 0 12px;
-  padding: 8px 12px;
-  border-left: 3px solid var(--exec-sev-high);
-  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
-  font-family: var(--exec-font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--exec-ink);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.exec-chat__evidence {
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  border-left: 3px solid var(--exec-sev-high);
-  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
-  font-family: var(--exec-font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--exec-ink);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.exec-chat__evidence-label {
-  display: block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--exec-sev-high);
-  margin-bottom: 3px;
-}
+/* Per-turn / single-turn "Evidence" quote blocks were removed (operator
+ * feedback 2026-06-07): the judge's cited span is a verbatim copy of the target
+ * response already shown above it, so repeating it was pure duplication. The
+ * raw span is still reachable via the "Evidence chain" JSONL link. The former
+ * .exec-probe__evidence-quote / .exec-chat__evidence{,-label} rules are dropped
+ * with their markup. */
 
 /* ============================================================
  * 15. Detail modal component (QA-031 / QA-032)

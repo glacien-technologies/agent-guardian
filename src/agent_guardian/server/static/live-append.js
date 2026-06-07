@@ -306,6 +306,13 @@
     // reflection event. Populated into the summary column when this turn rolls
     // the row verdict up to a new worst.
     var reasoning = safeStr(payload.reasoning || p.reasoning);
+    // Run status — the per-agent lifecycle signal for the STATUS column.
+    // ``agent_done`` (attack agent), ``recon_done`` (recon agent — it does NOT
+    // emit agent_done), and ``agent_skipped`` are terminal; everything else
+    // (agent_start / agent_progress / reflection) means the agent is running.
+    var status = "running";
+    if (kind === "agent_done" || kind === "recon_done") { status = "done"; }
+    else if (kind === "agent_skipped") { status = "skipped"; }
     return {
       kind: kind,
       agent: agent,
@@ -316,6 +323,7 @@
       isTurn: isTurn,
       turnNum: turnNum,
       reasoning: reasoning,
+      status: status,
     };
   }
 
@@ -366,6 +374,20 @@
     summary.textContent =
       agents + (agents === 1 ? " agent" : " agents") +
       " across " + turns + (turns === 1 ? " turn" : " turns");
+  }
+
+  /** Set the run-status pill (running / done / skipped) on a probe row.
+   *  Terminal states are sticky: a late ``reflection`` for an agent that has
+   *  already emitted ``agent_done`` must not flip the row back to "running". */
+  var STATUS_LABELS = { running: "Running", done: "Done", skipped: "Skipped" };
+  function setProbeStatus(row, status) {
+    var node = row.querySelector('[data-slot="status"]');
+    if (!node) { return; }
+    var cur = row.getAttribute("data-status") || "";
+    if ((cur === "done" || cur === "skipped") && status === "running") { return; }
+    row.setAttribute("data-status", status);
+    node.className = "exec-probe-status exec-probe-status--" + status;
+    node.textContent = STATUS_LABELS[status] || "Running";
   }
 
   /** Set the verdict pill text + modifier class on a probe row. */
@@ -437,6 +459,7 @@
     }
     var turnCount = ev.turnNum > 0 ? ev.turnNum : (ev.isTurn ? 1 : 0);
     row.setAttribute("data-turn-count", String(turnCount));
+    setProbeStatus(row, ev.status);
     setProbeVerdict(row, ev.verdict);
     // Placeholder dash matches the server-rendered empty summary until a graded
     // reflection fills it (the AI summary lands at scan finalization).
@@ -658,6 +681,9 @@
         if (ev.probeId && !existing.getAttribute("data-probe-id")) {
           existing.setAttribute("data-probe-id", ev.probeId);
         }
+        // Run-status pill — advance toward the terminal state (sticky; a late
+        // reflection won't revert a finished agent to "running").
+        setProbeStatus(existing, ev.status);
         updateProbesSummary();
         return;
       }
@@ -726,6 +752,9 @@
       "agent_progress",
       "agent_done",
       "agent_skipped",
+      // recon completion — recon does NOT emit agent_done, so without this the
+      // recon row's STATUS pill would stay "Running" after the audit finished.
+      "recon_done",
     ];
     probeKinds.forEach(function (k) {
       source.addEventListener(k, function (e) {

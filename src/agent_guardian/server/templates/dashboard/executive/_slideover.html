@@ -270,13 +270,10 @@
             <blockquote class="exec-chat__reason">{{ turn.reasoning }}</blockquote>
           </div>
         {% endif %}
-        {# Judge v2 (M5 / Stage D) — the verbatim span the judge cited as proof
-           of the verdict. Additive: only rendered when the turn carries one. #}
-        {% if turn.evidence %}
-          <div class="exec-chat__evidence">
-            <span class="exec-chat__evidence-label">Evidence</span>{{ turn.evidence }}
-          </div>
-        {% endif %}
+        {# The judge's cited evidence span is a verbatim copy of the target
+           response already shown above in this same turn, so it is intentionally
+           NOT repeated here (operator feedback 2026-06-07). The raw span remains
+           available via the "Evidence chain" JSONL link below. #}
       </li>
     {% endfor %}
   </ol>
@@ -361,12 +358,9 @@
     </p>
   {% endif %}
 
-  {# Judge v2 (M5 / Stage D) — the verbatim span the judge cited as proof of
-     the verdict (single-turn layout). Additive: only shown when present. #}
-  {% if ctx.evidence %}
-    <p class="exec-probe__label">Evidence</p>
-    <blockquote class="exec-probe__evidence-quote">{{ ctx.evidence }}</blockquote>
-  {% endif %}
+  {# The judge's cited evidence span duplicates the target response shown above,
+     so it is not repeated here (operator feedback 2026-06-07). The verbatim span
+     stays accessible via the "Evidence chain" JSONL link below. #}
   {% if ctx.evaluator_attack %}
     <p class="exec-probe__evaluator-attack-row">
       <span class="exec-evaluator-attack" title="The attacker prompt tried to manipulate the judge — not a target exploit.">⚠ evaluator-attack</span>

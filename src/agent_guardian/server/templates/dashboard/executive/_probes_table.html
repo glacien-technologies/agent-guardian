@@ -54,6 +54,7 @@
           <span class="exec-probes-table__runs-head">RUNS</span>
         </span>
       </th>
+      <th scope="col" class="exec-probes-table__col--status">STATUS</th>
       <th scope="col" class="exec-probes-table__col--verdict">VERDICT</th>
       <th scope="col" class="exec-probes-table__col--summary">SUMMARY</th>
     </tr>
@@ -84,6 +85,13 @@
           {# RUNS — turn count moved next to the ASI badge (was a far-right column). #}
           <span class="exec-probes-table__runs">{{ g.turn_count }} run{{ '' if g.turn_count == 1 else 's' }}</span>
         </td>
+        <td class="exec-probes-table__cell--status">
+          {# Run status — completed / running / skipped. Server-rendered from the
+             per-agent terminal events.jsonl signal; ``live-append.js`` updates
+             it in place as ``agent_start`` / ``agent_done`` / ``agent_skipped``
+             arrive over SSE. #}
+          <span class="exec-probe-status exec-probe-status--{{ g.status_class or 'running' }}" data-slot="status">{{ g.status_label or 'Running' }}</span>
+        </td>
         <td class="exec-probes-table__cell--verdict">
           {# Worst-case rollup pill — same single source of truth as the Findings
              tab evidence pills. Judge v2 (M5 / Stage D) gives each verdict a
@@ -109,6 +117,6 @@
         </td>
       </tr>
     {% endfor %}
-    {% if probe_groups | length == 0 %}<tr id="exec-probes-empty-row" class="exec-probes-table__empty-row"><td colspan="3" class="exec-empty">No probe attempts recorded yet — they appear here as the swarm runs.</td></tr>{% endif %}
+    {% if probe_groups | length == 0 %}<tr id="exec-probes-empty-row" class="exec-probes-table__empty-row"><td colspan="4" class="exec-empty">No probe attempts recorded yet — they appear here as the swarm runs.</td></tr>{% endif %}
   </tbody>
 </table>
