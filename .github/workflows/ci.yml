@@ -145,22 +145,3 @@ jobs:
           rm -f gitleaks gitleaks.tar.gz
       - name: Run gitleaks
         run: gitleaks detect --source . --no-banner --redact --verbose
-
-  notify-failure:
-    name: Notify Slack on failure
-    needs: [lint, type, test, licenses, sast, secret-scan]
-    runs-on: ubuntu-latest
-    # Only alert on a RED push to main (PR failures are already visible on the
-    # PR). failure() runs this job when any needed job failed. Skips cleanly
-    # when SLACK_WEBHOOK_URL is unset (the step guard below).
-    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Post CI-failure notification to Slack
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: env.SLACK_WEBHOOK_URL != ''
-        run: |
-          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          text=":x: *CI failed on main* (${GITHUB_REPOSITORY}@${GITHUB_SHA:0:7}). <${run_url}|View run>"
-          payload=$(printf '{"text": %s}' "$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
-          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
