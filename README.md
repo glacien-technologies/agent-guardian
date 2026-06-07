@@ -21,6 +21,10 @@ Open-source, local-first adversarial security testing for AI agents, RAG systems
 
 AgentGuardian points a swarm of adversarial probes at your target and gives you reproducible evidence you can use in engineering, security review, and CI: AIVSS scoring, signed JSON, SARIF, Markdown, JUnit, PDF, and per-probe transcripts.
 
+<p align="center">
+  <img src="./docs/images/swarm-diagrams/agentguardian-security-loop.jpg" alt="AgentGuardian recon, OWASP ASI probe generation, findings, reports, and fix-rerun loop" width="920">
+</p>
+
 - Built for agentic systems, not just single-prompt chatbot evals.
 - Finds prompt injection, tool misuse, privilege abuse, memory poisoning, code-exec paths, trust exploits, and goal drift.
 - Runs locally, in CI, or offline in deterministic `--model stub` mode.
