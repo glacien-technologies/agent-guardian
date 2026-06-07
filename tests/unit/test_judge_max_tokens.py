@@ -26,6 +26,9 @@ class _CapturingLLM(BaseLLM):
     provider = "capture"
 
     def __init__(self) -> None:
+        # In-process fake: no I/O — pass ``owns_client=False`` so BaseLLM skips
+        # the httpx.AsyncClient construction but still wires up its plumbing.
+        super().__init__(owns_client=False)
         self.last_request: LLMRequest | None = None
 
     async def _send(self, request: LLMRequest) -> LLMResponse:  # pragma: no cover - unused
