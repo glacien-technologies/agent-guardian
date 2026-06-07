@@ -13,6 +13,7 @@ from pathlib import Path
 
 from agent_guardian.server.dashboard_view import (
     _agent_lifecycle_states,
+    _assemble_probe_groups,
     _probe_status,
 )
 
@@ -78,3 +79,33 @@ def test_probe_status_done_when_scan_finalized() -> None:
 def test_probe_status_skipped() -> None:
     states = {"a2a-agent": "skipped"}
     assert _probe_status("a2a-agent", states, scan_finalized=True) == ("Skipped", "skipped")
+
+
+# --- group-assembly integration: the layer where the live/finalized bug lived ---
+
+
+def _probe(agent: str) -> dict:
+    return {"agent": agent, "asi_category": "ASI02", "verdict": "fail"}
+
+
+def test_live_scan_unfinished_agent_is_running_not_done() -> None:
+    # Regression: a live scan loads a PARTIAL Scan object (non-None), so keying
+    # "finalized" off ``scan is not None`` wrongly marked every agent Done. An
+    # agent that has NOT emitted agent_done must read Running while the scan runs.
+    [g] = _assemble_probe_groups([_probe("tool-abuse-agent")], lifecycle={}, scan_finalized=False)
+    assert g["status_label"] == "Running"
+    assert g["status_class"] == "running"
+
+
+def test_live_scan_agent_with_done_event_is_done() -> None:
+    [g] = _assemble_probe_groups(
+        [_probe("tool-abuse-agent")],
+        lifecycle={"tool-abuse-agent": "completed"},
+        scan_finalized=False,
+    )
+    assert g["status_label"] == "Done"
+
+
+def test_finalized_scan_marks_all_done() -> None:
+    [g] = _assemble_probe_groups([_probe("tool-abuse-agent")], scan_finalized=True)
+    assert g["status_label"] == "Done"

@@ -1560,11 +1560,19 @@ def build_dashboard_context(
     # report exporter) don't have to re-derive the join.
     _probes_list_for_evidence = _assemble_probes_list(scan_dir)
     _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
+    # ``scan_finalized`` must be the REAL "scan has finished" signal, NOT
+    # ``scan is not None``: during a live scan the dashboard loads a PARTIAL
+    # ``Scan`` from the on-disk snapshot, so ``scan`` is non-None while the scan
+    # is still running. Using ``scan is not None`` marked every agent "Done" the
+    # moment a partial snapshot existed. ``is_running`` is the authoritative flag
+    # (the same one that drives the "In progress" vs "Completed" header), so an
+    # agent is only "Done" when it actually emitted ``agent_done`` (lifecycle) or
+    # the whole scan has finalised.
     _probe_groups = _assemble_probe_groups(
         _probes_list_for_evidence,
         _load_probe_summaries(scan_dir),
         lifecycle=_agent_lifecycle_states(scan_dir),
-        scan_finalized=scan is not None,
+        scan_finalized=not is_running,
     )
     # QA-066 (2026-06-04) — PROBES KPI tile. "How many probes did we actually
     # run." ``completeness.turns_used`` is the authoritative, uncapped count of
