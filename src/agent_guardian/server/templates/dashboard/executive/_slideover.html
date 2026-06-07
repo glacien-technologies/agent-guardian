@@ -48,12 +48,10 @@
 #}
 {%- set _kind = kind | default('probe') -%}
 {%- set _verdict = ctx.verdict or 'unknown' -%}
-{%- if _verdict == 'fail' or _verdict == 'exploited' -%}
+{%- if _verdict == 'fail' or _verdict == 'exploited' or _verdict == 'info_leak' -%}
   {%- set _verdict_label = 'EXPLOITED' -%}
-{%- elif _verdict == 'info_leak' -%}
-  {%- set _verdict_label = 'INFO LEAK' -%}
-{%- elif _verdict == 'weakness_observed' -%}
-  {%- set _verdict_label = 'WEAKNESS' -%}
+{%- elif _verdict == 'vulnerable' -%}
+  {%- set _verdict_label = 'VULNERABLE' -%}
 {%- elif _verdict == 'needs_followup' -%}
   {%- set _verdict_label = 'NEEDS FOLLOW-UP' -%}
 {%- elif _verdict == 'simulated_or_unverified' -%}

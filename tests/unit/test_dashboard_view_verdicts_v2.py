@@ -27,8 +27,8 @@ from agent_guardian.server.dashboard_view import (
 # --------------------------------------------------------------------------
 def test_verdict_label_covers_all_six_v2_verdicts() -> None:
     assert _verdict_label("exploited") == "EXPLOITED"
-    assert _verdict_label("info_leak") == "INFO LEAK"
-    assert _verdict_label("weakness_observed") == "WEAKNESS"
+    assert _verdict_label("exploited") == "EXPLOITED"
+    assert _verdict_label("vulnerable") == "VULNERABLE"
     assert _verdict_label("needs_followup") == "NEEDS FOLLOW-UP"
     assert _verdict_label("simulated_or_unverified") == "UNVERIFIED"
     assert _verdict_label("defended") == "DEFENDED"
@@ -93,7 +93,7 @@ def test_run_result_view_picks_strongest_evidence_turn() -> None:
     turns = [
         _turn(turn=1, verdict="defended", confidence=0.9),
         _turn(turn=2, verdict="exploited", confidence=0.95),
-        _turn(turn=3, verdict="weakness_observed", confidence=0.4),
+        _turn(turn=3, verdict="vulnerable", confidence=0.4),
     ]
     rr = _run_result_view(turns)
     assert rr["has_run_result"] is True

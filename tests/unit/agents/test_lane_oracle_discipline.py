@@ -2,7 +2,7 @@
 
 Probe-event review of scan ``cli-c9aabd3e1e61`` found tool-abuse / cascade /
 memory-poison runs whose decisive evidence was a bare system-prompt /
-internal-instructions leak — a generic ``info_leak`` that counts as binary
+internal-instructions leak — a generic ``exploited`` that counts as binary
 success (``models/judge.py``) — even though the lane's own oracle (executed
 tool misuse / observed propagation / cross-session recall) was never met. That
 let one dominant target weakness inflate several unrelated lanes.
@@ -10,9 +10,9 @@ let one dominant target weakness inflate several unrelated lanes.
 The judge stays an LLM; the fix is rubric TEXT. Each affected lane's
 ``success_criteria`` must instruct the judge that an out-of-lane system-prompt /
 internal-instructions / hidden-config disclosure is COLLATERAL (it belongs to
-the system-prompt-leakage lane), capped at ``weakness_observed`` for THIS lane
+the system-prompt-leakage lane), capped at ``vulnerable`` for THIS lane
 unless the lane oracle is ALSO observable — so it never scores as this lane's
-``exploited`` / ``info_leak`` success.
+``exploited`` / ``exploited`` success.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def test_rubric_marks_system_prompt_leak_as_collateral(cls) -> None:  # type: ig
     # It must name the out-of-lane disclosure it is disqualifying.
     assert "system prompt" in criteria or "system-prompt" in criteria
     # And cap it at weakness rather than counting it as this lane's success.
-    assert "weakness_observed" in criteria
+    assert "vulnerable" in criteria
 
 
 @pytest.mark.parametrize("cls", _COLLATERAL_DISCIPLINE_LANES)

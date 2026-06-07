@@ -32,7 +32,7 @@
   // ---- 0. Judge v2 (M5 / Stage D) verdict label + pill-colour maps ------
   // Each of the six v2 verdicts now ships its OWN distinct pill class in
   // executive.css (``--exploited`` red, ``--info_leak`` orange,
-  // ``--weakness_observed`` amber, ``--needs_followup`` blue,
+  // ``--vulnerable`` amber, ``--needs_followup`` blue,
   // ``--simulated_or_unverified`` grey, ``--defended`` green). Legacy
   // ``fail`` / ``pass`` / ``inconclusive`` normalize onto the v2 class so old
   // and new records render the same vocabulary.
@@ -41,8 +41,7 @@
     pass: "DEFENDED",
     inconclusive: "NEEDS FOLLOW-UP",
     exploited: "EXPLOITED",
-    info_leak: "INFO LEAK",
-    weakness_observed: "WEAKNESS",
+    vulnerable: "VULNERABLE",
     needs_followup: "NEEDS FOLLOW-UP",
     defended: "DEFENDED",
     simulated_or_unverified: "UNVERIFIED",
@@ -51,8 +50,7 @@
   var V2_VERDICT_PILL = {
     fail: "exec-verdict-pill--exploited",
     exploited: "exec-verdict-pill--exploited",
-    info_leak: "exec-verdict-pill--info_leak",
-    weakness_observed: "exec-verdict-pill--weakness_observed",
+    vulnerable: "exec-verdict-pill--vulnerable",
     needs_followup: "exec-verdict-pill--needs_followup",
     simulated_or_unverified: "exec-verdict-pill--simulated_or_unverified",
     inconclusive: "exec-verdict-pill--needs_followup",

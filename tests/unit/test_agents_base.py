@@ -331,22 +331,22 @@ def test_build_finding_two_distinct_probe_ids_emit_distinct_findings() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_finding_gate_set_only_exploited_info_leak_weakness() -> None:
+def test_finding_gate_set_only_exploited_exploited_weakness() -> None:
     from agent_guardian.agents.base import _FINDING_VERDICTS
 
-    assert frozenset({"exploited", "info_leak", "weakness_observed"}) == _FINDING_VERDICTS
+    assert frozenset({"exploited", "vulnerable"}) == _FINDING_VERDICTS
     # The non-finding verdicts (defended / needs_followup / simulated) are
     # excluded.
     for v in ("defended", "needs_followup", "simulated_or_unverified"):
         assert v not in _FINDING_VERDICTS
 
 
-def test_build_finding_success_true_only_for_exploited_and_info_leak() -> None:
+def test_build_finding_success_true_only_for_exploited_and_exploited() -> None:
     agent = _make_cascade_agent()
     for verdict_str, expected_success in (
         ("exploited", True),
-        ("info_leak", True),
-        ("weakness_observed", False),
+        ("exploited", True),
+        ("vulnerable", False),
     ):
         verdict = JudgeVerdict(verdict=verdict_str, confidence=0.8, reasoning="r")  # type: ignore[arg-type]
         finding = agent._build_finding(

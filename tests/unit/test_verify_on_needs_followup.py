@@ -3,7 +3,7 @@
 When the judge returns ``needs_followup`` with a non-empty ``followup_probe``,
 :meth:`AsiAgent.run` runs a bounded VERIFICATION turn that sends that neutral
 drill-down probe to the target (BYPASSING the strategy) and re-judges. The
-re-judge resolves the prior claim: artifact now visible → exploited/info_leak
+re-judge resolves the prior claim: artifact now visible → exploited/exploited
 (a Finding is created via the existing gate); still absent/contradicted →
 simulated_or_unverified/defended (no finding). Verify turns are capped at
 ``_MAX_VERIFY_TURNS`` so a judge that always returns needs_followup cannot loop

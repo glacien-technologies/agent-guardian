@@ -444,7 +444,7 @@ def _truncate_for_preview(value: Any) -> str:
 
 # Judge v2 (M0) — the verdicts that created a Finding (used to pick the
 # representative turn). Legacy "fail" normalizes into ``exploited``.
-_FINDING_VERDICT_SET: frozenset[str] = frozenset({"exploited", "info_leak", "weakness_observed"})
+_FINDING_VERDICT_SET: frozenset[str] = frozenset({"exploited", "vulnerable"})
 
 
 # Judge v2 (M5 / Stage D) — the six-verdict taxonomy → operator-facing label.
@@ -453,8 +453,7 @@ _FINDING_VERDICT_SET: frozenset[str] = frozenset({"exploited", "info_leak", "wea
 # not two. ``feedback_no_raw_enum_in_ui`` — the operator never sees the raw enum.
 _VERDICT_LABELS: Final[dict[str, str]] = {
     "exploited": "EXPLOITED",
-    "info_leak": "INFO LEAK",
-    "weakness_observed": "WEAKNESS",
+    "vulnerable": "VULNERABLE",
     "needs_followup": "NEEDS FOLLOW-UP",
     "defended": "DEFENDED",
     "simulated_or_unverified": "UNVERIFIED",
@@ -467,7 +466,7 @@ def _verdict_label(verdict: str) -> str:
     Honours ``feedback_no_raw_enum_in_ui`` — the table never shows
     ``fail`` / ``pass`` / ``inconclusive`` verbatim; the operator sees a clean
     label from the six-verdict taxonomy (``EXPLOITED`` / ``INFO LEAK`` /
-    ``WEAKNESS`` / ``NEEDS FOLLOW-UP`` / ``DEFENDED`` / ``UNVERIFIED``).
+    ``VULNERABLE`` / ``NEEDS FOLLOW-UP`` / ``DEFENDED`` / ``UNVERIFIED``).
 
     Judge v2 (M5 / Stage D) — legacy ``pass`` / ``fail`` / ``inconclusive``
     normalize through :func:`normalize_verdict` onto the v2 taxonomy first, so
@@ -579,7 +578,7 @@ def _attach_evidence_to_findings(
                 stats["unknown"] += 1
                 continue
             norm = normalize_verdict(raw)
-            if norm in ("exploited", "info_leak"):
+            if norm == "exploited":
                 stats["fail"] += 1
             elif norm == "defended":
                 stats["pass"] += 1
@@ -637,7 +636,7 @@ def _representative_turn(records: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
     ordered = _sort_turns_in_order(records)
     # Judge v2 (M0) — surface the strongest finding-creating turn (exploited /
-    # info_leak / weakness_observed); legacy "fail" normalizes to "exploited".
+    # info_leak / vulnerable); legacy "fail" normalizes to "exploited".
     for rec in ordered:
         if normalize_verdict(str(rec.get("verdict") or "")) in _FINDING_VERDICT_SET:
             return rec
@@ -658,7 +657,11 @@ def _conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # (each probe is an iteration, not an attack turn), so the template numbers
     # them by ``iteration`` instead of repeating "turn 0".
     for idx, rec in enumerate(_sort_turns_in_order(records), start=1):
-        verdict = str(rec.get("verdict") or "")
+        raw_verdict = str(rec.get("verdict") or "")
+        # Normalize the value onto the current taxonomy so the per-turn pill's
+        # CSS class (exec-verdict-pill--<verdict>) is correct even for OLDER
+        # scans whose saved verdicts use the pre-2026-06 vocabulary.
+        verdict = normalize_verdict(raw_verdict) if raw_verdict else ""
         out.append(
             {
                 "iteration": idx,
@@ -668,7 +671,7 @@ def _conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "prompt": str(rec.get("prompt") or ""),
                 "target_response": str(rec.get("target_response") or ""),
                 "verdict": verdict or "unknown",
-                "verdict_label": _verdict_label(verdict),
+                "verdict_label": _verdict_label(raw_verdict),
                 "confidence_pct": _confidence_pct(rec.get("confidence")),
                 "reasoning": str(rec.get("reasoning") or ""),
                 # Judge v2 (M5 / Stage D) — per-turn signals for the slide-over
@@ -887,8 +890,7 @@ _VERDICT_RANK: Final[dict[str, int]] = {
     "pass": 1,
     # Judge v2 (M0) six-value taxonomy — worst-case wins.
     "exploited": 6,
-    "info_leak": 5,
-    "weakness_observed": 4,
+    "vulnerable": 4,
     "simulated_or_unverified": 3,
     "needs_followup": 2,
     "defended": 1,
@@ -906,7 +908,17 @@ def _rollup_verdict(turns: list[dict[str, Any]]) -> str:
     best = ""
     best_rank = 0
     for t in turns:
-        v = str(t.get("verdict") or "")
+        raw = str(t.get("verdict") or "")
+        if not raw:
+            # Ungraded turn (e.g. a live recon turn) contributes nothing — keep
+            # the thread at "" → PENDING rather than coercing it to a verdict.
+            continue
+        # Normalize each turn verdict onto the CURRENT taxonomy before ranking
+        # (info_leak → exploited, weakness_observed → vulnerable, pass/fail/…),
+        # so a row from an OLDER scan whose saved verdicts use the pre-2026-06
+        # vocabulary still ranks and renders under the new pills instead of
+        # falling through to PENDING.
+        v = normalize_verdict(raw)
         rank = _VERDICT_RANK.get(v, 0)
         if rank > best_rank:
             best_rank = rank

@@ -72,8 +72,7 @@
     inconclusive: "NEEDS FOLLOW-UP",
     // Judge v2 six-value taxonomy.
     exploited: "EXPLOITED",
-    info_leak: "INFO LEAK",
-    weakness_observed: "WEAKNESS",
+    vulnerable: "VULNERABLE",
     needs_followup: "NEEDS FOLLOW-UP",
     defended: "DEFENDED",
     simulated_or_unverified: "UNVERIFIED",
@@ -244,8 +243,7 @@
   var VERDICT_RANK = {
     fail: 6,
     exploited: 6,
-    info_leak: 5,
-    weakness_observed: 4,
+    vulnerable: 4,
     simulated_or_unverified: 3,
     inconclusive: 2,
     needs_followup: 2,
@@ -496,12 +494,11 @@
     var p = payload.payload || payload;
     var verdict = safeStr(p.verdict).toLowerCase();
     var level = "info";
-    // Judge v2 (M0) — exploited/info_leak are errors; the ambiguous middle
-    // grounds (needs_followup / simulated / inconclusive) are warnings.
+    // Judge v2 — exploited is an error; the ambiguous middle grounds
+    // (needs_followup / simulated / inconclusive) are warnings.
     if (verdict === "inconclusive" || verdict === "needs_followup"
         || verdict === "simulated_or_unverified") { level = "warn"; }
-    else if (verdict === "fail" || verdict === "exploited"
-        || verdict === "info_leak") { level = "error"; }
+    else if (verdict === "fail" || verdict === "exploited") { level = "error"; }
     var agent = safeStr(payload.agent || p.agent);
     var asi = safeStr(payload.asi || p.asi);
     var summary = safeStr(p.reasoning || p.summary || p.message || "");
@@ -661,7 +658,7 @@
         // DEFENDED turn-1 row flips to INFO LEAK pointing at turn 2).
         //
         // ``agent_done`` only knows findings_count>0 → coarse "fail", which
-        // outranks every precise per-turn verdict (info_leak, weakness …). Once
+        // outranks every precise per-turn verdict (exploited, vulnerable …). Once
         // a graded reflection verdict is on the row it is authoritative, so the
         // coarse summary is a FALLBACK only — it must never overwrite the
         // precise verdict the per-turn reflections rolled up. Otherwise the live

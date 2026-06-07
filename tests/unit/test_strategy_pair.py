@@ -349,7 +349,7 @@ async def test_pair_escalate_branch_on_exploited(tmp_path: Path) -> None:
             )
 
     ctx = _ctx(tmp_path, llm=_CapturingLLM(default="{}"), seeds=["seed-1"])
-    ctx.last_verdict = "info_leak"
+    ctx.last_verdict = "exploited"
     ctx.last_verdict_confidence = 0.9
     ctx.last_verdict_reasoning = "leaked one record"
     p = PAIRStrategy(ctx)

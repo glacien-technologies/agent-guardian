@@ -52,11 +52,11 @@
 
   function verdictClass(verdict) {
     if (verdict === 'pass' || verdict === 'defended') { return 'dash-reflection-card--pass'; }
-    if (verdict === 'fail' || verdict === 'exploited' || verdict === 'info_leak') {
+    if (verdict === 'fail' || verdict === 'exploited') {
       return 'dash-reflection-card--fail';
     }
     if (verdict === 'inconclusive' || verdict === 'needs_followup' ||
-        verdict === 'weakness_observed' || verdict === 'simulated_or_unverified') {
+        verdict === 'vulnerable' || verdict === 'simulated_or_unverified') {
       return 'dash-reflection-card--inconclusive';
     }
     return 'dash-reflection-card--neutral';

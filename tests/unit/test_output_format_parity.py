@@ -44,11 +44,11 @@ def test_format_flags_non_authoritative_scan(fmt: str) -> None:
 @pytest.mark.parametrize("fmt", ["sarif", "junit", "markdown", "gitlab"])
 def test_format_carries_evidence_chain(fmt: str) -> None:
     """Every format must surface finding_id + verdict_v2 for traceability."""
-    finding = make_finding(verdict_v2="info_leak")
+    finding = make_finding(verdict_v2="exploited")
     scan = make_scan(findings=[finding])
     text = _as_text(fmt, scan)
     assert finding.id in text, f"{fmt} dropped finding_id"
-    assert "info_leak" in text, f"{fmt} dropped verdict_v2"
+    assert "exploited" in text, f"{fmt} dropped verdict_v2"
 
 
 @pytest.mark.parametrize("fmt", ["sarif", "junit", "markdown", "gitlab"])

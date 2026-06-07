@@ -426,9 +426,9 @@ def test_judge_verdict_normalizes_legacy_verdicts() -> None:
 def test_judge_verdict_accepts_six_v2_verdicts() -> None:
     for verdict in (
         "defended",
-        "weakness_observed",
+        "vulnerable",
         "needs_followup",
-        "info_leak",
+        "exploited",
         "exploited",
         "simulated_or_unverified",
     ):
@@ -455,9 +455,9 @@ def test_normalize_verdict_legacy_mapping() -> None:
 def test_normalize_verdict_passthrough_for_v2() -> None:
     for v in (
         "defended",
-        "weakness_observed",
+        "vulnerable",
         "needs_followup",
-        "info_leak",
+        "exploited",
         "exploited",
         "simulated_or_unverified",
     ):
@@ -471,14 +471,14 @@ def test_normalize_verdict_tolerant_of_case_whitespace_and_unknown() -> None:
     assert normalize_verdict("garbage") == "needs_followup"
 
 
-def test_verdict_to_success_only_exploited_and_info_leak() -> None:
+def test_verdict_to_success_only_exploited_and_exploited() -> None:
     assert verdict_to_success("exploited") is True
-    assert verdict_to_success("info_leak") is True
+    assert verdict_to_success("exploited") is True
     # legacy fail also rides the success projection (normalized first).
     assert verdict_to_success("fail") is True
     for v in (
         "defended",
-        "weakness_observed",
+        "vulnerable",
         "needs_followup",
         "simulated_or_unverified",
         "pass",
@@ -494,9 +494,8 @@ def test_verdict_normalize_success_roundtrip() -> None:
         "fail": True,
         "inconclusive": False,
         "defended": False,
-        "weakness_observed": False,
+        "vulnerable": False,
         "needs_followup": False,
-        "info_leak": True,
         "exploited": True,
         "simulated_or_unverified": False,
     }
@@ -509,9 +508,9 @@ def test_verdict_normalize_success_roundtrip() -> None:
 
 def test_verdict_to_legacy_buckets() -> None:
     assert verdict_to_legacy("exploited") == "fail"
-    assert verdict_to_legacy("info_leak") == "fail"
+    assert verdict_to_legacy("exploited") == "fail"
     assert verdict_to_legacy("defended") == "pass"
-    assert verdict_to_legacy("weakness_observed") == "inconclusive"
+    assert verdict_to_legacy("vulnerable") == "inconclusive"
     assert verdict_to_legacy("needs_followup") == "inconclusive"
     assert verdict_to_legacy("simulated_or_unverified") == "inconclusive"
     # legacy inputs project through too.

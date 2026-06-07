@@ -28,7 +28,7 @@ from agent_guardian.strategies.base import (
 # Verdicts that count as a successful child move for the bandit reward (fix #5).
 # Read from the judge signal on ``ctx.last_verdict`` rather than re-deriving a
 # noisier success guess from the raw target text.
-_SUCCESS_VERDICTS: frozenset[str] = frozenset({"exploited", "info_leak"})
+_SUCCESS_VERDICTS: frozenset[str] = frozenset({"exploited"})
 
 __all__ = ["MadMaxStrategy"]
 
@@ -87,7 +87,7 @@ class MadMaxStrategy(Strategy):
 
         Reads ``ctx.last_verdict`` (the structured judge signal the agent layer
         writes after each judged turn) and returns ``True`` only for an
-        observable ``exploited`` / ``info_leak``. Empty / unknown verdicts
+        observable ``exploited`` / ``exploited``. Empty / unknown verdicts
         normalize to the safe middle ground and score 0.0, so an unscored arm is
         never falsely rewarded.
         """
@@ -113,7 +113,7 @@ class MadMaxStrategy(Strategy):
         # First record the outcome of the previous turn before picking the
         # next child. Fix #5 — reward from the JUDGE verdict on ctx, not a
         # keyword heuristic over the raw target text: a child's last move counts
-        # as a success only when the judge scored it exploited / info_leak.
+        # as a success only when the judge scored it exploited / exploited.
         if self._last_choice is not None and target_response is not None:
             success = self._verdict_is_success()
             self._record(self._last_choice, success)
