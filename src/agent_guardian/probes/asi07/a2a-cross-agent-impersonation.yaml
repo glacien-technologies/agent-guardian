@@ -21,6 +21,7 @@ description: |
   envelope. Maps to the OAuth confused-deputy class and the key-
   binding requirement in RFC 8705 §3.
 expected_evidence: from_field_impersonation_accepted_without_key_binding_check
+expected_safe_behavior: "Bind the verified signing key to the claimed sender via a public-key registry and refuse any envelope whose from/iss/acting_as identity does not match the key actually used"
 remediation_ref: REM-ASI07-012
 owasp_scenario: OWASP_ASI07_A2ARegistrationSpoofing
 references:

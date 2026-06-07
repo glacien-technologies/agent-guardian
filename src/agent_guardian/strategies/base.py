@@ -706,9 +706,34 @@ class Strategy(ABC):
                 self._active_delivery_vector = vec
         elif self._parent_probe_id:
             meta["seed_id"] = self._parent_probe_id
+        else:
+            # Issue #82 — a generated turn with no dispatched corpus seed and no
+            # prior provenance (tool-abuse/memory-poison/a2a generate their own
+            # prompts instead of firing seeds). Attach a representative
+            # same-category corpus probe id under a SEPARATE key so the judge
+            # still receives that probe's expected_safe_behavior / expected_evidence
+            # (D3) and the lane's curated corpus metadata is not bypassed. Kept
+            # distinct from ``seed_id`` so finding provenance is NOT mis-attributed
+            # to a probe this turn did not actually fire.
+            rep = self._representative_provenance_id()
+            if rep:
+                meta["provenance_seed_id"] = rep
         if self._active_delivery_vector:
             meta["delivery_vector"] = self._active_delivery_vector
         return meta
+
+    def _representative_provenance_id(self) -> str | None:
+        """Return a representative corpus probe id from ``ctx.seeds`` (#82).
+
+        Used to attach same-category judging metadata to generated turns that
+        carry no dispatched seed. Deterministic: the first configured
+        :class:`ProbeSeed` with a probe id (raw-string seeds have none).
+        """
+        for s in self.ctx.seeds:
+            pid = seed_probe_id(s)
+            if pid:
+                return pid
+        return None
 
     def _attack_system_extra(self) -> str:
         """Render the PAIR preamble + per-agent ASI specialization.

@@ -78,3 +78,87 @@ def test_build_finding_stamps_expected_safe_behavior() -> None:
         strategy_metadata={"seed_id": "P-1"},
     )
     assert finding.expected_safe_behavior == "require verified auth"
+
+
+def test_generated_turn_attaches_provenance_seed_id() -> None:
+    """Issue #82 — a generated turn (no dispatched corpus seed) attaches a
+    representative same-category provenance id so its probe metadata still
+    reaches the judge, WITHOUT faking seed_id (no finding mis-attribution)."""
+    import random
+    import tempfile
+    from pathlib import Path
+
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.strategies.base import StrategyContext
+    from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+    seed = ProbeSeed(
+        probe_id="ASI06-MP-001",
+        text="poison memory",
+        expected_safe_behavior="refuse to persist unverified policy",
+    )
+    ctx = StrategyContext(
+        attacker_llm=StubLLM(default="x"),
+        attacker_model="stub",
+        goal="g",
+        seeds=[seed],
+        memory=SharedMemory("s82", root_dir=Path(tempfile.mkdtemp())),
+        rng=random.Random(0),
+    )
+    meta = CrescendoStrategy(ctx)._build_seed_metadata(None)
+    assert meta.get("provenance_seed_id") == "ASI06-MP-001"
+    assert "seed_id" not in meta  # not mis-attributed
+
+
+def test_provenance_id_none_for_raw_string_seeds() -> None:
+    """Raw-string seeds carry no probe id, so no provenance is attached."""
+    import random
+    import tempfile
+    from pathlib import Path
+
+    from agent_guardian.core.memory import SharedMemory
+    from agent_guardian.strategies.base import StrategyContext
+    from agent_guardian.strategies.crescendo import CrescendoStrategy
+
+    ctx = StrategyContext(
+        attacker_llm=StubLLM(default="x"),
+        attacker_model="stub",
+        goal="g",
+        seeds=["just a raw string seed"],
+        memory=SharedMemory("s82b", root_dir=Path(tempfile.mkdtemp())),
+        rng=random.Random(0),
+    )
+    meta = CrescendoStrategy(ctx)._build_seed_metadata(None)
+    assert "provenance_seed_id" not in meta
+
+
+def test_finding_stamps_expected_safe_behavior_via_provenance() -> None:
+    """Issue #82 — a generated-turn finding (no dispatched seed_id, only a
+    provenance_seed_id) still carries the category's expected_safe_behavior,
+    without faking probe attribution."""
+    from agent_guardian.agents.base import AgentBudget
+    from agent_guardian.agents.privilege import PrivilegeAgent
+
+    agent = PrivilegeAgent(
+        attacker_llm=StubLLM(default="x"),
+        evaluator_llm=StubLLM(default="x"),
+        attacker_model="stub",
+        evaluator_model="stub",
+        budget=AgentBudget(tokens_remaining=20_000, wall_seconds_remaining=30.0, max_turns=5),
+        rng=Random(0),
+    )
+    agent._seed_index = {
+        "ASI06-MP-001": ProbeSeed(
+            probe_id="ASI06-MP-001", text="x", expected_safe_behavior="refuse unverified policy"
+        )
+    }
+    finding = agent._build_finding(
+        prompt="p",
+        response="r",
+        verdict=JudgeVerdict(verdict="exploited", confidence=1.0, reasoning="x"),
+        attempt_count=1,
+        strategy_metadata={"provenance_seed_id": "ASI06-MP-001"},  # generated turn, no seed_id
+    )
+    assert finding.expected_safe_behavior == "refuse unverified policy"
+    # probe_id is NOT faked to the provenance probe (attribution stays synthetic)
+    assert finding.probe_id != "ASI06-MP-001"
