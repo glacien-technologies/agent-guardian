@@ -262,6 +262,14 @@ agentdojo_app = typer.Typer(
 )
 app.add_typer(agentdojo_app, name="agentdojo")
 
+# Suite runner — `agent-guardian suite run suite.yaml` launches a fleet of
+# independent scans in parallel (one isolated subprocess per workload) and
+# aggregates a cross-scan summary. Orchestration only; the `scan` command above
+# is untouched. Defined in its own subpackage to keep this module focused.
+from agent_guardian.suite.cli import suite_app  # noqa: E402
+
+app.add_typer(suite_app, name="suite")
+
 
 # ---------------------------------------------------------------------------
 # State persistence (first-run banner, last-score)
