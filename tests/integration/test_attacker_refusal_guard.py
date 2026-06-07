@@ -56,6 +56,13 @@ class _RefusalThenDone(Strategy):
 class _RefusalAgent(TrustExploitAgent):
     """TrustExploit agent whose strategy yields only a self-refusal probe."""
 
+    # Isolate the refusal GUARD: pin the B6 min-turns floor to 0 so it does not
+    # rotate to corpus seeds (whose real static attacks would legitimately
+    # produce findings via the fail-judge), keeping this test focused on the one
+    # invariant it guards — the attacker's own refusal probe is never dispatched
+    # and never round-trips into a finding.
+    min_turns = 0
+
     def strategy_stack(self, ctx: StrategyContext) -> Strategy:
         return _RefusalThenDone(ctx)
 

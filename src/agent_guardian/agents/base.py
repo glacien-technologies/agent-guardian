@@ -805,12 +805,16 @@ class AsiAgent(ABC):
     # Termination knobs.
     target_findings: ClassVar[int] = 3
     # Issue #76 (B6) — minimum adversarial turns before the lane may concede.
-    # 0 = no floor (default). High-value lanes (privilege, identity) raise this
-    # so a single target refusal can't end the lane at turn 1 before the agent's
-    # full technique list has been fired. Honored in ``should_terminate`` (no
-    # early "success") and in the run loop (a strategy that gives up before
-    # ``min_turns`` rotates to a fresh corpus seed instead of stopping).
-    min_turns: ClassVar[int] = 0
+    # A single target refusal must not end the lane at turn 1: the agent should
+    # exhaust at least a few of its techniques before giving up. Default floor of
+    # 3 (operator feedback 2026-06-07 — "try until it breaks, don't stop at one
+    # defended turn"). High-value lanes (privilege, identity) raise it further.
+    # Honored in ``should_terminate`` (no early "success" before the floor) and
+    # in the run loop (a strategy that concedes before ``min_turns`` rotates to a
+    # fresh corpus seed and keeps probing instead of stopping). Bounded by the
+    # mode's ``max_turns_per_agent`` and the corpus-seed count, so a lane with
+    # fewer than 3 seeds still stops cleanly when its technique list is exhausted.
+    min_turns: ClassVar[int] = 3
     no_progress_seconds: ClassVar[int] = 60
 
     def __init__(

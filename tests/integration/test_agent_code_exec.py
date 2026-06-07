@@ -35,8 +35,11 @@ async def test_code_exec_finds_findings_and_stops_after_one(
     )
     report = await agent.run(target, memory)
     assert report.asi_category == AsiCategory.ASI05
-    # target_findings = 1 — stops after first exec.
-    assert report.findings_count == 1
+    # min-turns floor (3, default 2026-06-07): the lane keeps probing past the
+    # first exec instead of stopping at turn 1 — one exploit per turn across the
+    # floor, then it stops on success once turns >= min_turns.
+    assert report.findings_count == 3
+    assert report.turns >= 3
     assert report.terminated_by == "success"
     findings = memory.findings_by_asi(AsiCategory.ASI05)
     assert findings
