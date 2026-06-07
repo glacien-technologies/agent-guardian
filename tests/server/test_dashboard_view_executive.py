@@ -99,7 +99,7 @@ def test_live_snapshot_carries_full_10_axis_radar(tmp_path: Path) -> None:
     assert isinstance(radar, list)
     assert len(radar) == 10
     # No scan yet -> every category pending -> plots at 0.
-    assert all(v == 0 or v == 0.0 for v in radar)
+    assert all(v == 0 for v in radar)
 
 
 def _scan_with_partial_scores() -> Scan:
