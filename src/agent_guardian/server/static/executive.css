@@ -3461,42 +3461,12 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   white-space: nowrap;
 }
 
-/* Judge v2 (M5 / Stage D) — Evidence quote block in the slide-over. The
- * verbatim span the judge cited as proof of the verdict; rendered as a tinted,
- * monospaced quote distinct from the prose "Judge reasoning" blockquote. */
-.exec-probe__evidence-quote {
-  margin: 4px 0 12px;
-  padding: 8px 12px;
-  border-left: 3px solid var(--exec-sev-high);
-  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
-  font-family: var(--exec-font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--exec-ink);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.exec-chat__evidence {
-  margin: 6px 0 0;
-  padding: 6px 10px;
-  border-left: 3px solid var(--exec-sev-high);
-  background: color-mix(in srgb, var(--exec-sev-high) 6%, transparent);
-  font-family: var(--exec-font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--exec-ink);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.exec-chat__evidence-label {
-  display: block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--exec-sev-high);
-  margin-bottom: 3px;
-}
+/* Per-turn / single-turn "Evidence" quote blocks were removed (operator
+ * feedback 2026-06-07): the judge's cited span is a verbatim copy of the target
+ * response already shown above it, so repeating it was pure duplication. The
+ * raw span is still reachable via the "Evidence chain" JSONL link. The former
+ * .exec-probe__evidence-quote / .exec-chat__evidence{,-label} rules are dropped
+ * with their markup. */
 
 /* ============================================================
  * 15. Detail modal component (QA-031 / QA-032)
