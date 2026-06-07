@@ -1,6 +1,9 @@
 #!/bin/bash -eu
 
-python3 -m pip install --upgrade pip
+# 'pip install .' installs agent-guardian from local source and cannot be
+# hash-pinned from PyPI (it is not a PyPI distribution).
+# The Scorecard PinnedDependenciesID alert for this line must be dismissed
+# in GitHub Security as a local-source install, not a PyPI fetch.
 python3 -m pip install .
 
 for fuzzer in "$SRC"/agent-guardian/fuzzers/*_fuzzer.py; do

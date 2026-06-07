@@ -418,30 +418,6 @@ def _findings_page(
 # "10 of N evidence event(s) shown".
 _FINDING_EVIDENCE_CAP: Final[int] = 10
 
-# QA-054 — preview cap for the per-turn child rows. Each child row shows the
-# leading characters of the prompt and target_response so the operator can
-# eyeball which turn flipped the verdict without opening the slide-over. The
-# full text is still available via the slide-over (which fetches the verbatim
-# probe sheet from ``/scan/<id>/probe``).
-_FINDING_CHILD_PREVIEW_CHARS: Final[int] = 140
-
-
-def _truncate_for_preview(value: Any) -> str:
-    """Return a single-line preview prefix of ``value`` for child-row display.
-
-    Collapses whitespace runs to single spaces (so a multi-line prompt fits
-    one table row), trims to :data:`_FINDING_CHILD_PREVIEW_CHARS`, and appends
-    a ``…`` ellipsis when truncation occurred. Non-string inputs are coerced
-    via ``str()`` so the helper never raises on unexpected types.
-    """
-    if value is None:
-        return ""
-    text = " ".join(str(value).split())
-    if len(text) <= _FINDING_CHILD_PREVIEW_CHARS:
-        return text
-    return text[:_FINDING_CHILD_PREVIEW_CHARS].rstrip() + "…"
-
-
 # Judge v2 (M0) — the verdicts that created a Finding (used to pick the
 # representative turn). Legacy "fail" normalizes into ``exploited``.
 _FINDING_VERDICT_SET: frozenset[str] = frozenset({"exploited", "vulnerable"})
@@ -1433,7 +1409,6 @@ def _build_scan_plan(
     EM_DASH = "—"
     if scan is None:
         target_mode = EM_DASH
-        is_http = False
         mode = EM_DASH
         usd_cap = EM_DASH
         wall_cap = EM_DASH
@@ -1443,7 +1418,6 @@ def _build_scan_plan(
         egress = EM_DASH
     else:
         target_mode = scan.target_mode
-        is_http = scan.target_mode == "http"
         mode = scan.mode
         # USD cap: prefer the budget envelope's recorded cap; ``None`` = uncapped.
         if scan.budget is not None and scan.budget.cap_usd is not None:
@@ -1490,7 +1464,9 @@ def _build_scan_plan(
 
     return {
         "target": {
-            "url": scan.target_ref if (scan is not None and is_http) else EM_DASH,
+            "url": scan.target_ref
+            if (scan is not None and scan.target_mode == "http")
+            else EM_DASH,
             "mode": target_mode,
             "reachable": reachable,
             "multi_agent": multi_agent,
