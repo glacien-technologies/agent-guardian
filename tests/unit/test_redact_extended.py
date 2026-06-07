@@ -46,8 +46,13 @@ def test_redacts_gitlab_pat() -> None:
 
 def test_redacts_stripe_live_secret() -> None:
     r = PiiRedactor()
-    out = r.redact("billing sk_live_4eC39HqLyjWDarjtT1zdp7dc found")
-    assert "sk_live_4eC39HqLyjWDarjtT1zdp7dc" not in out
+    # Synthetic, non-functional. Assembled from parts so the verbatim
+    # secret pattern never appears in source — this is test data for the
+    # redaction feature itself, and a contiguous literal trips GitHub secret
+    # scanning ("public leak") even though no real credential exists.
+    secret = "sk_live_" + "4eC39HqLyjWDarjtT1zdp7dc"
+    out = r.redact(f"billing {secret} found")
+    assert secret not in out
     assert "[REDACTED:STRIPE_KEY]" in out
 
 
@@ -60,8 +65,10 @@ def test_redacts_stripe_test_publishable() -> None:
 
 def test_redacts_twilio_sk_key() -> None:
     r = PiiRedactor()
-    out = r.redact("twilio SKabcdef0123456789abcdef0123456789 used")
-    assert "SKabcdef0123456789abcdef0123456789" not in out
+    # Synthetic; split so the verbatim pattern isn't in source (see note above).
+    secret = "SK" + "abcdef0123456789abcdef0123456789"
+    out = r.redact(f"twilio {secret} used")
+    assert secret not in out
     assert "[REDACTED:TWILIO_SK]" in out
 
 
@@ -98,7 +105,13 @@ def test_redacts_pem_openssh_private_key() -> None:
 
 def test_redacts_discord_bot_token() -> None:
     r = PiiRedactor()
-    token = "MTAxOTI4NDU1MDQwMDgyMzM2OQ.GsdaQp.abcdefghijklmnopqrstuvwxyz12345"
+    # Synthetic; split so the verbatim pattern isn't in source (see note above).
+    # The leading 24-char base64 user-id segment has high entropy, so gitleaks'
+    # generic-api-key detector flags it even split. The inline gitleaks:allow
+    # below sits on that literal's own line — line-scoped, not a file/rule-wide
+    # exemption, and it travels with the line across a squash-merge.
+    uid = "MTAxOTI4NDU1MDQwMDgyMzM2OQ"  # gitleaks:allow -- synthetic fixture
+    token = uid + ".GsdaQp." + "abcdefghijklmnopqrstuvwxyz12345"
     out = r.redact(f"discord {token} leaked")
     assert token not in out
     assert "[REDACTED:DISCORD_BOT_TOKEN]" in out
