@@ -30,9 +30,26 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
         if: env.SLACK_WEBHOOK_URL != ''
         run: |
-          text=$(printf ':twisted_rightwards_arrows: *PR #%s merged* to main by %s: %s — <%s|View PR>' \
-            "$PR_NUMBER" "$PR_AUTHOR" "$PR_TITLE" "$PR_URL")
-          payload=$(printf '{"text": %s}' "$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+          # Build the Block Kit payload entirely in Python: it reads the
+          # untrusted PR fields straight from os.environ (no shell interpolation)
+          # and json.dumps escapes everything — there is no injection surface.
+          payload=$(python3 - <<'PY'
+          import json, os
+          num = os.environ["PR_NUMBER"]
+          title = os.environ["PR_TITLE"]
+          author = os.environ["PR_AUTHOR"]
+          url = os.environ["PR_URL"]
+          repo = os.environ["REPO"].split("/")[-1]
+          blocks = [
+              {"type": "section", "text": {"type": "mrkdwn",
+               "text": f":twisted_rightwards_arrows: *<{url}|#{num} · {title}>*\nmerged into `main`"}},
+              {"type": "context", "elements": [{"type": "mrkdwn",
+               "text": f"{repo} · by *{author}*"}]},
+          ]
+          print(json.dumps({"text": f"PR #{num} merged — {title}", "blocks": blocks}))
+          PY
+          )
           curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"

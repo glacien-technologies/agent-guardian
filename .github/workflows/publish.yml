@@ -175,10 +175,25 @@ jobs:
       - name: Post release notification to Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         if: env.SLACK_WEBHOOK_URL != ''
         run: |
-          tag="${GITHUB_REF_NAME}"
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
-          text=":white_check_mark: *AgentGuardian ${tag}* published — PyPI + GHCR + signed GitHub Release. <${url}|Release notes>"
-          payload=$(printf '{"text": %s}' "$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+          # Block Kit payload built in Python (json.dumps escaping; trusted env
+          # vars only — the tag and repo are GitHub-provided).
+          payload=$(python3 - <<'PY'
+          import json, os
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+          name = repo.split("/")[-1]
+          url = f"https://github.com/{repo}/releases/tag/{tag}"
+          blocks = [
+              {"type": "section", "text": {"type": "mrkdwn",
+               "text": f":rocket: *<{url}|{name} {tag}>* released"}},
+              {"type": "context", "elements": [{"type": "mrkdwn",
+               "text": "PyPI · GHCR · signed GitHub Release"}]},
+          ]
+          print(json.dumps({"text": f"{name} {tag} released", "blocks": blocks}))
+          PY
+          )
           curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
