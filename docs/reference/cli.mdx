@@ -40,10 +40,18 @@ Commands:
   validate      Run the payload-free pre-flight against a contract.
   init          Author a new target contract, then pre-flight it.
   scan          Run an adversarial swarm scan against a target.
+  suite         Run a fleet of scans in parallel from one YAML file.
   telemetry     Opt-in usage telemetry (consent + status).
   contract      Work with target contracts (schema export, migration).
   scans         Manage stored scans (list, delete, purge --older-than).
 ```
+
+<Note>
+  `suite` runs many independent scans in parallel from one YAML file and
+  aggregates a cross-scan summary. See
+  [Parallel suites & bulk scanning](/ci-cd/parallel-suites) for the full guide
+  and `examples/suite.yaml` for a commented reference file.
+</Note>
 
 ---
 

@@ -236,6 +236,45 @@ jobs:
 
 See [`docs/ci-cd/overview.mdx`](./docs/ci-cd/overview.mdx) and [`docs/ci-cd/github-actions.mdx`](./docs/ci-cd/github-actions.mdx) for the fuller setup, thresholds, and composite-action path.
 
+## Parallel & bulk scanning
+
+Need to scan a whole fleet — every agent you ship, several models against one
+target, or a nightly regression sweep? `agent-guardian suite` runs many
+independent scans **in parallel from one YAML file**, then aggregates a
+cross-scan summary and a report per workload. Each workload is a separate,
+fully isolated `scan` subprocess, so the suite never changes how any single
+scan behaves.
+
+```yaml
+# suite.yaml
+version: 1
+suite:
+  name: nightly-fleet
+  concurrency: 4
+  out_dir: ./suite-out
+  formats: [json, sarif]
+defaults:
+  model: gemini:gemini-2.5-flash
+  mode: full
+workloads:
+  - { name: finbot-http,       endpoint: https://finbot.internal/agent, fail_under: 70 }
+  - { name: planner-langgraph, framework: langgraph, framework_ref: app.graph:graph }
+  - { name: prompt-baseline,   system_prompt: ./prompts/agent_v3.txt, mode: fast }
+```
+
+```bash
+agent-guardian suite validate suite.yaml   # check, no spawn
+agent-guardian suite run      suite.yaml    # run the fleet → summary + reports
+```
+
+You get a summary table (per-workload AIVSS / band / findings, with a trust
+flag), a machine-readable `summary.json`, and flat `reports/<name>.<ext>` for
+every requested format. With `register_scans` (the default) each scan is also
+browsable in the dashboard by its own id. See
+[`docs/ci-cd/parallel-suites.mdx`](./docs/ci-cd/parallel-suites.mdx) for the
+full guide and [`examples/suite.yaml`](./examples/suite.yaml) for a commented
+reference.
+
 ## Standards and coverage
 
 Enumerate the corpus locally:

@@ -71,6 +71,12 @@ node_modules/
 # telemetry collector (which only sees the anonymous allowlist).
 examples/reports/
 
+# Local suite files that point at real/private endpoints — keep the generic
+# `examples/suite.yaml` committed as the reference, but never push a copy
+# wired to an actual target. `*.local.yaml` is the operator's working file.
+examples/*.local.yaml
+suite-out/
+
 # GTM launch operational kit — local-only operator scratch.
 # The committed gtm/ files are reproducible launch artifacts;
 # operator drafts, A/B copy variants, and screenshots stay local.
