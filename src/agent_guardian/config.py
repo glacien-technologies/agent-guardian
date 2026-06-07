@@ -256,6 +256,15 @@ _STANDARD_ENV_VAR: dict[str, tuple[str, ...]] = {
     "openai": ("OPENAI_API_KEY",),
     "anthropic": ("ANTHROPIC_API_KEY",),
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    # Azure OpenAI — api-key auth (Entra is keyless, resolved in the client).
+    "azure": ("AZURE_OPENAI_API_KEY",),
+    # OpenAI-compatible gateways — all plain Bearer keys.
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+    "together": ("TOGETHER_API_KEY",),
+    "fireworks": ("FIREWORKS_API_KEY",),
+    # vLLM key is OPTIONAL (only enforced if the server was started with one).
+    "vllm": ("VLLM_API_KEY",),
 }
 
 

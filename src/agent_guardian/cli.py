@@ -64,14 +64,8 @@ from agent_guardian.core.swarm import (
     expected_agent_count,
 )
 from agent_guardian.llm import (
-    AnthropicClient,
     BaseLLM,
-    GeminiClient,
-    LLMAuthError,
     LLMError,
-    OllamaClient,
-    OpenAIClient,
-    StubScript,
 )
 from agent_guardian.logging_setup import configure_logging
 from agent_guardian.models.asi import AsiCategory, asi_description
@@ -384,108 +378,39 @@ def build_llm(model_spec: str, role: str) -> BaseLLM:
 
     The role string is used only in error messages so the user knows
     which LLM slot misconfigured.
+
+    The parsing + construction logic lives in
+    :mod:`agent_guardian.llm.registry`; this wrapper only translates the
+    registry's provider-agnostic :class:`~agent_guardian.llm.registry.RegistryError`
+    into a Typer-friendly ``BadParameter`` so the CLI surface is unchanged.
+    Multi-provider support (Azure, Vertex, OpenRouter, Groq, Together,
+    Fireworks, vLLM) and the ``provider:model[+qualifier=value]*`` grammar are
+    handled there.
     """
-    spec = (model_spec or "stub").strip()
-    if spec.lower() == "stub":
-        return StubScript().default(f"[stub:{role}] safe default response").build()
+    from agent_guardian.llm.registry import RegistryError
+    from agent_guardian.llm.registry import build_llm as _registry_build_llm
 
-    provider: str
-    model: str
-    if ":" in spec:
-        provider, _, model = spec.partition(":")
-        provider = provider.lower()
-    else:
-        lowered = spec.lower()
-        if lowered.startswith("gpt-"):
-            provider, model = "openai", spec
-        elif lowered.startswith("claude-"):
-            provider, model = "anthropic", spec
-        elif lowered.startswith("gemini-"):
-            provider, model = "gemini", spec
-        elif lowered.startswith("ollama-"):
-            provider, model = "ollama", spec
-        else:
-            raise typer.BadParameter(
-                f"Cannot infer provider for model spec '{spec}' (role={role}). "
-                f"Use one of: stub, openai:<model>, anthropic:<model>, "
-                f"gemini:<model>, ollama:<model>, bedrock:<id>."
-            )
-
-    if provider == "stub":
-        return StubScript().default(f"[stub:{role}] safe default response").build()
-    if provider == "ollama":
-        # OllamaClient takes no auth; the model is supplied per-request via
-        # the swarm's ``attacker_model`` / ``evaluator_model`` config knobs.
-        _ = model
-        return OllamaClient()
-    if provider == "openai":
-        api_key = env_api_key("openai")
-        if not api_key:
-            raise typer.BadParameter(
-                f"OpenAI requested for {role} but no API key found. "
-                f"Set AGENT_GUARDIAN_OPENAI_API_KEY or OPENAI_API_KEY."
-            )
-        return OpenAIClient(api_key=api_key)
-    if provider == "anthropic":
-        api_key = env_api_key("anthropic")
-        if not api_key:
-            raise typer.BadParameter(
-                f"Anthropic requested for {role} but no API key found. "
-                f"Set AGENT_GUARDIAN_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY."
-            )
-        return AnthropicClient(api_key=api_key)
-    if provider == "gemini":
-        api_key = env_api_key("gemini")
-        if not api_key:
-            raise typer.BadParameter(
-                f"Gemini requested for {role} but no API key found. "
-                f"Set AGENT_GUARDIAN_GEMINI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY."
-            )
-        return GeminiClient(api_key=api_key)
-    if provider == "bedrock":
-        # Bedrock uses the AWS credential chain (env vars > ~/.aws/credentials
-        # > IAM role). It deliberately does NOT consult ``env_api_key`` --
-        # there is no such thing as a Bedrock API key.
-        try:
-            from agent_guardian.llm.bedrock import BedrockClient
-        except ImportError as exc:
-            raise typer.BadParameter(
-                f"Bedrock requested for {role} but the AWS extra is not installed. "
-                f"Install with: pip install 'agent-guardian[aws]' "
-                f"(import error: {exc})"
-            ) from exc
-        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-        try:
-            return BedrockClient(region=region)
-        except LLMAuthError as exc:
-            raise typer.BadParameter(
-                f"Bedrock requested for {role} but credentials are missing: {exc}"
-            ) from exc
-    if provider == "vertex":
-        # #15 — Vertex AI is request-builder-only until M9 lands OAuth2 SA
-        # auth. Refuse with a clear M9-pending message instead of letting the
-        # spec fall through to the generic "Unknown provider" error, which
-        # mismatches the ``doctor`` surface and the ``llm.vertex`` module's
-        # own claim of provider support.
-        raise typer.BadParameter(
-            f"Vertex AI requested for {role} but provider authentication is M9-"
-            "pending (request-builder + response-mapper only). See "
-            "docs/providers/vertex.md for the M9 roadmap. Use openai:<model>, "
-            "anthropic:<model>, gemini:<model>, ollama:<model>, or bedrock:<id> "
-            "in the meantime."
-        )
-    raise typer.BadParameter(
-        f"Unknown provider '{provider}' for model spec '{spec}' (role={role})."
-    )
+    try:
+        return _registry_build_llm(model_spec, role)
+    except RegistryError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _normalise_model_name(model_spec: str) -> str:
-    """Return the bare model name a swarm config expects (no provider prefix)."""
+    """Return the bare model name a swarm config expects.
+
+    Strips both the ``provider:`` prefix AND any ``+qualifier=value`` tail so
+    downstream cost lookups / logging see the plain model id (e.g.
+    ``vertex:gemini-2.5-flash+project=p`` → ``gemini-2.5-flash``).
+    """
     spec = (model_spec or "stub").strip()
     if ":" in spec:
         _, _, model = spec.partition(":")
-        return model or spec
-    return spec
+        model = model or spec
+    else:
+        model = spec
+    # Strip the qualifier tail (the model id itself never contains ``+`` today).
+    return model.split("+", 1)[0] or spec
 
 
 # ---------------------------------------------------------------------------
@@ -777,19 +702,14 @@ def doctor(
     # Python + platform.
     typer.echo(f"python: {sys.version.split()[0]}")
 
-    # Detect available LLM keys. #15 — Vertex is request-builder-only until
-    # M9 ships OAuth2 SA auth; we still surface it here so the operator can
-    # see the env key landed, but we label it so they don't think a Vertex
-    # scan is supported (it isn't yet -- ``build_llm`` raises a clear
-    # M9-pending error if they try). Bedrock is intentionally NOT in this loop
-    # -- it uses the AWS credential chain (env > ~/.aws/credentials > IAM role),
-    # not an API key. Its readiness is reported by `_probe_bedrock_readiness()`.
+    # Detect available LLM keys. Bedrock and Vertex are intentionally NOT in
+    # this loop -- they use cloud credential chains (the AWS chain and Google
+    # ADC respectively), not API keys, so there is no ``*_API_KEY`` to detect
+    # here. Bedrock readiness is reported by `_probe_bedrock_readiness()`.
     found_keys: list[str] = []
     for provider in ("openai", "anthropic", "gemini"):
         if env_api_key(provider):
             found_keys.append(provider)
-    if env_api_key("vertex"):
-        found_keys.append("vertex (request-builder-only, M9-pending)")
     if found_keys:
         typer.echo(
             "llm keys detected: "

@@ -121,6 +121,16 @@ aws = [
 gcp = [
   "google-auth>=2.0",
 ]
+# ``azure`` carries azure-identity for the OPTIONAL Microsoft Entra ID
+# (keyless) auth path on the Azure OpenAI provider. It is used ONLY to mint /
+# refresh an Entra bearer token (``DefaultAzureCredential``); no Azure SDK type
+# touches the wire — the request is raw httpx like every other provider. Opt-in
+# like ``aws`` / ``gcp``: the default Azure api-key auth path needs nothing
+# here, and ``AzureOpenAIClient`` raises a clear ImportError with remediation
+# when Entra is requested (``AZURE_USE_ENTRA=1``) without this extra installed.
+azure = [
+  "azure-identity>=1.15",
+]
 # ``otel`` carries the OpenTelemetry stack used by the GenAI-observability
 # module (:mod:`agent_guardian.obs`). It is strictly opt-in: the module
 # degrades to a silent no-op when these packages are absent, so the default
@@ -383,6 +393,17 @@ ignore_missing_imports = true
 # (precedent: ``botocore.*`` / ``google.*`` / ``opentelemetry.*``).
 [[tool.mypy.overrides]]
 module = ["agentdojo.*"]
+ignore_missing_imports = true
+
+# azure-identity is an optional dependency (the ``[azure]`` extra) used only by
+# :class:`agent_guardian.llm.azure_openai.AzureOpenAIClient` to mint an Entra
+# bearer token, behind a lazy import guard. It ships no PEP-561 stubs and the
+# pre-commit mypy hook runs in an isolated venv without it installed — silence
+# the missing-import noise once for the whole project so mypy behaves
+# identically whether or not the extra is installed (precedent: ``botocore.*`` /
+# ``google.*`` / ``opentelemetry.*``).
+[[tool.mypy.overrides]]
+module = ["azure.*"]
 ignore_missing_imports = true
 
 # jsonschema has incomplete first-party stubs and ships none of its own. We

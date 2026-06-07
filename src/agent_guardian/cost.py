@@ -118,8 +118,30 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("gemini", "gemini-2.5-flash-lite", 0.075, 0.300),
     # Vertex AI — Gemini family list prices (parity with the AI Studio
     # surface; pricing is the same per-token on the Vertex SKU).
-    PriceRow("vertex", "gemini-2.5-flash", 0.30, 2.50),
     PriceRow("vertex", "gemini-2.5-pro", 1.25, 10.00),
+    PriceRow("vertex", "gemini-2.5-flash", 0.30, 2.50),
+    PriceRow("vertex", "gemini-2.5-flash-lite", 0.075, 0.300),
+    PriceRow("vertex", "gemini-2.0-flash", 0.15, 0.60),
+    PriceRow("vertex", "gemini-2.0-flash-lite", 0.075, 0.30),
+    PriceRow("vertex", "gemini-3.1-pro-preview", 1.250, 10.000),
+    PriceRow("vertex", "gemini-3.5-flash", 0.300, 2.500),
+    # Azure OpenAI — the model_id is the user-chosen DEPLOYMENT name, so we
+    # cannot map it to a SKU. Use a single wildcard priced at the OpenAI
+    # gpt-4o list rate (the common default) so the pre-flight estimate is
+    # informative rather than zero. Cost for Azure is always approximate.
+    PriceRow("azure", "*", 2.50, 10.00),
+    # OpenAI-compatible gateways. The model half is an upstream-vendor slug
+    # (OpenRouter ``vendor/model``, Together ``provider/model``, Fireworks
+    # ``accounts/.../models/...``) that we cannot map to an exact SKU without
+    # tracking every gateway's rotating catalog, so each provider falls through
+    # to a conservative wildcard. Cost for these gateways is ALWAYS approximate
+    # — the real rate depends on the upstream model the gateway routes to.
+    PriceRow("openrouter", "*", 3.00, 15.00),
+    PriceRow("groq", "*", 0.59, 0.79),
+    PriceRow("together", "*", 0.88, 0.88),
+    PriceRow("fireworks", "*", 0.90, 0.90),
+    # Local vLLM — self-hosted, no per-token list price.
+    PriceRow("vllm", "*", 0.0, 0.0),
     # Free / local — wildcard rows.
     PriceRow("ollama", "*", 0.0, 0.0),
     PriceRow("stub", "*", 0.0, 0.0),
@@ -147,6 +169,10 @@ def lookup_price(model_spec: str) -> PriceRow:
     if ":" in model_spec:
         provider, _, model = model_spec.partition(":")
         provider = provider.lower()
+        # Strip any ``+qualifier=value`` tail before table lookup (e.g.
+        # ``vertex:gemini-2.5-flash+project=p`` → ``gemini-2.5-flash``).
+        # Backward-compatible: existing model ids contain no ``+``.
+        model = model.split("+", 1)[0]
         # Exact match.
         for row in PRICE_TABLE:
             if row.provider == provider and row.model == model:
