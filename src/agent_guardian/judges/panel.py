@@ -336,6 +336,18 @@ class PanelJudge:
             max(majority_members, key=lambda v: v.confidence) if majority_members else None
         )
         followup_probe = (best_member.followup_probe if best_member else "") or ""
+        # Verify-lane fix — a needs_followup verdict reached by a panel TIE
+        # (1-1-1 split → resolved to needs_followup) has NO majority seat to
+        # forward a drill-down probe from, so the verify lane never armed. When
+        # the final verdict is needs_followup and no probe was forwarded, pull
+        # the first non-empty drill-down probe from ANY seat so the loop can
+        # still arm a verify turn and resolve the ambiguity.
+        if majority == "needs_followup" and not followup_probe:
+            for seat_v in verdicts:
+                cand = (seat_v.followup_probe or "").strip()
+                if cand:
+                    followup_probe = cand
+                    break
         evidence = (best_member.evidence if best_member else "") or ""
         observable_compromise = bool(best_member.observable_compromise) if best_member else False
         refused = bool(best_member.refused) if best_member else False
