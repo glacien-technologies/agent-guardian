@@ -1037,8 +1037,71 @@ def _load_probe_summaries(scan_dir: Path | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in summaries.items() if is_usable_summary(str(v))}
 
 
+def _agent_lifecycle_states(scan_dir: Path | None) -> dict[str, str]:
+    """Map ``agent name -> "completed" | "skipped"`` from ``events.jsonl``.
+
+    The authoritative per-agent run-status signal is the terminal SSE event the
+    swarm appended to ``events.jsonl``: ``agent_done`` (finished) or
+    ``agent_skipped`` (not applicable to this target). An agent absent from this
+    map has started but not finished — i.e. it is still running. ``has_run_result``
+    is NOT used here: it is true for any agent with a graded turn, including one
+    mid-run, so it would mark an in-flight agent "done" prematurely.
+
+    Never raises — a missing dir/file or corrupt line yields a partial map.
+    """
+    states: dict[str, str] = {}
+    if scan_dir is None:
+        return states
+    path = scan_dir / "events.jsonl"
+    if not path.is_file():
+        return states
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    rec = json.loads(stripped)
+                except (ValueError, json.JSONDecodeError):
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                kind = rec.get("kind")
+                if kind not in ("agent_done", "agent_skipped"):
+                    continue
+                agent = str(rec.get("agent") or "")
+                if not agent:
+                    continue
+                states[agent] = "skipped" if kind == "agent_skipped" else "completed"
+    except OSError as exc:  # pragma: no cover — defensive
+        _LOG.debug("dashboard_view: events.jsonl lifecycle read failed (%s)", exc)
+    return states
+
+
+def _probe_status(
+    agent: str, lifecycle: dict[str, str], *, scan_finalized: bool
+) -> tuple[str, str]:
+    """Return ``(label, css_class)`` for a probe row's run status.
+
+    ``css_class`` is one of ``running`` / ``done`` / ``skipped`` (reusing the
+    same colour grammar as the ASI compact-status pills). A finalized scan marks
+    every agent done even without a per-agent terminal event.
+    """
+    st = lifecycle.get(agent)
+    if st == "skipped":
+        return ("Skipped", "skipped")
+    if st == "completed" or scan_finalized:
+        return ("Done", "done")
+    return ("Running", "running")
+
+
 def _assemble_probe_groups(
-    probes_list: list[dict[str, Any]], summaries: dict[str, str] | None = None
+    probes_list: list[dict[str, Any]],
+    summaries: dict[str, str] | None = None,
+    *,
+    lifecycle: dict[str, str] | None = None,
+    scan_finalized: bool = False,
 ) -> list[dict[str, Any]]:
     """Collapse the flat per-turn probes list into ONE entry per agent.
 
@@ -1105,6 +1168,9 @@ def _assemble_probe_groups(
         run_result = (
             {"has_run_result": False} if agent == "recon-agent" else _run_result_view(turns)
         )
+        _status_label, _status_class = _probe_status(
+            agent, lifecycle or {}, scan_finalized=scan_finalized
+        )
         groups.append(
             {
                 "group_key": key,
@@ -1116,6 +1182,10 @@ def _assemble_probe_groups(
                 "timestamp_label": timestamp_label,
                 "turns": turns,
                 "run_result": run_result,
+                # Run-status pill — completed / running / skipped, from the
+                # per-agent terminal events.jsonl signal (see _probe_status).
+                "status_label": _status_label,
+                "status_class": _status_class,
                 # AI-written SUMMARY (empty until scan finalization writes it;
                 # the template falls back to the reasoning gloss meanwhile).
                 "ai_summary": (summaries or {}).get(key, ""),
@@ -1491,7 +1561,10 @@ def build_dashboard_context(
     _probes_list_for_evidence = _assemble_probes_list(scan_dir)
     _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
     _probe_groups = _assemble_probe_groups(
-        _probes_list_for_evidence, _load_probe_summaries(scan_dir)
+        _probes_list_for_evidence,
+        _load_probe_summaries(scan_dir),
+        lifecycle=_agent_lifecycle_states(scan_dir),
+        scan_finalized=scan is not None,
     )
     # QA-066 (2026-06-04) — PROBES KPI tile. "How many probes did we actually
     # run." ``completeness.turns_used`` is the authoritative, uncapped count of

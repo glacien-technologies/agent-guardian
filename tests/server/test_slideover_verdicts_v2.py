@@ -221,5 +221,8 @@ def test_each_verdict_group_slideover_renders_without_error(
         body = resp.text
         # Per-turn pill class for this verdict present in the conversation.
         assert f"exec-verdict-pill--{verdict}" in body
-        # Evidence span rendered.
-        assert f"evidence span for {verdict}" in body
+        # The redundant per-turn "Evidence" quote was removed (it duplicated the
+        # Target Response shown directly above it). The verbatim span stays
+        # reachable via the "Evidence chain" JSONL link.
+        assert "exec-chat__evidence" not in body
+        assert "View JSONL events" in body
