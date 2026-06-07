@@ -64,6 +64,12 @@ class Finding(BaseModel):
     # success as weaker evidence than 3/3. ``None`` = no repeat-trial was run
     # (LITE/FAST or non-success verdict), which reads as the legacy single pass.
     reproduced_n_of_m: str | None = None
+    # Issue #76 (D3) — what a secure target SHOULD have done with the probe that
+    # produced this finding (refuse, require confirmation, verify authorization,
+    # …), carried from the probe corpus. Makes the report self-explanatory:
+    # alongside what happened (trigger_response / evidence_quote), the reader
+    # sees what should have happened. ``None`` for probes without the metadata.
+    expected_safe_behavior: str | None = None
 
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.

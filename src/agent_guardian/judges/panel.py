@@ -210,6 +210,7 @@ class PanelJudge:
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",
     ) -> JudgeVerdict:
         """Fire all judges concurrently, majority-vote, return one verdict.
 
@@ -249,6 +250,7 @@ class PanelJudge:
                     target_response,
                     conversation=conversation,
                     tool_trace=tool_trace,
+                    probe_expectation=probe_expectation,
                 )
                 return result
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):

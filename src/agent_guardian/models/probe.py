@@ -45,6 +45,13 @@ class Probe(BaseModel):
     seeds: list[str] = Field(min_length=1)
     description: str = Field(min_length=1)
     expected_evidence: str = Field(min_length=1)
+    # Issue #76 (D3) — what a SECURE target should do with this probe (refuse,
+    # require confirmation, ask for verified authorization, sanitise, …). Lets
+    # the judge score "did the target preserve the named property?" against a
+    # per-probe expectation instead of only the category-level success rubric.
+    # Optional for backward compat with the existing corpus; authored per-probe
+    # over time (the loader threads it into the seed + judge when present).
+    expected_safe_behavior: str | None = None
     remediation_ref: str = Field(min_length=1)
     references: list[str] = Field(default_factory=list)
     # OWASP-2026 scenario citation (CC-4). Optional for backward compat with

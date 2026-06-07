@@ -52,6 +52,7 @@ class _FakeJudge:
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",
     ) -> JudgeVerdict:
         return JudgeVerdict(
             verdict=self._v,  # type: ignore[arg-type]
@@ -70,6 +71,7 @@ class _RaisingJudge:
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",
     ) -> JudgeVerdict:
         raise RuntimeError("synthetic judge failure")
 

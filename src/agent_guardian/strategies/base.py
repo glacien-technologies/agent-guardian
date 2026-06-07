@@ -146,6 +146,14 @@ class ProbeSeed:
     # threads that channel through so the strategy delivers via THAT vector
     # rather than a random global rotation. ``None`` / ``"user_input"`` = direct.
     delivery_vector: str | None = None
+    # Issue #76 (D3) — per-probe judging metadata carried from the corpus YAML.
+    # ``expected_evidence``: what corroborating signal proves a compromise.
+    # ``expected_safe_behavior``: what a secure target should do (refuse, require
+    # confirmation, …). Threaded into the judge prompt so it scores against the
+    # probe's own expectation, and stamped onto the Finding for auditability.
+    # ``None`` keeps the legacy category-level rubric unchanged.
+    expected_evidence: str | None = None
+    expected_safe_behavior: str | None = None
 
 
 def seed_text(seed: ProbeSeed | str) -> str:

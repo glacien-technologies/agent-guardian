@@ -123,6 +123,7 @@ class _CanaryReflectionJudge(Judge):
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",  # D3 — accepted for parity; heuristic ignores it
     ) -> JudgeVerdict:
         match = reflects_canary(target_response)
         if match is not None:

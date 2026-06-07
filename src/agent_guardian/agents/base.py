@@ -387,17 +387,24 @@ class Judge:
         *,
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
+        probe_expectation: str = "",
     ) -> JudgeVerdict:
         """Render a structured v2 verdict from the FULL conversation.
 
         ``conversation`` is the oldest-first transcript the loop assembles from
         ``history``; ``tool_trace`` is the opportunistic structured tool-call
         list lifted from the response envelope (``"(none — black-box target)"``
-        when the adapter surfaces none — never required).
+        when the adapter surfaces none — never required). ``probe_expectation``
+        (D3) folds the per-probe expected-safe-behavior / expected-evidence into
+        the success rubric so the judge scores against the specific probe's
+        expectation, not only the category-level definition (empty = legacy).
         """
+        success_criteria = self._rubric.success_criteria
+        if probe_expectation:
+            success_criteria = f"{success_criteria}\n{probe_expectation}"
         message = _JUDGE_PROMPT.format(
             category=self._rubric.category.value,
-            success_criteria=self._rubric.success_criteria,
+            success_criteria=success_criteria,
             conversation=conversation or "(this is the first turn)",
             tool_trace=tool_trace or "(none — black-box target)",
             prompt=prompt,
@@ -1699,6 +1706,26 @@ class AsiAgent(ABC):
             # prior judge_verdict in Turn.metadata.
             conversation_str = _render_conversation(history)
             tool_trace_str = self._augment_tool_trace(_render_tool_trace(target, target_response))
+            # D3 (issue #76) — fold this probe's expected-safe-behavior / evidence
+            # into the judge rubric so it scores against the specific probe, not
+            # only the category-level definition. Resolved from the seed pool via
+            # the turn's seed_id; empty for strategy-internal (non-seeded) turns,
+            # which keeps the legacy category-only rubric.
+            probe_expectation = ""
+            _seed_id = result.metadata.get("seed_id") if result.metadata else None
+            _seed_obj = self._seed_index.get(str(_seed_id)) if _seed_id else None
+            if _seed_obj is not None:
+                _exp_parts: list[str] = []
+                if _seed_obj.expected_safe_behavior:
+                    _exp_parts.append(
+                        f"For THIS probe, a secure target should: "
+                        f"{_seed_obj.expected_safe_behavior}"
+                    )
+                if _seed_obj.expected_evidence:
+                    _exp_parts.append(
+                        f"Evidence of compromise to look for: {_seed_obj.expected_evidence}"
+                    )
+                probe_expectation = " ".join(_exp_parts)
             try:
                 # Phase B.B4 — prefer the optional PanelJudge over the
                 # single Judge when configured. Both expose the same
@@ -1717,6 +1744,7 @@ class AsiAgent(ABC):
                         target_response,
                         conversation=conversation_str,
                         tool_trace=tool_trace_str,
+                        probe_expectation=probe_expectation,
                     )
                 else:
                     verdict = await self.judge.verdict(
@@ -1724,6 +1752,7 @@ class AsiAgent(ABC):
                         target_response,
                         conversation=conversation_str,
                         tool_trace=tool_trace_str,
+                        probe_expectation=probe_expectation,
                     )
             except Exception as exc:  # pragma: no cover — defensive: judge should not raise
                 terminated_by = "error"
@@ -2489,6 +2518,8 @@ class AsiAgent(ABC):
             evidence_quote=(verdict.evidence or "").strip()[:2048],
             # D1 — FULL-mode repeat-trial consistency ("3/3"), or None.
             reproduced_n_of_m=reproduced_n_of_m,
+            # D3 — what the target should have done (from the probe corpus).
+            expected_safe_behavior=(seed.expected_safe_behavior if seed is not None else None),
             created_at=_utcnow(),
         )
 
