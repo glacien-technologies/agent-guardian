@@ -158,7 +158,7 @@ def emit_junit(scan: Scan, *, redact: bool = True) -> ET.Element:
     )
     _append_suites_properties(suites, scan)
 
-    for category in AsiCategory:
+    for category in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         findings = grouped[category]
         suite_failures = len(findings)
         suite = ET.SubElement(

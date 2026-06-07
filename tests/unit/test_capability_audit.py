@@ -354,7 +354,7 @@ def test_is_satisfied_treats_unknown_with_budget_as_unsatisfied() -> None:
     # A fresh ledger (all UNKNOWN, 0 probes, budget available) is NOT satisfied.
     assert cov.is_satisfied() is False
     # Spend the per-band cap on every band -> nothing targetable -> satisfied.
-    for b in Band:
+    for b in Band:  # codeql[py/non-iterable-in-for-loop]
         cov.probes_per_band[b] = 3
     assert cov.is_satisfied() is True
 

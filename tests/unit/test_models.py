@@ -93,7 +93,7 @@ def test_csa_category_has_twelve_entries() -> None:
 
 
 def test_csa_category_values_are_kebab_case() -> None:
-    for cat in CsaCategory:
+    for cat in CsaCategory:  # codeql[py/non-iterable-in-for-loop]
         assert "_" not in cat.value
         assert cat.value == cat.value.lower()
 
@@ -169,7 +169,7 @@ def test_colour_for_band_handles_not_evaluated() -> None:
 
 def test_colour_for_band_is_total_over_all_bands() -> None:
     # Guards against a new band being added without a colour (KeyError at render).
-    for band in SeverityBand:
+    for band in SeverityBand:  # codeql[py/non-iterable-in-for-loop]
         assert colour_for_band(band).startswith("#")
 
 

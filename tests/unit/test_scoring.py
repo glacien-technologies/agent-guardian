@@ -196,13 +196,13 @@ def test_sub_scores_excessive_agency_uses_weighted_mean() -> None:
 
 def test_tier_weighted_aggregate_returns_100_when_all_scores_are_100() -> None:
     asi_scores = dict.fromkeys(AsiCategory, 100.0)
-    for tier in Tier:
+    for tier in Tier:  # codeql[py/non-iterable-in-for-loop]
         assert tier_weighted_aggregate(asi_scores, tier) == pytest.approx(100.0)
 
 
 def test_tier_weighted_aggregate_returns_zero_when_all_scores_are_zero() -> None:
     asi_scores = dict.fromkeys(AsiCategory, 0.0)
-    for tier in Tier:
+    for tier in Tier:  # codeql[py/non-iterable-in-for-loop]
         assert tier_weighted_aggregate(asi_scores, tier) == 0.0
 
 
@@ -358,7 +358,7 @@ def test_severity_weights_cover_every_severity() -> None:
 
 
 def test_tier_weights_cover_every_asi_for_every_tier() -> None:
-    for tier in Tier:
+    for tier in Tier:  # codeql[py/non-iterable-in-for-loop]
         assert set(TIER_WEIGHTS[tier].keys()) == set(AsiCategory)
 
 
@@ -606,7 +606,7 @@ def test_compute_aivss_undertested_caps_band_in_isolation() -> None:
         undertested=list(AsiCategory),
     )
     # Per-category scores untouched (annotation-only).
-    for cat in AsiCategory:
+    for cat in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         assert result.asi_scores[cat] == 100.0
     # But the headline band must NOT read as EXCELLENT.
     assert result.band not in {SeverityBand.GOOD, SeverityBand.EXCELLENT}

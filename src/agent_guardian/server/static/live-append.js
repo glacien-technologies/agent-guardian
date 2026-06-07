@@ -398,22 +398,6 @@
     pillNode.textContent = VERDICT_LABELS[verdict] || "PENDING";
   }
 
-  /**
-   * Fill the EVIDENCE column ("turn N") on a probe row. The evidence is now its
-   * own column (was a strap line under the verdict), so we just set the
-   * ``data-slot="run-evidence"`` span text — matching the server-rendered cell.
-   * No-ops gracefully when the slot is absent (older cached template) and when
-   * ``turnNum`` <= 0 (nothing meaningful to point at).
-   */
-  function setProbeRunEvidence(row, turnNum) {
-    if (!row || !turnNum || turnNum <= 0) { return; }
-    var ev = row.querySelector('[data-slot="run-evidence"]')
-      || row.querySelector(".exec-run-result__evidence");
-    if (!ev) { return; }
-    ev.classList.remove("exec-run-result__evidence--empty");
-    ev.textContent = "turn " + turnNum;
-  }
-
   /** Fill the "WHAT WE LEARNED" summary column on a probe row (no-op if empty). */
   function setProbeSummary(row, text) {
     if (!row || !text) { return; }

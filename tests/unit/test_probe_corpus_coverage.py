@@ -50,7 +50,7 @@ def test_each_asi_dir_meets_documented_minimum() -> None:
     ``_MIN_PROBES_PER_ASI`` probe YAML files. asi04 historically shipped 7;
     the poisoned-checkpoint addition brings it to the floor."""
     root = find_corpus_root()
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         category_dir = root / asi.value.lower()
         assert category_dir.is_dir(), f"missing ASI directory: {category_dir}"
         files = _yaml_files_under(category_dir)

@@ -52,7 +52,7 @@ def test_triple_framework_tagging() -> None:
 def test_each_asi_has_at_least_five_probes() -> None:
     """Coverage gate: every ASI category has >=5 probes (PRD §5.3)."""
     counts = Counter(p.asi for p in load_all_probes())
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         assert counts[asi] >= 5, f"{asi.value} has only {counts[asi]} probes"
 
 
@@ -67,7 +67,7 @@ def test_each_asi_has_at_least_seven_probes_after_owasp_upgrade() -> None:
     """Phase B coverage gate: every ASI category has >=7 probes after the
     OWASP-2026 upgrade (5 seed + 2-3 new = 7-8)."""
     counts = Counter(p.asi for p in load_all_probes())
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         assert counts[asi] >= 7, f"{asi.value} has only {counts[asi]} probes — Phase B expects >=7"
 
 
@@ -141,7 +141,7 @@ def test_load_probes_for_asi_returns_at_least_five_each() -> None:
     >=5 still holds, and every returned probe must belong to the requested
     ASI category.
     """
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         probes = load_probes_for_asi(asi)
         assert len(probes) >= 5, f"{asi.value} returned {len(probes)} probes"
         for probe in probes:
@@ -151,7 +151,7 @@ def test_load_probes_for_asi_returns_at_least_five_each() -> None:
 def test_corpus_ids_match_filename_category() -> None:
     """Each probe's ASI tag matches the directory it lives in."""
     root = find_corpus_root()
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         category_dir = root / asi.value.lower()
         for yml_path in sorted(category_dir.glob("*.yaml")):
             probes = load_probes_for_asi(asi)

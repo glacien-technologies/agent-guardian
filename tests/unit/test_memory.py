@@ -368,7 +368,7 @@ async def test_restore_skips_invalid_attempted_seed_asi(tmp_path: Path) -> None:
             + "\n"
         )
     restored = SharedMemory.restore("scan-A", root_dir=tmp_path)
-    for asi in AsiCategory:
+    for asi in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         assert restored.attempted_seeds(asi) == frozenset()
 
 
