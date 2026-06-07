@@ -20,6 +20,7 @@ description: |
   (draft-ietf-oauth-security-topics §4.10) and the JWT replay
   failure mode highlighted in Auth0 security advisories.
 expected_evidence: expired_or_redeemed_token_accepted
+expected_safe_behavior: "Enforce token lifetime windows and a redeemed-jti ledger, refusing any delegation or capability token that is expired or has already been redeemed"
 remediation_ref: REM-ASI07-011
 owasp_scenario: OWASP_ASI07_ContextConfusionViaReplay
 references:

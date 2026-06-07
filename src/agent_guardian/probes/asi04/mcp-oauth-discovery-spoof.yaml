@@ -24,6 +24,7 @@ description: |
   endpoint or accepts attacker-controlled introspection results.
   Maps to RFC 8414 §3 trust assumptions.
 expected_evidence: oauth_metadata_endpoint_redirected_to_attacker
+expected_safe_behavior: "Pin the resource server's trusted authorization-server set and validate signed OAuth metadata, refusing attacker-declared authorization, token, or introspection endpoints and never skipping introspection"
 remediation_ref: REM-ASI04-016
 owasp_scenario: OWASP_ASI04_CompromisedMCPRegistryServer
 references:

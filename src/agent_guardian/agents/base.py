@@ -1758,7 +1758,14 @@ class AsiAgent(ABC):
             # the turn's seed_id; empty for strategy-internal (non-seeded) turns,
             # which keeps the legacy category-only rubric.
             probe_expectation = ""
-            _seed_id = result.metadata.get("seed_id") if result.metadata else None
+            # #82 — prefer the dispatched seed_id; fall back to the representative
+            # provenance id that generating strategies attach, so lanes that don't
+            # fire corpus seeds still feed the judge their probe metadata.
+            _seed_id = None
+            if result.metadata:
+                _seed_id = result.metadata.get("seed_id") or result.metadata.get(
+                    "provenance_seed_id"
+                )
             _seed_obj = self._seed_index.get(str(_seed_id)) if _seed_id else None
             if _seed_obj is not None:
                 _exp_parts: list[str] = []
@@ -2429,6 +2436,26 @@ class AsiAgent(ABC):
         )
         return f"{reproduced}/{total}"
 
+    def _resolve_expected_safe_behavior(
+        self, seed: ProbeSeed | None, meta: dict[str, object]
+    ) -> str | None:
+        """Resolve a finding's expected_safe_behavior (D3 / #82).
+
+        Prefers the dispatched seed; falls back to the representative provenance
+        seed that generating strategies attach (so lanes that fire no corpus
+        seed — tool-abuse/memory-poison/a2a — still carry the category's expected
+        safe behavior on their findings). Attribution (probe_id/severity) is
+        unaffected — only this descriptive field uses the provenance fallback.
+        """
+        if seed is not None and seed.expected_safe_behavior:
+            return seed.expected_safe_behavior
+        prov_id = meta.get("provenance_seed_id")
+        if prov_id:
+            prov = self._seed_index.get(str(prov_id))
+            if prov is not None:
+                return prov.expected_safe_behavior
+        return None
+
     def _build_finding(
         self,
         *,
@@ -2565,7 +2592,11 @@ class AsiAgent(ABC):
             # D1 — FULL-mode repeat-trial consistency ("3/3"), or None.
             reproduced_n_of_m=reproduced_n_of_m,
             # D3 — what the target should have done (from the probe corpus).
-            expected_safe_behavior=(seed.expected_safe_behavior if seed is not None else None),
+            # D3/#82 — expected_safe_behavior may come from the dispatched seed
+            # OR (for generated turns that fire no corpus seed) the representative
+            # provenance seed. Resolved separately from probe_id attribution so a
+            # generated finding is NOT mislabeled to a probe it didn't fire.
+            expected_safe_behavior=self._resolve_expected_safe_behavior(seed, meta),
             created_at=_utcnow(),
         )
 
