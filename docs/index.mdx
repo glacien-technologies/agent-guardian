@@ -15,6 +15,13 @@ The one question this tool answers:
 
 You point AgentGuardian at an agent. It launches a swarm of adversarial attackers against it. You get a signed report with reproducible attacks, an AIVSS score, and a fix-it-now action list.
 
+<Frame caption="Recon → OWASP-ASI probe generation → findings → signed report → fix and re-run. AgentGuardian runs the whole loop against your agent.">
+  <img
+    src="/images/swarm-diagrams/agentguardian-security-loop.jpg"
+    alt="AgentGuardian security loop: recon, OWASP ASI probe generation, findings, reports, and a fix-and-rerun cycle"
+  />
+</Frame>
+
 ```bash
 pip install agent-guardian
 ```
