@@ -1,0 +1,179 @@
+---
+title: "Parallel suites & bulk scanning"
+sidebarTitle: "Parallel suites"
+description: "Run a whole fleet of agents through AgentGuardian in parallel from one YAML file — isolated scans, a cross-scan summary, and per-workload reports for nightly runs, benchmarks, and regression sweeps."
+icon: "layer-group"
+---
+
+`agent-guardian suite` runs **many independent scans in parallel from a single
+YAML file**, then aggregates one cross-scan summary and collects a report per
+workload. It's built for the jobs a single `scan` doesn't cover: a nightly sweep
+across every agent you ship, a benchmark of several models against the same
+target, or a regression suite that scores a fleet on every release.
+
+It is an **orchestration layer only**. Each workload is launched as a separate
+`agent-guardian scan` subprocess, so a suite run of one workload is identical to
+running that one `scan` command — the suite never changes how a scan behaves.
+
+<Note>
+  Every workload key maps 1:1 onto a real `scan` flag (see the
+  [CLI reference](/reference/cli)). The suite adds orchestration — parallelism,
+  isolation, aggregation — on top of the unchanged scan engine.
+</Note>
+
+## Quickstart
+
+<Steps>
+  <Step title="Write a suite file">
+    Start from the committed reference, `examples/suite.yaml`, and edit the
+    workloads. Each workload needs a `name` and exactly one target
+    (`endpoint` / `target` / `system_prompt` / `framework` / `contract`).
+  </Step>
+  <Step title="Validate it">
+    ```bash
+    agent-guardian suite validate suite.yaml
+    ```
+    Schema-checks the file and resolves every workload — no scans are launched.
+  </Step>
+  <Step title="Run the fleet">
+    ```bash
+    agent-guardian suite run suite.yaml
+    ```
+    Launches all workloads in parallel (bounded by `concurrency`), prints the
+    summary, and writes `summary.json` + per-workload reports under `out_dir`.
+  </Step>
+</Steps>
+
+## Example
+
+```yaml suite.yaml
+version: 1
+
+suite:
+  name: nightly-fleet
+  concurrency: 4            # max scans in flight (default: min(N, cpu_count))
+  isolate_home: true        # each workload = a fully separate scan (default)
+  register_scans: true      # browsable in the dashboard by its own scan id
+  out_dir: ./suite-out
+  formats: [json]           # default deliverable format(s) per workload
+  exit_code: any-gate-fail  # any-gate-fail | all-pass | always-zero
+
+defaults:                   # inherited by every workload that omits the key
+  model: gemini:gemini-2.5-flash
+  mode: full
+
+workloads:
+  - name: finbot-http
+    endpoint: https://finbot.internal/agent
+    fail_under: 70          # this workload's gate
+    formats: [json, pdf, sarif]
+  - name: planner-langgraph
+    framework: langgraph
+    framework_ref: app.graph:graph
+  - name: prompt-baseline
+    system_prompt: ./prompts/agent_v3.txt
+    mode: fast
+```
+
+The full, commented reference lives at `examples/suite.yaml` in the repository.
+
+## Isolation — one workload never affects another
+
+Each workload runs in its **own OS process** under its **own `HOME`**, so its
+entire `~/.agentguardian` tree — the scan directory *and* the adversarial
+winning-seeds database — is private to that scan. Concurrent workloads can never
+collide on disk or cross-pollinate seeds, and the scan engine is never imported
+into the runner. The practical guarantee:
+
+> A workload in a suite produces the same result as running that one
+> `agent-guardian scan` command by hand.
+
+`concurrency` bounds how many **scans** run at once — it does not touch each
+scan's own internal agent parallelism. Children always run headless (no
+dashboard server, no TTY UI, no plan prompt).
+
+## What you get
+
+After every workload finishes, `suite run` prints a summary table and writes
+machine-readable output:
+
+```text
+SUMMARY
+WORKLOAD              STATUS    AIVSS  BAND       TIER  FINDINGS  TRUST
+----------------------------------------------------------------------
+finbot-http           ok           41  POOR       T2          66  authoritative
+planner-langgraph     ok           58  FAIR       T2          22  authoritative
+prompt-baseline       ok           79  not_eval.  T4           0  CAVEAT
+
+TOTALS: 3 workloads — 3 completed, 0 failed
+  weakest target: finbot-http (AIVSS 41 POOR)
+
+Scan log folders:
+  finbot-http:       ~/.agentguardian/scans/cli-9369915ce946
+  planner-langgraph: ~/.agentguardian/scans/cli-30af1b8a8952
+  prompt-baseline:   ~/.agentguardian/scans/cli-b4cf1c81a4a7
+```
+
+| Output | Where | What it is |
+|---|---|---|
+| Summary table | stdout | One row per workload + totals + scan-log-folder list. |
+| `summary.json` | `<out_dir>/summary.json` | The same rows, machine-readable for CI. |
+| Reports | `<out_dir>/reports/<name>.<ext>` | Each workload's report in every requested `format`. |
+| Console logs | `<out_dir>/<name>.console.log` | Each child's stdout/stderr. |
+
+<Note>
+  The summary is **trust-aware**. A scan the engine marks non-authoritative
+  (stub model, high attacker-refusal rate, or coverage below the mode's
+  threshold) is flagged `CAVEAT` so it is never silently ranked next to a clean
+  full-coverage scan. The numeric AIVSS is still shown for transparency.
+</Note>
+
+### Multiple formats, one scan
+
+A workload's `formats` can list several report types (`json`, `sarif`, `pdf`,
+`md`, `junit`, `gitlab`). The scan runs **once** and writes `report.json`
+natively; each extra format is rendered from that same finished scan via
+`agent-guardian report <id> --output <fmt>` — never a second scan.
+
+## Dashboard
+
+With `register_scans: true` (the default), each finished scan is moved into your
+real `~/.agentguardian/scans/<id>/`. Because every scan has a unique id, they
+never collide — so `agent-guardian serve` and `agent-guardian report <id>` find
+**each workload by its own scan id**. Set `serve: true` to open one dashboard
+automatically after the whole fleet finishes.
+
+## Gates & exit codes
+
+Per-workload gates (`fail_under`, `max_critical`, `max_high`, …) work exactly as
+they do for a single `scan` — a breach makes that child exit non-zero. The suite
+rolls those up into its own exit code via `suite.exit_code`:
+
+| `exit_code` | Suite exits non-zero when… |
+|---|---|
+| `any-gate-fail` *(default)* | any workload failed or tripped a gate. |
+| `all-pass` | any workload is not a clean, authoritative pass. |
+| `always-zero` | never (reporting-only runs). |
+
+A crashed or timed-out workload (`timeout_seconds`) becomes an error row and
+never aborts its siblings (`fail_fast: false`, the default).
+
+## Commands
+
+```bash
+agent-guardian suite run SUITE.yaml [--concurrency N] [--out-dir DIR] [--dry-run]
+agent-guardian suite validate SUITE.yaml
+agent-guardian suite summary OUT_DIR
+```
+
+`--dry-run` prints the exact resolved `agent-guardian scan …` command for every
+workload and spawns nothing — the fastest way to confirm a file before a real
+run. `suite summary OUT_DIR` re-prints the table from a prior run's
+`summary.json`.
+
+## Keeping endpoints private
+
+Commit a generic `examples/suite.yaml` with placeholder endpoints, and keep the
+copy wired to your real target as `*.local.yaml` — the repository's `.gitignore`
+excludes `examples/*.local.yaml` and `suite-out/` so neither a live endpoint nor
+scan output is ever pushed.

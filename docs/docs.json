@@ -87,6 +87,7 @@
         "icon": "git-branch",
         "pages": [
           "ci-cd/overview",
+          "ci-cd/parallel-suites",
           "ci-cd/github-actions",
           "ci-cd/composite-action",
           "ci-cd/gitlab-ci",
@@ -186,7 +187,14 @@
     }
   },
   "contextual": {
-    "options": ["copy", "view", "chatgpt", "claude", "mcp", "cursor"]
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "mcp",
+      "cursor"
+    ]
   },
   "footer": {
     "socials": {

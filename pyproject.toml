@@ -307,6 +307,7 @@ ignore = ["E501", "UP042"]
 [tool.ruff.lint.per-file-ignores]
 # Typer requires function-call defaults — they are the public API.
 "src/agent_guardian/cli.py" = ["B008"]
+"src/agent_guardian/suite/cli.py" = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"
