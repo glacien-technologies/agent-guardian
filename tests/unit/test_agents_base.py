@@ -879,9 +879,7 @@ async def test_debug_text_path_truncates_target_response_body(
     elided behind the ``…[+N chars]`` preview marker and the raw long body must
     NOT appear verbatim in the DEBUG-text records.
     """
-    import agent_guardian.agents.base as base_mod
-
-    monkeypatch.setattr(base_mod, "structured_logging_enabled", lambda: False)
+    monkeypatch.setattr("agent_guardian.agents.base.structured_logging_enabled", lambda: False)
     long_response = "LEAKYSECRET " * 100  # well over the preview cap
     records = await _run_one_turn_capturing_debug(tmp_path, caplog, long_response=long_response)
     resp_lines = [r.message for r in records if "target response:" in r.message]
@@ -901,9 +899,7 @@ async def test_structured_path_emits_full_target_response_body(
     When ``structured_logging_enabled()`` is True the full target-response body
     is logged verbatim for machine consumers / forensic replay.
     """
-    import agent_guardian.agents.base as base_mod
-
-    monkeypatch.setattr(base_mod, "structured_logging_enabled", lambda: True)
+    monkeypatch.setattr("agent_guardian.agents.base.structured_logging_enabled", lambda: True)
     long_response = "FULLBODYTOKEN " * 100
     records = await _run_one_turn_capturing_debug(tmp_path, caplog, long_response=long_response)
     resp_lines = [r.message for r in records if "target response:" in r.message]

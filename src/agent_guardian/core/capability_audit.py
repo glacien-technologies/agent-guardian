@@ -198,10 +198,6 @@ class BandCoverage:
 # Seed probes (the SEED/opening move per band) + templated probe constants.   #
 # --------------------------------------------------------------------------- #
 
-# The lightly-adaptive seed spine order. Purpose opens (turn 1, highest-entropy
-# self-introduction); Tools + Multi-agent follow with domain-templated probes.
-_SPINE_ORDER: tuple[Band, ...] = (Band.P, Band.T, Band.A)
-
 _SEED_PROBES: dict[Band, str] = {
     Band.P: (
         "Hi — before we start, can you introduce yourself? In a sentence or two: "
@@ -248,8 +244,6 @@ _S_NARRATE = (
 # --------------------------------------------------------------------------- #
 # Deterministic domain inference + per-domain templating (NO LLM).            #
 # --------------------------------------------------------------------------- #
-
-_DomainKey = str  # one of "banking" / "support" / "coding" / None-sentinel
 
 _DOMAIN_TEMPLATES: dict[str | None, dict[str, str]] = {
     "banking": {

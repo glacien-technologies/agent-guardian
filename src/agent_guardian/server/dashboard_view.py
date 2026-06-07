@@ -1433,7 +1433,6 @@ def _build_scan_plan(
     EM_DASH = "—"
     if scan is None:
         target_mode = EM_DASH
-        target_ref = EM_DASH
         is_http = False
         mode = EM_DASH
         usd_cap = EM_DASH
@@ -1444,7 +1443,6 @@ def _build_scan_plan(
         egress = EM_DASH
     else:
         target_mode = scan.target_mode
-        target_ref = scan.target_ref
         is_http = scan.target_mode == "http"
         mode = scan.mode
         # USD cap: prefer the budget envelope's recorded cap; ``None`` = uncapped.
@@ -1492,7 +1490,7 @@ def _build_scan_plan(
 
     return {
         "target": {
-            "url": target_ref if is_http else EM_DASH,
+            "url": scan.target_ref if (scan is not None and is_http) else EM_DASH,
             "mode": target_mode,
             "reachable": reachable,
             "multi_agent": multi_agent,

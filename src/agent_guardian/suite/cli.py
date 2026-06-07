@@ -52,6 +52,7 @@ def suite_run(
         sf = load_suite_file(suite_file)
         resolved = resolve_workloads(sf)
     except SuiteConfigError as exc:
+        _LOG.debug("suite run rejected: %s", exc)
         typer.echo(f"suite config error: {exc}", err=True)
         raise typer.Exit(code=_EXIT_CONFIG) from exc
 

@@ -48,6 +48,8 @@ def load_suite_file(path: str | Path) -> SuiteFile:
         raise SuiteConfigError(f"suite file {p} must be a YAML mapping at the top level")
 
     try:
-        return SuiteFile.model_validate(_expand(doc))
+        suite_file = SuiteFile.model_validate(_expand(doc))
     except ValidationError as exc:
         raise SuiteConfigError(f"invalid suite config in {p}:\n{exc}") from exc
+    _LOG.debug("suite loaded from %s: %d workload(s)", p, len(suite_file.workloads))
+    return suite_file
