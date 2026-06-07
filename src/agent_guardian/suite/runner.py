@@ -12,6 +12,7 @@ operator's real scans root so the dashboard can browse it by its own scan id.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import sys
@@ -28,6 +29,8 @@ from agent_guardian.suite.aggregate import (
 from agent_guardian.suite.argv import build_scan_argv
 from agent_guardian.suite.resolve import resolve_workloads
 from agent_guardian.suite.schema import SuiteFile, WorkloadFields
+
+_LOG = logging.getLogger(__name__)
 
 # Scan exit codes that still mean "the scan ran and finalized a report". 0 = OK,
 # 1 = a gate (--fail-under/--max-*) tripped — both produce a real scan dir.
@@ -101,6 +104,11 @@ async def _spawn_with_timeout(
         try:
             await asyncio.wait_for(proc.wait(), timeout=timeout)
         except TimeoutError:
+            _LOG.warning(
+                "suite: workload exceeded timeout_seconds=%s — killed (log: %s)",
+                timeout,
+                log_path,
+            )
             proc.kill()
             await proc.wait()
             return (-1, True)

@@ -206,6 +206,38 @@ annotations) for a scan. Defaults to the newest scan under
 `~/.agentguardian/scans`; pass `--scan` to target a specific scan id or
 `scan.json` path, and `--dry-run` to render without posting.
 
+### `suite`
+
+```text
+agent-guardian suite run SUITE.yaml [--concurrency N] [--out-dir DIR] [--dry-run]
+agent-guardian suite validate SUITE.yaml
+agent-guardian suite summary OUT_DIR
+```
+
+Run a fleet of independent scans **in parallel** from a single YAML file.
+Each workload is launched as a separate `agent-guardian scan` subprocess
+under its own isolated `HOME`, so concurrent scans never collide or share
+state — a suite run of one workload is identical to running that one
+`scan` command. Every workload key maps 1:1 onto a real `scan` flag; the
+suite layer never changes single-scan behavior.
+
+After all workloads finish, `agent-guardian suite run` prints a
+cross-scan summary table (per-workload AIVSS / band / tier / findings,
+with a trust flag), lists every scan log folder, and writes
+`<out_dir>/summary.json`. Each requested report format is collected flat
+at `<out_dir>/reports/<name>.<ext>` (extra formats are rendered from the
+same finished scan, never a second scan). With `register_scans: true`
+(the default) each finished scan is also moved into
+`~/.agentguardian/scans/<id>/` so `agent-guardian serve` and
+`agent-guardian report <id>` can browse each workload by its own scan id.
+
+`agent-guardian suite validate` schema-checks the file without launching
+anything; `agent-guardian suite run --dry-run` prints the resolved
+`scan` command for each workload and spawns nothing; `agent-guardian
+suite summary OUT_DIR` re-prints the summary from a prior run. See
+[`examples/suite.yaml`](https://github.com/glacien-technologies/agent-guardian/blob/main/examples/suite.yaml)
+for a complete, commented suite file.
+
 ## Scan options
 
 The `scan` command exposes every knob the swarm respects. The list

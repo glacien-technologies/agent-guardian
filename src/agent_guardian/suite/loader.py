@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,8 @@ from pydantic import ValidationError
 
 from agent_guardian.suite.errors import SuiteConfigError
 from agent_guardian.suite.schema import SuiteFile
+
+_LOG = logging.getLogger(__name__)
 
 
 def _expand(value: Any) -> Any:

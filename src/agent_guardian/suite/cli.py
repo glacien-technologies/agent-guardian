@@ -10,6 +10,7 @@ Additive sub-app; the single-scan ``scan`` command is untouched. Commands:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import typer
@@ -20,6 +21,8 @@ from agent_guardian.suite.errors import SuiteConfigError
 from agent_guardian.suite.loader import load_suite_file
 from agent_guardian.suite.resolve import resolve_workloads
 from agent_guardian.suite.runner import run_suite_sync
+
+_LOG = logging.getLogger(__name__)
 
 suite_app = typer.Typer(
     help="Run a fleet of independent scans in parallel from one YAML suite.",

@@ -8,8 +8,11 @@ summary logic is unit-testable without running a scan.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+_LOG = logging.getLogger(__name__)
 
 # A refusal rate at/above this means the attacker fell back to seeds too often
 # for the score to be treated as an adaptive-attack result (matches the FULL
@@ -45,7 +48,8 @@ def read_report(scan_dir: str | Path) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        _LOG.warning("suite: could not read %s (%s) — workload row will lack a report", path, exc)
         return None
     return data if isinstance(data, dict) else None
 
