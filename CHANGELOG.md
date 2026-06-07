@@ -5,9 +5,21 @@
 ### Added
 
 ### Changed
+
+### Fixed
+
+## [1.0.0rc10] — 2026-06-07
+
+### Added
+- **Parallel suites / bulk scanning — `agent-guardian suite` (#85).** Run a whole fleet of agents through AgentGuardian in parallel from one YAML file — nightly sweeps, model benchmarks, regression suites. Each workload launches as a separate, fully isolated `agent-guardian scan` subprocess (its own `HOME`, so its scan dir *and* winning-seeds DB are private), bounded by a `concurrency` cap. The runner aggregates a trust-aware cross-scan summary (`summary.json` + a table), collects each workload's report flat at `reports/<name>.<ext>` for every requested format (rendered from the one finished scan, never a second run), and — with `register_scans` (default) — moves each scan into `~/.agentguardian/scans/<id>/` so the dashboard and `report <id>` browse it by its own scan id. Orchestration only: a suite run of one workload is identical to running that one `scan` command. New `suite run` / `suite validate` / `suite summary` commands; see `docs/ci-cd/parallel-suites.mdx` and `examples/suite.yaml`.
+- **Corpus-wide `expected_safe_behavior` for all 128 attack probes (#81).** Every probe now carries a concise "what a secure target should do", folded into the judge rubric and stamped on findings (D3 per-probe judging metadata), so verdicts score against the specific probe's expectation, not only the category-level definition.
+
+### Changed
 - **Attacker prompting reframed to refusal-resistant "negative security test case" framing (#76).** The default attacker system prompt no longer asks for "attack prompts / jailbreak templates / prompt-injection payloads" and no longer commands "Do NOT refuse" — the vocabulary safety-aligned models (e.g. Gemini) refused ~45% of the time, silently degrading scans to static corpus seeds. It now asks for a realistic input that verifies a named security boundary under operator-owned rules of engagement (OWASP-grounded), keeping the verbatim-to-target output contract. The refusal retry de-escalates ("this is a sandbox QA task") instead of pressuring ("Refusing is not appropriate"). The legacy framing is preserved as `attacker_complete(generation_mode="legacy-redteam")` for operators who supply an uncensored attacker model.
 
 ### Fixed
+- **Judge verdict JSON no longer truncated by the output-token cap (#84).** The LLM-judge ran with the framework-default 1024-token output budget. For a *thinking* evaluator model (e.g. `gemini-3.5-flash`, whose reasoning tokens count against `maxOutputTokens`) that budget was consumed by reasoning and the verdict JSON was cut off mid-object on ~42% of judge calls — failing to parse and falling back to a heuristic `needs_followup` (conf 0.30, no follow-up probe). That silently degraded ~42% of *all* verdicts and starved the verify-on-needs_followup lane. The judge now requests a generous explicit budget so the JSON always completes; live-verified the heuristic fallback dropped 209→0 and the verify lane recovered.
+- **Four self-generating agent lanes now carry probe provenance (#82).** Tool-abuse / memory-poison / a2a / ASI11 agents generate their own prompts and never dispatched corpus seeds, so their probe metadata (and D3 expectations) never reached the judge or findings. They now attach a representative same-category `provenance_seed_id` — kept separate from `seed_id` so finding attribution is never faked — so these lanes carry their category's expected-safe-behavior on judge prompts and findings.
 - **Attacker-LLM refusals no longer silently pass as an authoritative "Excellent" score (#76).** When the attacker refuses on too many turns and the scan falls back to static seeds, finalize now consumes the attacker-rejection rate as a scoring gate: ≥30% (FULL) forces `mode_authoritative=False`, and ≥50% forces `scoring_valid=False` with band `NOT_EVALUATED` — the same treatment a stub evaluator gets. The rejection rate + refused-turn count are stamped on the signed `Scan`, surfaced in the CLI scan-end summary ("attacker quality: X% rejection rate …"), and logged to `run.log` (per-turn WARNING + an aggregate finalize WARNING), so a refusal-degraded scan is impossible to mistake for a clean one.
 
 ## [1.0.0rc9] — 2026-06-06
@@ -211,4 +223,5 @@ historical tag pointer at the bottom of this file but its scope is fully subsume
 
 See `docs/operator-checklist.md` for the full list.
 
+[1.0.0rc10]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc10
 [1.0.0rc1]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc1
