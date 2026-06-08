@@ -58,6 +58,7 @@ from agent_guardian.config import Config, env_api_key, load_config
 from agent_guardian.contract.preflight import PreflightReport
 from agent_guardian.core.sandbox import SandboxViolation
 from agent_guardian.core.swarm import (
+    _ASI_AGENT_CLASSES,
     SwarmCommander,
     SwarmConfig,
     SwarmEvent,
@@ -170,23 +171,32 @@ def _resolve_framework_ref(ref: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Ordered ASI agent slate -- single source of truth for ``list-agents`` etc.
+# CLI agent roster.
 # ---------------------------------------------------------------------------
 
 
-_AGENT_SLATE: tuple[tuple[str, AsiCategory], ...] = (
-    ("recon-agent", AsiCategory.ASI01),  # Recon has no category; we list ASI01 for layout.
-    ("goal-hijack-agent", AsiCategory.ASI01),
-    ("tool-abuse-agent", AsiCategory.ASI02),
-    ("privilege-agent", AsiCategory.ASI03),
-    ("supply-chain-agent", AsiCategory.ASI04),
-    ("code-exec-agent", AsiCategory.ASI05),
-    ("memory-poison-agent", AsiCategory.ASI06),
-    ("a2a-agent", AsiCategory.ASI07),
-    ("cascade-agent", AsiCategory.ASI08),
-    ("trust-exploit-agent", AsiCategory.ASI09),
-    ("drift-agent", AsiCategory.ASI10),
-)
+AgentRosterRow = tuple[str, AsiCategory | None, str, str]
+
+
+def _live_agent_roster() -> tuple[AgentRosterRow, ...]:
+    """Return the CLI-visible roster from the runtime agent registries."""
+    from agent_guardian.agents import GAP_FILL_AGENTS, M2_SPECIALIST_AGENTS
+
+    def _row(agent_cls: type[Any], availability: str) -> AgentRosterRow:
+        category = agent_cls.asi_category
+        name = str(agent_cls.name)
+        return name, category, availability, asi_description(category)
+
+    rows: list[AgentRosterRow] = [
+        ("recon-agent", None, "always-on", "Phase 1 fingerprint refinement")
+    ]
+    rows.extend(_row(agent_cls, "always-on") for agent_cls in _ASI_AGENT_CLASSES)
+    rows.extend(_row(agent_cls, "always-on") for agent_cls in GAP_FILL_AGENTS)
+    rows.extend(
+        _row(agent_cls, "default-on (--no-owasp-llm disables)")
+        for agent_cls in M2_SPECIALIST_AGENTS
+    )
+    return tuple(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -967,14 +977,12 @@ def _probe_otel_and_dashboard_readiness() -> None:
 
 @app.command("list-agents")
 def list_agents() -> None:
-    """Print the eleven specialist agents with their ASI category."""
-    typer.echo("Agent                  ASI    Description")
-    typer.echo("-" * 60)
-    for name, category in _AGENT_SLATE:
-        if name == "recon-agent":
-            typer.echo(f"{name:22} n/a    Phase 1 fingerprint refinement")
-        else:
-            typer.echo(f"{name:22} {category.value}  {asi_description(category)}")
+    """Print the agents that run in the default scan roster."""
+    typer.echo("Agent                         ASI    Availability                         Description")
+    typer.echo("-" * 96)
+    for name, category, availability, description in _live_agent_roster():
+        asi = category.value if category is not None else "n/a"
+        typer.echo(f"{name:29} {asi:6} {availability:36} {description}")
 
 
 @app.command("list-probes")
