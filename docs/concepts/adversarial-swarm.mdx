@@ -1,7 +1,7 @@
 ---
 title: "Adversarial swarm"
 sidebarTitle: "Adversarial swarm"
-description: "The fourteen specialist agents, parallelism limits, Commander/Attacker/Evaluator split, and how the swarm decides which specialists to run against your target."
+description: "The sixteen specialist agents, parallelism limits, Commander/Attacker/Evaluator split, and how the swarm decides which specialists to run against your target."
 icon: "network"
 ---
 
@@ -24,11 +24,11 @@ The three roles can be the same LLM or three different LLMs (see
 *always* logically separate — the same model instance is never asked to
 both attack and grade its own attack.
 
-## The fourteen specialists
+## The sixteen specialists
 
-Ten run by default — one per OWASP Agentic Security Initiative (ASI)
-category. Four additional OWASP-LLM specialists run when you pass
-`--include-m2-agents`.
+Ten run one per OWASP Agentic Security Initiative (ASI) category, plus
+one always-on identity-leak gap-fill agent. Five additional OWASP-LLM
+specialists also run by default; pass `--no-owasp-llm` to suppress them.
 
 | ASI | Specialist | Source file |
 |---|---|---|
@@ -46,6 +46,7 @@ category. Four additional OWASP-LLM specialists run when you pass
 | OWASP-LLM | Detection Evasion | `agents/detection_evasion_agent.py` |
 | OWASP-LLM | Secret Extraction | `agents/secret_extraction_agent.py` |
 | OWASP-LLM | Denial-of-Wallet | `agents/denial_of_wallet_agent.py` |
+| OWASP-LLM | Output Handling | `agents/output_handling_agent.py` |
 
 `agent-guardian list-agents` prints the same table from the CLI.
 

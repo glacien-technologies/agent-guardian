@@ -155,7 +155,7 @@ agent-guardian verify ~/.agentguardian/scans/SCAN_ID/scan.json
 - **Agent-first** — built for tool-using, stateful, multi-step systems rather than single-turn prompt checks
 - **Recon before attack** — fingerprints the target surface and then runs only the relevant specialists
 - **Evidence over vibes** — reports are grounded in transcripts, structured findings, and signed artifacts
-- **Local-first** — no telemetry, no phone-home, and a fully offline stub-mode path
+- **Local-first** — telemetry is opt-in and off by default; nothing is sent unless you explicitly enable it, and stub mode works fully offline
 - **CI-ready** — non-zero exit codes, SARIF export, and reusable GitHub Action patterns
 
 For a deeper competitive breakdown, see [`docs/concepts/agent-guardian-vs.mdx`](./docs/concepts/agent-guardian-vs.mdx).
@@ -286,9 +286,7 @@ Enumerate the corpus locally:
 
 ```bash
 agent-guardian list-probes
-agent-guardian list-probes --by-standard owasp-asi
-agent-guardian list-probes --by-standard mitre-atlas
-agent-guardian list-probes --by-standard csa-agentic-rt
+agent-guardian list-probes --asi ASI01
 ```
 
 Coverage today:
@@ -301,7 +299,7 @@ The exact probe-to-standard mapping lives in [`docs/reports/owasp-mapping.mdx`](
 
 ## Privacy & telemetry
 
-**No telemetry is collected.** There is no analytics ping, install tracker, or phone-home path. Stub mode additionally works offline with no LLM key.
+**Telemetry is opt-in and disabled by default.** Out of the box AgentGuardian sends nothing — no analytics ping, no install ping, no scan counts. Telemetry only activates after you explicitly opt in (`agent-guardian telemetry`). Once enabled, it sends anonymous operational counts (agents dispatched, attempts, findings) plus a locally generated, anonymous install id (a random UUID stored at `~/.agentguardian/install_id`, with no link to your identity). You can opt out again at any time. Stub mode additionally works fully offline with no LLM key.
 
 ## Docs
 

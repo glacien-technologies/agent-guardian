@@ -35,7 +35,7 @@ flowchart LR
    get one reply" interface and captures a static `TargetFingerprint`
    (tools surfaced, memory present, multi-agent hand-offs, PII exposure,
    reachable external systems).
-3. **Attack Swarm** — up to fourteen specialist agents, each owning one
+3. **Attack Swarm** — up to sixteen specialist agents, each owning one
    OWASP Agentic Security Initiative category, run concurrently and
    synthesise category-specific attack prompts. See
    [Adversarial swarm](/concepts/adversarial-swarm).
@@ -78,8 +78,9 @@ specialists run and what each one prioritises.
 ### Phase 2 — Decompose
 
 The swarm instantiates the ten ASI specialist agents (one per OWASP ASI
-2026 category) plus the four OWASP-LLM specialists when
-`--include-m2-agents` is set, then filters them through
+2026 category), an always-on identity-leak gap-fill agent, and the five
+OWASP-LLM specialists. The OWASP-LLM specialists run by default; pass
+`--no-owasp-llm` to suppress them. The swarm then filters every agent through
 `AsiAgent.is_applicable(fingerprint)`. A tool-less target skips ASI02 (Tool
 Abuse). A memory-less target skips ASI06 (Memory Poisoning). The global
 token budget is sliced across whichever agents survive the filter.
@@ -134,7 +135,7 @@ because they explain every weird-looking knob in the CLI:
 
 ## Where to go next
 
-- [Adversarial swarm](/concepts/adversarial-swarm) — the fourteen
+- [Adversarial swarm](/concepts/adversarial-swarm) — the sixteen
   specialists, parallelism limits, and Commander prompt.
 - [Target adapters](/concepts/target-adapters) — the adapter contract and
   how to add a new one.

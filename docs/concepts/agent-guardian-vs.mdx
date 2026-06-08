@@ -29,7 +29,7 @@ The table is reviewed monthly. If a row goes stale, file an issue at [glacien-te
 
 Whether the tool runs multiple attacker specialists *concurrently* against the same target, with a coordinator and shared adversarial memory. Single-attacker tools issue prompts sequentially from one corpus; swarm tools fan out across a category-sharded corpus and re-task idle attackers.
 
-AgentGuardian is the only OSS tool in this list that ships a swarm by default — fourteen specialists (ten ASI + four OWASP LLM), an `asyncio.TaskGroup` execution model, and a shared `VectorMemory` so multi-hop attacks can compose. The academic precedents are RedAgent and Co-RedTeam; see [/concepts/research-foundation](/concepts/research-foundation).
+AgentGuardian is the only OSS tool in this list that ships a swarm by default — sixteen specialists (ten ASI + one always-on identity-leak gap-fill agent + five OWASP-LLM), an `asyncio.TaskGroup` execution model, and a shared `VectorMemory` so multi-hop attacks can compose. The academic precedents are RedAgent and Co-RedTeam; see [/concepts/research-foundation](/concepts/research-foundation).
 
 ### Agentic-AI focus
 

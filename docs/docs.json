@@ -113,6 +113,14 @@
         ]
       },
       {
+        "group": "Build with AgentGuardian",
+        "icon": "wrench",
+        "pages": [
+          "build-with/write-a-probe",
+          "build-with/write-an-adapter"
+        ]
+      },
+      {
         "group": "Blog",
         "icon": "newspaper",
         "pages": [

@@ -52,12 +52,12 @@ The Pydantic shape, exactly as the loader enforces it:
 ```yaml
 swarm:
   commander_model: claude-haiku-4-5     # default
-  attacker_model: gpt-4o-mini           # default
-  evaluator_model: gpt-4o-mini          # default
+  attacker_model: gemini-3.5-flash      # default
+  evaluator_model: gemini-3.5-flash     # default
   max_parallel_agents: 11               # default; clamped to 1..=11
   budget:
-    wall_seconds: 900                   # default (15 min); must be >= 1
-    max_total_tokens: 2000000           # default (2M); must be >= 1
+    wall_seconds: null                  # default (uncapped); set an int >= 1 to cap
+    max_total_tokens: 10000000          # default (10M); must be >= 1
 
 target:
   mode: prompt                          # default; one of: prompt | code | http | framework
@@ -68,7 +68,7 @@ target:
 
 output:
   formats: ["json"]                     # default; list of formats to emit
-  redact_pii: true                      # default
+  redact_pii: false                     # default (opt-in PII redaction)
   sign_evidence: true                   # DEPRECATED (no-op) — see note below
   output_dir: null                      # optional; default is alongside the scan
 
@@ -94,11 +94,11 @@ LLM identifiers and budget for one scan.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `commander_model` | `claude-haiku-4-5` | Commander LLM. CLI override: `--commander-model` or `--model`. |
-| `attacker_model` | `gpt-4o-mini` | Attacker LLM. CLI override: `--attacker-model` or `--model`. |
-| `evaluator_model` | `gpt-4o-mini` | Judge / evaluator LLM. CLI override: `--evaluator-model` or `--model`. |
+| `attacker_model` | `gemini-3.5-flash` | Attacker LLM. CLI override: `--attacker-model` or `--model`. |
+| `evaluator_model` | `gemini-3.5-flash` | Judge / evaluator LLM. CLI override: `--evaluator-model` or `--model`. |
 | `max_parallel_agents` | `11` | Cap on concurrent specialist agents. Range `1..=11`. |
-| `budget.wall_seconds` | `900` | Hard wall-clock cap. Range `>= 1`. |
-| `budget.max_total_tokens` | `2000000` | Token budget across all roles. Range `>= 1`. |
+| `budget.wall_seconds` | `null` (uncapped) | Optional hard wall-clock cap. `null` = no cap; set an int `>= 1` to enable. |
+| `budget.max_total_tokens` | `10000000` | Token budget across all roles. Range `>= 1`. |
 
 The runtime USD cap is a CLI / SDK concern only (`--budget-usd` or
 `SwarmConfig.usd_cap`) — it's not in the config schema today.
@@ -122,8 +122,8 @@ Default report shape.
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `formats` | `["json"]` | List of formats to emit. Each must be one of `json`, `sarif`, `junit`, `md`, `pdf`. |
-| `redact_pii` | `true` | Run findings through `PiiRedactor` before emit. |
+| `formats` | `["json"]` | List of formats to emit. Each must be one of `json`, `sarif`, `junit`, `md`, `gitlab`, `pdf`. |
+| `redact_pii` | `false` | Opt-in: run findings through `PiiRedactor` before emit (also `AGENT_GUARDIAN_REDACT_PII=1`). Off by default — operators see verbatim target output. |
 | `sign_evidence` | `true` | **DEPRECATED in 1.0 — no-op forward-compat placeholder.** See note below. |
 | `output_dir` | `null` | Where reports land. `null` = alongside the scan dir. |
 
@@ -264,4 +264,4 @@ unset key showing its default). A typo or wrong type raises a Pydantic
 - Read the [Python SDK](/reference/python-sdk) page if you want
   programmatic access to the same `Config` model.
 - Wire it into a CI job — see
-  [GitHub Actions integration](/ci/github-actions).
+  [GitHub Actions integration](/ci-cd/github-actions).

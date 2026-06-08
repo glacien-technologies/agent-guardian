@@ -1,11 +1,11 @@
 ---
 title: "Introducing AgentGuardian: open-source red-teaming for AI agents"
 sidebarTitle: "Introducing AgentGuardian"
-description: "Why single-prompt testers miss tool abuse, what changes when fourteen specialist attackers run concurrently, and how to point AgentGuardian at your own agent in five minutes."
+description: "Why single-prompt testers miss tool abuse, what changes when sixteen specialist attackers run concurrently, and how to point AgentGuardian at your own agent in five minutes."
 icon: "rocket"
 ---
 
-> AgentGuardian is an open-source, Apache-2.0, local-first red-teaming toolkit for AI agents. Point it at a LangGraph, CrewAI, MCP server, RAG app, or REST-API agent — it deploys a swarm of fourteen specialist attackers, produces a deterministic 0–100 AIVSS score mapped to OWASP ASI 2026, MITRE ATLAS v5.4, and the CSA Agentic AI Red Teaming Guide, and emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
+> AgentGuardian is an open-source, Apache-2.0, local-first red-teaming toolkit for AI agents. Point it at a LangGraph, CrewAI, MCP server, RAG app, or REST-API agent — it deploys a swarm of sixteen specialist attackers, produces a deterministic 0–100 AIVSS score mapped to OWASP ASI 2026, MITRE ATLAS v5.4, and the CSA Agentic AI Red Teaming Guide, and emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
 >
 > `pip install agent-guardian` to try it. The 90-second demo is on [YouTube](https://github.com/glacien-technologies/agent-guardian#demo).
 
@@ -28,7 +28,7 @@ We started AgentGuardian to fix that gap.
 
 The v1.1 line is the first "production" line. The headline pieces:
 
-- **The swarm.** Fourteen attacker specialists (ten OWASP ASI 2026 categories plus four OWASP LLM Top 10 categories — fuzzing, secret extraction, denial of wallet, detection evasion) run concurrently against your agent, coordinated by a Swarm Commander LLM. The Commander reads the recon fingerprint, decomposes the attack surface, and re-tasks idle agents until either the budget is exhausted or the AIVSS variance has stabilised.
+- **The swarm.** Sixteen attacker specialists (ten OWASP ASI 2026 categories, one always-on identity-leak gap-fill agent, plus five OWASP LLM Top 10 specialists — fuzzing, secret extraction, denial of wallet, detection evasion, output handling) run concurrently against your agent, coordinated by a Swarm Commander LLM. The Commander reads the recon fingerprint, decomposes the attack surface, and re-tasks idle agents until either the budget is exhausted or the AIVSS variance has stabilised.
 - **The AIVSS scorer.** Every finding contributes to a deterministic 0–100 score. Higher is safer. The formula is open — see [reports/aivss-score](/reports/aivss-score). The same agent + the same probes + the same model produce the same score; LLM stochasticity is bounded by the swarm structure, not absorbed into the score.
 - **PoV-as-oracle.** Every finding ships with a proof-of-vulnerability script. Before the score is computed the runner replays each PoV N times against the live target and drops findings that don't reproduce. Score inflation from one-off LLM hallucinations is gated out.
 - **Three scan modes.** `--mode fast` for CI gates (~45 seconds, ~$0.01), `--mode smart` for everyday use (~2 minutes, ~$0.03), `--mode full` for the authoritative pre-release scan (~5 minutes, ~$0.06). Numbers measured against Gemini 2.5 Flash on a tools-only target.

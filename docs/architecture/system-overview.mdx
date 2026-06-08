@@ -47,8 +47,10 @@ contract.
 
 ### 3. Attack Swarm
 
-The fourteen specialist agents (ten OWASP ASI categories + four
-OWASP-LLM specialists when `--include-m2-agents` is set). They run
+The sixteen specialist agents (ten OWASP ASI categories, one always-on
+identity-leak gap-fill agent, and five OWASP-LLM specialists). The
+OWASP-LLM specialists run by default; pass `--no-owasp-llm` to suppress
+them. They run
 under one `asyncio.TaskGroup` in Phase 3, each owning one category and
 generating category-specific attack prompts. The applicability filter
 (`AsiAgent.is_applicable(fingerprint)`) skips specialists whose
@@ -74,7 +76,7 @@ the scan; everything else is derived from it.
 
 ### 6. Report Generator
 
-Five emitters derive their output from the same canonical
+Six emitters derive their output from the same canonical
 `scan.json`:
 
 | Format | Use it for | Source |
@@ -83,9 +85,10 @@ Five emitters derive their output from the same canonical
 | `sarif` | GitHub Code Scanning / SOC tooling | `src/agent_guardian/reports/sarif.py` |
 | `junit` | Any CI test dashboard | `src/agent_guardian/reports/junit.py` |
 | `md` | Markdown for PR comments and READMEs | `src/agent_guardian/reports/markdown.py` |
+| `gitlab` | GitLab SAST / Code Quality widget | `src/agent_guardian/reports/codeclimate.py` |
 | `pdf` | Auditor and reviewer hand-offs | `src/agent_guardian/reports/pdf.py` |
 
-The local **Live dashboard** at `http://127.0.0.1:7474/scans/<scan_id>`
+The local **Live dashboard** at `http://127.0.0.1:7474/scan/<scan_id>`
 reads the same `scan.json` plus a live reflection feed for in-flight
 scans. See [Live dashboard](/architecture/live-dashboard).
 
@@ -102,7 +105,7 @@ machine you run it on. That is the whole architecture.
 For the runtime governance plane — managed evidence packs, team
 workflows, policy enforcement, audit dashboards — see
 [Open vs Enterprise](/concepts/open-vs-enterprise) and
-[Enterprise](/enterprise).
+[Enterprise](/enterprise/index).
 
 ## Subsystems worth knowing about
 

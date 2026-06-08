@@ -6,8 +6,8 @@ icon: "download"
 
 Pick one install path and go. All paths give you the `agent-guardian`
 CLI and the Python SDK; the base install already ships the full attack
-swarm, all five report writers (`json`, `sarif`, `junit`, `md`, `pdf`
-via ReportLab), the seed-probe corpus, the loopback dashboard, and the
+swarm, all six report writers (`json`, `sarif`, `junit`, `md`, `gitlab`,
+`pdf` via ReportLab), the seed-probe corpus, the loopback dashboard, and the
 Ed25519 / HMAC signing primitives. Optional extras (WeasyPrint PDFs,
 OpenTelemetry, AWS Bedrock, Vertex AI, WebSocket / gRPC / browser
 transports, bundled demo agents) are opt-in below.
@@ -167,7 +167,7 @@ python: 3.11.13
 llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
 bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
 sandbox: importable
-pdf engine: none | reportlab 4.2 -- install 'agent-guardian[full]' to upgrade to WeasyPrint (higher-fidelity HTML→PDF).
+pdf engines — weasyprint: not installed | reportlab: reportlab 4.2  (install 'agent-guardian[full]' to add WeasyPrint for higher-fidelity HTML→PDF)
 otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
 dashboard port 7474: free
 state dir: /Users/you/.agentguardian
@@ -244,8 +244,8 @@ working directory is loaded automatically at CLI startup (handled in
   Bedrock uses the AWS credential chain, not a namespaced API key. Set
   `AWS_PROFILE` or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
   `AWS_REGION` per the standard botocore conventions; `agent-guardian
-  doctor` will report `bedrock: ready` once both the `[aws]` extra and
-  the credentials are in place.
+  doctor` will report `bedrock: aws extra OK, region=...` once both the
+  `[aws]` extra and the credentials are in place.
 </Note>
 
 ## Troubleshooting

@@ -7,7 +7,7 @@ operator out-of-band.
 | File                      | Purpose                                          | Source                                              | Size cap |
 |---------------------------|--------------------------------------------------|-----------------------------------------------------|----------|
 | `demo-scan.gif`           | 30–45s loop shown at the top of README.md        | Screen capture of a live `agent-guardian scan` run  | 5 MB     |
-| `sample-scan-report.html` | One representative HTML report linked from README | `agent-guardian report SCAN_ID --output html`       | 2 MB     |
+| `sample-scan-report.pdf`  | One representative PDF report linked from README  | `agent-guardian report SCAN_ID --output pdf`        | 2 MB     |
 
 ## How to produce `demo-scan.gif`
 
@@ -41,7 +41,7 @@ operator out-of-band.
 5. Confirm the result is under 5 MB before committing. If it isn't,
    drop FPS to 10 or width to 1024 and re-encode.
 
-## How to produce `sample-scan-report.html`
+## How to produce `sample-scan-report.pdf`
 
 1. Run a real scan against any local target (the stub model is fine):
 
@@ -53,23 +53,23 @@ operator out-of-band.
    ```
 
 2. Note the scan ID printed at the end (e.g. `scan_2026...`). Export
-   the HTML report:
+   the PDF report (requires the `[full]` or `[pdf-fallback]` extra):
 
    ```bash
    agent-guardian report scan_2026... \
-     --output html \
-     --output-path docs/_assets/sample-scan-report.html
+     --output pdf \
+     --output-path docs/_assets/sample-scan-report.pdf
    ```
 
-3. Open the file locally in a browser to sanity-check it renders, then
-   commit. If the file exceeds 2 MB, gzip it (`gzip -k` keeps the
-   original) and link the `.html.gz` from the README instead.
+3. Open the file locally to sanity-check it renders, then commit. If the
+   file exceeds 2 MB, gzip it (`gzip -k` keeps the original) and link the
+   `.pdf.gz` from the README instead.
 
 ## Why these paths
 
 The repo root `README.md` links these files via relative paths
-(`docs/_assets/demo-scan.gif`, `docs/_assets/sample-scan-report.html`).
-GitHub renders the GIF inline and serves the HTML as a raw download.
+(`docs/_assets/demo-scan.gif`, `docs/_assets/sample-scan-report.pdf`).
+GitHub renders the GIF inline and serves the PDF as a raw download.
 The Mintlify docs site (`docs/docs.json`) does not nav-include
 `_assets/` (see `.mintignore`), so these never leak into the public
 docs site.

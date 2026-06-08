@@ -21,7 +21,7 @@ Single-agent banking assistant ("FinBot"). Eight planted classes — the widest 
 ```bash
 agent-guardian scan \
   --endpoint http://localhost:8000/vulnerable-langgraph-chatbot/chat \
-  --model stub --mode fast --output html --output-path scan-langgraph.html
+  --model stub --mode fast --output pdf --output-path scan-langgraph.pdf
 ```
 
 ## vulnerable-mcp-server
@@ -50,7 +50,7 @@ Coding assistant ("DevHelper") with `exec_shell` and `pip_install` tools. Four p
 ```bash
 agent-guardian scan \
   --endpoint http://localhost:8000/vulnerable-tool-agent/chat \
-  --model stub --mode fast --output html --output-path scan-tool.html
+  --model stub --mode fast --output pdf --output-path scan-tool.pdf
 ```
 
 ## vulnerable-rag-agent
@@ -64,7 +64,7 @@ Multi-agent travel orchestrator with a shared in-memory itinerary store across a
 ```bash
 agent-guardian scan \
   --endpoint http://localhost:8000/vulnerable-rag-agent/chat \
-  --model stub --mode fast --output html --output-path scan-rag.html
+  --model stub --mode fast --output pdf --output-path scan-rag.pdf
 ```
 
 ## defended-baseline
