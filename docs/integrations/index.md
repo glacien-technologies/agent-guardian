@@ -94,7 +94,7 @@ The composite action uploads SARIF for you. If you run the CLI directly, mirror 
     category: agentguardian
 ```
 
-A static example of what the report looks like, pre-rendered from real scan output: [`docs/_assets/sample-report.html`](../_assets/sample-report.html).
+A static example of what the report looks like, generated from real scan output: [`docs/_assets/sample-report.pdf`](../_assets/sample-report.pdf).
 
 ## Exit codes
 
