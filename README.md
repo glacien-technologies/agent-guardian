@@ -34,6 +34,19 @@ AgentGuardian points a swarm of adversarial probes at your target and gives you 
 - Finds prompt injection, tool misuse, privilege abuse, memory poisoning, code-exec paths, trust exploits, and goal drift.
 - Runs locally, in CI, or offline in deterministic `--model stub` mode.
 
+## Choose your path
+
+Pick the entrypoint that matches what you already have:
+
+| I have... | Start here | What it does |
+| --- | --- | --- |
+| A system prompt | `agent-guardian scan --system-prompt prompt.txt --mode fast --model stub` | Offline smoke test with deterministic probes. |
+| A local or hosted HTTP agent | `agent-guardian scan --endpoint http://localhost:8000/chat --model gemini:gemini-2.5-flash --mode smart` | Black-box scan against a running agent endpoint. |
+| A LangGraph / CrewAI / AutoGen / ADK app | `agent-guardian scan --framework langgraph --framework-ref my_app.graph:graph --model gemini:gemini-2.5-flash` | Wraps the native framework object and tests it directly. |
+| A CI release gate | `agent-guardian scan --endpoint "$AGENT_URL" --mode full --output sarif --output-path agentguardian.sarif --fail-under 80` | Produces an authoritative AIVSS gate plus uploadable SARIF. |
+
+<!-- TODO-README: Replace the HTTP/framework commands above with the canonical public demo target and best default model once the v1.0 docs decide the preferred onboarding path. -->
+
 ## Demo
 
 ```bash
@@ -102,6 +115,45 @@ agent-guardian serve
 # → http://127.0.0.1:7474
 ```
 
+### Expected output
+
+```text
+scan cli-PLACEHOLDER done: AIVSS=PLACEHOLDER band=PLACEHOLDER tier=T_PLACEHOLDER findings=PLACEHOLDER
+report:    ~/.agentguardian/scans/cli-PLACEHOLDER/report.json
+events:    ~/.agentguardian/scans/cli-PLACEHOLDER/events.jsonl
+memory:    ~/.agentguardian/scans/cli-PLACEHOLDER/memory.jsonl
+probes:    ~/.agentguardian/scans/cli-PLACEHOLDER/probe/
+dashboard: http://127.0.0.1:7474/scan/cli-PLACEHOLDER
+```
+
+<!-- TODO-README: Replace the placeholder output above with a stable, freshly generated v1.0.0 scan transcript from the public demo target. Keep it short enough to fit on one screen. -->
+
+### What the dashboard shows
+
+AgentGuardian turns every scan into a local dashboard: recon, attack coverage,
+findings, per-probe transcripts, logs, and exportable reports.
+
+<p align="center">
+  <img src="./docs/images/readme/dashboard-overview.jpg" alt="AgentGuardian dashboard overview with AIVSS, findings, probe count, cost, coverage, and recon fingerprint" width="920">
+</p>
+
+<p align="center">
+  <img src="./docs/images/readme/dashboard-findings.jpg" alt="AgentGuardian dashboard findings table with severity, ASI category, agent, probe, and finding summary" width="920">
+</p>
+
+<!-- TODO-README: Replace these screenshots with polished canonical screenshots before a large public launch if the demo scan id, score, target name, or metrics should not be treated as the public example. Current best screenshot choices are: overview/recon and findings. The probe table screenshot is useful for docs, but too dense for the root README. -->
+
+### What a finding looks like
+
+```text
+CRITICAL · ASI02 Tool Misuse · tool-abuse-agent
+Probe: ASI02-PLACEHOLDER
+Evidence: target accepted an unauthorized tool request and exposed a sensitive operation path.
+Fix: require explicit authorization, validate tool arguments server-side, and add an approval step for high-risk actions.
+```
+
+<!-- TODO-README: Replace this placeholder finding with a real redacted finding from docs/_assets/sample-report.html or a stable demo scan. Do not include secrets, customer identifiers, internal URLs, or non-public target names. -->
+
 ## What you can scan
 
 - **Prompt-only targets** via `--system-prompt PATH`
@@ -118,6 +170,19 @@ Built-in framework kinds:
 - `autogen`
 - `adk`
 - `strands`
+
+## Supported surface
+
+| Area | Supported today |
+| --- | --- |
+| Targets | System prompts, HTTP endpoints, Python callables, framework-native objects, contract-driven transports |
+| Frameworks | LangGraph, CrewAI, OpenAI Agents, AutoGen, ADK, Strands |
+| Reports | JSON, SARIF, JUnit, Markdown, GitLab Code Quality, PDF |
+| CI/CD | GitHub Actions, GitLab CI, Bitbucket Pipelines, generic shell gates |
+| Modes | `fast`, `smart`, `full` |
+| Standards | OWASP ASI 2026, MITRE ATLAS v5.4.0 mapping, CSA Agentic AI Red Teaming Guide mapping |
+
+<!-- TODO-README: Confirm the final public model-provider matrix before adding provider names here. A provider row is useful, but only if it exactly matches the package extras and docs. -->
 
 ## What it catches
 
@@ -159,6 +224,17 @@ agent-guardian verify ~/.agentguardian/scans/SCAN_ID/scan.json
 - **CI-ready** — non-zero exit codes, SARIF export, and reusable GitHub Action patterns
 
 For a deeper competitive breakdown, see [`docs/concepts/agent-guardian-vs.mdx`](./docs/concepts/agent-guardian-vs.mdx).
+
+## How AgentGuardian is different
+
+| If you use... | You usually get | AgentGuardian adds |
+| --- | --- | --- |
+| Generic LLM evals | Task success / quality scores | Security-specific adversarial probes, exploit evidence, and AIVSS. |
+| Prompt-injection scanners | Single-turn prompt tests | Multi-turn agent attacks across tools, memory, delegation, and output handling. |
+| Manual red teaming | High-quality but slow review | Repeatable probe runs, signed artifacts, CI gates, and per-probe transcripts. |
+| Runtime guardrails | Live policy enforcement | Pre-release evidence that shows what the target does before attackers see it. |
+
+<!-- TODO-README: Add named comparisons only after legal/positioning review. Keep this table category-based for now. -->
 
 ## How it works
 
