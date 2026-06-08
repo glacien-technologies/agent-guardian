@@ -6,7 +6,6 @@ name: Validate integration pack
 #    produces a non-empty SARIF file.
 #  - the .pre-commit-hooks.yaml file parses against the pre-commit registry
 #    schema.
-#  - the docs/_assets/sample-report.html file is well-formed HTML.
 
 on:
   pull_request:
@@ -14,7 +13,6 @@ on:
       - ".github/actions/agentguardian-scan/**"
       - ".github/workflows/validate-action.yml"
       - ".pre-commit-hooks.yaml"
-      - "docs/_assets/sample-report.html"
       - "src/agent_guardian/**"
   push:
     branches: [main]
@@ -22,7 +20,6 @@ on:
       - ".github/actions/agentguardian-scan/**"
       - ".github/workflows/validate-action.yml"
       - ".pre-commit-hooks.yaml"
-      - "docs/_assets/sample-report.html"
   workflow_dispatch:
 
 permissions:
@@ -105,29 +102,4 @@ jobs:
               missing = required - entry.keys()
               assert not missing, f"hook {entry.get('id')!r} missing keys: {missing}"
           print(f"validated {len(data)} hook entries")
-          PY
-
-  sample-report:
-    name: Sample HTML report is parseable
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install --require-hashes --no-deps -r .github/requirements/validate.txt
-      - name: Parse sample-report.html
-        run: |
-          python - <<'PY'
-          import html5lib
-          with open("docs/_assets/sample-report.html", "rb") as fh:
-              tree = html5lib.parse(fh, treebuilder="etree", namespaceHTMLElements=False)
-          # Confirm core structural anchors are present.
-          html = open("docs/_assets/sample-report.html").read()
-          # NOTE: ``schema`` and the schema id are split by an inline ``</b>``
-          # close-tag in the meta-row markup, so the raw HTML string never
-          # contains them contiguously. Anchor on the canonical schema id only.
-          for needle in ("AgentGuardian scan report", "AIVSS", "ASI01", "agentguardian-scan-v1"):
-              assert needle in html, needle
-          print("sample-report.html parsed; expected anchors present")
           PY

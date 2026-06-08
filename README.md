@@ -4,8 +4,6 @@
 
 **Red-team your AI agents before attackers do.**
 
-Open-source, local-first adversarial security testing for AI agents, RAG systems, MCP servers, and tool-using LLM applications.
-
 [![PyPI](https://img.shields.io/pypi/v/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![Python](https://img.shields.io/pypi/pyversions/agent-guardian.svg)](https://pypi.org/project/agent-guardian/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -18,307 +16,242 @@ Open-source, local-first adversarial security testing for AI agents, RAG systems
 <!-- [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/<ID>/badge)](https://www.bestpractices.dev/projects/<ID>) -->
 [![Docs](https://img.shields.io/badge/docs-docs.agentguardian.io-1f6feb.svg)](https://docs.agentguardian.io)
 
-[Docs](https://docs.agentguardian.io) · [Quickstart](https://docs.agentguardian.io/quickstart) · [Try the demo agent](https://docs.agentguardian.io/start-here/try-the-demo-agent) · [Attack library](https://docs.agentguardian.io/attacks/overview) · [CI/CD](https://docs.agentguardian.io/ci-cd/overview) · [Sample report](./docs/_assets/sample-report.html)
+[Docs](https://docs.agentguardian.io) · [Quickstart](https://docs.agentguardian.io/quickstart) · [Try the demo agent](https://docs.agentguardian.io/start-here/try-the-demo-agent) · [Attack library](https://docs.agentguardian.io/attacks/overview) · [CI/CD](https://docs.agentguardian.io/ci-cd/overview) · [Sample report](./docs/_assets/sample-report.pdf)
 
 </div>
 
 ---
 
-AgentGuardian points a swarm of adversarial probes at your target and gives you reproducible evidence you can use in engineering, security review, and CI: AIVSS scoring, signed JSON, SARIF, Markdown, JUnit, PDF, and per-probe transcripts.
+AgentGuardian is an open-source red-teaming toolkit for AI agents. It scans your agent, maps the attack surface, runs the relevant adversarial agents, and generates evidence-backed findings for you to review — and fix the vulnerabilities before they reach production.
 
 <p align="center">
-  <img src="./docs/images/swarm-diagrams/agentguardian-security-loop.jpg" alt="AgentGuardian recon, OWASP ASI probe generation, findings, reports, and fix-rerun loop" width="920">
+  <img src="./docs/images/swarm-diagrams/agentguardian-security-loop.jpg" alt="AgentGuardian recon, OWASP ASI probe generation, findings, reports, and fix-rerun loop" width="900">
 </p>
 
-- Built for agentic systems, not just single-prompt chatbot evals.
-- Finds prompt injection, tool misuse, privilege abuse, memory poisoning, code-exec paths, trust exploits, and goal drift.
-- Runs locally, in CI, or offline in deterministic `--model stub` mode.
+<p align="center">▶ <b><a href="https://youtu.be/AD-CIIccklA">Watch the demo</a></b> to see how AgentGuardian finds vulnerabilities in a live scan.</p>
 
-## Demo
+## Getting started
+
+**1. Install**
 
 ```bash
 pip install agent-guardian
-echo 'You are a helpful customer-support agent for ACME Bank.' > prompt.txt
-agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
 ```
 
-That gives you:
-
-- a live local dashboard during interactive scans
-- a stored scan artifact under `~/.agentguardian/scans/<scan_id>/`
-- exportable reports via `agent-guardian report SCAN_ID --output sarif --output-path scan.sarif`
-- a static reference rendering: [`docs/_assets/sample-report.html`](./docs/_assets/sample-report.html)
-
-`--model stub` requires no API key and no network. Swap in a real model such as `gemini:gemini-2.5-flash` or `openai:gpt-4o` when you want an authoritative judge.
-
-## Install
+or
 
 ```bash
-# pip
-pip install agent-guardian
-
-# pipx
-pipx install agent-guardian
-
-# uv
-uv add agent-guardian
-# or
 uv tool install agent-guardian
 ```
 
-Python `3.11`–`3.13` are supported. Linux and macOS are first-class; Windows is community-supported.
+**2. Configure a model provider**
 
-> **Heads up:** current macOS often defaults `python3` to `3.14`, which AgentGuardian does not yet target. If `pip install agent-guardian` fails with `No matching distribution found`, use Python `3.13` instead:
->
-> ```bash
-> python3.13 -m venv .venv
-> source .venv/bin/activate
-> pip install agent-guardian
-> ```
->
-> Docker and the GitHub Action path are insulated from this. See [`docs/installation.mdx`](./docs/installation.mdx) for the full install matrix.
-
-## 60-second quickstart
+AgentGuardian drives its attacks with an LLM. Export a key for your provider — Gemini, OpenAI, or Anthropic:
 
 ```bash
-# 1. Sanity-check the install
-agent-guardian doctor
-
-# 2. See the shipped probe corpus
-agent-guardian list-probes
-
-# 3. Run an offline scan
-echo 'You are a helpful customer-support agent for ACME Bank.' > prompt.txt
-agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
-
-# 4. Export a machine-readable report once you have a scan id
-agent-guardian report SCAN_ID --output sarif --output-path scan.sarif
+export GEMINI_API_KEY=...        # or OPENAI_API_KEY / ANTHROPIC_API_KEY
 ```
 
-Interactive scans auto-serve a local dashboard. You can also browse results later with:
+For every supported provider and the full set of configuration options, see the [configuration guide](https://docs.agentguardian.io/reference/config#provider-api-keys).
+
+**3. Scan your agent**
 
 ```bash
-agent-guardian serve
-# → http://127.0.0.1:7474
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model gemini:gemini-3.5-flash \
+  --mode fast \
+  --output pdf --output-path report.pdf
 ```
+
+**4. Review the findings**
+
+AgentGuardian opens a live dashboard while it runs (`http://127.0.0.1:7474`) and writes an evidence bundle — findings, transcripts, and your PDF report — under `~/.agentguardian/scans/<scan-id>/`.
 
 ## What you can scan
 
-- **Prompt-only targets** via `--system-prompt PATH`
-- **Hosted HTTP agents** via `--endpoint URL`
-- **Framework-native objects** via `--framework KIND --framework-ref MODULE:ATTR`
-- **Custom Python entrypoints** via the positional `target` argument (`my_agent:run`, `path/to/app.py:graph`)
-- **Advanced contract-driven targets** including MCP / OpenAPI / browser / WebSocket flows via the contract path documented in [`docs/concepts/target-adapters.mdx`](./docs/concepts/target-adapters.mdx)
-
-Built-in framework kinds:
-
-- `langgraph`
-- `crewai`
-- `openai_agents`
-- `autogen`
-- `adk`
-- `strands`
-
-## What it catches
-
-AgentGuardian ships **96 attack probes** covering all ten OWASP Top 10 for Agentic Applications 2026 categories:
-
-- **ASI01** — prompt injection / goal hijack
-- **ASI02** — tool misuse
-- **ASI03** — privilege compromise
-- **ASI04** — supply chain / resource overload
-- **ASI05** — code execution
-- **ASI06** — memory poisoning
-- **ASI07** — agent-to-agent compromise
-- **ASI08** — cascading failures
-- **ASI09** — trust exploitation / unsafe output handling
-- **ASI10** — untraceability / goal drift
-
-The corpus is also mapped to MITRE ATLAS v5.4.0 and the CSA Agentic AI Red Teaming Guide. See the exact set in [`docs/reference/framework-coverage-matrix.md`](./docs/reference/framework-coverage-matrix.md).
-
-## What you get
-
-- **Signed JSON evidence** — `scan.json` ships with HMAC-SHA256 + Ed25519 signatures verifiable with `agent-guardian verify`
-- **Exportable reports** — `json`, `sarif`, `junit`, `md`, `gitlab`, and `pdf`
-- **Per-probe transcripts** — prompts, responses, verdicts, and evidence trails
-- **AIVSS scoring** — publishable in `--mode full`; trend-tracking in `fast` and `smart`
-- **Local dashboard** — browse historical scans, findings, and evidence bundles
-
-To verify a stored report:
+### Scan an HTTP agent
 
 ```bash
-agent-guardian verify ~/.agentguardian/scans/SCAN_ID/scan.json
-```
-
-## Why AgentGuardian
-
-- **Agent-first** — built for tool-using, stateful, multi-step systems rather than single-turn prompt checks
-- **Recon before attack** — fingerprints the target surface and then runs only the relevant specialists
-- **Evidence over vibes** — reports are grounded in transcripts, structured findings, and signed artifacts
-- **Local-first** — telemetry is opt-in and off by default; nothing is sent unless you explicitly enable it, and stub mode works fully offline
-- **CI-ready** — non-zero exit codes, SARIF export, and reusable GitHub Action patterns
-
-For a deeper competitive breakdown, see [`docs/concepts/agent-guardian-vs.mdx`](./docs/concepts/agent-guardian-vs.mdx).
-
-## How it works
-
-Every scan follows the same narrative:
-
-1. **Plan** — resolve the target type, budgets, models, and output format
-2. **Recon** — black-box fingerprint the target: tools, memory, PII exposure, multi-agent handoffs, reachable systems
-3. **Red Teaming** — dispatch ASI-aligned specialists against the observed surface
-4. **Findings** — judge outcomes, compute AIVSS, and write signed reports
-
-The recon fingerprint is the key difference: AgentGuardian decides which attacks matter *for this target* before it spends budget on them.
-
-## Scan a real target
-
-```bash
-# Hosted HTTP endpoint
 agent-guardian scan \
   --endpoint http://localhost:8000/chat \
-  --model gemini:gemini-2.5-flash \
+  --model gemini:gemini-3.5-flash \
   --mode smart
+```
 
-# LangGraph app
+### Scan a system prompt
+
+```bash
+agent-guardian scan \
+  --system-prompt ./prompts/customer-support-agent.txt \
+  --model gemini:gemini-3.5-flash \
+  --mode fast
+```
+
+### Scan a LangGraph agent
+
+```bash
 agent-guardian scan \
   --framework langgraph \
   --framework-ref my_app.graph:graph \
-  --model gemini:gemini-2.5-flash
-
-# Custom Python entrypoint
-agent-guardian scan \
-  my_agent:run \
-  --model gemini:gemini-2.5-flash
+  --model gemini:gemini-3.5-flash \
+  --mode smart
 ```
 
-Worked examples live under [`examples/`](./examples/) and the `Try AgentGuardian` guides under [`docs/try/`](./docs/try/).
+### Scan a Google ADK agent
+
+```bash
+agent-guardian scan \
+  --framework adk \
+  --framework-ref my_agent.agent:root_agent \
+  --model gemini:gemini-3.5-flash \
+  --mode smart
+```
+
+For more targets (MCP, OpenAPI, WebSocket, browser flows), see the [target adapters guide](https://docs.agentguardian.io/concepts/target-adapters).
+
+## What AgentGuardian catches
+
+AgentGuardian tests agentic risks that normal prompt scanners miss:
+
+- Prompt injection and goal hijack
+- Unsafe tool calls and tool chaining
+- Privilege abuse
+- RAG poisoning and indirect prompt injection
+- Memory and context poisoning
+- Sensitive data leakage
+- Agent-to-agent manipulation
+- Cascading failures
+- Trust exploitation and unsafe outputs
+- Goal drift and untraceable behavior
+
+## Reports and evidence
+
+Every scan writes a local evidence bundle under `~/.agentguardian/scans/<scan-id>/`:
+
+- `scan.json` — machine-readable findings, signed (HMAC-SHA256 + Ed25519)
+- `events.jsonl` — the scan timeline
+- `probe/` — per-probe requests, responses, verdicts, and evidence
+- `forensic_manifest.json` — integrity manifest for the bundle
+- a live local dashboard — browse findings, transcripts, and exports
+
+Generate shareable or CI-ready reports in any format on demand:
+
+```bash
+agent-guardian report SCAN_ID --output sarif --output-path scan.sarif   # GitHub Security
+agent-guardian report SCAN_ID --output md                                # Markdown
+agent-guardian report SCAN_ID --output pdf  --output-path report.pdf      # shareable PDF
+```
+
+Formats: `json` · `sarif` · `junit` · `md` · `gitlab` · `pdf`. Stored evidence can be verified with `agent-guardian verify`.
+
+## How it works
+
+Every scan follows the same loop:
+
+```text
+Target → surface mapping → adversarial agents → AIVSS-scored findings → evidence bundle
+```
+
+For the full workflow, see [how AgentGuardian works](https://docs.agentguardian.io/concepts/target-adapters).
 
 ## Scan modes
 
-| Mode | Typical use | Notes |
-| --- | --- | --- |
-| `fast` | Dev loop, smoke checks, pre-push | Lowest cost and quickest feedback |
-| `smart` | PR iteration, broader nightly coverage | Better signal than `fast`, still non-authoritative |
-| `full` | Release gates, CI on `main`, audit evidence | Authoritative mode for AIVSS and `--fail-under` |
+- `fast` — quick local feedback
+- `smart` — broader coverage for development and pull requests
+- `full` — release gates and audit evidence
 
-Only `--mode full` produces an authoritative AIVSS suitable for hard release gating.
+Use `full` when you need AIVSS-scored findings for CI/CD gates.
 
-## CI integration
+## CI/CD with GitHub Actions
+
+The shipped composite action runs a scan, uploads SARIF to GitHub Code Scanning, and (optionally) posts a summary comment on the pull request:
 
 ```yaml
 name: AgentGuardian
-on: [pull_request]
+
+on:
+  pull_request:
+  push:
+    branches: [main]
 
 jobs:
-  scan:
+  red-team:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      security-events: write   # upload SARIF to Code Scanning
+      pull-requests: write     # post the summary comment
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - uses: glacien-technologies/agent-guardian/.github/actions/agentguardian-scan@v1
         with:
-          python-version: "3.11"
-      - run: pip install agent-guardian
-      - name: Red-team the agent
+          endpoint: http://localhost:8000/chat
+          model: gemini:gemini-3.5-flash
+          mode: full
+          fail-under: "80"
+          max-critical: "0"
+          comment: "true"
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          agent-guardian scan \
-            --endpoint http://localhost:8000/chat \
-            --model gemini:gemini-2.5-flash \
-            --mode full \
-            --output sarif \
-            --output-path agentguardian.sarif \
-            --fail-under 80
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: agentguardian.sarif
 ```
 
-See [`docs/ci-cd/overview.mdx`](./docs/ci-cd/overview.mdx) and [`docs/ci-cd/github-actions.mdx`](./docs/ci-cd/github-actions.mdx) for the fuller setup, thresholds, and composite-action path.
-
-## Parallel & bulk scanning
-
-Need to scan a whole fleet — every agent you ship, several models against one
-target, or a nightly regression sweep? `agent-guardian suite` runs many
-independent scans **in parallel from one YAML file**, then aggregates a
-cross-scan summary and a report per workload. Each workload is a separate,
-fully isolated `scan` subprocess, so the suite never changes how any single
-scan behaves.
-
-```yaml
-# suite.yaml
-version: 1
-suite:
-  name: nightly-fleet
-  concurrency: 4
-  out_dir: ./suite-out
-  formats: [json, sarif]
-defaults:
-  model: gemini:gemini-2.5-flash
-  mode: full
-workloads:
-  - { name: finbot-http,       endpoint: https://finbot.internal/agent, fail_under: 70 }
-  - { name: planner-langgraph, framework: langgraph, framework_ref: app.graph:graph }
-  - { name: prompt-baseline,   system_prompt: ./prompts/agent_v3.txt, mode: fast }
-```
-
-```bash
-agent-guardian suite validate suite.yaml   # check, no spawn
-agent-guardian suite run      suite.yaml    # run the fleet → summary + reports
-```
-
-You get a summary table (per-workload AIVSS / band / findings, with a trust
-flag), a machine-readable `summary.json`, and flat `reports/<name>.<ext>` for
-every requested format. With `register_scans` (the default) each scan is also
-browsable in the dashboard by its own id. See
-[`docs/ci-cd/parallel-suites.mdx`](./docs/ci-cd/parallel-suites.mdx) for the
-full guide and [`examples/suite.yaml`](./examples/suite.yaml) for a commented
-reference.
+The job fails when the gate (`fail-under` / `max-critical`) is breached. For GitLab, Bitbucket, raw-CLI, and fleet/nightly setups, see the [CI/CD guides](https://docs.agentguardian.io/ci-cd/overview) — including the [parallel suites guide](https://docs.agentguardian.io/ci-cd/parallel-suites) for scanning many agents from one file.
 
 ## Standards and coverage
 
-Enumerate the corpus locally:
+AgentGuardian maps its shipped probes to:
 
-```bash
-agent-guardian list-probes
-agent-guardian list-probes --asi ASI01
-```
+- OWASP Top 10 for Agentic Applications
+- MITRE ATLAS
+- CSA Agentic AI Red Teaming Guide
 
-Coverage today:
-
-- **OWASP ASI 2026** — all 10 categories covered
-- **MITRE ATLAS v5.4.0** — mapped where black-box agent testing can observe the technique at the target I/O surface
-- **CSA Agentic AI Red Teaming Guide** — mapped across the shipped corpus
-
-The exact probe-to-standard mapping lives in [`docs/reports/owasp-mapping.mdx`](./docs/reports/owasp-mapping.mdx) and [`docs/reference/framework-coverage-matrix.md`](./docs/reference/framework-coverage-matrix.md).
+The exact agents and probes that ran against your target are enumerated in every scan report (`coverage` in `scan.json`). The full probe-to-standard mapping lives in the [OWASP mapping](https://docs.agentguardian.io/reports/owasp-mapping) and the [framework coverage matrix](https://docs.agentguardian.io/reference/framework-coverage-matrix).
 
 ## Privacy & telemetry
 
-**Telemetry is opt-in and disabled by default.** Out of the box AgentGuardian sends nothing — no analytics ping, no install ping, no scan counts. Telemetry only activates after you explicitly opt in (`agent-guardian telemetry`). Once enabled, it sends anonymous operational counts (agents dispatched, attempts, findings) plus a locally generated, anonymous install id (a random UUID stored at `~/.agentguardian/install_id`, with no link to your identity). You can opt out again at any time. Stub mode additionally works fully offline with no LLM key.
+**Telemetry is opt-in and disabled by default.** Out of the box AgentGuardian sends nothing — no analytics ping, no install ping, no scan counts. Telemetry only activates after you explicitly opt in. Once enabled, it sends anonymous operational counts (agents dispatched, attempts, findings) plus a locally generated, anonymous install id (a random UUID stored at `~/.agentguardian/install_id`, with no link to your identity).
 
-## Docs
+Manage it any time:
 
-- [Docs home](https://docs.agentguardian.io)
-- [`docs/quickstart.mdx`](./docs/quickstart.mdx)
-- [`docs/attacks/overview.mdx`](./docs/attacks/overview.mdx)
-- [`docs/concepts/target-adapters.mdx`](./docs/concepts/target-adapters.mdx)
-- [`docs/integrations/index.md`](./docs/integrations/index.md)
-- [`docs/reference/cli.mdx`](./docs/reference/cli.mdx)
+```bash
+agent-guardian telemetry status     # show current state
+agent-guardian telemetry enable      # opt in
+agent-guardian telemetry disable     # opt out
+```
 
-## Project status
+AgentGuardian never collects prompts, agent responses, target URLs, headers, secrets, API keys, transcripts, reports, evidence files, tool inputs or outputs, or customer data.
 
-AgentGuardian `1.0.0` is the first stable release. Semantic versioning applies to the public Python API, CLI surface, report schemas, and probe IDs. Probe content and scoring may evolve within a minor release as coverage improves.
+## Run from source
 
-See the [`OSS roadmap`](./docs/community/oss-roadmap.md), [`CHANGELOG.md`](./CHANGELOG.md), and [`governance`](./docs/community/governance.md).
+To run AgentGuardian from a source checkout instead of the published package:
+
+```bash
+# clone
+git clone https://github.com/glacien-technologies/agent-guardian.git
+cd agent-guardian
+
+# virtual environment
+python3.11 -m venv .venv
+source .venv/bin/activate
+
+# install the checkout in editable mode
+pip install -e ".[dev]"
+
+# run it from source
+agent-guardian doctor
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model gemini:gemini-3.5-flash \
+  --mode fast
+```
+
+For contribution guidelines, see the [contribution guide](https://docs.agentguardian.io/community/contributing).
 
 ## Contributing
 
-We welcome new probes, new adapters, and new attacker logic. Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) and the [`good first issue`](https://github.com/glacien-technologies/agent-guardian/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label.
+We welcome new probes, new adapters, and new attacker logic. Start with the [contribution guide](https://docs.agentguardian.io/community/contributing) and the [`good first issue`](https://github.com/glacien-technologies/agent-guardian/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) label.
 
 All commits must be DCO-signed:
 
@@ -326,11 +259,11 @@ All commits must be DCO-signed:
 git commit -s
 ```
 
-By participating you agree to [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) and the [`ethics policy`](./docs/community/ethics.md). AgentGuardian is for testing systems you own or are explicitly authorised to test.
+By participating you agree to [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) and the [ethics policy](https://docs.agentguardian.io/community/ethics). AgentGuardian is for testing systems you own or are explicitly authorised to test.
 
 ## Community
 
-Join us on [Discord](https://discord.gg/h4FRgxvr) for probe design, adapter questions, and roadmap discussion. For longer-form support channels, see [`docs/community/support.mdx`](./docs/community/support.mdx).
+Join us on [Discord](https://discord.gg/h4FRgxvr) for quickstart help, probe design, adapter questions, and roadmap discussion. For longer-form support channels, see the [support guide](https://docs.agentguardian.io/community/support).
 
 ## Security
 

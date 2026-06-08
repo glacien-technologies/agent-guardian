@@ -88,11 +88,14 @@ def test_comparison_page_lists_competitors() -> None:
         assert vendor in page, f"comparison page missing {vendor}"
 
 
-def test_readme_embeds_swarm_diagram() -> None:
+def test_readme_documents_coverage_standards() -> None:
+    # The README's "What AgentGuardian catches" section maps to the published
+    # standards in plain language; the per-ASI taxonomy + swarm diagram moved to
+    # docs (framework-coverage-matrix.md). Guard that the README still names the
+    # standards and links the coverage matrix so coverage stays discoverable.
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    # All ten ASI categories should appear in the embedded diagram.
-    for asi in (f"ASI{n:02d}" for n in range(1, 11)):
-        assert asi in readme, f"README architecture diagram missing {asi}"
+    for needle in ("OWASP", "MITRE ATLAS", "CSA", "framework-coverage-matrix"):
+        assert needle in readme, f"README coverage section missing {needle}"
 
 
 def test_readme_product_name_lint() -> None:
