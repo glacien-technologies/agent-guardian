@@ -29,21 +29,18 @@ agent-guardian COMMAND [ARGS]...
 Commands:
   version       Print the installed agent-guardian version and exit.
   doctor        Verify install, available LLM keys, and runtime prerequisites.
-  list-agents   Print the eleven specialist agents with their ASI category.
+  list-agents   Print the specialist agents with their ASI category.
   list-probes   Print the bundled seed-probe corpus (one line per probe).
-  badge         Emit an AIVSS badge -- text by default, SVG with --svg.
   last-score    Print the AIVSS of the most recent scan.
   serve         Start the local dashboard at http://<host>:<port>.
-  report        Regenerate a report from a stored scan.
+  report        Regenerate a report from a stored scan (incl. --output badge).
+  gate          Apply pass/fail thresholds to a stored scan (CI-friendly).
   verify        Verify HMAC-SHA256 + Ed25519 signatures on a JSON report.
-  publish       Publish a signed scan to the public AgentGuardian leaderboard.
-  validate      Run the payload-free pre-flight against a contract.
-  init          Author a new target contract, then pre-flight it.
   scan          Run an adversarial swarm scan against a target.
   suite         Run a fleet of scans in parallel from one YAML file.
   telemetry     Opt-in usage telemetry (consent + status).
-  contract      Work with target contracts (schema export, migration).
-  scans         Manage stored scans (list, delete, purge --older-than).
+  scans         Manage stored scans (list; delete by id or --older-than).
+  config        Inspect (show) and scaffold (init) the config file.
   calibrate     Calibrate a judge model against the packaged calibration set.
   comment       Upsert an AgentGuardian summary comment on the current PR / MR.
   code-insights Publish a Code Insights report for a scan (Bitbucket).
@@ -168,29 +165,30 @@ the probe's short name.
 
 ---
 
-### `badge`
+### `gate`
 
-Emit an AIVSS badge — text by default, SVG with `--svg`.
+Apply pass/fail thresholds to a **stored** scan, decoupled from `scan` — re-gate
+a completed scan without re-running it. The same gate `comment` uses.
 
 | Argument | Type | Purpose |
 | --- | --- | --- |
-| `SCORE` | int (0–100) | AIVSS score to render. |
+| `SCAN_ID` | str / path | Scan to gate. Omit for the newest scan on disk. |
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--svg` | off | Emit an SVG badge instead of one-line text. |
+| `--fail-under N` | unset | Fail if final AIVSS is below `N`. |
+| `--max-critical N` / `--max-high` / `--max-medium` / `--max-low` | unset | Fail if findings of that severity exceed `N`. |
 
 ```bash
-agent-guardian badge 87
-# AIVSS 87 (GOOD) #22c55e
-
-agent-guardian badge 87 --svg > badge.svg
+agent-guardian gate --fail-under 70 --max-critical 0
+# exit 0 on pass, 1 on breach — drops straight into a CI step
 ```
 
-Compose with `last-score` for README badges:
+An AIVSS badge is now a `report` output format:
 
 ```bash
-agent-guardian badge $(agent-guardian last-score --score-only) --svg > badge.svg
+agent-guardian report <id> --output badge            # AIVSS 87 (GOOD) #22c55e
+agent-guardian report <id> --output badge-svg > badge.svg
 ```
 
 ---
@@ -286,26 +284,20 @@ is shown as `UNANCHORED` and the command exits non-zero
 
 ---
 
-### `publish`
+### `config`
 
-Publish a signed scan to the public AgentGuardian leaderboard.
+Inspect and scaffold the AgentGuardian config file. Distinct from the
+`scan --config` flag (which points a single run at an explicit file).
 
-| Argument | Type | Purpose |
-| --- | --- | --- |
-| `SCAN_ID` | str / path | Scan ID under `~/.agentguardian/scans/` or path to a signed `scan.json`. |
-
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `--output PATH` | unset | Where to write the redacted payload. Default: alongside the scan. |
+| Command | Purpose |
+| --- | --- |
+| `config show [--config PATH]` | Print the effective resolved config (file values merged over built-in defaults). |
+| `config init [--out PATH] [--force]` | Scaffold a default config file (default `~/.agentguardian/config.yaml`). |
 
 ```bash
-agent-guardian publish cli-3a4c1d9c2840
+agent-guardian config show
+agent-guardian config init --out ./agentguardian.config.yaml
 ```
-
-Today this writes a redacted, leaderboard-ready payload alongside the
-scan and prints operator-facing instructions for hand submission via the
-project's GitHub issue tracker. Refuses to publish unsigned or tampered
-scans.
 
 ---
 
@@ -367,10 +359,9 @@ Model specs: `stub`, `openai:gpt-4o`, `anthropic:claude-haiku-4-5`,
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `gitlab` \| `pdf`. All six work after a stock `pip install agent-guardian` — no extras required. |
+| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `gitlab` \| `pdf`. All work after a stock `pip install agent-guardian` — no extras required. |
 | `--output-path PATH` | unset | Where to write the report file. |
 | `--no-tui` | off | Disable the Rich progress panel. |
-| `--legacy-board` | off | Render the pre-QA-012 flat agent table instead of the new three-phase panels (Recon → Red Teaming → Findings). One-release deprecation escape hatch; will be removed in v1.2. |
 | `--config PATH` | auto-discovered | Override the default config file location. |
 
 <Tip>
@@ -396,7 +387,6 @@ dashboard server down, model id typo.
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--yes`, `-y` | off | Skip the 5-second confirmation wait. Equivalent to `AGENT_GUARDIAN_NO_PLAN_CONFIRM=1`. Implicit when stdout is not a TTY or `$CI=true`. |
-| `--no-plan-confirm` | off | Alias for `--yes` — skip the wait without suppressing the panel. |
 | `--no-plan` | off | Skip the panel entirely. For ultra-quiet CI use. The dashboard URL is still emitted via the legacy one-line print so the QA-003 guarantee holds. |
 
 What you'll see on an interactive scan:
@@ -438,7 +428,6 @@ Any ✗ row appends a `WARNINGS` footer with one line per ✗. The
 out via `--yes` or one of the implicit skips:
 
 * `--yes` / `-y` (CLI)
-* `--no-plan-confirm` (CLI alias)
 * `--no-plan` (CLI; suppresses the panel itself)
 * `$AGENT_GUARDIAN_NO_PLAN_CONFIRM=1` (env)
 * `$CI=true` (env)
@@ -492,10 +481,6 @@ with `findings_count > 0` projects rows into the severity-grouped list
 (CRITICAL → HIGH → MEDIUM → LOW → INFO). The `--debug` attack feed
 (QA-005) flows ABOVE the Live frame as scrollback, so panel borders
 never tear.
-
-Pass `--legacy-board` to opt into the pre-QA-012 flat agent table for
-one release. The flag is a deprecation escape hatch and will be
-removed in v1.2.
 
 #### Network + reachability
 
