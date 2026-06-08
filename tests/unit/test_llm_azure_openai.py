@@ -124,11 +124,13 @@ class _FakeCredential:
 
 @respx.mock
 async def test_azure_entra_mode_uses_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent_guardian.llm.azure_openai as az
-
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_AVAILABLE", True)
+    monkeypatch.setattr("agent_guardian.llm.azure_openai._AZURE_IDENTITY_AVAILABLE", True)
     fake = _FakeCredential()
-    monkeypatch.setattr(az, "DefaultAzureCredential", lambda: fake, raising=False)
+    monkeypatch.setattr(
+        "agent_guardian.llm.azure_openai.DefaultAzureCredential",
+        lambda: fake,
+        raising=False,
+    )
 
     url = _deployment_url("dep", "2024-10-21")
     route = respx.post(url).mock(return_value=Response(200, json=_ok_body()))
@@ -141,11 +143,13 @@ async def test_azure_entra_mode_uses_bearer(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 async def test_azure_entra_token_cached(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent_guardian.llm.azure_openai as az
-
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_AVAILABLE", True)
+    monkeypatch.setattr("agent_guardian.llm.azure_openai._AZURE_IDENTITY_AVAILABLE", True)
     fake = _FakeCredential()
-    monkeypatch.setattr(az, "DefaultAzureCredential", lambda: fake, raising=False)
+    monkeypatch.setattr(
+        "agent_guardian.llm.azure_openai.DefaultAzureCredential",
+        lambda: fake,
+        raising=False,
+    )
     llm = AzureOpenAIClient(deployment="dep", endpoint=_ENDPOINT, use_entra=True)
     try:
         # Minting happens off-thread in _prepare_request; _headers reads the
@@ -159,9 +163,10 @@ async def test_azure_entra_token_cached(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_azure_entra_without_identity_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent_guardian.llm.azure_openai as az
-
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_AVAILABLE", False)
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_IMPORT_ERROR", ImportError("no azure-identity"))
+    monkeypatch.setattr("agent_guardian.llm.azure_openai._AZURE_IDENTITY_AVAILABLE", False)
+    monkeypatch.setattr(
+        "agent_guardian.llm.azure_openai._AZURE_IDENTITY_IMPORT_ERROR",
+        ImportError("no azure-identity"),
+    )
     with pytest.raises(LLMAuthError, match="azure-identity"):
         AzureOpenAIClient(deployment="dep", endpoint=_ENDPOINT, use_entra=True)

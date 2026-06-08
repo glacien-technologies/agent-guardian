@@ -166,11 +166,13 @@ async def test_vertex_concurrent_complete_refreshes_once(monkeypatch: pytest.Mon
 
 
 def test_vertex_missing_google_auth_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    import agent_guardian.llm.vertex as vx
     from agent_guardian.llm.errors import LLMAuthError
 
-    monkeypatch.setattr(vx, "_GOOGLE_AUTH_AVAILABLE", False)
-    monkeypatch.setattr(vx, "_GOOGLE_AUTH_IMPORT_ERROR", ImportError("no google-auth"))
+    monkeypatch.setattr("agent_guardian.llm.vertex._GOOGLE_AUTH_AVAILABLE", False)
+    monkeypatch.setattr(
+        "agent_guardian.llm.vertex._GOOGLE_AUTH_IMPORT_ERROR",
+        ImportError("no google-auth"),
+    )
     client = VertexClient(project="p", location="us-central1")
     try:
         with pytest.raises(LLMAuthError, match="google-auth"):
