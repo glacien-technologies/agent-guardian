@@ -314,8 +314,13 @@ class PiiRedactor:
         # shapes; run those through the regex bank FIRST so a captured key/token
         # is masked even when presidio is active.
         out = self._redact_secret_entities(text)
-        # Filter to entities we care about that presidio knows.
-        results = self._analyzer.analyze(text=out, entities=list(self.entities), language="en")
+        # Pass presidio only the entities it has a recognizer for. The
+        # credential/secret types in _SECRET_ENTITIES are already masked by the
+        # regex bank above; presidio has no recognizer for them, so requesting
+        # them produces nothing but a flood of one "no recognizer" WARNING per
+        # type per call (presidio's own logger, not suppressible via -q).
+        presidio_entities = [e for e in self.entities if e not in self._SECRET_ENTITIES]
+        results = self._analyzer.analyze(text=out, entities=presidio_entities, language="en")
         # presidio returns spans with .start, .end, .entity_type
         # Sort by start descending so we can splice without reindexing.
         results = sorted(results, key=lambda r: r.start, reverse=True)
