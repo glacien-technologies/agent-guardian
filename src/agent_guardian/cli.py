@@ -68,7 +68,7 @@ from agent_guardian.llm import (
     LLMError,
 )
 from agent_guardian.logging_setup import configure_logging
-from agent_guardian.models.asi import AsiCategory, asi_description
+from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import (
     SeverityBand,
@@ -167,26 +167,6 @@ def _resolve_framework_ref(ref: str) -> Any:
                 f"{attr_path!r} not found on module {module_name!r} ({exc})."
             ) from exc
     return obj
-
-
-# ---------------------------------------------------------------------------
-# Ordered ASI agent slate -- single source of truth for ``list-agents`` etc.
-# ---------------------------------------------------------------------------
-
-
-_AGENT_SLATE: tuple[tuple[str, AsiCategory], ...] = (
-    ("recon-agent", AsiCategory.ASI01),  # Recon has no category; we list ASI01 for layout.
-    ("goal-hijack-agent", AsiCategory.ASI01),
-    ("tool-abuse-agent", AsiCategory.ASI02),
-    ("privilege-agent", AsiCategory.ASI03),
-    ("supply-chain-agent", AsiCategory.ASI04),
-    ("code-exec-agent", AsiCategory.ASI05),
-    ("memory-poison-agent", AsiCategory.ASI06),
-    ("a2a-agent", AsiCategory.ASI07),
-    ("cascade-agent", AsiCategory.ASI08),
-    ("trust-exploit-agent", AsiCategory.ASI09),
-    ("drift-agent", AsiCategory.ASI10),
-)
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +296,9 @@ agentdojo_app = typer.Typer(
     ),
     no_args_is_help=True,
 )
-app.add_typer(agentdojo_app, name="agentdojo")
+app.add_typer(
+    agentdojo_app, name="agentdojo", hidden=True
+)  # TODO(extra): benchmark tool, [agentdojo] extra — off default surface.
 
 # Suite runner — `agent-guardian suite run suite.yaml` launches a fleet of
 # independent scans in parallel (one isolated subprocess per workload) and
@@ -324,7 +306,9 @@ app.add_typer(agentdojo_app, name="agentdojo")
 # is untouched. Defined in its own subpackage to keep this module focused.
 from agent_guardian.suite.cli import suite_app  # noqa: E402
 
-app.add_typer(suite_app, name="suite")
+app.add_typer(
+    suite_app, name="suite", hidden=True
+)  # TODO(extra): power-user fleet runner — off default surface.
 
 
 # ---------------------------------------------------------------------------
@@ -1027,45 +1011,11 @@ def _probe_otel_and_dashboard_readiness() -> None:
     )
 
 
-@app.command("list-agents")
-def list_agents() -> None:
-    """Print the eleven specialist agents with their ASI category."""
-    typer.echo("Agent                  ASI    Description")
-    typer.echo("-" * 60)
-    for name, category in _AGENT_SLATE:
-        if name == "recon-agent":
-            typer.echo(f"{name:22} n/a    Phase 1 fingerprint refinement")
-        else:
-            typer.echo(f"{name:22} {category.value}  {asi_description(category)}")
-
-
-@app.command("list-probes")
-def list_probes(
-    asi: str | None = typer.Option(None, "--asi", help="Filter by ASI category (e.g. ASI01)."),
-) -> None:
-    """Print the bundled seed-probe corpus (one line per probe)."""
-    from agent_guardian.probes.loader import PROBE_CORPUS_VERSION, load_all_probes
-
-    probes = load_all_probes()
-    asi_filter: AsiCategory | None = None
-    if asi is not None:
-        try:
-            asi_filter = AsiCategory(asi)
-        except ValueError as exc:
-            raise typer.BadParameter(
-                f"unknown ASI category '{asi}' -- expected one of "
-                f"{', '.join(c.value for c in AsiCategory)}."
-            ) from exc
-        probes = [p for p in probes if p.asi == asi_filter]
-
-    typer.echo(f"Probe corpus version: {PROBE_CORPUS_VERSION}")
-    suffix = f" (filtered by {asi_filter.value})" if asi_filter is not None else ""
-    typer.echo(f"Found {len(probes)} probes{suffix}:")
-    for probe in probes:
-        typer.echo(
-            f"  {probe.id}  [{probe.asi.value}/{probe.severity.value}/"
-            f"{probe.tier_floor.value}]  {probe.name}"
-        )
+# NOTE: `list-agents` / `list-probes` were removed (closes #106). The
+# authoritative roster of agents that actually ran against a target now lives in
+# the per-scan report (`coverage.agents` + `coverage.skipped_agents`) — an
+# auditable artifact that cannot drift from the live swarm, unlike the old
+# hand-maintained `_AGENT_SLATE` which advertised 11 while a default scan fires 17.
 
 
 @app.command("last-score")
@@ -1420,7 +1370,9 @@ def gate(
     raise typer.Exit(code=EXIT_FAIL_UNDER)
 
 
-@app.command()
+@app.command(
+    hidden=True
+)  # TODO(ci): driven by the composite Action / GitLab template, not the user-facing CLI.
 def comment(
     scan: str | None = typer.Option(
         None,
@@ -1489,7 +1441,9 @@ def comment(
     typer.echo(f"posted AgentGuardian comment to {platform}")
 
 
-@app.command(name="code-insights")
+@app.command(
+    name="code-insights", hidden=True
+)  # TODO(ci): Bitbucket poster invoked from CI, not the user-facing CLI.
 def code_insights(
     scan: str | None = typer.Option(
         None,
@@ -1644,7 +1598,9 @@ def verify(
 _CALIBRATION_CHANCE_BRIER = 0.25
 
 
-@app.command()
+@app.command(
+    hidden=True
+)  # TODO(extra): advanced/maintainer tool — demoted off the default surface.
 def calibrate(
     judge_model: str = typer.Option(
         ...,

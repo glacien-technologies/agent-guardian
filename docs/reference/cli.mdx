@@ -29,23 +29,23 @@ agent-guardian COMMAND [ARGS]...
 Commands:
   version       Print the installed agent-guardian version and exit.
   doctor        Verify install, available LLM keys, and runtime prerequisites.
-  list-agents   Print the specialist agents with their ASI category.
-  list-probes   Print the bundled seed-probe corpus (one line per probe).
   last-score    Print the AIVSS of the most recent scan.
   serve         Start the local dashboard at http://<host>:<port>.
   report        Regenerate a report from a stored scan (incl. --output badge).
   gate          Apply pass/fail thresholds to a stored scan (CI-friendly).
   verify        Verify HMAC-SHA256 + Ed25519 signatures on a JSON report.
   scan          Run an adversarial swarm scan against a target.
-  suite         Run a fleet of scans in parallel from one YAML file.
   telemetry     Opt-in usage telemetry (consent + status).
   scans         Manage stored scans (list; delete by id or --older-than).
   config        Inspect (show) and scaffold (init) the config file.
-  calibrate     Calibrate a judge model against the packaged calibration set.
-  comment       Upsert an AgentGuardian summary comment on the current PR / MR.
-  code-insights Publish a Code Insights report for a scan (Bitbucket).
-  agentdojo     AgentDojo benchmark adapter (run a suite against a target).
 ```
+
+<Note>
+  CI integrations (`comment`, `code-insights`) and benchmark/maintainer tools
+  (`agentdojo`, `suite`, `calibrate`) are still installed and callable — they
+  are driven by the composite Action / GitLab template or gated behind extras,
+  so they are kept off the default `--help` to foreground the core workflow.
+</Note>
 
 <Note>
   `suite` runs many independent scans in parallel from one YAML file and
@@ -102,66 +102,6 @@ config (cwd): <not present>
 
 Run `doctor --check-connectivity` before a paid scan to confirm your keys
 actually authenticate against each provider's API.
-
----
-
-### `list-agents`
-
-Print the eleven specialist agents with their ASI category.
-
-```bash
-agent-guardian list-agents
-```
-
-Output:
-
-```text
-Agent                  ASI    Description
-------------------------------------------------------------
-recon-agent            n/a    Phase 1 fingerprint refinement
-goal-hijack-agent      ASI01  Goal Hijack
-tool-abuse-agent       ASI02  Tool Misuse
-privilege-agent        ASI03  Privilege Abuse
-supply-chain-agent     ASI04  Supply Chain
-code-exec-agent        ASI05  Code Execution
-memory-poison-agent    ASI06  Memory Poisoning
-a2a-agent              ASI07  Agent-to-Agent (A2A)
-cascade-agent          ASI08  Cascading Failures
-trust-exploit-agent    ASI09  Trust Exploitation
-drift-agent            ASI10  Rogue Agents (drift)
-```
-
----
-
-### `list-probes`
-
-Print the bundled seed-probe corpus (one line per probe).
-
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `--asi CATEGORY` | unset | Filter by ASI category (e.g. `ASI01`). |
-
-```bash
-agent-guardian list-probes --asi ASI02
-```
-
-Sample output:
-
-```text
-Probe corpus version: 2026.05
-Found 8 probes (filtered by ASI02):
-  ASI02-TA-001  [ASI02/critical/T1]  tool-arg-injection
-  ASI02-TA-002  [ASI02/critical/T1]  chain-exfil
-  ASI02-TA-003  [ASI02/critical/T1]  scope-expansion
-  ASI02-TA-004  [ASI02/critical/T1]  parameter-smuggle
-  ASI02-TA-005  [ASI02/critical/T1]  recursion-bomb
-  ASI02-TA-006  [ASI02/critical/T1]  dns-exfil-via-approved-tool
-  ASI02-TA-007  [ASI02/high/T1]      tool-name-typosquat
-  ASI02-TA-008  [ASI02/critical/T1]  edr-bypass-via-legit-chain
-```
-
-Each line carries the probe ID, ASI category, severity, tier floor, and
-the probe's short name.
 
 ---
 
