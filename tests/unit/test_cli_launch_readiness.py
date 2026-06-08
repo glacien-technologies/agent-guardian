@@ -521,7 +521,7 @@ def test_scans_purge_only_removes_old(runner: CliRunner, tmp_path: Path) -> None
     os.utime(old_scan, (sixty_days_ago, sixty_days_ago))
     now = time.time()
     os.utime(new_scan, (now, now))
-    result = runner.invoke(app, ["scans", "purge", "--older-than", "30d"])
+    result = runner.invoke(app, ["scans", "delete", "--older-than", "30d"])
     assert result.exit_code == EXIT_OK
     assert not old_scan.exists()
     assert new_scan.exists()
@@ -535,7 +535,7 @@ def test_scans_purge_dry_run_keeps_files(runner: CliRunner, tmp_path: Path) -> N
     old_scan.mkdir(parents=True, exist_ok=True)
     sixty_days_ago = (datetime.now(tz=UTC) - timedelta(days=60)).timestamp()
     os.utime(old_scan, (sixty_days_ago, sixty_days_ago))
-    result = runner.invoke(app, ["scans", "purge", "--older-than", "30d", "--dry-run"])
+    result = runner.invoke(app, ["scans", "delete", "--older-than", "30d", "--dry-run"])
     assert result.exit_code == EXIT_OK
     assert old_scan.exists()
     assert "would purge" in result.stdout.lower()

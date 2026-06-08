@@ -61,13 +61,16 @@ agent-guardian list-probes
 
 Print the bundled seed-probe corpus, one line per probe.
 
-### `badge`
+### `gate`
 
 ```text
-agent-guardian badge
+agent-guardian gate [SCAN_ID] [--fail-under N] [--max-critical N] [--max-high N] [--max-medium N] [--max-low N]
 ```
 
-Emit an AIVSS badge — text by default, SVG with `--svg`.
+Apply pass/fail thresholds to a **stored** scan, decoupled from `scan` — re-gate
+a completed scan without re-running it. Defaults to the newest scan. Exits `0`
+on pass and `1` on breach, so it drops straight into a CI step. (An AIVSS badge
+is now `agent-guardian report <id> --output badge`.)
 
 ### `last-score`
 
@@ -88,14 +91,16 @@ Start the local FastAPI dashboard at `http://127.0.0.1:7474/`.
 ### `report`
 
 ```text
-agent-guardian report <SCAN_ID> [--output {json|sarif|junit|md|pdf}] [--output-path PATH]
+agent-guardian report <SCAN_ID> [--output {json|sarif|junit|md|pdf|badge|badge-svg}] [--output-path PATH]
 ```
 
 Regenerate a report from a stored scan in any supported output format. The
 positional `<SCAN_ID>` is required — it resolves under
 `~/.agentguardian/scans/<scan-id>/`. Text formats (`json` / `sarif` / `junit` /
 `md`) print to stdout by default, or to `--output-path` when given. `--output
-pdf` is binary and always requires `--output-path`.
+pdf` is binary and always requires `--output-path`. `--output badge` (text) and
+`badge-svg` emit an AIVSS badge from the scan's score — this subsumes the former
+top-level `badge` command.
 
 ### `verify`
 
@@ -114,13 +119,17 @@ agent-guardian calibrate
 Run the calibration harness against a target to size budgets before a
 full scan.
 
-### `publish`
+### `config`
 
 ```text
-agent-guardian publish
+agent-guardian config show [--config PATH]
+agent-guardian config init [--out PATH] [--force]
 ```
 
-Publish a signed scan bundle to the public AgentGuardian leaderboard.
+`config show` prints the effective resolved config (file values merged over
+built-in defaults) so you can see what actually took effect. `config init`
+scaffolds a default config file (default `~/.agentguardian/config.yaml`;
+`--force` to overwrite).
 
 ### `validate`
 

@@ -226,7 +226,13 @@ contract_app = typer.Typer(
     help="Work with target contracts (schema export, migration).",
     no_args_is_help=True,
 )
-app.add_typer(contract_app, name="contract")
+# TODO(saas): Target contracts (transport/auth/session + Rules of Engagement +
+# provenance audit) are the enterprise/authorized-pentest surface, reserved for
+# the hosted SaaS offering. Hidden from the OSS CLI so the default surface stays
+# to the developer hot path (target / --endpoint / --system-prompt / --framework).
+# The engine under agent_guardian.contract.* is intact; re-expose by dropping
+# `hidden=True` here and on the `init` / `validate` / `scan --contract` sites.
+app.add_typer(contract_app, name="contract", hidden=True)
 
 # Management sub-app for stored scans. Registered under ``scans`` (plural) to
 # avoid colliding with the top-level ``scan`` run command. Provides delete,
@@ -234,10 +240,66 @@ app.add_typer(contract_app, name="contract")
 # ``~/.agentguardian``).
 scan_app = typer.Typer(
     name="scans",
-    help="Manage stored scans (list, delete, purge --older-than).",
+    help="Manage stored scans (list; delete by id or --older-than).",
     no_args_is_help=True,
 )
 app.add_typer(scan_app, name="scans")
+
+# Config inspection / scaffolding. ``config show`` prints the effective resolved
+# config (file + built-in defaults) so operators can see what actually took
+# effect; ``config init`` scaffolds a default config file. Distinct from the
+# ``scan --config`` flag, which points a single run at an explicit file.
+config_app = typer.Typer(
+    name="config",
+    help="Inspect (show) and scaffold (init) the AgentGuardian config file.",
+    no_args_is_help=True,
+)
+
+
+@config_app.command("show")
+def config_show(
+    config_path: Path | None = typer.Option(
+        None, "--config", help="Config file to read (default: auto-discovered)."
+    ),
+) -> None:
+    """Print the effective resolved config (file values merged over defaults)."""
+    # QA-013: import the names directly so cli.py never uses qualified yaml.* access.
+    from yaml import safe_dump
+
+    from agent_guardian.config import discover_config_path, load_config
+
+    resolved = discover_config_path(config_path)
+    cfg = load_config(resolved)
+    typer.echo(f"# source: {resolved or 'built-in defaults (no config file found)'}")
+    typer.echo(safe_dump(cfg.model_dump(mode="json"), sort_keys=False).rstrip())
+
+
+@config_app.command("init")
+def config_init(
+    out: Path | None = typer.Option(
+        None, "--out", help="Where to write (default: ~/.agentguardian/config.yaml)."
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing config file."),
+) -> None:
+    """Scaffold a default config file."""
+    # QA-013: import the names directly so cli.py never uses qualified yaml.* access.
+    from yaml import safe_dump
+
+    from agent_guardian.config import Config, default_config_path
+
+    target = out or default_config_path()
+    if target.exists() and not force:
+        typer.echo(f"refusing to overwrite {target} (pass --force).", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        safe_dump(Config().model_dump(mode="json"), sort_keys=False),
+        encoding="utf-8",
+    )
+    typer.echo(f"wrote default config to {target}")
+
+
+app.add_typer(config_app, name="config")
 
 # Phase C, C3 — AgentDojo benchmark adapter. ``agent-guardian agentdojo run``
 # loads an AgentDojo task suite (banking / slack / travel / workspace) and
@@ -1006,19 +1068,6 @@ def list_probes(
         )
 
 
-@app.command()
-def badge(
-    score: int = typer.Argument(..., min=0, max=100, help="AIVSS score (0-100)."),
-    svg: bool = typer.Option(False, "--svg", help="Emit an SVG badge."),
-) -> None:
-    """Emit an AIVSS badge -- text by default, SVG with ``--svg``."""
-    band = band_for_score(score)
-    if svg:
-        typer.echo(_badge_svg(score), nl=False)
-    else:
-        typer.echo(f"AIVSS {score} ({band.value}) {colour_for_band(band)}")
-
-
 @app.command("last-score")
 def last_score(
     score_only: bool = typer.Option(
@@ -1175,7 +1224,9 @@ def serve(
 def report(
     scan_id: str = typer.Argument(..., help="Scan ID to regenerate reports for."),
     output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md | gitlab | pdf."
+        "json",
+        "--output",
+        help="Report format: json | sarif | junit | md | gitlab | pdf | badge | badge-svg.",
     ),
     output_path: Path | None = typer.Option(
         None,
@@ -1188,15 +1239,20 @@ def report(
 ) -> None:
     """Regenerate a report from a stored scan.
 
+    ``--output badge`` (text) / ``badge-svg`` emit an AIVSS badge from the
+    scan's score -- this subsumes the former top-level ``badge`` command.
+
     Text formats (json / sarif / junit / md) print to stdout by default, or to
     ``--output-path`` when given. ``--output pdf`` is binary and always requires
     ``--output-path`` -- it is routed through the PDF writer, which raises a
     clear remediation error if no PDF engine (WeasyPrint / reportlab) is
     installed.
     """
-    if output not in _ALL_FORMATS:
+    _badge_formats = {"badge", "badge-svg"}
+    if output not in _ALL_FORMATS and output not in _badge_formats:
         typer.echo(
-            f"unknown output format '{output}' -- choose one of: {', '.join(sorted(_ALL_FORMATS))}",
+            f"unknown output format '{output}' -- choose one of: "
+            f"{', '.join(sorted(_ALL_FORMATS | _badge_formats))}",
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -1219,6 +1275,21 @@ def report(
     except (json.JSONDecodeError, ValueError) as exc:
         typer.echo(f"could not load scan from {scan_file}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # Badge formats render from the scan's AIVSS (folds the old `badge` command).
+    if output in _badge_formats:
+        band = band_for_score(scan.aivss)
+        rendered = (
+            _badge_svg(scan.aivss)
+            if output == "badge-svg"
+            else f"AIVSS {scan.aivss} ({band.value}) {colour_for_band(band)}"
+        )
+        if output_path is not None:
+            output_path.write_text(rendered, encoding="utf-8")
+            typer.echo(f"report written to {output_path}")
+        else:
+            typer.echo(rendered, nl=(output != "badge-svg"))
+        return
 
     # PDF is binary -- it can only be written to a file, never echoed.
     if output == "pdf" and output_path is None:
@@ -1296,6 +1367,57 @@ def _load_scan_for_ci(scan: str | None) -> Scan:
     except (json.JSONDecodeError, ValueError, OSError) as exc:
         typer.echo(f"could not load scan from {scan_file}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+@app.command()
+def gate(
+    scan: str | None = typer.Argument(
+        None,
+        help=(
+            "Scan id, or a path to a scan.json. Defaults to the newest scan "
+            "under ~/.agentguardian/scans."
+        ),
+    ),
+    fail_under: int | None = typer.Option(
+        None, "--fail-under", help="Fail if the final AIVSS is below this value."
+    ),
+    max_critical: int | None = typer.Option(
+        None, "--max-critical", help="Fail if CRITICAL findings exceed this count."
+    ),
+    max_high: int | None = typer.Option(
+        None, "--max-high", help="Fail if HIGH findings exceed this count."
+    ),
+    max_medium: int | None = typer.Option(
+        None, "--max-medium", help="Fail if MEDIUM findings exceed this count."
+    ),
+    max_low: int | None = typer.Option(
+        None, "--max-low", help="Fail if LOW findings exceed this count."
+    ),
+) -> None:
+    """Apply pass/fail thresholds to a STORED scan, decoupled from ``scan``.
+
+    Re-gate a completed scan with different thresholds without re-running it --
+    the same gate the CI ``comment`` uses. Exits 0 on pass and 1
+    (EXIT_FAIL_UNDER) on breach, so it drops straight into a CI step:
+    ``agent-guardian gate --fail-under 70 --max-critical 0``.
+    """
+    from agent_guardian.core.gate import evaluate_gate
+
+    scan_result = _load_scan_for_ci(scan)
+    result = evaluate_gate(
+        scan_result,
+        fail_under=fail_under,
+        max_critical=max_critical,
+        max_high=max_high,
+        max_medium=max_medium,
+        max_low=max_low,
+    )
+    if result.passed:
+        typer.echo(f"gate PASS -- AIVSS {scan_result.aivss}")
+        raise typer.Exit(code=EXIT_OK)
+    for reason in result.reasons:
+        typer.echo(f"gate FAIL -- {reason}", err=True)
+    raise typer.Exit(code=EXIT_FAIL_UNDER)
 
 
 @app.command()
@@ -1695,128 +1817,6 @@ def calibrate(
         raise typer.Exit(code=EXIT_FAIL_UNDER)
 
 
-@app.command()
-def publish(
-    scan_id: str = typer.Argument(
-        ...,
-        help="Scan ID (under ~/.agentguardian/scans/) or path to a signed scan.json.",
-    ),
-    output: Path | None = typer.Option(
-        None,
-        "--output",
-        help="Where to write the redacted payload. Default: alongside the scan.",
-    ),
-) -> None:
-    """Publish a signed scan to the public AgentGuardian leaderboard.
-
-    Today this is a placeholder: the public leaderboard endpoint
-    (``https://agentguardian.io/api/v1/leaderboard``) is Glacien-edge
-    infrastructure that has not yet been deployed. What the command does
-    *now* still has user value:
-
-    1. Locate and load the scan JSON (by ID or path).
-    2. Verify the HMAC + Ed25519 signatures so we never publish a
-       tampered report.
-    3. Strip transcripts and other PII-prone fields (``transcript_ref``,
-       per-finding ``summary`` is already redacted at emit time).
-    4. Write the redacted, leaderboard-ready payload alongside the scan
-       and print operator-facing instructions for hand submission via the
-       project's GitHub issue tracker.
-
-    When the public endpoint goes live this command will POST the
-    redacted payload instead of printing the manual-submission message.
-    """
-    # 1. Resolve the source path.
-    direct = Path(scan_id)
-    if direct.is_file():
-        scan_path = direct
-    else:
-        scan_path = Path.home() / ".agentguardian" / "scans" / scan_id / "report.json"
-        if not scan_path.is_file():
-            # Some flows persist the raw model dump at ``scan.json`` instead.
-            fallback = Path.home() / ".agentguardian" / "scans" / scan_id / "scan.json"
-            if fallback.is_file():
-                scan_path = fallback
-            else:
-                typer.echo(
-                    f"no scan found for '{scan_id}'. Looked in {scan_path} and {fallback}.",
-                    err=True,
-                )
-                raise typer.Exit(code=EXIT_CONFIG)
-
-    # 2. Verify signatures. We only allow publishing what's signed --
-    #    the leaderboard's integrity story depends on it.
-    from agent_guardian.reports.json_report import verify_signatures
-
-    payload: dict[str, Any]
-    try:
-        payload = json.loads(scan_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        typer.echo(f"could not read scan JSON: {exc}", err=True)
-        raise typer.Exit(code=EXIT_CONFIG) from None
-
-    if not isinstance(payload, dict):
-        typer.echo("scan JSON is not a JSON object -- refusing to publish.", err=True)
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    if "signatures" not in payload:
-        typer.echo(
-            "scan is not signed -- refusing to publish. Re-emit the report "
-            "with the JSON emitter (which signs by default).",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    # We refuse to publish a *tampered* scan, so we require the Ed25519
-    # signature to recompute (bytes-not-modified). Ed25519 alone proves
-    # integrity without a shared secret; the HMAC leg fails closed off a real
-    # secret, so it is not the right integrity gate here. Full provenance trust
-    # (who signed) is the job of the ``verify`` command with a pinned key.
-    verify_result = verify_signatures(payload)
-    if not (verify_result.ed25519_valid and verify_result.schema_ok):
-        typer.echo(
-            "signature verification failed -- refusing to publish a possibly "
-            "tampered scan. Details:",
-            err=True,
-        )
-        typer.echo(f"  schema:       {'OK' if verify_result.schema_ok else 'FAIL'}", err=True)
-        typer.echo(f"  HMAC-SHA256:  {'OK' if verify_result.hmac_valid else 'FAIL'}", err=True)
-        typer.echo(f"  Ed25519:      {'OK' if verify_result.ed25519_valid else 'FAIL'}", err=True)
-        raise typer.Exit(code=EXIT_FAIL_UNDER)
-
-    # 3. Strip PII / transcript references. Per-finding ``summary`` is
-    #    already redacted at emit time (json_report.py), but ``transcript_ref``
-    #    can point at on-disk traces that the public leaderboard must never
-    #    see. We also drop the signature block because the redacted
-    #    payload is no longer the originally signed bytes.
-    redacted = {k: v for k, v in payload.items() if k != "signatures"}
-    findings = redacted.get("findings")
-    if isinstance(findings, list):
-        for finding in findings:
-            if isinstance(finding, dict):
-                finding.pop("transcript_ref", None)
-                finding.pop("transcript", None)
-                # ``summary`` already passed through PiiRedactor at emit time
-                # but we coerce a hard cap here just in case a custom emitter
-                # ever bypasses redaction.
-                summary = finding.get("summary")
-                if isinstance(summary, str) and len(summary) > 280:
-                    finding["summary"] = summary[:277] + "..."
-
-    # 4. Write the redacted payload + print the manual-submission message.
-    if output is None:
-        output = scan_path.parent / "leaderboard.json"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(redacted, indent=2, sort_keys=True), encoding="utf-8")
-
-    typer.echo(
-        "Leaderboard endpoint not yet deployed. To submit your scan, file an "
-        "issue at github.com/glacien-technologies/agent-guardian/issues with "
-        "the redacted JSON attached."
-    )
-    typer.echo(f"redacted payload written to: {output}")
-
-
 @telemetry_app.command("essential")
 def telemetry_essential() -> None:
     """Switch to ESSENTIAL tier -- operational counts only (the default).
@@ -1982,7 +1982,9 @@ def _render_preflight(report: PreflightReport) -> None:
             typer.echo(typer.style(f"         remediation: {stage.remediation}", dim=True))
 
 
-@app.command()
+@app.command(
+    hidden=True
+)  # TODO(saas): contract preflight — reserved for hosted SaaS, hidden from OSS CLI.
 def validate(
     contract: Path = typer.Argument(
         Path("agentguardian.yaml"),
@@ -2029,7 +2031,9 @@ def validate(
     raise typer.Exit(code=EXIT_OK)
 
 
-@app.command()
+@app.command(
+    hidden=True
+)  # TODO(saas): contract authoring wizard — reserved for hosted SaaS, hidden from OSS CLI.
 def init(
     out: Path = typer.Option(
         Path("agentguardian.yaml"),
@@ -2340,11 +2344,36 @@ def scans_list() -> None:
 
 @scan_app.command("delete")
 def scans_delete(
-    scan_id: str = typer.Argument(
-        ..., help="Scan ID to delete (matches a sub-dir under the scans root)."
+    scan_id: str | None = typer.Argument(
+        None,
+        help="Scan ID to delete. Omit and pass --older-than for bulk cleanup.",
+    ),
+    older_than: str | None = typer.Option(
+        None,
+        "--older-than",
+        help=(
+            "Bulk-delete every scan older than this instead of a single id. "
+            "NUMBER+UNIT, e.g. '30d' (days), '2w' (weeks), '6m' (months)."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="With --older-than: list what would be deleted without deleting.",
     ),
 ) -> None:
-    """Delete a single stored scan directory."""
+    """Delete a stored scan by id, or bulk-delete with ``--older-than``.
+
+    ``scans delete <id>`` removes one scan. ``scans delete --older-than 30d``
+    removes every scan older than the cutoff (this subsumes the former
+    ``scans purge``).
+    """
+    if older_than is not None:
+        _purge_older_than(older_than, dry_run=dry_run)
+        return
+    if not scan_id:
+        typer.echo("provide a scan_id, or --older-than for bulk cleanup.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
     # Up-front lexical validation -- reject anything that even *looks* like
     # path traversal before we resolve. Catches the common attacker payloads
     # (``../../../etc``, ``/tmp/canary``, NUL-byte injection, etc.) with a
@@ -2389,23 +2418,12 @@ def scans_delete(
     typer.echo(f"deleted: {target}")
 
 
-@scan_app.command("purge")
-def scans_purge(
-    older_than: str = typer.Option(
-        ...,
-        "--older-than",
-        help=(
-            "Delete stored scans whose mtime is older than this. NUMBER+UNIT, "
-            "e.g. '30d' (days), '2w' (weeks), '6m' (months, ~30 days each)."
-        ),
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Show which scans would be purged without deleting them.",
-    ),
-) -> None:
-    """Purge stored scans older than --older-than."""
+def _purge_older_than(older_than: str, *, dry_run: bool) -> None:
+    """Bulk-delete stored scans older than ``older_than``.
+
+    Backs ``scans delete --older-than`` (formerly the standalone
+    ``scans purge`` command).
+    """
     delta = _parse_relative_age(older_than)
     root = _scans_root()
     if not root.is_dir():
@@ -3158,15 +3176,6 @@ def scan(
         None, "--output-path", help="Where to write the report file."
     ),
     no_tui: bool = typer.Option(False, "--no-tui", help="Disable the Rich progress panel."),
-    legacy_board: bool = typer.Option(
-        False,
-        "--legacy-board",
-        help=(
-            "Render the pre-QA-012 flat agent table instead of the new "
-            "three-phase panels (Recon -> Red Teaming -> Findings). "
-            "One-release deprecation window; will be removed in v1.2."
-        ),
-    ),
     config_path: Path | None = typer.Option(
         None, "--config", help="Override the default config file location."
     ),
@@ -3256,6 +3265,7 @@ def scan(
     contract: Path | None = typer.Option(
         None,
         "--contract",
+        hidden=True,  # TODO(saas): contract-driven scans reserved for hosted SaaS; hidden from OSS CLI.
         help=(
             "Drive the scan from a target contract (agentguardian.yaml). "
             "The contract supplies the transport, auth, session, and Rules of "
@@ -3366,15 +3376,6 @@ def scan(
             "press Enter."
         ),
     ),
-    no_plan_confirm: bool = typer.Option(
-        False,
-        "--no-plan-confirm",
-        help=(
-            "Alias for --yes (QA-011). Skips the 5-second confirmation "
-            "wait without suppressing the panel. Use --no-plan to also "
-            "skip rendering the panel entirely."
-        ),
-    ),
     no_plan: bool = typer.Option(
         False,
         "--no-plan",
@@ -3475,9 +3476,8 @@ def scan(
                 debug_format=debug_format_norm,
                 no_serve=no_serve,
                 serve_grace_seconds=serve_grace_seconds,
-                yes=yes or no_plan_confirm,
+                yes=yes,
                 no_plan=no_plan,
-                legacy_board=legacy_board,
                 open_browser=open_browser,
             )
         )
