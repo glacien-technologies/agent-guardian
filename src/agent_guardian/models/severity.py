@@ -84,19 +84,21 @@ def colour_for_band(band: SeverityBand) -> str:
 # QA-G6 (2026-06-03) — single source of truth for human-facing band labels.
 # The dashboard view-model (``server/dashboard_view._humanise_band``) and the
 # CLI scan-complete summary (``cli._humanise_band_for_summary``) both delegate
-# here so the two surfaces cannot diverge again. The mapping intentionally
-# pairs ``NOT_EVALUATED`` with explanatory prose ("Not Evaluated (stub mode)")
-# instead of leaking the underscore-bearing enum value verbatim — feedback
-# memory ``no_raw_enum_in_ui`` requires it. The dashboard tile uses the
-# shorter ``NA`` short-code for layout reasons; the CLI summary uses the
-# verbose form because horizontal space is plentiful in a terminal line.
+# here so the two surfaces cannot diverge again. ``NOT_EVALUATED`` is a
+# *neutral* "Not Evaluated" label: it is set for several causes (stub
+# evaluator, coverage below the mode threshold, high attacker-rejection), so
+# the label must NOT assert any single one (issue #115 — a real-model scan
+# withheld for thin coverage was mislabeled "stub mode"). The accompanying
+# reason banner already names the true cause; the label only avoids leaking
+# the underscore-bearing enum value (feedback memory ``no_raw_enum_in_ui``).
+# The dashboard tile uses the shorter ``NA`` short-code for layout reasons.
 _HUMAN_BAND_LABELS: Final[Mapping[SeverityBand, str]] = {
     SeverityBand.EXCELLENT: "Excellent",
     SeverityBand.GOOD: "Good",
     SeverityBand.WARNING: "Warning",
     SeverityBand.POOR: "Poor",
     SeverityBand.CRITICAL: "Critical",
-    SeverityBand.NOT_EVALUATED: "Not Evaluated (stub mode)",
+    SeverityBand.NOT_EVALUATED: "Not Evaluated",
 }
 
 
