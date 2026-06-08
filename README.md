@@ -54,15 +54,19 @@ export GEMINI_API_KEY=...        # or OPENAI_API_KEY / ANTHROPIC_API_KEY
 
 For every supported provider and the full set of configuration options, see the [configuration guide](https://docs.agentguardian.io/reference/config#provider-api-keys).
 
-**3. Scan your agent**
+**3. Scan an agent**
+
+No agent of your own yet? Point it at the hosted demo target — a deliberately vulnerable "finbot" banking agent:
 
 ```bash
 agent-guardian scan \
-  --endpoint http://localhost:8000/chat \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
   --model gemini:gemini-3.5-flash \
   --mode fast \
   --output pdf --output-path report.pdf
 ```
+
+To scan **your own** agent instead, swap `--endpoint` for any target — a hosted URL, a `--system-prompt` file, or a `--framework` object (see [What you can scan](#what-you-can-scan)).
 
 **4. Review the findings**
 
@@ -162,6 +166,24 @@ For the full workflow, see [how AgentGuardian works](https://docs.agentguardian.
 - `full` — release gates and audit evidence
 
 Use `full` when you need AIVSS-scored findings for CI/CD gates.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `agent-guardian scan` | Run an adversarial swarm scan against a target |
+| `agent-guardian report <id> --output FMT` | Regenerate a report — `json` · `sarif` · `junit` · `md` · `gitlab` · `pdf` · `badge` |
+| `agent-guardian gate <id> --fail-under N` | Apply pass/fail thresholds to a stored scan (CI exit codes) |
+| `agent-guardian serve` | Start the local dashboard |
+| `agent-guardian scans list` / `delete` | List or delete stored scans (`delete --older-than 30d` for bulk cleanup) |
+| `agent-guardian config show` / `init` | Inspect the effective config / scaffold a config file |
+| `agent-guardian verify <report>` | Verify the HMAC-SHA256 + Ed25519 signatures on a report |
+| `agent-guardian last-score` | Print the AIVSS of the most recent scan |
+| `agent-guardian doctor` | Verify the install, provider keys, and prerequisites |
+| `agent-guardian telemetry status` | Manage opt-in telemetry (`enable` / `disable`) |
+| `agent-guardian version` | Print the installed version |
+
+Run any command with `--help` for its full options, or see the [CLI reference](https://docs.agentguardian.io/reference/cli).
 
 ## CI/CD with GitHub Actions
 
