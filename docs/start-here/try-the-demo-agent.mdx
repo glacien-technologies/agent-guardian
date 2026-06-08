@@ -104,14 +104,14 @@ The full live region is several hundred lines; here is a redacted slice
 showing the dashboard banner, mid-scan progress, and the final summary:
 
 ```text expandable
-▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scans/cli-3a4c1d9c2840
-▸ Report when complete                   http://127.0.0.1:7474/scans/cli-3a4c1d9c2840/report
-→ live dashboard: http://127.0.0.1:7474/scans/cli-3a4c1d9c2840
+▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+▸ Report when complete                   http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report
+→ live dashboard: http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
 
   AgentGuardian v1.1.0 · mode=fast · budget=$0.20 · seed=0
   target  : https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat
   tier    : T1 (auto-detected — tools + memory + PII)
-  swarm   : 14 agents (10 ASI + 4 OWASP-LLM)
+  swarm   : 16 agents (10 ASI + 1 gap-fill + 5 OWASP-LLM)
 
   ✓ recon              probes=fingerprint                spend=$0.001
   ✓ goal_hijack        probes=9   findings=3             spend=$0.018

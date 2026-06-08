@@ -27,7 +27,7 @@ with one of these.
 | `0` | `EXIT_OK` | Any command on success | Success. |
 | `1` | `EXIT_FAIL_UNDER` | `scan` (with `--fail-under N` and/or `--max-critical` / `--max-high` / `--max-medium` / `--max-low`), `verify`, `publish`, `last-score --score-only` | A CI gate failed: final AIVSS `< N`, a severity-count ceiling was exceeded, the scan was non-authoritative, signature verification failed, or `last-score` had no scans on record. |
 | `2` | `EXIT_CONFIG` | All commands | Configuration error: bad flag, missing file, unknown format, unsafe `serve` bind, contract migration failure, invalid `scan_id`. |
-| `3` | `EXIT_TARGET_UNREACHABLE` | `scan` (HTTP endpoint mode) | Endpoint preflight could not reach the target after 3 attempts (5s, 10s, 15s — cold-start tolerant). |
+| `3` | `EXIT_TARGET_UNREACHABLE` | `scan` (HTTP endpoint mode) | Endpoint preflight could not reach the target after 5 attempts (5s, 10s, 15s, 20s, 30s — cold-start tolerant). |
 | `4` | `EXIT_LLM_PROVIDER` | `scan` | LLM provider misconfigured (missing key, unknown provider) or model not found during pre-scan validation. |
 | `5` | `EXIT_SANDBOX` | `scan` | Sandbox violation — an agent attempted a blocked filesystem / network operation. |
 | `130` | `EXIT_USER_INTERRUPT` | `scan` | Operator hit Ctrl-C (POSIX convention: `128 + SIGINT(2)`). |

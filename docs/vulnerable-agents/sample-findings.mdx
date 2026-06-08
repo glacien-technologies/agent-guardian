@@ -3,13 +3,13 @@ title: "Sample findings"
 description: "What AgentGuardian produces when you scan the vulnerable demo agents."
 ---
 
-The sibling repo ships pre-captured scan output in [`sample-findings/`](https://github.com/glacien-technologies/agentguardian-vulnerable-agents/tree/main/sample-findings) — one directory per agent, with `fast-scan.json`, `fast-scan.sarif`, and `fast-scan.html`. Read these before running your own scan to know what the result should look like.
+The sibling repo ships pre-captured scan output in [`sample-findings/`](https://github.com/glacien-technologies/agentguardian-vulnerable-agents/tree/main/sample-findings) — one directory per agent, with `fast-scan.json`, `fast-scan.sarif`, and `fast-scan.pdf`. Read these before running your own scan to know what the result should look like.
 
 ## What to look for
 
 - **`fast-scan.json`** — machine-readable. Top-level `findings: [...]` array; each finding has `category`, `severity`, `aivss_score`, `evidence.prompt`, `evidence.response`.
 - **`fast-scan.sarif`** — GitHub Code Scanning format. Upload to a repo's Security tab with `actions/upload-sarif@v3` and the findings render inline on the PR.
-- **`fast-scan.html`** — human-readable report with collapsible attack transcripts. The shareable artifact for a launch demo.
+- **`fast-scan.pdf`** — human-readable report with attack transcripts. The shareable artifact for a launch demo.
 
 ## Regenerating
 
@@ -22,7 +22,7 @@ for agent in vulnerable-langgraph-chatbot vulnerable-mcp-server vulnerable-tool-
   agent-guardian scan \
     --endpoint "http://localhost:8000/${agent}/chat" \
     --model stub --mode fast \
-    --output html --output-path "sample-findings/${agent}/fast-scan.html"
+    --output pdf --output-path "sample-findings/${agent}/fast-scan.pdf"
 done
 ```
 

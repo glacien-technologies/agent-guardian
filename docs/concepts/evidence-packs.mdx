@@ -26,7 +26,7 @@ The bundle directory is named `bundle_<scan_id>` under the path you pass. You ca
 
 ## Bundle layout
 
-```
+```text
 bundle_<scan_id>/
 ├── findings.sarif            # SARIF 2.1.0, schema-validated
 ├── pov/<finding_id>.py       # PoV reproducer scripts (when captured)
@@ -95,7 +95,7 @@ for rel, meta in m['files'].items():
 
 Expected output for an untampered bundle:
 
-```
+```text
 OK  evidence/f-001/transcript.jsonl
 OK  findings.sarif
 OK  pov/f-001.py
@@ -122,5 +122,5 @@ flowchart LR
 
 ## Next step
 
-- Wire the bundle's `findings.sarif` into GitHub code-scanning — see [GitHub Actions](/ci/github-actions).
+- Wire the bundle's `findings.sarif` into GitHub code-scanning — see [GitHub Actions](/ci-cd/github-actions).
 - Understand the SARIF and JSON shapes field-by-field in the [Report schema reference](/reference/report-schema).

@@ -97,9 +97,9 @@ AgentGuardian ran a **swarm** of attackers against your prompt:
 
 1. **Recon** — fingerprints the target (HTTP shape, available tools, response format).
 2. **Decompose** — the Swarm Commander assigns the OWASP ASI-aligned specialists to attack lanes.
-3. **Parallel attack** — up to 14 attackers (10 ASI specialists + 4 OWASP-LLM specialists) run concurrently. Each picks probes from its lane in the bundled corpus.
+3. **Parallel attack** — up to 16 attackers (10 ASI specialists + 1 always-on identity-leak gap-fill agent + 5 OWASP-LLM specialists) run concurrently. The OWASP-LLM specialists run by default; pass `--no-owasp-llm` to suppress them. Each picks probes from its lane in the bundled corpus.
 4. **Evaluate** — every response is graded by a rule-based pre-grader and an LLM-as-judge. Findings that survive both go into the report.
-5. **Finalise** — a deterministic AIVSS score is computed, the report is signed (HMAC-SHA256 + Ed25519), and the dashboard URL stays live for 5 minutes.
+5. **Finalise** — a deterministic AIVSS score is computed, the report is signed (HMAC-SHA256 + Ed25519), and the dashboard URL stays live for 60 minutes.
 
 The whole thing is local — no network egress except to the LLM API you chose.
 
@@ -236,7 +236,7 @@ If you need runtime governance, see [Open vs Enterprise](/concepts/open-vs-enter
 - policy governance
 - commercial support from Glacien
 
-See [Open vs Enterprise](/concepts/open-vs-enterprise) for the full breakdown, or visit [Glacien](/enterprise) for Enterprise inquiries.
+See [Open vs Enterprise](/concepts/open-vs-enterprise) for the full breakdown, or see the [Enterprise](/enterprise/index) page for commercial inquiries.
 
 ## Next steps
 

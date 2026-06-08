@@ -34,6 +34,7 @@ Format      Resolution
 ``sarif``   Always ``ok`` — ``jsonschema`` is in base deps.
 ``junit``   Always ``ok`` — hand-rolled XML via stdlib.
 ``md``      Always ``ok`` (stdlib).
+``gitlab``  Always ``ok`` — GitLab SAST JSON via stdlib.
 ``pdf``     ``ok`` iff WeasyPrint native deps probe-render OK,
             OR ReportLab is importable. Otherwise ``missing``
             with ``install_hint='pip install agent-guardian[full]'``.
@@ -60,7 +61,7 @@ EngineStatus = Literal["ok", "missing", "unknown_format"]
 
 #: Every format the CLI advertises via ``--output``. Used by the unknown-
 #: format short-circuit and by the plan panel to enumerate rows.
-ALL_FORMATS: Final[frozenset[str]] = frozenset({"json", "sarif", "junit", "md", "pdf"})
+ALL_FORMATS: Final[frozenset[str]] = frozenset({"json", "sarif", "junit", "md", "gitlab", "pdf"})
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ def validate_output_engine_available(format: str) -> EngineCheck:
             message=(f"unknown output format {format!r}; expected one of {sorted(ALL_FORMATS)}"),
         )
 
-    if fmt in {"json", "sarif", "junit", "md"}:
+    if fmt in {"json", "sarif", "junit", "md", "gitlab"}:
         return EngineCheck(format=fmt, status="ok", engine="stdlib")
 
     # fmt == "pdf" — defer the import so this module type-checks cleanly even

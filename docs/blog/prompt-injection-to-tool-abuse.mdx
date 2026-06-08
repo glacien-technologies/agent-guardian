@@ -22,7 +22,7 @@ The agent threat model is not that. A modern agent reads from:
 
 Every channel above is an injection surface. Every channel above eventually reaches a tool call. The cascade we care about is:
 
-```
+```text
 inject -> the agent's plan changes -> the agent calls a tool -> the tool does something the system prompt forbids
 ```
 
@@ -107,7 +107,7 @@ AgentGuardian is a **testing** tool. It does not:
 - sit in front of a production agent at serve time,
 - block, redact, or rewrite production traffic,
 - guarantee zero false-negatives — every red-team tool, this one included, can miss a class of attacks not represented in its corpus,
-- replace a runtime gateway. If you need runtime governance see the AgentGuardian Enterprise tier at [/enterprise](/enterprise). The OSS layer documented in these docs is the developer-loop and the CI-gate, not the runtime.
+- replace a runtime gateway. If you need runtime governance see the [AgentGuardian Enterprise](/enterprise/index) tier. The OSS layer documented in these docs is the developer-loop and the CI-gate, not the runtime.
 
 ## Reading list
 

@@ -143,7 +143,7 @@ agent-guardian verify ./scan.json \
 
 Expected output:
 
-```
+```text
 schema:       OK
 HMAC-SHA256:  OK
 Ed25519:      OK
@@ -281,6 +281,6 @@ Breaking changes to the JSON shape bump the `schema` string. Additive fields do 
 
 ## Next step
 
-- Wire SARIF into GitHub code-scanning in [GitHub Actions](/ci/github-actions).
+- Wire SARIF into GitHub code-scanning in [GitHub Actions](/ci-cd/github-actions).
 - Package the JSON, SARIF, PoVs, and transcripts together with [Evidence packs](/concepts/evidence-packs).
 - Verify provenance end-to-end in [Signatures](/reports/signatures).

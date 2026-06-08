@@ -59,14 +59,10 @@ This is a deliberately-vulnerable system prompt — broad authority, sensitive t
 agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
 ```
 
-`--model stub` is a deterministic in-process model — zero API keys, sub-second wall-time, ~$0 cost. Real output:
+`--model stub` is a deterministic in-process model — zero API keys, sub-second wall-time, ~$0 cost. The scan ends with a one-line summary:
 
 ```text
-phase recon: starting (scan_id=cli-839d88f0b7a9, wall_budget=300s)
-phase decompose: 14 attackers dispatched
-phase attack: 14 agents running in parallel
-...
-scan cli-839d88f0b7a9 done: AIVSS=n/a band=Not Evaluated (stub mode) tier=T4 findings=12 coverage=54% report=/Users/you/.agentguardian/scans/cli-839d88f0b7a9/scan.json
+scan cli-839d88f0b7a9 done: AIVSS=n/a band=Not Evaluated (stub mode) tier=T4 findings=12 report=/Users/you/.agentguardian/scans/cli-839d88f0b7a9/scan.json
 ```
 
 `band=Not Evaluated (stub mode)` is expected when you run with `--model stub` — the stub model cannot adjudicate authoritatively. To get a real band, swap in a real evaluator:
@@ -88,7 +84,7 @@ The scan also auto-spawns a local dashboard:
 → live dashboard: http://127.0.0.1:7474/scan/cli-839d88f0b7a9
 ```
 
-Open it. You will see the 12 findings, the attack transcripts, the AIVSS score breakdown, and the evidence records — exactly what an auditor would want. The dashboard stays live for 5 minutes after the scan completes (`--serve-grace-seconds` to extend).
+Open it. You will see the 12 findings, the attack transcripts, the AIVSS score breakdown, and the evidence records — exactly what an auditor would want. The dashboard stays live for 60 minutes after the scan completes (`--serve-grace-seconds` to change). The CLI emits the canonical `/scan/<id>` (singular) URL; the legacy `/scans/<id>` path still works and 307-redirects to it.
 
 <Tip>
   **Auto-serve requires an interactive terminal.** In CI, behind `| tee`, or any non-TTY stdout, the in-band dashboard is silently suppressed (the CLI emits a `⚠ Dashboard auto-serve suppressed` warning when this happens). To browse the same scan after the fact, start the server yourself in another terminal:

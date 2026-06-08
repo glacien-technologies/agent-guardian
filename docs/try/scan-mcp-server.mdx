@@ -192,12 +192,14 @@ the remediation is the RoE allow-list.
   Check the server logs — a malformed `inputSchema` or a missing
   required argument is the usual cause.
 - **`EXIT_CONTRACT_INVALID` on startup.** Your `agentguardian.yaml`
-  failed Pydantic validation. Run `agent-guardian contract validate
-  agentguardian.yaml` to see the exact field error.
+  failed Pydantic validation. The error message names the offending
+  field; cross-check it against the schema with
+  `agent-guardian contract schema` (emits the contract JSON Schema).
 
 ## Next step
 
-- Author your contract with the wizard: `agent-guardian contract new`.
+- Author your `agentguardian.yaml` by hand, validating field names
+  against `agent-guardian contract schema`.
 - Compare with a framework-adapter target:
   [Scan a LangGraph agent](/try/scan-langgraph).
 - Add the SARIF report to GitHub Code Scanning:

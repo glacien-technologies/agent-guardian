@@ -122,7 +122,7 @@ sequenceDiagram
     GH->>Runner: dispatch workflow
     Runner->>Runner: pip install agent-guardian
     Runner->>AG: scan --mode full --output sarif --fail-under 70
-    AG->>LLM: 14 agents x 96 probes (parallel)
+    AG->>LLM: 16 agents x 96 probes (parallel)
     LLM-->>AG: completions
     AG-->>Runner: scan.sarif + exit code
     Runner->>CS: codeql-action/upload-sarif@v3
