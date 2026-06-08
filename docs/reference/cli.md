@@ -45,22 +45,6 @@ agent-guardian doctor
 Verify the install, detect available LLM keys, confirm the sandbox is
 importable, and print state / config locations.
 
-### `list-agents`
-
-```text
-agent-guardian list-agents
-```
-
-Print the eleven specialist agents with their ASI category.
-
-### `list-probes`
-
-```text
-agent-guardian list-probes
-```
-
-Print the bundled seed-probe corpus, one line per probe.
-
 ### `gate`
 
 ```text
