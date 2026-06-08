@@ -14,3 +14,8 @@
 # git tree per the .md stub's own preamble. CI runners therefore cannot resolve
 # the file:// reference to roadmap.mdx, so we suppress it here.
 roadmap\.mdx$
+
+# The hosted demo "finbot" target in the README quickstart is a POST-only
+# /chat endpoint, so a lychee GET returns 405 (not in the accept-list). The
+# target is verified live out-of-band; suppress the README example URL here.
+^https://agent-guardian-testbench-u6tm6gzysq-uc\.a\.run\.app/
