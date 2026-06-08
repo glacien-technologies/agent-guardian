@@ -256,11 +256,12 @@ def test_build_bedrock_without_botocore(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_build_azure_entra_without_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """AZURE_USE_ENTRA=1 without azure-identity → clear install hint."""
-    import agent_guardian.llm.azure_openai as az
-
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://r.openai.azure.com")
     monkeypatch.setenv("AZURE_USE_ENTRA", "1")
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_AVAILABLE", False)
-    monkeypatch.setattr(az, "_AZURE_IDENTITY_IMPORT_ERROR", ImportError("no azure-identity"))
+    monkeypatch.setattr("agent_guardian.llm.azure_openai._AZURE_IDENTITY_AVAILABLE", False)
+    monkeypatch.setattr(
+        "agent_guardian.llm.azure_openai._AZURE_IDENTITY_IMPORT_ERROR",
+        ImportError("no azure-identity"),
+    )
     with pytest.raises(RegistryError, match="azure-identity"):
         build_llm("azure:my-dep", "attacker")
