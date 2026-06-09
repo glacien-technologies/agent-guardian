@@ -121,7 +121,12 @@ async def test_agent_exits_immediately_when_cancel_event_set_before_run(tmp_path
 @pytest.mark.asyncio
 async def test_agent_exits_at_next_turn_boundary_when_cancelled_mid_run(tmp_path: Path) -> None:
     """Setting the cancel event during turn 1 should let that turn complete
-    (no in-flight work discarded) and exit at the next turn boundary."""
+    (no in-flight work discarded) and exit at the next turn boundary.
+
+    The agent always reports ``cancelled`` for a swarm cancellation (it can't
+    tell early-stop from budget/abort here); the scan-level ``_stopped_reason``
+    is the discriminator and ``_build_completeness`` credits early-stop coverage
+    from it (covered separately in test_scoring_empty_plan_gate)."""
     cancel_event = asyncio.Event()
 
     def on_call(n: int) -> None:

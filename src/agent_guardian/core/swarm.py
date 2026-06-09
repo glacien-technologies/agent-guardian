@@ -2061,17 +2061,41 @@ class SwarmCommander:
         (``cancelled`` / ``budget`` / ``error``) reduce the figure.
         ``turns_used`` / ``turns_planned`` are retained as informational detail.
 
+        EARLY-STOP credit: an agent reports ``terminated_by="cancelled"`` for
+        every swarm-driven cancellation — but the swarm cancels for THREE very
+        different reasons (``self._stopped_reason``): a deliberate variance
+        EARLY_STOP, the budget watchdog, or an operator abort. Only the first is
+        a "we have enough signal" coverage decision. So when the scan stopped via
+        ``early_stop``, a ``cancelled`` agent that ran >=1 turn did real coverage
+        work and counts as COMPLETE; a ``cancelled`` agent that never ran (0
+        turns) covered nothing and stays truncated. Under ``budget`` / operator
+        ``cancelled`` stops, every ``cancelled`` agent stays truncated (those are
+        genuine truncations). This is what lets a FAST/SMART scan of a clean
+        target — which early-stops once variance stabilises with no findings —
+        read as authoritative instead of collapsing to 0% completeness.
+        Genuinely degraded scans are still gated to Not Evaluated by the
+        independent attacker-refusal and stub-evaluator gates.
+
         Zero planned agents (recon ruled every class out, or empty slate) is 0%,
         not 100% — so an empty scan cannot silently compose into a gate-pass.
         """
         attack_reports = [r for r in self._agent_reports if r.agent != "recon-agent"]
         planned = len(self._active_agents)
-        cut_short = sum(
-            1 for r in attack_reports if r.terminated_by in self._TRUNCATED_TERMINATIONS
-        )
-        completed = sum(
-            1 for r in attack_reports if r.terminated_by not in self._TRUNCATED_TERMINATIONS
-        )
+        # An agent the swarm cancelled by a *deliberate early-stop* after it ran
+        # >=1 turn did real coverage work — credit it as complete rather than
+        # truncated. Budget/abort cancellations (and 0-turn early-stop cancels)
+        # remain truncations.
+        early_stopped = self._stopped_reason == "early_stop"
+
+        def _is_truncated(r: AgentReport) -> bool:
+            if r.terminated_by not in self._TRUNCATED_TERMINATIONS:
+                return False
+            # Early-stop credit: a ``cancelled`` agent that ran >=1 turn under a
+            # deliberate early-stop is completed coverage, not a truncation.
+            return not (early_stopped and r.terminated_by == "cancelled" and r.turns > 0)
+
+        cut_short = sum(1 for r in attack_reports if _is_truncated(r))
+        completed = sum(1 for r in attack_reports if not _is_truncated(r))
         turns_used = sum(r.turns for r in attack_reports)
         per_agent_max = self.config.max_turns_per_agent or 20
         turns_planned = planned * per_agent_max

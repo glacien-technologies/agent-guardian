@@ -134,13 +134,55 @@ def test_build_completeness_framework_cut_short_reduces_pct() -> None:
     cmd._agent_reports = [
         _report("a", "exhausted", 4),
         _report("b", "success", 3),
-        _report("c", "cancelled", 6),  # early-stopped mid-run
+        _report("c", "cancelled", 0),  # cancelled before any turn ran — covered nothing
         _report("d", "budget", 5),  # budget-truncated mid-corpus
     ]
     c = cmd._build_completeness()
     assert c.agents_completed == 2
     assert c.agents_cut_short == 2
     assert c.pct == 50.0  # 2 of 4 applicable agents finished
+
+
+def test_build_completeness_early_stop_credits_cancelled_with_turns() -> None:
+    """QA — under a deliberate variance EARLY_STOP (``_stopped_reason ==
+    'early_stop'``), a ``cancelled`` agent that ran >=1 turn did real coverage
+    work and counts as completed; a ``cancelled`` agent that never ran (0 turns)
+    covered nothing and stays cut-short. This is what stops a FAST/SMART scan of
+    a clean target — which early-stops once variance stabilises with no findings
+    — from collapsing to 0% completeness / Not Evaluated."""
+    cmd = _commander()
+    cmd._stopped_reason = "early_stop"
+    cmd._active_agents = [object()] * 4  # type: ignore[list-item]  # only len() matters
+    cmd._agent_reports = [
+        _report("a", "cancelled", 2),  # early-stopped after 2 turns → complete
+        _report("b", "cancelled", 3),  # early-stopped after 3 turns → complete
+        _report("c", "exhausted", 1),  # ran its corpus → complete
+        _report("d", "cancelled", 0),  # never ran before early-stop → cut-short
+    ]
+    c = cmd._build_completeness()
+    assert c.agents_completed == 3
+    assert c.agents_cut_short == 1
+    assert c.pct == 75.0
+
+
+def test_build_completeness_budget_stop_keeps_cancelled_truncated() -> None:
+    """Under a BUDGET (or operator-abort) stop, every ``cancelled`` agent stays
+    truncated regardless of turns run — those are genuine truncations, not an
+    "enough signal" decision. Guards against the early-stop credit leaking into
+    budget/abort stops."""
+    cmd = _commander()
+    cmd._stopped_reason = "budget"
+    cmd._active_agents = [object()] * 4  # type: ignore[list-item]  # only len() matters
+    cmd._agent_reports = [
+        _report("a", "exhausted", 4),
+        _report("b", "cancelled", 5),  # ran turns but budget-cancelled → truncated
+        _report("c", "cancelled", 2),  # ditto
+        _report("d", "budget", 3),
+    ]
+    c = cmd._build_completeness()
+    assert c.agents_completed == 1
+    assert c.agents_cut_short == 3
+    assert c.pct == 25.0
 
 
 def test_tier_aggregate_excluding_all_categories_returns_zero() -> None:
