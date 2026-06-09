@@ -208,18 +208,51 @@ def _classify_transport_error(error: TransportError) -> tuple[int, str]:
     return _classify_send_error(message)
 
 
-async def run_preflight(contract_path: Path) -> PreflightReport:
+# Canonical stage order — used to validate ``stop_after`` and to short-circuit
+# the walk once the requested stage has run. Mirrors the ``name=`` values each
+# stage records on its ``StageResult``.
+PREFLIGHT_STAGE_ORDER: tuple[str, ...] = (
+    "resolve+lint",
+    "connect",
+    "authenticate/probe",
+    "benign-round-trip",
+    "session-check",
+    "capability-report",
+    "roe-echo",
+)
+
+
+def _reached_stop(report: PreflightReport, stop_after: str | None) -> bool:
+    """True once ``stop_after`` is set and that stage has been recorded.
+
+    Checked right after each stage so the walk halts as soon as the requested
+    stage completes — so ``--stage connect`` does NOT pay the cost of the slow,
+    retrying probe stage that follows.
+    """
+    if not stop_after:
+        return False
+    return any(stage.name == stop_after for stage in report.stages)
+
+
+async def run_preflight(contract_path: Path, *, stop_after: str | None = None) -> PreflightReport:
     """Run the seven-stage pre-flight against the contract at ``contract_path``.
 
     Stops at the first failing stage and returns a :class:`PreflightReport`. No
     attack payload is ever sent — the only egress is a benign introduce-yourself
     round-trip used to prove the wiring.
+
+    When ``stop_after`` names a stage (one of :data:`PREFLIGHT_STAGE_ORDER`), the
+    walk halts as soon as that stage has run — so a connectivity-only check
+    (``stop_after="connect"``) never pays the cost of the slow probe/session
+    stages. An unknown ``stop_after`` is ignored (the full walk runs).
     """
     report = PreflightReport()
 
     # --- Stage 1: resolve + lint -------------------------------------------
     contract = _stage_resolve(contract_path, report)
     if contract is None:
+        return report
+    if _reached_stop(report, stop_after):
         return report
 
     # --- Stage 2: connect (build the transport + session machine) ----------
@@ -228,27 +261,35 @@ async def run_preflight(contract_path: Path) -> PreflightReport:
         return report
     transport, session_machine = built
 
+    # Halt before the probe stage if the operator only asked to reach connect —
+    # close the just-built transport so we don't leak the client.
+    if _reached_stop(report, stop_after):
+        await transport.aclose()
+        return report
+
     try:
         # --- Stage 3: authenticate / probe (transport.probe) --------------
         first_reply = await _stage_probe(transport, report)
         if first_reply is None:
             return report
+        if _reached_stop(report, stop_after):
+            return report
 
         # --- Stage 4: benign round-trip (extract + print reply) -----------
         _stage_round_trip(first_reply, report)
-        if not report.ok:
+        if not report.ok or _reached_stop(report, stop_after):
             return report
 
         # --- Stage 5: session check (2 real turns for stateful contracts) -
         await _stage_session(contract, session_machine, report)
-        if not report.ok:
+        if not report.ok or _reached_stop(report, stop_after):
             return report
     finally:
         await transport.aclose()
 
     # --- Stage 6: capability report (transport.describe) -------------------
     _stage_capability(contract, transport, report)
-    if not report.ok:
+    if not report.ok or _reached_stop(report, stop_after):
         return report
 
     # --- Stage 7: RoE echo + authorization gate ----------------------------

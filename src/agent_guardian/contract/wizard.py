@@ -302,7 +302,10 @@ def run_wizard(
     gathered = _interactive_gather(p, base, from_openapi=openapi_shapes is not None)
     document = build_contract_dict(gathered, openapi_shapes=openapi_shapes)
     written = write_contract_yaml(document, out)
-    p.echo(f"contract written to {written}")
+    # NB: the "contract written to <path>" confirmation is emitted once by the
+    # ``init`` CLI command (cli.py), which is the single source for both the
+    # ``--yes`` and interactive paths. Echoing it here too made interactive runs
+    # print the line twice (the interactive prompter's echo routes to stdout).
     return written
 
 

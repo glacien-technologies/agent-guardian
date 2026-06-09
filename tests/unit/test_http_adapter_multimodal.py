@@ -163,3 +163,76 @@ class TestSupportsVisionGuard:
             assert adapter.supports_vision is False
         finally:
             await adapter.aclose()
+
+
+@pytest.mark.anyio
+class TestTargetErrorLabeling:
+    """QA #109 issue 1 — target HTTP faults must NOT read as LLM-provider
+    faults. The adapter raises ``Target*`` error subclasses so the shared
+    retry log line ("retry N/3 (<ClassName>: …)") names the target, while the
+    subclassing keeps the retry/backoff behaviour identical."""
+
+    @pytest.fixture
+    def anyio_backend(self) -> str:
+        return "asyncio"
+
+    async def test_network_error_raises_target_transient(self) -> None:
+        from agent_guardian.llm.errors import LLMTransientError, TargetTransientError
+
+        with respx.mock(base_url="https://unreachable.test") as mock:
+            mock.post("/chat").mock(side_effect=httpx.ConnectError("getaddrinfo failed"))
+            adapter = HttpAdapter(
+                endpoint="https://unreachable.test/chat",
+                shape="generic",
+                request_template='{"input": "{prompt}"}',
+                response_jsonpath="$.output",
+                max_retries=0,  # no backoff sleep in the test
+            )
+            try:
+                with pytest.raises(TargetTransientError) as caught:
+                    await adapter.call("hi")
+            finally:
+                await adapter.aclose()
+            # Still retryable (the wrapper keys off LLMTransientError).
+            assert isinstance(caught.value, LLMTransientError)
+            assert type(caught.value).__name__ == "TargetTransientError"
+            assert "http: network error" in str(caught.value)
+
+    async def test_timeout_raises_target_timeout(self) -> None:
+        from agent_guardian.llm.errors import LLMTimeoutError, TargetTimeoutError
+
+        with respx.mock(base_url="https://slow.test") as mock:
+            mock.post("/chat").mock(side_effect=httpx.ConnectTimeout("slow"))
+            adapter = HttpAdapter(
+                endpoint="https://slow.test/chat",
+                shape="generic",
+                request_template='{"input": "{prompt}"}',
+                response_jsonpath="$.output",
+                max_retries=0,
+            )
+            try:
+                with pytest.raises(TargetTimeoutError) as caught:
+                    await adapter.call("hi")
+            finally:
+                await adapter.aclose()
+            assert isinstance(caught.value, LLMTimeoutError)
+            assert type(caught.value).__name__ == "TargetTimeoutError"
+
+    async def test_5xx_raises_target_transient(self) -> None:
+        from agent_guardian.llm.errors import LLMTransientError, TargetTransientError
+
+        with respx.mock(base_url="https://down.test") as mock:
+            mock.post("/chat").mock(return_value=httpx.Response(503, text="down"))
+            adapter = HttpAdapter(
+                endpoint="https://down.test/chat",
+                shape="generic",
+                request_template='{"input": "{prompt}"}',
+                response_jsonpath="$.output",
+                max_retries=0,
+            )
+            try:
+                with pytest.raises(TargetTransientError) as caught:
+                    await adapter.call("hi")
+            finally:
+                await adapter.aclose()
+            assert isinstance(caught.value, LLMTransientError)

@@ -1950,7 +1950,14 @@ def validate(
         False, "--json", help="Emit the pre-flight report as JSON instead of text."
     ),
     stage: str | None = typer.Option(
-        None, "--stage", help="Only print this single stage's result (by name)."
+        None,
+        "--stage",
+        help=(
+            "Stop after this stage and print only its result (by name: "
+            "resolve+lint, connect, authenticate/probe, benign-round-trip, "
+            "session-check, capability-report, roe-echo). Useful for a quick "
+            "connectivity check without paying the full probe cost."
+        ),
     ),
 ) -> None:
     """Run the payload-free pre-flight against a contract (Stage 1B).
@@ -1959,10 +1966,13 @@ def validate(
     session, capability, RoE) and stops at the first failure. Exits with the
     failing stage's exit code (``EXIT_CONFIG`` / ``EXIT_TARGET_UNREACHABLE`` /
     ``EXIT_LLM_PROVIDER``), or ``EXIT_OK`` when every stage passes.
+
+    ``--stage X`` halts the walk after stage X has run (not just a display
+    filter), so a connectivity-only check doesn't trigger the slow probe stage.
     """
     from agent_guardian.contract.preflight import run_preflight
 
-    report = asyncio.run(run_preflight(contract))
+    report = asyncio.run(run_preflight(contract, stop_after=stage))
 
     if json_out:
         payload = report.to_dict()

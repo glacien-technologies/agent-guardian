@@ -89,6 +89,43 @@ async def test_preflight_all_stages_green(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# QA #109 issue 2 -- --stage halts execution, not just display
+# ---------------------------------------------------------------------------
+
+
+@respx.mock
+async def test_preflight_stop_after_connect_skips_probe(tmp_path: Path) -> None:
+    """``stop_after="connect"`` must NOT run the probe stage — the slow,
+    retrying network turn — so a connectivity-only check is cheap. We assert
+    the target endpoint is never called and the walk halts at connect."""
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={"output": {"text": "hi"}}))
+    path = _write(tmp_path, _MINIMAL)
+
+    report = await run_preflight(path, stop_after="connect")
+
+    names = [s.name for s in report.stages]
+    assert names == ["resolve+lint", "connect"]
+    assert "authenticate/probe" not in names
+    # The decisive proof the probe stage never ran: no egress to the target.
+    assert route.call_count == 0
+    # Both recorded stages passed → the connectivity check exits clean.
+    assert report.ok is True
+
+
+@respx.mock
+async def test_preflight_stop_after_unknown_runs_full_walk(tmp_path: Path) -> None:
+    """An unrecognised ``stop_after`` is ignored — the full pre-flight runs."""
+    respx.post(URL).mock(return_value=httpx.Response(200, json={"output": {"text": "hi"}}))
+    path = _write(tmp_path, _MINIMAL)
+
+    report = await run_preflight(path, stop_after="not-a-stage")
+
+    names = [s.name for s in report.stages]
+    assert names[-1] == "roe-echo"
+    assert "authenticate/probe" in names
+
+
+# ---------------------------------------------------------------------------
 # Stage 7 -- prod without authorization_ref is refused (EXIT_CONFIG)
 # ---------------------------------------------------------------------------
 
@@ -516,6 +553,38 @@ def test_wizard_interactive_scripted_answers(tmp_path: Path) -> None:
     assert contract.roe.budgets.max_requests == 100
     assert contract.roe.tools is not None
     assert contract.roe.tools.blocklist == ["delete_account", "drop_table"]
+
+
+def test_wizard_interactive_does_not_echo_contract_written(tmp_path: Path) -> None:
+    """QA #110 — the 'contract written to …' confirmation is the CLI's job: the
+    ``init`` command prints it exactly once for both ``--yes`` and interactive
+    runs. The wizard must NOT also echo it, otherwise interactive mode (where
+    the prompter's echo routes to stdout) prints the line twice."""
+    from agent_guardian.contract.wizard import ScriptedPrompter, run_wizard
+
+    out = tmp_path / "interactive.yaml"
+    prompter = ScriptedPrompter(
+        answers=[
+            "scripted-bot",  # name
+            "https://api.example.com/v1/chat",  # url
+            "staging",  # environment
+            "bearer",  # auth kind
+            "${env:AG_TOKEN}",  # secret reference
+            "$.reply",  # output_path
+            "stateless",  # session mode
+            "",  # authorization ref
+            "5",  # max rps
+            "100",  # max requests
+            "delete_account",  # blocklist
+        ]
+    )
+
+    run_wizard(out, prompter=prompter)
+
+    written_echoes = [e for e in prompter.echoes if "contract written to" in e]
+    assert written_echoes == [], (
+        f"wizard must not echo the written-path line (the CLI owns it); got {written_echoes}"
+    )
 
 
 def test_wizard_rejects_raw_secret_then_accepts_reference(tmp_path: Path) -> None:
