@@ -8,6 +8,11 @@
 
 ### Fixed
 
+## [1.0.0rc11] — 2026-06-09
+
+### Changed
+- **Dashboard & CLI UI polish (#121).** Severity bars now reveal their ASI-category breakdown on hover and drill into the Findings tab with the matching severity filter on click; the ASI radar colours each category vertex by its score band so critical/high categories stand out; the Findings and Probes KPI tiles open their tab on click; the Home page gains a copy-able launch command, scan-list refresh / auto-refresh controls, and viewer-localised timestamps; the events view gains per-event JSON copy. The Logs tab no longer claims a completed scan is "updating live" (offering a manual Refresh instead), the scan-plan and probes-table layouts were tightened, and the recon-agent now reports its capability-probe count in the CLI Turns column.
+
 ## [1.0.0rc10] — 2026-06-07
 
 ### Added
@@ -223,5 +228,6 @@ historical tag pointer at the bottom of this file but its scope is fully subsume
 
 See `docs/operator-checklist.md` for the full list.
 
+[1.0.0rc11]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc11
 [1.0.0rc10]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc10
 [1.0.0rc1]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc1
