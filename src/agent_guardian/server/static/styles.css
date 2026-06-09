@@ -330,6 +330,44 @@ code, .mono {
   background: rgba(139, 145, 153, 0.1);
   color: var(--muted-strong);
 }
+/* Failed / incomplete scan status (issue #112) — distinct from a clean "done"
+   row so a crashed scan can't be mistaken for a real result. */
+.pill-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--poor);
+  border-color: var(--poor);
+}
+/* Per-row delete control (issue #111). */
+.btn-delete {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--muted-strong);
+  background: transparent;
+  border: 1px solid rgba(139, 145, 153, 0.35);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.btn-delete:hover:not(:disabled) {
+  color: var(--poor);
+  border-color: var(--poor);
+  background: rgba(239, 68, 68, 0.08);
+}
+.btn-delete:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 .pill-band-excellent { background: rgba(22, 163, 74, 0.15); color: var(--excellent); border-color: var(--excellent); }
 .pill-band-good      { background: rgba(34, 197, 94, 0.15); color: var(--good); border-color: var(--good); }

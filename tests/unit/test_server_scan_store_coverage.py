@@ -139,6 +139,7 @@ def test_scan_summary_to_dict_roundtrips_all_fields() -> None:
         findings_count=3,
         created_at=created,
         is_running=True,
+        status="running",
     )
     out = s.to_dict()
     assert out == {
@@ -150,6 +151,7 @@ def test_scan_summary_to_dict_roundtrips_all_fields() -> None:
         "findings_count": 3,
         "created_at": created.isoformat(),
         "is_running": True,
+        "status": "running",
     }
 
 

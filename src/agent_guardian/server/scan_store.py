@@ -128,6 +128,28 @@ MAX_OPEN_JSONL_HANDLES: int = 256
 INDEX_FILENAME: str = "_index.json"
 
 
+# An index row still flagged ``is_running=True`` whose dir hasn't been touched
+# in this long is treated as failed/stale — the producing process crashed before
+# finalising (issue #112). A genuinely in-flight scan updates its mtime far more
+# often than this.
+STALE_RUNNING_AFTER_SECONDS = 900
+
+
+def _derive_status(*, is_running: bool, has_score: bool, mtime: float | None, now: float) -> str:
+    """Map a scan's persisted signals to a terminal dashboard status (issue #112).
+
+    Returns one of ``running`` / ``completed`` / ``failed``. A row flagged
+    running but untouched past :data:`STALE_RUNNING_AFTER_SECONDS` is ``failed``
+    (it never reached ``scan_done``); a finalised row with no real score is
+    ``failed``; otherwise ``completed``.
+    """
+    if is_running:
+        if mtime is not None and (now - mtime) > STALE_RUNNING_AFTER_SECONDS:
+            return "failed"
+        return "running"
+    return "completed" if has_score else "failed"
+
+
 @dataclass(frozen=True)
 class ScanSummary:
     """One row in the dashboard's scan-history list."""
@@ -140,6 +162,10 @@ class ScanSummary:
     findings_count: int | None
     created_at: datetime | None
     is_running: bool
+    # Terminal status for the dashboard (issue #112). Defaults to ``completed``
+    # so direct constructions elsewhere keep working; the listing path derives
+    # the real value (running / completed / failed).
+    status: str = "completed"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +177,7 @@ class ScanSummary:
             "findings_count": self.findings_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "is_running": self.is_running,
+            "status": self.status,
         }
 
 
@@ -456,6 +483,48 @@ class ScanStore:
         except OSError as exc:
             _LOG.warning("scan_store: failed to write index at %s (%s)", path, exc)
 
+    def delete_scan(self, scan_id: str) -> bool:
+        """Delete a stored scan directory + its index/cache rows (issue #111).
+
+        Path-contained: the ``scan_id`` must resolve to a direct sub-directory
+        of the scans root — any traversal / absolute / separator-bearing id is
+        rejected with :class:`ValueError` (mirrors the CLI ``scans delete``
+        safety). Returns ``True`` when something was removed (directory and/or
+        an index row), ``False`` when there was nothing to delete. Also drops
+        the scan from the in-memory running/started caches so a deleted scan
+        cannot linger anywhere the dashboard reads from.
+        """
+        import shutil
+
+        if (
+            not scan_id
+            or ".." in scan_id
+            or "\x00" in scan_id
+            or scan_id.startswith("/")
+            or "/" in scan_id
+            or "\\" in scan_id
+        ):
+            raise ValueError("invalid scan_id (must be a sub-directory of the scans root)")
+        target = self._root / scan_id
+        root_resolved = self._root.resolve(strict=False)
+        target_resolved = target.resolve(strict=False)
+        if target_resolved == root_resolved or not target_resolved.is_relative_to(root_resolved):
+            raise ValueError("scan_id escapes the scans root")
+
+        removed = False
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+            removed = True
+        # Drop from caches so it disappears from the running set / listing.
+        self._running.pop(scan_id, None)
+        self._scan_started_at.pop(scan_id, None)
+        index = self._index_read()
+        if scan_id in index:
+            del index[scan_id]
+            self._index_write(index)
+            removed = True
+        return removed
+
     def _index_upsert(self, scan_id: str, *, is_running: bool) -> None:
         """Upsert a row in the on-disk index from the freshest source.
 
@@ -530,6 +599,7 @@ class ScanStore:
                         findings_count=len(scan.findings),
                         created_at=scan.created_at,
                         is_running=True,
+                        status="running",
                     )
                 )
             else:
@@ -543,6 +613,7 @@ class ScanStore:
                         findings_count=None,
                         created_at=None,
                         is_running=True,
+                        status="running",
                     )
                 )
 
@@ -566,24 +637,42 @@ class ScanStore:
                     if created_at is not None
                     else float(row.get("mtime") or 0.0)
                 )
+                _aivss = row.get("aivss") if isinstance(row.get("aivss"), int) else None
+                _band = row.get("band") if isinstance(row.get("band"), str) else None
+                _findings = (
+                    row.get("findings_count")
+                    if isinstance(row.get("findings_count"), int)
+                    else None
+                )
+                _status = _derive_status(
+                    is_running=bool(row.get("is_running")),
+                    has_score=_aivss is not None,
+                    mtime=(
+                        float(row["mtime"]) if isinstance(row.get("mtime"), (int, float)) else None
+                    ),
+                    now=time.time(),
+                )
+                # #112 — a failed/stuck scan must not display a real-looking
+                # score; blank the numeric columns so only the status shows.
+                if _status != "completed":
+                    _aivss = _band = _findings = None
                 completed_rows.append(
                     (
                         sort_key,
                         ScanSummary(
                             scan_id=sid,
-                            aivss=row.get("aivss") if isinstance(row.get("aivss"), int) else None,
-                            band=row.get("band") if isinstance(row.get("band"), str) else None,
+                            aivss=_aivss,
+                            band=_band,
                             target_ref=row.get("target_ref")
                             if isinstance(row.get("target_ref"), str)
                             else None,
                             target_mode=row.get("target_mode")
                             if isinstance(row.get("target_mode"), str)
                             else None,
-                            findings_count=row.get("findings_count")
-                            if isinstance(row.get("findings_count"), int)
-                            else None,
+                            findings_count=_findings,
                             created_at=created_at,
-                            is_running=False,
+                            is_running=(_status == "running"),
+                            status=_status,
                         ),
                     )
                 )

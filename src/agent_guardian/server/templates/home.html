@@ -27,14 +27,17 @@
           <th scope="col">Band</th>
           <th scope="col">Findings</th>
           <th scope="col">When</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
       <tbody>
         {% for s in scans %}
-        <tr>
+        <tr data-row-scan-id="{{ s.scan_id }}">
           <td>
-            {% if s.is_running %}
+            {% if s.status == 'running' %}
             <span class="pill pill-running">live</span>
+            {% elif s.status == 'failed' %}
+            <span class="pill pill-failed" title="Scan did not finish — re-run">failed</span>
             {% else %}
             <span class="pill pill-done">done</span>
             {% endif %}
@@ -46,17 +49,19 @@
             {% if s.target_ref %}{{ s.target_mode }}: {{ s.target_ref }}{% else %}—{% endif %}
           </td>
           <td>
-            {% if s.is_running %}<span class="muted">—</span>
-            {% elif s.aivss is not none %}
+            {% if s.status == 'completed' and s.aivss is not none %}
             <span class="aivss aivss-{{ (s.band or '')|lower }}">{{ s.aivss }}</span>
-            {% else %}—{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
           </td>
           <td>
-            {% if s.is_running %}<span class="muted">—</span>
-            {% elif s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}—{% endif %}
+            {% if s.status == 'completed' and s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}<span class="muted">—</span>{% endif %}
           </td>
-          <td>{{ s.findings_count if s.findings_count is not none else '—' }}</td>
+          <td>{% if s.status == 'completed' and s.findings_count is not none %}{{ s.findings_count }}{% else %}<span class="muted">—</span>{% endif %}</td>
           <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '—' }}</td>
+          <td>
+            <button type="button" class="btn-delete" data-scan-id="{{ s.scan_id }}"
+                    title="Delete this scan" aria-label="Delete scan {{ s.scan_id }}">Delete</button>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -68,4 +73,5 @@
   </div>
   {% endif %}
 </section>
+<script type="module" src="/static/home.js"></script>
 {% endblock %}

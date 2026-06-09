@@ -158,12 +158,14 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
         home,
         reflections,
         scan,
+        scan_admin,
         swarm,
         transcripts,
     )
 
     app.include_router(home.router)
     app.include_router(scan.router)
+    app.include_router(scan_admin.router)
     app.include_router(findings.router)
     app.include_router(aivss.router)
     app.include_router(swarm.router)
