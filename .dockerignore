@@ -1,5 +1,10 @@
 .git
 .github
+# The image build needs the pinned-hash bootstrap requirements that live
+# under .github/requirements/ (Dockerfile COPYs docker-bootstrap.txt). Keep
+# the rest of .github out of the build context, but re-include that subtree
+# so `COPY .github/requirements/...` resolves.
+!.github/requirements
 .venv
 __pycache__
 .pytest_cache
