@@ -8,6 +8,11 @@
 
 ### Fixed
 
+## [1.0.0rc13] — 2026-06-09
+
+### Changed
+- **Public scan surface focused on the proven black-box modes (#127).** The CLI now leads with `--endpoint` (hosted agent), `--system-prompt` (zero-deploy prompt scan), and the in-process code target (`module:attr`). The framework-native modes (`--framework` / `--framework-ref`) are hidden from the public surface: the adapters invoke the agent but their tool/memory interception hooks are not yet wired, so a framework scan is black-box in-process and would imply white-box visibility it does not yet deliver. The code path still works and nothing was removed. Black-box endpoint scanning already covers the full OWASP ASI01–ASI10 taxonomy on observable compromise; trace-aware white-box detection (OpenTelemetry) is the roadmapped next step ([#126](https://github.com/glacien-technologies/agent-guardian/issues/126)).
+
 ## [1.0.0rc12] — 2026-06-09
 
 ### Fixed
@@ -235,6 +240,7 @@ historical tag pointer at the bottom of this file but its scope is fully subsume
 
 See `docs/operator-checklist.md` for the full list.
 
+[1.0.0rc13]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc13
 [1.0.0rc12]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc12
 [1.0.0rc11]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc11
 [1.0.0rc10]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc10
