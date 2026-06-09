@@ -31,6 +31,11 @@
              margin:0 0 12px; overflow:hidden; }
     .event__head { display:flex; gap:10px; align-items:center; padding:8px 14px;
                    border-bottom:1px solid var(--border); background:var(--head); }
+    .json-copy { margin-left:auto; font:600 11px system-ui,sans-serif; color:var(--muted);
+                 background:transparent; border:1px solid var(--border); border-radius:6px;
+                 padding:3px 10px; cursor:pointer; }
+    .json-copy:hover { color:var(--accent); border-color:var(--accent); }
+    .json-copy.copied { color:var(--str); border-color:var(--str); }
     .badge { font:600 11px system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase;
              color:var(--accent); background:#efe9fb; border-radius:6px; padding:2px 8px; }
     .meta { color:var(--muted); font:12px system-ui,sans-serif; }
@@ -57,6 +62,7 @@
           <span class="badge">{{ rec.kind }}</span>
           {% if rec.seq is not none %}<span class="meta">seq {{ rec.seq }}</span>{% endif %}
           <span class="meta">{{ rec.source }}</span>
+          <button type="button" class="json-copy" aria-label="Copy this event JSON">Copy</button>
         </div>
         <pre class="json">{{ rec.pretty }}</pre>
       </section>
@@ -84,6 +90,21 @@
       }
       document.querySelectorAll("pre.json").forEach(function (el) {
         el.innerHTML = highlight(el.textContent);
+      });
+      document.querySelectorAll(".json-copy").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var section = btn.closest(".event");
+          var pre = section && section.querySelector("pre.json");
+          if (!pre) { return; }
+          navigator.clipboard.writeText(pre.textContent).then(function () {
+            btn.textContent = "Copied";
+            btn.classList.add("copied");
+            setTimeout(function () {
+              btn.textContent = "Copy";
+              btn.classList.remove("copied");
+            }, 1200);
+          }).catch(function () {});
+        });
       });
     })();
   </script>

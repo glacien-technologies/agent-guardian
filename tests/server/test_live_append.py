@@ -292,10 +292,33 @@ def test_findings_tab_documents_live_append_contract(client: TestClient, store: 
 def test_logs_tab_lede_no_longer_advertises_f5(client: TestClient, store: ScanStore) -> None:
     """The Logs tab's lede used to read "press F5 to refresh" — that
     text is the user-visible footprint of the snapshot-only contract
-    we just reversed. Replaced with "updating live"."""
+    we just reversed.
+
+    A COMPLETED scan's log tail is static, so the lede must NOT claim it
+    is "updating live" (that misleads the operator); instead it offers a
+    manual Refresh affordance. The "updating live" flag is reserved for
+    in-flight (non-terminal) scans — see the running-scan test below."""
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _logs_pane(resp.text)
     assert "press <kbd>F5</kbd> to refresh" not in pane
+    # Terminal scan: no false live claim, but a manual refresh control.
+    assert "updating live" not in pane
+    assert "data-logs-refresh" in pane
+
+
+def test_logs_tab_lede_advertises_live_for_running_scan(
+    client: TestClient, store: ScanStore
+) -> None:
+    """An in-flight scan's log tail DOES update live, so the lede keeps the
+    "updating live" flag. A scan is in-flight when ``scan.partial.json`` is
+    present on disk and no terminal ``scan.json`` has been written yet."""
+    scan = _make_scan()
+    scan_dir = store.scan_dir(scan.id)
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    # Partial snapshot only (no terminal scan.json) → store.is_running == True.
+    (scan_dir / "scan.partial.json").write_text(scan.model_dump_json(indent=2), encoding="utf-8")
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _logs_pane(resp.text)
     assert "updating live" in pane

@@ -18,6 +18,7 @@
     'label': sev | upper,
     'count': counts[sev] | default(0),
     'anchor': '#exec-sev-' ~ sev,
+    'asi': (severity_asi_breakdown[sev] if severity_asi_breakdown is defined else []),
   }) %}
 {% endfor %}
 {% set _bar_payload = {'rows': _severity_rows} %}

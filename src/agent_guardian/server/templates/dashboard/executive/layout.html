@@ -108,6 +108,10 @@
       }
       var label = pill.querySelector('[data-scan-status-label]');
       if (label) { label.textContent = 'Completed'; }
+      // The logs tail stops updating once the scan is done — drop the
+      // "updating live." flag so it doesn't contradict the Completed status.
+      var liveFlag = document.querySelector('[data-logs-live-flag]');
+      if (liveFlag) { liveFlag.remove(); }
     },
   };
   </script>

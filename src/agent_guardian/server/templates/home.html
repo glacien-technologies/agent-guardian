@@ -10,11 +10,21 @@
 <section class="card launcher" aria-labelledby="launch-heading">
   <h2 id="launch-heading">Launch a scan</h2>
   <p class="muted">Scans are launched via the CLI. The dashboard streams progress live.</p>
-  <pre class="code"><code>agent-guardian scan --system-prompt prompt.txt --model stub</code></pre>
+  <div class="cmd-block">
+    <pre class="code"><code id="launch-cmd">agent-guardian scan --system-prompt prompt.txt --model gemini:gemini-3.5-flash --mode fast</code></pre>
+    <button type="button" class="btn-copy" data-copy-target="launch-cmd" aria-label="Copy command to clipboard">Copy</button>
+  </div>
 </section>
 
-<section aria-labelledby="history-heading">
-  <h2 id="history-heading" class="section-title">Recent scans ({{ scans|length }})</h2>
+<section id="scan-list-section" aria-labelledby="history-heading">
+  <div class="section-head">
+    <h2 id="history-heading" class="section-title">Recent scans ({{ scans|length }})</h2>
+    <div class="refresh-controls">
+      <button type="button" id="refresh-scans" class="btn-refresh" title="Refresh the scan list">↻ Refresh</button>
+      <label class="auto-refresh"><input type="checkbox" id="auto-refresh-scans"> Auto-refresh</label>
+    </div>
+  </div>
+  <div id="scan-list-body">
   {% if scans %}
   <div class="table-wrap">
     <table class="table">
@@ -57,7 +67,7 @@
             {% if s.status == 'completed' and s.band %}<span class="pill pill-band-{{ s.band|lower }}">{{ s.band }}</span>{% else %}<span class="muted">—</span>{% endif %}
           </td>
           <td>{% if s.status == 'completed' and s.findings_count is not none %}{{ s.findings_count }}{% else %}<span class="muted">—</span>{% endif %}</td>
-          <td class="muted">{{ s.created_at.strftime('%Y-%m-%d %H:%M') if s.created_at else '—' }}</td>
+          <td class="muted">{% if s.created_at %}<time class="localtime" datetime="{{ s.created_at.isoformat() }}">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</time>{% else %}—{% endif %}</td>
           <td>
             <button type="button" class="btn-delete" data-scan-id="{{ s.scan_id }}"
                     title="Delete this scan" aria-label="Delete scan {{ s.scan_id }}">Delete</button>
@@ -69,9 +79,10 @@
   </div>
   {% else %}
   <div class="card empty">
-    <p>No scans yet. Run <code>agent-guardian scan --system-prompt prompt.txt --model stub</code> in another terminal.</p>
+    <p>No scans yet. Run <code>agent-guardian scan</code> in another terminal.</p>
   </div>
   {% endif %}
+  </div>
 </section>
 <script type="module" src="/static/home.js"></script>
 {% endblock %}

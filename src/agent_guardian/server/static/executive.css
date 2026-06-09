@@ -3066,14 +3066,20 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   overflow-wrap: anywhere;
 }
 .exec-plan__sections {
-  display: grid;
-  /* Two readable columns rather than an auto-fit row of 5-6 narrow columns
-     (which scattered the groups and wrapped values like the dashboard URL). */
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 56px;
+  /* Two readable columns. CSS multi-column (rather than a 2-col grid) so each
+     column packs its groups tightly — a 2-col grid forced every row to the
+     height of its tallest cell, leaving a large empty gap below short groups
+     like OUTPUTS before SAFETY GUARDS (QA). */
+  column-count: 2;
+  column-gap: 56px;
 }
 .exec-plan__group {
   min-width: 0;
+  break-inside: avoid;
+  margin-bottom: 18px;
+}
+.exec-plan__group:last-child {
+  margin-bottom: 0;
 }
 .exec-plan__eyebrow {
   margin: 0 0 8px 0;
@@ -3305,7 +3311,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   /* Same 12px horizontal gutter as the header cells — equal, tight spacing
      between every column. */
   padding: 12px 12px;
-  vertical-align: middle;
+  /* Top-align so the STATUS / VERDICT pills line up with the first line of a
+     multi-line SUMMARY instead of floating to the row's vertical centre (QA). */
+  vertical-align: top;
 }
 .exec-probes-table__asi {
   display: inline-block;
@@ -3328,7 +3336,7 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
    name truncates with an ellipsis rather than shoving RUNS out of alignment. */
 .exec-probes-table__cell--agent {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
 }
 .exec-probes-table__agent {
   flex: 1 1 auto;
@@ -4237,4 +4245,33 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
     animation: none;
     transition: none;
   }
+}
+
+/* QA — FINDINGS / PROBES KPI tiles navigate to their tab. */
+.exec-kpi--clickable {
+  cursor: pointer;
+}
+.exec-kpi--clickable:hover {
+  border-color: var(--exec-brand);
+}
+.exec-kpi--clickable:focus-visible {
+  outline: 2px solid var(--exec-brand);
+  outline-offset: 2px;
+}
+
+/* QA — logs-tab refresh control. */
+.exec-logs-refresh {
+  margin-left: 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgba(139, 145, 153, 0.4);
+  border-radius: 6px;
+  padding: 2px 10px;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+.exec-logs-refresh:hover {
+  border-color: var(--exec-brand);
 }
