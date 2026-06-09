@@ -8,6 +8,11 @@
 
 ### Fixed
 
+## [1.0.0rc14] — 2026-06-09
+
+### Fixed
+- **Scan completeness no longer misreports an early-stopped scan as 0% covered (#129).** A FAST/SMART scan of a clean target could read `completeness=0% / Not Evaluated` even after exercising every agent: a deliberate variance EARLY_STOP cancels in-flight agents (`terminated_by="cancelled"`), and the completeness metric counted every `cancelled` agent as truncated. Completeness now credits a `cancelled` agent that ran ≥1 turn as completed **only** when the scan stopped via early-stop (distinguished from budget/abort via the scan-level stop reason); 0-turn cancellations and budget/abort stops stay truncated. A fast scan of a clean target now reports honest coverage with findings instead of a misleading 0%. It remains correctly non-authoritative — the independent coverage-grade and attacker-refusal gates are unchanged, so fast stays a smoke check and `--mode full` remains the path to a certifiable band.
+
 ## [1.0.0rc13] — 2026-06-09
 
 ### Changed
@@ -240,6 +245,7 @@ historical tag pointer at the bottom of this file but its scope is fully subsume
 
 See `docs/operator-checklist.md` for the full list.
 
+[1.0.0rc14]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc14
 [1.0.0rc13]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc13
 [1.0.0rc12]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc12
 [1.0.0rc11]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc11
