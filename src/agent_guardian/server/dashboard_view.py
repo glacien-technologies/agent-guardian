@@ -1524,6 +1524,19 @@ def build_dashboard_context(
     empty_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     counts = scan.findings_summary() if scan is not None else empty_counts
     findings_total = sum(counts.values())
+    # QA — severity-bar tooltip breakdown. For each severity, the ASI
+    # categories that contribute findings at that level (with per-category
+    # counts), e.g. ``{"critical": [{"asi": "ASI01", "count": 2}, ...]}``.
+    # Inverts ``findings_by_asi`` (already {asi: {severity: n}}) so the bar
+    # chart tooltip can name *which* threat classes drive each severity.
+    severity_asi_breakdown: dict[str, list[dict[str, object]]] = {
+        sev: [] for sev in ("critical", "high", "medium", "low")
+    }
+    for _asi_code in sorted(findings_by_asi):
+        _per_sev = findings_by_asi[_asi_code]
+        for _sev in ("critical", "high", "medium", "low"):
+            if _per_sev.get(_sev):
+                severity_asi_breakdown[_sev].append({"asi": _asi_code, "count": _per_sev[_sev]})
 
     if scan is not None:
         aivss_label: str | int = scan.aivss
@@ -1810,6 +1823,7 @@ def build_dashboard_context(
             f"−{counts['high'] * 0.4:.1f}" if counts["high"] else "0.0"  # noqa: RUF001
         ),
         "counts": counts,
+        "severity_asi_breakdown": severity_asi_breakdown,
         # At a glance
         "budget_label": "15:00 budget",
         "elapsed_pct": _fmt_pct((elapsed / 900.0) * 100.0 if elapsed else 0.0),

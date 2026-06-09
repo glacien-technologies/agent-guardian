@@ -369,6 +369,70 @@ code, .mono {
   border: 0;
 }
 
+/* Launch-command copy control (QA: needed a copy button + a real command). */
+.cmd-block {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.cmd-block .code {
+  flex: 1;
+  margin: 0;
+}
+.btn-copy {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--muted-strong);
+  background: transparent;
+  border: 1px solid rgba(139, 145, 153, 0.35);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  align-self: center;
+  white-space: nowrap;
+}
+.btn-copy:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Scan-list header + refresh controls (QA: refresh button + auto-refresh). */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.refresh-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.btn-refresh {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted-strong);
+  background: transparent;
+  border: 1px solid rgba(139, 145, 153, 0.35);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.btn-refresh:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.auto-refresh {
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
 .pill-band-excellent { background: rgba(22, 163, 74, 0.15); color: var(--excellent); border-color: var(--excellent); }
 .pill-band-good      { background: rgba(34, 197, 94, 0.15); color: var(--good); border-color: var(--good); }
 .pill-band-warning   { background: rgba(245, 158, 11, 0.15); color: var(--warning); border-color: var(--warning); }

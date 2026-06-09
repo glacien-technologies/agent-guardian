@@ -27,8 +27,15 @@
          hidden>
   <h2 class="exec-section-title">Scan log tail.</h2>
   <p class="exec-section-lede">
-    <span data-live="logs-count">{{ logs_tail | length }}</span> events &middot; updating live.
+    <span data-live="logs-count">{{ logs_tail | length }}</span> events{% if not is_terminal %} &middot; <span data-logs-live-flag>updating live.</span>{% endif %}
+    <button type="button" class="exec-logs-refresh" data-logs-refresh title="Reload the log tail">↻ Refresh</button>
   </p>
+  <script>
+    (function () {
+      var btn = document.querySelector("[data-logs-refresh]");
+      if (btn) { btn.addEventListener("click", function () { window.location.reload(); }); }
+    })();
+  </script>
   {% if logs_tail | length > 0 %}
     {# Filter toolbar — level chips (multi-select, default all on) + free-form
        search (substring, case-insensitive, 100ms debounce) + showing-X-of-Y

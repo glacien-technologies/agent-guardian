@@ -70,6 +70,31 @@
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") { closeAll(null); }
     });
+
+    // QA — the FINDINGS and PROBES tiles open their corresponding tab.
+    var navTiles = document.querySelectorAll(
+      '.exec-kpi[data-kpi="findings"], .exec-kpi[data-kpi="probes"]',
+    );
+    for (var j = 0; j < navTiles.length; j += 1) {
+      (function (tile) {
+        var tabId = tile.getAttribute("data-kpi");
+        tile.classList.add("exec-kpi--clickable");
+        tile.setAttribute("role", "link");
+        tile.setAttribute("tabindex", "0");
+        function go() {
+          var tab = document.getElementById("tab-" + tabId);
+          if (tab) { tab.click(); }
+        }
+        tile.addEventListener("click", function (ev) {
+          // Leave the ⓘ info button (and any inner control) to its own handler.
+          if (ev.target && ev.target.closest && ev.target.closest("button, a")) { return; }
+          go();
+        });
+        tile.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter") { ev.preventDefault(); go(); }
+        });
+      })(navTiles[j]);
+    }
   }
 
   if (document.readyState === "loading") {

@@ -450,6 +450,26 @@ def test_agent_done_zero_findings_does_not_grow_stream() -> None:
     assert len(tui._state.findings_streaming) == 0
 
 
+def test_recon_done_populates_recon_agent_turns_from_probe_count() -> None:
+    """QA-4 — recon's capability-probe count lands in the Turns column.
+
+    Recon emits ``recon_progress`` (probes_sent) rather than ``agent_progress``
+    turns, so the recon-agent row used to render "—". After ``recon_done`` the
+    Turns pair must reflect the real probe count as ``(n, n)``.
+    """
+    tui = ScanTUI(scan_id="s", target_ref="t", tier="auto")
+    tui.handle_event(_phase_event("recon_progress", activity="probing", probes_sent=17))
+    tui.handle_event(_phase_event("recon_done"))
+    assert tui._state.agent_turns["recon-agent"] == (17, 17)
+
+
+def test_recon_done_without_probes_leaves_turns_unset() -> None:
+    """No probes sent → no synthetic Turns entry (row still renders "—")."""
+    tui = ScanTUI(scan_id="s", target_ref="t", tier="auto")
+    tui.handle_event(_phase_event("recon_done"))
+    assert "recon-agent" not in tui._state.agent_turns
+
+
 def test_next_phase_after_unknown_returns_done() -> None:
     from agent_guardian.cli_tui import _next_phase_after
 

@@ -2819,7 +2819,7 @@ def print_scan_urls(
 def _await_plan_confirmation(
     *,
     yes: bool,
-    timeout_seconds: float = 5.0,
+    timeout_seconds: float = 10.0,
     stdin: Any = None,
     stdout: Any = None,
     environ: dict[str, str] | None = None,
@@ -2835,7 +2835,7 @@ def _await_plan_confirmation(
 
     Interactive path: print
 
-        Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 5s)
+        Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 10s)
 
     then :func:`select.select` on ``stdin`` until either the timer fires
     or any input arrives. ``KeyboardInterrupt`` → ``"abort"``.

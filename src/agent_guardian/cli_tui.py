@@ -384,6 +384,14 @@ class ScanTUI:
                 self._state.recon_probes_sent = sent
         elif kind == "recon_done":
             self._state.agent_status[_RECON_AGENT] = "done"
+            # QA-4 — surface recon's real activity count in the Turns column.
+            # Recon emits ``probes_sent`` (not ``agent_progress`` turns), so
+            # without this the recon-agent row rendered "—" as if it had run
+            # zero turns. Each capability probe is one recon turn; show it as
+            # n/n (terminal == the agent reached its final count).
+            if self._state.recon_probes_sent > 0:
+                n = self._state.recon_probes_sent
+                self._state.agent_turns[_RECON_AGENT] = (n, n)
             # Flush the last (current) band durably — it never saw a "next band"
             # to trigger its print.
             if self._state.recon_activity:

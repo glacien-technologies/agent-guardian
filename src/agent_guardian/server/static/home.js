@@ -7,6 +7,8 @@
  */
 function wireDeleteButtons() {
   document.querySelectorAll(".btn-delete").forEach((btn) => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "1";
     btn.addEventListener("click", async () => {
       const scanId = btn.dataset.scanId;
       if (!scanId) return;
@@ -39,4 +41,100 @@ function wireDeleteButtons() {
   });
 }
 
+/* Render UTC timestamps in the viewer's local time (QA: timestamps were GMT only). */
+function localizeTimes() {
+  document.querySelectorAll("time.localtime").forEach((el) => {
+    let iso = el.getAttribute("datetime");
+    if (!iso) return;
+    // A timestamp with no timezone suffix is stored UTC — mark it so Date() doesn't
+    // misread it as local.
+    if (!/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return;
+    el.textContent = d.toLocaleString([], {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    el.title = d.toString();
+  });
+}
+
+/* Generic copy-to-clipboard for any [data-copy-target] button. */
+function wireCopyButtons() {
+  document.querySelectorAll(".btn-copy[data-copy-target]").forEach((btn) => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", async () => {
+      const target = document.getElementById(btn.dataset.copyTarget);
+      if (!target) return;
+      try {
+        await navigator.clipboard.writeText(target.textContent.trim());
+        const orig = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => {
+          btn.textContent = orig;
+        }, 1200);
+      } catch (_e) {
+        /* clipboard unavailable (non-secure context) */
+      }
+    });
+  });
+}
+
+/* Soft-refresh just the scan-list body so the controls + scroll survive. */
+async function refreshScanList() {
+  try {
+    const res = await fetch(window.location.href, { headers: { "X-Requested-With": "fetch" } });
+    if (!res.ok) return;
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const fresh = doc.querySelector("#scan-list-body");
+    const current = document.querySelector("#scan-list-body");
+    if (fresh && current) {
+      current.replaceWith(fresh);
+      wireDeleteButtons();
+      localizeTimes();
+    }
+  } catch (_e) {
+    /* ignore — a failed refresh just keeps the current view */
+  }
+}
+
+const AUTO_REFRESH_KEY = "ag-home-autorefresh";
+let autoRefreshTimer = null;
+function setAutoRefresh(on) {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+  if (on) autoRefreshTimer = setInterval(refreshScanList, 10000);
+  try {
+    localStorage.setItem(AUTO_REFRESH_KEY, on ? "1" : "0");
+  } catch (_e) {
+    /* storage unavailable */
+  }
+}
+function wireRefreshControls() {
+  const btn = document.getElementById("refresh-scans");
+  if (btn) btn.addEventListener("click", refreshScanList);
+  const chk = document.getElementById("auto-refresh-scans");
+  if (chk) {
+    let saved = false;
+    try {
+      saved = localStorage.getItem(AUTO_REFRESH_KEY) === "1";
+    } catch (_e) {
+      /* storage unavailable */
+    }
+    chk.checked = saved;
+    setAutoRefresh(saved);
+    chk.addEventListener("change", () => setAutoRefresh(chk.checked));
+  }
+}
+
 wireDeleteButtons();
+wireCopyButtons();
+localizeTimes();
+wireRefreshControls();

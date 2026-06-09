@@ -82,6 +82,17 @@
   // tearing the chart down and re-instantiating on every 500ms snapshot).
   var asiRadarChart = null;
 
+  // QA-21 — map an ASI category score (0–100, higher == better defended) to a
+  // vertex colour. A low score means more adversarial surface exposed, so it
+  // reads in the severity palette: critical (<40), high (<70), else brand.
+  function radarPointColor(v) {
+    var n = typeof v === "number" ? v : parseFloat(v);
+    if (isNaN(n)) { return readToken("--exec-brand") || "#8b5cf6"; }
+    if (n < 40) { return readToken("--exec-sev-critical") || "#dc2626"; }
+    if (n < 70) { return readToken("--exec-sev-high") || "#ea580c"; }
+    return readToken("--exec-brand") || "#8b5cf6";
+  }
+
   function mountAsiRadar() {
     if (!window.Chart) { return; }
     var canvas = document.getElementById("exec-asi-radar");
@@ -108,10 +119,15 @@
             fill: true,
             backgroundColor: withAlpha(brand, 0.18),
             borderColor: brand,
-            pointBackgroundColor: brand,
+            // QA-21 — colour each vertex by its score band so a category in
+            // the critical / high range stands out from the healthy ones
+            // instead of every point reading as the same brand purple.
+            pointBackgroundColor: payload.values.map(radarPointColor),
             pointBorderColor: bgElev,
             pointHoverBackgroundColor: bgElev,
             pointHoverBorderColor: brand,
+            pointRadius: 4,
+            pointHoverRadius: 6,
             borderWidth: 2,
           },
         ],
@@ -191,6 +207,8 @@
       return;
     }
     ds.data = values;
+    // Keep the per-vertex severity colours (QA-21) in sync as scores move.
+    ds.pointBackgroundColor = values.map(radarPointColor);
     asiRadarChart.update("none"); // no entry animation on a live tick
   }
 
@@ -263,6 +281,16 @@
       });
       var counts = payload.rows.map(function (r) { return r.count || 0; });
       var anchors = payload.rows.map(function (r) { return r.anchor; });
+      var severities = payload.rows.map(function (r) { return r.severity; });
+      // QA-13b — per-severity ASI breakdown for the hover tooltip. Each row's
+      // ``asi`` is a list of {asi, count}; we pre-format the tooltip footer
+      // lines once so the Chart.js callback stays a cheap lookup.
+      var asiLines = payload.rows.map(function (r) {
+        if (!Array.isArray(r.asi) || !r.asi.length) { return []; }
+        return r.asi.map(function (e) {
+          return "  " + e.asi + " · " + e.count;
+        });
+      });
       var colors = payload.rows.map(function (r) {
         return readToken("--exec-sev-" + r.severity) || "#8b5cf6";
       });
@@ -316,11 +344,45 @@
               bodyColor: bgElev,
               padding: 10,
               displayColors: false,
+              callbacks: {
+                /* Body: the count line, then one line per contributing ASI
+                 * category. Lets an operator see at a glance which threat
+                 * classes drive this severity without leaving Overview. */
+                label: function (ctx) {
+                  var idx = ctx.dataIndex;
+                  var n = counts[idx] || 0;
+                  var lines = [n + (n === 1 ? " finding" : " findings")];
+                  var extra = asiLines[idx] || [];
+                  if (extra.length) {
+                    lines.push("by ASI category:");
+                    lines = lines.concat(extra);
+                  }
+                  return lines;
+                },
+              },
             },
           },
           onClick: function (_evt, els) {
             if (!els.length) { return; }
             var idx = els[0].index;
+            /* QA-13a — open the Findings tab and apply the matching severity
+             * filter, so a bar click drills straight into those findings.
+             * The tab switch is idempotent when already on Findings. */
+            var sev = severities[idx];
+            var findingsTab = document.getElementById("tab-findings");
+            if (findingsTab) { findingsTab.click(); }
+            var sevSelect = document.getElementById("exec-findings-filter-severity");
+            if (sevSelect && sev) {
+              var hasOption = false;
+              for (var oi = 0; oi < sevSelect.options.length; oi += 1) {
+                if (sevSelect.options[oi].value === sev) { hasOption = true; break; }
+              }
+              if (hasOption) {
+                sevSelect.value = sev;
+                sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+            /* Then scroll the matching severity grouping into view. */
             var anchor = anchors[idx];
             if (!anchor) { return; }
             /* getElementById is safer than querySelector when anchor is a
