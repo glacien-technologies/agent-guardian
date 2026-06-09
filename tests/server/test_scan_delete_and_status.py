@@ -60,7 +60,8 @@ def test_delete_route_round_trip(tmp_path: Path) -> None:
     assert not store.scan_dir("cli-route").exists()
 
     # Already gone → 404.
-    assert client.delete("/scan/cli-route").status_code == 404
+    second = client.delete("/scan/cli-route")
+    assert second.status_code == 404
 
 
 # --------------------------------------------------------------- #112 status

@@ -15,6 +15,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store
 
@@ -37,9 +38,12 @@ async def delete_scan(request: Request, scan_id: str) -> JSONResponse:
     store = get_scan_store(request)
     try:
         removed = await asyncio.to_thread(store.delete_scan, scan_id)
-    except ValueError as exc:
-        _LOG.warning("rejected delete for unsafe scan_id %r: %s", scan_id, exc)
-        return JSONResponse({"error": str(exc)}, status_code=400)
+    except ValueError:
+        # The scan_id is attacker-controlled: sanitise before logging (no log
+        # injection) and never echo the exception text back to the client (no
+        # information exposure) — a generic 400 is enough.
+        _LOG.warning("rejected delete for unsafe scan_id %r", sanitize_for_log(scan_id))
+        return JSONResponse({"error": "invalid scan id"}, status_code=400)
     if not removed:
         return JSONResponse({"error": "scan not found"}, status_code=404)
     return JSONResponse({"deleted": scan_id})
