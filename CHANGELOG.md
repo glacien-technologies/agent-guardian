@@ -8,6 +8,13 @@
 
 ### Fixed
 
+## [1.0.0rc12] — 2026-06-09
+
+### Fixed
+- **`init` no longer prints the confirmation twice (#110).** Interactive `init` echoed `contract written to <path>` from both the wizard and the CLI; the wizard's echo is dropped so the message prints exactly once in both `--yes` and interactive modes.
+- **`validate` target faults are no longer mislabeled as LLM errors (#109).** A target HTTP fault (DNS/connection/5xx) surfaced in the retry log as `LLMTransientError`, reading as if the operator's own judge/attacker model were broken. The target HTTP adapter now raises `TargetTransientError` / `TargetTimeoutError` (subclasses of the LLM error types, so retry/backoff behaviour is unchanged) — the retry log now names the target, not the LLM provider. Applies to contract-driven scans too, since the same transport is shared.
+- **`validate --stage X` now limits execution, not just display (#109).** The flag was a display filter — it still ran the full pre-flight, including the slow retrying probe stage. `--stage X` now halts the walk after stage X, so a connectivity-only check (`--stage connect`) no longer pays the probe cost.
+
 ## [1.0.0rc11] — 2026-06-09
 
 ### Changed
@@ -228,6 +235,7 @@ historical tag pointer at the bottom of this file but its scope is fully subsume
 
 See `docs/operator-checklist.md` for the full list.
 
+[1.0.0rc12]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc12
 [1.0.0rc11]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc11
 [1.0.0rc10]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc10
 [1.0.0rc1]: https://github.com/glacien-technologies/agent-guardian/releases/tag/v1.0.0rc1
