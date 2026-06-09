@@ -1486,6 +1486,13 @@ class AsiAgent(ABC):
             # the current turn's already-recorded findings.
             cancel_event = getattr(self, "_cancel_event", None)
             if cancel_event is not None and cancel_event.is_set():
+                # The swarm sets ``_cancel_event`` for EARLY_STOP *and* the
+                # budget watchdog *and* operator abort. The agent can't tell
+                # which here, so it always reports ``cancelled``; the scan-level
+                # ``_stopped_reason`` is the authoritative discriminator, and
+                # ``_build_completeness`` uses it to credit early-stop coverage
+                # (an early-stopped agent that ran >=1 turn did real work) while
+                # keeping budget/abort cancellations as truncations.
                 terminated_by = "cancelled"
                 _LOG.info(
                     "agent %s: cancellation requested — exiting at turn boundary (turns=%d findings=%d elapsed=%.1fs)",
