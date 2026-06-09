@@ -40,8 +40,8 @@ from agent_guardian.llm.errors import (
     LLMPermanentError,
     LLMRateLimitError,
     LLMResponseFormatError,
-    LLMTimeoutError,
-    LLMTransientError,
+    TargetTimeoutError,
+    TargetTransientError,
 )
 from agent_guardian.llm.retry import with_backoff
 from agent_guardian.models.multimodal import ProbeAttachment
@@ -381,9 +381,9 @@ class HttpAdapter(TargetAdapter):
         try:
             resp = await self._client.post(self._endpoint, json=body, headers=headers)
         except httpx.TimeoutException as exc:
-            raise LLMTimeoutError(f"http: timeout: {exc}") from exc
+            raise TargetTimeoutError(f"http: timeout: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise LLMTransientError(f"http: network error: {exc}") from exc
+            raise TargetTransientError(f"http: network error: {exc}") from exc
         _raise_for_status(resp)
         try:
             data = resp.json()
@@ -469,9 +469,9 @@ class HttpAdapter(TargetAdapter):
             try:
                 resp = await self._client.post(self._endpoint, json=body, headers=headers)
             except httpx.TimeoutException as exc:
-                raise LLMTimeoutError(f"http: timeout: {exc}") from exc
+                raise TargetTimeoutError(f"http: timeout: {exc}") from exc
             except httpx.HTTPError as exc:
-                raise LLMTransientError(f"http: network error: {exc}") from exc
+                raise TargetTransientError(f"http: network error: {exc}") from exc
             _raise_for_status(resp)
             try:
                 data = resp.json()
@@ -538,5 +538,5 @@ def _raise_for_status(resp: httpx.Response) -> None:
         _LOG.warning("http target 429 rate limited (retry_after=%s)", retry_after)
         raise LLMRateLimitError("http: rate limited", retry_after=retry_after)
     if resp.status_code == 408 or resp.status_code >= 500:
-        raise LLMTransientError(f"http: transient {resp.status_code}: {body_preview}")
+        raise TargetTransientError(f"http: transient {resp.status_code}: {body_preview}")
     raise LLMPermanentError(f"http: {resp.status_code} {body_preview}")

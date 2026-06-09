@@ -16,6 +16,8 @@ __all__ = [
     "LLMResponseFormatError",
     "LLMTimeoutError",
     "LLMTransientError",
+    "TargetTimeoutError",
+    "TargetTransientError",
 ]
 
 
@@ -45,6 +47,27 @@ class LLMTimeoutError(LLMError):
 
 class LLMTransientError(LLMError):
     """5xx / network blip — safe to retry."""
+
+
+class TargetTransientError(LLMTransientError):
+    """A transient fault talking to the **target under test** (not an LLM
+    provider) — DNS/connection failure or a 5xx from the target endpoint.
+
+    Subclasses :class:`LLMTransientError` so the shared retry/backoff wrapper
+    treats it identically (it is still retried), but the distinct class name
+    keeps target-transport faults from reading as an LLM-provider failure in
+    the retry log line and operator diagnostics. The target HTTP adapter
+    reuses the LLM retry taxonomy; this is the label that says "your target,
+    not your judge/attacker model".
+    """
+
+
+class TargetTimeoutError(LLMTimeoutError):
+    """A request to the **target under test** timed out (not an LLM provider).
+
+    See :class:`TargetTransientError` — same rationale, applied to the timeout
+    case so a slow/unreachable target doesn't surface as ``LLMTimeoutError``.
+    """
 
 
 class LLMPermanentError(LLMError):
