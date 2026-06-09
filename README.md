@@ -66,7 +66,7 @@ agent-guardian scan \
   --output pdf --output-path report.pdf
 ```
 
-To scan **your own** agent instead, swap `--endpoint` for any target — a hosted URL, a `--system-prompt` file, or a `--framework` object (see [What you can scan](#what-you-can-scan)).
+To scan **your own** agent instead, swap `--endpoint` for any target — a hosted URL or a `--system-prompt` file (see [What you can scan](#what-you-can-scan)).
 
 **4. Review the findings**
 
@@ -92,27 +92,17 @@ agent-guardian scan \
   --mode fast
 ```
 
-### Scan a LangGraph agent
+### Scan an in-process agent
 
 ```bash
-agent-guardian scan \
-  --framework langgraph \
-  --framework-ref my_app.graph:graph \
+agent-guardian scan my_app.agent:agent \
   --model gemini:gemini-3.5-flash \
   --mode smart
 ```
 
-### Scan a Google ADK agent
+Point AgentGuardian at any importable Python callable or agent object (`module:attr`) and it runs in-process — useful for pre-deploy and CI, with nothing to host.
 
-```bash
-agent-guardian scan \
-  --framework adk \
-  --framework-ref my_agent.agent:root_agent \
-  --model gemini:gemini-3.5-flash \
-  --mode smart
-```
-
-For more targets (MCP, OpenAPI, WebSocket, browser flows), see the [target adapters guide](https://docs.agentguardian.io/concepts/target-adapters).
+> **Roadmap — white-box agentic detection.** Today's scans are **black-box**: AgentGuardian drives the agent adversarially and detects compromise from what is observable (the response, returned data, and any tool calls the API exposes) across the full OWASP ASI taxonomy. Framework-native modes (LangGraph, CrewAI, AutoGen, OpenAI Agents, ADK, Strands) and OpenTelemetry trace correlation are in progress — they will read the agent's own tool/sub-agent traces to catch internal tool-misuse a clean reply can hide. Follow [#126](https://github.com/glacien-technologies/agent-guardian/issues/126).
 
 ## What AgentGuardian catches
 

@@ -3024,7 +3024,7 @@ def _attacker_quality_lines(scan_result: Scan) -> list[str]:
 def scan(
     target: str | None = typer.Argument(
         None,
-        help="Dotted path or file:attr -- e.g. 'my_agent:run'. Mutually exclusive with --system-prompt / --endpoint / --framework.",
+        help="In-process target: dotted path or file:attr -- e.g. 'my_agent:run'. Mutually exclusive with --system-prompt / --endpoint.",
     ),
     system_prompt: Path | None = typer.Option(
         None, "--system-prompt", help="Path to a system prompt file (prompt-only target)."
@@ -3032,9 +3032,16 @@ def scan(
     endpoint: str | None = typer.Option(
         None, "--endpoint", help="Hosted HTTP endpoint URL of the target agent."
     ),
+    # Framework-native mode is hidden from the OSS surface for now: the adapters
+    # invoke the agent but their tool/memory interception hooks are not yet wired
+    # (deferred), so a framework scan is black-box-in-process and would imply
+    # white-box visibility it doesn't yet deliver. The code path still works for
+    # power users; trace-aware white-box detection (OTel) is the roadmapped
+    # replacement that makes this mode earn its keep. See the OTel roadmap issue.
     framework: str | None = typer.Option(
         None,
         "--framework",
+        hidden=True,
         help=(
             "Framework kind. One of: "
             "adk, autogen, crewai, langgraph, openai_agents, strands. "
@@ -3044,6 +3051,7 @@ def scan(
     framework_ref: str | None = typer.Option(
         None,
         "--framework-ref",
+        hidden=True,
         help=(
             "With --framework: a Python dotted reference (MODULE:ATTR) to the "
             "framework-native object to wrap (e.g. 'my_app.graph:graph')."
