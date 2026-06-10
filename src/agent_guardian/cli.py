@@ -4512,10 +4512,16 @@ async def _run_scan_inner(
         coverage_pct = float(scan_result.completeness.pct)
         if coverage_pct < 100.0:
             coverage_label = f" coverage={coverage_pct:.0f}%"
+    # #134 — the headline counts only confirmed (success=True) findings;
+    # unconfirmed/informational records are called out separately so the
+    # number a user trusts never includes self-judged non-compromises.
+    confirmed_count = sum(1 for f in scan_result.findings if f.success)
+    informational_count = len(scan_result.findings) - confirmed_count
+    informational_label = f" (+{informational_count} informational)" if informational_count else ""
     typer.echo(
         f"scan {scan_id} done: AIVSS={aivss_label} band={band_label} "
-        f"tier={scan_result.tier.value} findings={len(scan_result.findings)}{coverage_label} "
-        f"report={output_path}"
+        f"tier={scan_result.tier.value} findings={confirmed_count}{informational_label}"
+        f"{coverage_label} report={output_path}"
     )
     # QA-072 — point the operator at the full raw trace + the structured
     # artifacts for reference / post-processing. The terminal stays quiet during

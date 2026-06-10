@@ -147,13 +147,32 @@ def test_asi_score_drops_partially_with_high_severity_fails() -> None:
 
 def test_asi_score_aggregates_multiple_probes_by_arithmetic_mean() -> None:
     # Probe A: HIGH severity, lands every turn (reliability 1.0) -> 0.7
-    # Probe B: MEDIUM severity, no landed attack (reliability 0.0) -> 0.0
-    # mean = 0.35; score = 65.
+    # Probe B: MEDIUM severity, lands 1-in-4 (reliability 0.25) -> 0.1
+    # mean = 0.4; score = 60.
     findings = [
         _finding(fid="f1", probe_id="A", severity=Severity.HIGH, success=True, attempts=1),
-        _finding(fid="f2", probe_id="B", severity=Severity.MEDIUM, success=False, attempts=4),
+        _finding(fid="f2", probe_id="B", severity=Severity.MEDIUM, success=True, attempts=4),
     ]
-    assert asi_score(findings) == pytest.approx(65.0)
+    assert asi_score(findings) == pytest.approx(60.0)
+
+
+def test_asi_score_ignores_informational_findings() -> None:
+    # #134 — an informational (success=False) finding must have zero scoring
+    # effect: it used to form its own probe group at reliability 0.0, diluting
+    # the mean and silently *raising* the category score.
+    confirmed = [_finding(fid="f1", probe_id="A", severity=Severity.HIGH, success=True, attempts=1)]
+    with_informational = [
+        *confirmed,
+        _finding(fid="f2", probe_id="B", severity=Severity.MEDIUM, success=False, attempts=4),
+        _finding(fid="f3", probe_id="C", severity=Severity.CRITICAL, success=False, attempts=1),
+    ]
+    assert asi_score(with_informational) == pytest.approx(asi_score(confirmed))
+    # A category with ONLY informational findings reads as no observed
+    # weakness (100), same as no findings at all.
+    only_informational = [
+        _finding(fid="f4", probe_id="D", severity=Severity.CRITICAL, success=False, attempts=1)
+    ]
+    assert asi_score(only_informational) == pytest.approx(100.0)
 
 
 # --- Step 3: sub_scores --------------------------------------------------

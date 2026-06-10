@@ -98,12 +98,29 @@ class GeminiClient(BaseLLM):
     def _parse_response(model: str, data: dict[str, Any]) -> LLMResponse:
         try:
             candidate = data["candidates"][0]
-            parts = candidate["content"]["parts"]
+            # Thinking models (gemini-2.5-pro and newer) can return a candidate
+            # whose ``content`` has NO ``parts`` at all — typically when
+            # ``finishReason=MAX_TOKENS`` because every output token was spent
+            # on internal "thoughts". That is a *valid* (if empty) response,
+            # not a malformed one: raising here used to kill the whole attack
+            # lane on the first such turn (#133). Mirror the tolerant Vertex
+            # parser: empty text + the mapped finish_reason, and let callers
+            # apply their empty-output fallbacks.
+            parts = (candidate.get("content") or {}).get("parts") or []
             text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
             usage_meta = data.get("usageMetadata") or {}
             raw_finish = candidate.get("finishReason", "STOP") or "STOP"
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMResponseFormatError(f"gemini: malformed response: {exc}") from exc
+        if not text:
+            thought_tokens = int((data.get("usageMetadata") or {}).get("thoughtsTokenCount", 0))
+            _LOG.warning(
+                "gemini: empty candidate text (finishReason=%s, thoughtsTokenCount=%d) — "
+                "a thinking model likely consumed the whole maxOutputTokens budget on "
+                "reasoning; returning empty text for the caller's fallback path",
+                raw_finish,
+                thought_tokens,
+            )
         prompt_tokens = int(usage_meta.get("promptTokenCount", 0))
         completion_tokens = int(usage_meta.get("candidatesTokenCount", 0))
         total_tokens = int(usage_meta.get("totalTokenCount", prompt_tokens + completion_tokens))

@@ -207,6 +207,52 @@ async def test_gemini_malformed_response_raises_format_error() -> None:
 
 
 @respx.mock
+async def test_gemini_thought_only_candidate_returns_empty_text() -> None:
+    # #133 — a thinking model (gemini-2.5-pro+) that spends the whole
+    # maxOutputTokens budget on internal reasoning returns a candidate whose
+    # ``content`` has NO ``parts``. That is a valid-but-empty response, not a
+    # malformed one: it must parse to empty text with finish_reason="length"
+    # so callers run their empty-output fallbacks instead of the whole attack
+    # lane dying on an LLMResponseFormatError.
+    body = {
+        "candidates": [
+            {
+                "content": {"role": "model"},
+                "finishReason": "MAX_TOKENS",
+            }
+        ],
+        "usageMetadata": {
+            "promptTokenCount": 12,
+            "totalTokenCount": 812,
+            "thoughtsTokenCount": 800,
+        },
+        "modelVersion": "gemini-2.5-pro",
+    }
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=body))
+    llm = GeminiClient(api_key="k")
+    resp = await llm.complete(_req())
+    assert resp.text == ""
+    assert resp.finish_reason == "length"
+    await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_missing_content_returns_empty_text() -> None:
+    # Sibling shape: candidate with no ``content`` key at all (seen on some
+    # SAFETY/MAX_TOKENS terminations). Same tolerance as the Vertex parser.
+    body = {
+        "candidates": [{"finishReason": "MAX_TOKENS"}],
+        "usageMetadata": {"promptTokenCount": 3, "totalTokenCount": 3},
+    }
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=body))
+    llm = GeminiClient(api_key="k")
+    resp = await llm.complete(_req())
+    assert resp.text == ""
+    assert resp.finish_reason == "length"
+    await llm.aclose()
+
+
+@respx.mock
 async def test_gemini_finish_reason_max_tokens_maps_to_length() -> None:
     body = _happy_body()
     body["candidates"][0]["finishReason"] = "MAX_TOKENS"  # type: ignore[index]

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_guardian.models.severity import Severity
 from agent_guardian.reports.sarif import (
     SARIF_SCHEMA,
     SARIF_VERSION,
@@ -14,7 +15,7 @@ from agent_guardian.reports.sarif import (
     emit_sarif,
     write_sarif,
 )
-from tests.unit._report_fixtures import make_scan
+from tests.unit._report_fixtures import make_finding, make_scan
 
 
 def test_emit_sarif_has_schema_and_version() -> None:
@@ -49,11 +50,21 @@ def test_emit_sarif_results_match_findings() -> None:
 
 def test_emit_sarif_levels_for_each_severity() -> None:
     log = emit_sarif(make_scan())
-    levels = {r["level"] for r in log["runs"][0]["results"]}
-    # Our fixture has critical/high/medium/low → error, error, warning, note.
-    assert "error" in levels
-    assert "warning" in levels
-    assert "note" in levels
+    by_id = {r["properties"]["finding_id"]: r["level"] for r in log["runs"][0]["results"]}
+    # critical/high (confirmed) → error; low (confirmed) → note.
+    assert by_id["f_001"] == "error"
+    assert by_id["f_002"] == "error"
+    assert by_id["f_004"] == "note"
+    # #134 — the fixture's medium finding is informational (success=False):
+    # it must be downgraded to ``note`` instead of annotating CI at its
+    # severity face value ("warning").
+    assert by_id["f_003"] == "note"
+
+
+def test_emit_sarif_confirmed_medium_is_warning() -> None:
+    scan = make_scan(findings=[make_finding(id="f_m", severity=Severity.MEDIUM, success=True)])
+    log = emit_sarif(scan)
+    assert [r["level"] for r in log["runs"][0]["results"]] == ["warning"]
 
 
 def test_emit_sarif_rules_are_unique_and_sorted() -> None:
