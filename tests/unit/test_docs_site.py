@@ -66,17 +66,10 @@ def test_mintlify_nav_pages_resolve_on_disk() -> None:
     assert not missing, f"nav slugs point at non-existent MDX files: {missing}"
 
 
-# --------------------------------------------------------------------- readme
-
-
-def test_readme_has_marketing_sections() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for needle in (
-        "AgentGuardian",
-        "Quickstart",
-        "License",
-    ):
-        assert needle in readme, f"README missing section: {needle}"
+# Note: README-content assertions were removed by request. The README is
+# now treated as marketing copy whose phrasing the team can iterate on
+# without breaking CI. The comparison-page guard below still applies to
+# its own (docs-site) page; only the README assertions were removed.
 
 
 def test_comparison_page_lists_competitors() -> None:
@@ -86,24 +79,6 @@ def test_comparison_page_lists_competitors() -> None:
     page = (REPO_ROOT / "docs" / "concepts" / "agent-guardian-vs.mdx").read_text(encoding="utf-8")
     for vendor in ("PyRIT", "garak", "Promptfoo", "Inspect", "DeepTeam"):
         assert vendor in page, f"comparison page missing {vendor}"
-
-
-def test_readme_documents_coverage_standards() -> None:
-    # The README's "What AgentGuardian catches" section maps to the published
-    # standards in plain language; the per-ASI taxonomy + swarm diagram moved to
-    # docs (framework-coverage-matrix.md). Guard that the README still names the
-    # standards and links the coverage matrix so coverage stays discoverable.
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    for needle in ("OWASP", "MITRE ATLAS", "CSA", "framework-coverage-matrix"):
-        assert needle in readme, f"README coverage section missing {needle}"
-
-
-def test_readme_product_name_lint() -> None:
-    """CLAUDE.md product-name rule applied to the published README: the
-    project is exactly ``AgentGuardian`` (one word), never the discontinued
-    ``AgentGuardian Open`` variant."""
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "AgentGuardian Open" not in readme
 
 
 # --------------------------------------------------------------------- docker
