@@ -8,13 +8,15 @@
 
 ---
 
-AgentGuardian is an open-source red-teaming toolkit for AI agents. It scans your agent, maps the attack surface, runs the relevant adversarial agents, and generates evidence-backed findings — so you fix the vulnerabilities before they reach production.
+AgentGuardian is an open-source red-teaming toolkit for AI agents. It scans your agent, maps the attack surface, runs the relevant adversarial agents, and generates evidence-backed findings for you to review — and fix the vulnerabilities before they reach production.
+
+<p align="center">
+  <img src="./docs/images/agentguardian-demo.gif" alt="AgentGuardian finding vulnerabilities in a live scan" width="800">
+</p>
 
 <p align="center">
   <img src="./docs/images/swarm-diagrams/agentguardian-security-loop.jpg" alt="AgentGuardian recon, OWASP ASI probe generation, findings, reports, and fix-rerun loop" width="900">
 </p>
-
-<p align="center">▶ <b><a href="https://youtu.be/AD-CIIccklA">Watch the demo</a></b> — AgentGuardian finding vulnerabilities in a live scan.</p>
 
 ## Quickstart
 
