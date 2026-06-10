@@ -112,7 +112,7 @@ def _minimal_ctx(**overrides: Any) -> ScanPlanContext:
         ),
         budget=BudgetRow(
             mode="full",
-            mode_threshold_pct=95.0,
+            mode_threshold_pct=85.0,
             wall_seconds_cap=900,
             usd_cap=0.10,
             estimated_cost_lo=0.04,
@@ -280,7 +280,7 @@ def test_panel_renders_budget_uncapped_when_no_caps() -> None:
     """Uncapped budget rows say "uncapped" rather than echoing 0."""
     budget = BudgetRow(
         mode="full",
-        mode_threshold_pct=95.0,
+        mode_threshold_pct=85.0,
         wall_seconds_cap=None,
         usd_cap=None,
         estimated_cost_lo=0.04,
@@ -393,7 +393,7 @@ def test_panel_budget_wall_clock_minutes_only() -> None:
     """Wall-clock cap on a minute boundary renders as ``N min``."""
     budget = BudgetRow(
         mode="full",
-        mode_threshold_pct=95.0,
+        mode_threshold_pct=85.0,
         wall_seconds_cap=120,
         usd_cap=None,
         estimated_cost_lo=0.04,

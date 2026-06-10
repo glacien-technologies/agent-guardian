@@ -53,7 +53,13 @@ MODE_AUTHORITATIVE_THRESHOLDS: Mapping[ScanModeStr, float] = MappingProxyType(
     {
         "fast": 60.0,
         "smart": 80.0,
-        "full": 95.0,
+        # 85 (was 95): with the full 16-agent slate each agent is worth ~6.25%,
+        # so a 95% floor left ZERO tolerance for a single transient failure
+        # (1 of 16 erroring = 93.75% < 95% → NOT_EVALUATED). Real scans lose the
+        # odd agent to a transient target timeout / 5xx or an LLM-provider 500
+        # despite the adapter's retries; 85% tolerates ~2 such hiccups out of 16
+        # while still refusing to certify a genuinely-undercovered scan.
+        "full": 85.0,
     }
 )
 

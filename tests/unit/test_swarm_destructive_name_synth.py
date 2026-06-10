@@ -334,4 +334,4 @@ async def test_smart_mode_with_high_completeness_is_not_authoritative() -> None:
 def test_min_authoritative_completeness_thresholds() -> None:
     assert SwarmCommander._MIN_AUTHORITATIVE_COMPLETENESS[ScanMode.FAST] == 60.0
     assert SwarmCommander._MIN_AUTHORITATIVE_COMPLETENESS[ScanMode.SMART] == 80.0
-    assert SwarmCommander._MIN_AUTHORITATIVE_COMPLETENESS[ScanMode.FULL] == 95.0
+    assert SwarmCommander._MIN_AUTHORITATIVE_COMPLETENESS[ScanMode.FULL] == 85.0
