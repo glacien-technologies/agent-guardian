@@ -15,7 +15,15 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
-        exclude: ^uv\.lock$
+        # The 500 KB cap is intentional — every committed image/PDF in
+        # the repo sits well under it. Exceptions live here, named
+        # explicitly so a future accidental large binary still gets
+        # caught:
+        #   * uv.lock — deterministic dep lockfile, grows over time.
+        #   * agentguardian-demo.gif — README hero asset (~6 MB); a
+        #     decent-quality demo of the launch render does not fit
+        #     under 500 KB. Replace, don't bypass for other files.
+        exclude: ^(uv\.lock|docs/images/agentguardian-demo\.gif)$
       - id: detect-private-key
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
