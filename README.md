@@ -275,7 +275,7 @@ By participating you agree to [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) and t
 
 ## Community
 
-Join us on [Discord](https://discord.gg/h4FRgxvr) for quickstart help, probe design, adapter questions, and roadmap discussion. For longer-form support channels, see the [support guide](https://docs.agentguardian.io/community/support).
+Join us on [Discord](https://discord.gg/X6UFKYXdBJ) for quickstart help, probe design, adapter questions, and roadmap discussion. For longer-form support channels, see the [support guide](https://docs.agentguardian.io/community/support).
 
 ## Security
 

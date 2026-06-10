@@ -39,6 +39,7 @@
         "pages": [
           "try/scan-rest-api",
           "try/scan-langgraph",
+          "try/scan-openai-agents",
           "try/scan-crewai",
           "try/scan-mcp-server",
           "try/scan-rag-app",
@@ -176,7 +177,7 @@
         },
         {
           "anchor": "Discord",
-          "href": "https://discord.gg/h4FRgxvr",
+          "href": "https://discord.gg/X6UFKYXdBJ",
           "icon": "message-square"
         }
       ]
