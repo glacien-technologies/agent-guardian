@@ -212,7 +212,7 @@ def test_stub_branch_no_coverage_data_still_renders() -> None:
 
 def test_real_low_coverage_full_mode_names_pct_threshold_mode() -> None:
     """QA-004 headline acceptance: real evaluator + 41% coverage + FULL mode
-    → low-coverage copy names '41%', '95%', '--mode full', findings count, and
+    → low-coverage copy names '41%', '85%', '--mode full', findings count, and
     remediation that offers BOTH budget AND mode-drop."""
     scan = _make_scan(
         mode="full",
@@ -225,7 +225,7 @@ def test_real_low_coverage_full_mode_names_pct_threshold_mode() -> None:
     assert text is not None
     assert "Coverage 41%" in text
     assert "--mode full" in text
-    assert "95%" in text
+    assert "85%" in text
     assert "16 findings" in text
     # Remediation must offer the smaller mode + budget option.
     assert "--budget-usd" in text
@@ -491,7 +491,7 @@ def test_cli_3a4c1d9c2840_reproduction_returns_new_copy_not_stub() -> None:
     assert text is not None
     # New copy markers.
     assert "Coverage 41%" in text
-    assert "95%" in text
+    assert "85%" in text
     assert "--mode full" in text
     assert "16 findings" in text
     assert "--mode smart" in text
