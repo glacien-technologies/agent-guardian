@@ -138,6 +138,12 @@ def _build_rules(findings: list[Finding]) -> list[dict[str, Any]]:
 
 
 def _build_result(finding: Finding) -> dict[str, Any]:
+    # #134 — an informational finding (success=False: unconfirmed
+    # ``vulnerable`` / capability-exposure note) must not annotate CI at its
+    # severity face value; it is emitted at SARIF level ``note`` so a build
+    # gate keyed on error/warning only trips on confirmed compromises. The
+    # original severity stays in ``properties.aivss_severity``.
+    level = _sarif_level(finding.severity.value) if finding.success else "note"
     props: dict[str, Any] = {
         "aivss_severity": finding.severity.value,
         "asi": finding.asi.value,
@@ -163,7 +169,7 @@ def _build_result(finding: Finding) -> dict[str, Any]:
         props["pov_reliability"] = finding.pov_reliability
     return {
         "ruleId": finding.probe_id,
-        "level": _sarif_level(finding.severity.value),
+        "level": level,
         "message": {"text": finding.summary},
         "properties": props,
     }

@@ -239,13 +239,20 @@ def _humanise_seconds(seconds: float) -> str:
 
 
 def _count_findings_by_asi(scan: Scan | None) -> dict[str, dict[str, int]]:
-    """Return ``{asi_code: {critical, high, medium, low}}`` for the scan."""
+    """Return ``{asi_code: {critical, high, medium, low}}`` for the scan.
+
+    Counts *confirmed* (``success=True``) findings only, mirroring
+    :meth:`Scan.findings_summary` (#134) so the per-ASI rows and the KPI tile
+    derive from the same trusted numbers.
+    """
     out: dict[str, dict[str, int]] = {
         c.value: {"critical": 0, "high": 0, "medium": 0, "low": 0} for c in AsiCategory
     }
     if scan is None:
         return out
     for f in scan.findings:
+        if not f.success:
+            continue
         bucket = out[f.asi.value]
         if f.severity is Severity.CRITICAL:
             bucket["critical"] += 1
@@ -262,6 +269,7 @@ def _build_kpi_hover_tables(
     *,
     counts: dict[str, int],
     findings_total: int,
+    informational: int = 0,
 ) -> dict[str, list[dict[str, str]]]:
     """Build the FINDINGS-tile hover data-table payload.
 
@@ -286,6 +294,11 @@ def _build_kpi_hover_tables(
         {"label": "Low", "value": str(counts.get("low", 0))},
         {"label": "Total", "value": str(findings_total)},
     ]
+    # #134 — severity counts above are confirmed-only; the findings table on
+    # the same page lists informational records too, so name the remainder
+    # here to keep the two surfaces reconcilable at a glance.
+    if informational:
+        findings_rows.append({"label": "Informational", "value": str(informational)})
     return {"findings": findings_rows}
 
 
@@ -1787,6 +1800,7 @@ def build_dashboard_context(
         "kpi_hover_tables": _build_kpi_hover_tables(
             counts=counts,
             findings_total=findings_total,
+            informational=scan.informational_count() if scan is not None else 0,
         ),
         # QA-028 sub-ask 2 — per-tile inline-SVG mini-charts. The KPI strip
         # template reads this dict to draw a 64px-tall visualisation inside

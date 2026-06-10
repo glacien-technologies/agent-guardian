@@ -326,6 +326,21 @@ def test_scan_findings_summary_counts_by_severity() -> None:
     assert scan.findings_summary() == {"critical": 1, "high": 2, "medium": 0, "low": 1}
 
 
+def test_scan_findings_summary_excludes_informational() -> None:
+    # #134 — findings whose own verdict is not a compromise (success=False,
+    # e.g. verdict_v2="vulnerable") must not inflate the severity counts a
+    # user trusts; they are surfaced via informational_count() instead.
+    findings = [
+        _make_finding(id="f1", severity=Severity.CRITICAL),
+        _make_finding(id="f2", severity=Severity.CRITICAL, success=False),
+        _make_finding(id="f3", severity=Severity.HIGH, success=False),
+        _make_finding(id="f4", severity=Severity.LOW),
+    ]
+    scan = _make_scan(findings=findings)
+    assert scan.findings_summary() == {"critical": 1, "high": 0, "medium": 0, "low": 1}
+    assert scan.informational_count() == 2
+
+
 def test_scan_round_trips() -> None:
     scan = _make_scan(findings=[])
     assert Scan.model_validate(scan.model_dump()) == scan

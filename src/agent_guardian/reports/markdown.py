@@ -86,7 +86,7 @@ def _undertested_badge_line(scan: Scan) -> str:
 
 def _summary_table(scan: Scan) -> str:
     summary = scan.findings_summary()
-    return (
+    table = (
         "| Severity | Count |\n"
         "|----------|------:|\n"
         f"| Critical | {summary['critical']} |\n"
@@ -95,6 +95,16 @@ def _summary_table(scan: Scan) -> str:
         f"| Low      | {summary['low']} |\n"
         f"| **Total** | **{sum(summary.values())}** |\n"
     )
+    # #134 — counts above are confirmed compromises only; surface the
+    # unconfirmed remainder so the table and the findings list reconcile.
+    informational = scan.informational_count()
+    if informational:
+        table += (
+            f"\n_{informational} additional informational (unconfirmed) "
+            "finding(s) are recorded in the findings list but excluded from "
+            "the severity counts and the score._\n"
+        )
+    return table
 
 
 def _asi_section(scan: Scan, findings: list[Finding]) -> str:

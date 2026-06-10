@@ -179,9 +179,17 @@ def asi_score(findings_in_category: Iterable[Finding]) -> float:
     one-in-twelve exploit weighs far less than one that lands every turn,
     per the PRD §6 Step 2 docstring (and fixing finding #17, where the old
     ``sum(attempt_count)`` arithmetic pinned every finding to fail_rate 1.0).
+
+    Only *confirmed* findings (``success=True``) participate (#134): an
+    informational finding (``vulnerable`` / capability-exposure note) used to
+    form its own probe group with reliability 0.0, which diluted the mean and
+    silently *raised* the category score — an unconfirmed observation must
+    have zero scoring effect, in either direction.
     """
     by_probe: dict[str, list[Finding]] = {}
     for finding in findings_in_category:
+        if not finding.success:
+            continue
         by_probe.setdefault(finding.probe_id, []).append(finding)
 
     if not by_probe:

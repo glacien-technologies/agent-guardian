@@ -77,7 +77,12 @@ def summary_row(
             "aivss": report.get("aivss"),
             "band": report.get("band"),
             "tier": report.get("tier"),
-            "findings_total": len(report.get("findings") or []),
+            # #134 — confirmed findings only, so the FINDINGS column always
+            # reconciles with findings_by_severity below (both derive from
+            # the confirmed-only findings_summary). The unconfirmed remainder
+            # travels separately.
+            "findings_total": sum(dict(report.get("findings_summary") or {}).values()),
+            "findings_informational": int(report.get("findings_informational") or 0),
             "findings_by_severity": dict(report.get("findings_summary") or {}),
             "refusal_rate": float(
                 (report.get("coverage") or {}).get("attacker_refusal_rate", 0.0) or 0.0

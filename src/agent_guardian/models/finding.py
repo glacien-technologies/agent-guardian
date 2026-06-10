@@ -70,6 +70,13 @@ class Finding(BaseModel):
     # alongside what happened (trigger_response / evidence_quote), the reader
     # sees what should have happened. ``None`` for probes without the metadata.
     expected_safe_behavior: str | None = None
+    # #136 — cross-category de-duplication. When several ASI lanes elicited the
+    # byte-identical target response, finalise keeps the finding in a single
+    # owning category and folds the other categories in here (sorted ASI value
+    # strings, e.g. ``["ASI03", "ASI10"]``) so the cross-lane signal survives
+    # as a cross-reference instead of as duplicate findings with conflicting
+    # severities. Empty for findings that were never deduplicated against.
+    related_asi: list[str] = Field(default_factory=list)
 
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.

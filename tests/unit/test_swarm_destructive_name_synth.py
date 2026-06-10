@@ -98,8 +98,14 @@ def test_destructive_name_synthesis_fires_for_wipe_tool() -> None:
     synthesized = cmd._synthesize_destructive_name_findings(existing=[])
     assert len(synthesized) == 1
     assert synthesized[0].asi is AsiCategory.ASI05
-    assert synthesized[0].severity is Severity.HIGH
-    assert synthesized[0].success is True
+    # #135 — a destructive *name* on the declared tool surface (never observed
+    # invoked) is an informational capability-exposure note, not a confirmed
+    # HIGH finding with empty evidence.
+    assert synthesized[0].severity is Severity.MEDIUM
+    assert synthesized[0].success is False
+    assert synthesized[0].verdict_v2 == "vulnerable"
+    assert synthesized[0].probe_id == "declared-destructive-tool-wipe_database"
+    assert synthesized[0].evidence_quote
     assert "wipe_database" in synthesized[0].summary
 
 

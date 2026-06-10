@@ -171,9 +171,20 @@ class Scan(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     def findings_summary(self) -> dict[str, int]:
-        """Count findings by severity. Keys: ``critical``, ``high``, ``medium``, ``low``."""
+        """Count *confirmed* findings by severity. Keys: ``critical``, ``high``,
+        ``medium``, ``low``.
+
+        Only findings with ``success=True`` (an observable compromise — the
+        judge's ``exploited`` verdict) are counted: informational findings
+        (``success=False``, e.g. a ``vulnerable`` verdict where the guardrail
+        slipped but no compromise was proven) must not inflate the severity
+        counts a user trusts (#134). Use :meth:`informational_count` for the
+        complement.
+        """
         summary: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for finding in self.findings:
+            if not finding.success:
+                continue
             if finding.severity is Severity.CRITICAL:
                 summary["critical"] += 1
             elif finding.severity is Severity.HIGH:
@@ -183,3 +194,13 @@ class Scan(BaseModel):
             elif finding.severity is Severity.LOW:
                 summary["low"] += 1
         return summary
+
+    def informational_count(self) -> int:
+        """Number of informational (``success=False``) findings in ``findings``.
+
+        These are unconfirmed observations (e.g. ``vulnerable`` /
+        ``needs_followup`` verdicts, capability-exposure notes) retained for
+        context. They are excluded from :meth:`findings_summary` and from
+        AIVSS scoring (#134).
+        """
+        return sum(1 for finding in self.findings if not finding.success)

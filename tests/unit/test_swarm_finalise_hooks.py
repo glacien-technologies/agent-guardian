@@ -161,6 +161,11 @@ def test_synthesize_blocklisted_tool_findings() -> None:
     assert all(f.severity is Severity.HIGH for f in synthesized)
     assert all(f.asi is AsiCategory.ASI05 for f in synthesized)
     assert all(f.success for f in synthesized)
+    # #135 — the observed-invocation tier must be self-evidencing: a confirmed
+    # finding can no longer ship verdict_v2=None / empty evidence fields.
+    assert all(f.verdict_v2 == "exploited" for f in synthesized)
+    assert all(f.evidence_quote for f in synthesized)
+    assert all(f.evidence_types for f in synthesized)
     tools_named = " ".join(f.summary for f in synthesized)
     assert "wipe_database" in tools_named
     assert "drop_table" in tools_named
@@ -195,6 +200,107 @@ def test_synthesize_skips_already_reported_tool() -> None:
 def test_synthesize_returns_empty_without_roe() -> None:
     cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
     assert cmd._synthesize_blocklisted_tool_findings(existing=[]) == []
+
+
+# --- #136 cross-category de-duplication ----------------------------------
+
+
+def _dup_finding(
+    fid: str,
+    asi: AsiCategory,
+    *,
+    severity: Severity = Severity.HIGH,
+    success: bool = True,
+    confidence: float = 0.9,
+    response: str | None = "OVERRIDE_OK",
+) -> Finding:
+    return Finding(
+        id=fid,
+        probe_id=f"{asi.value}-P-001",
+        asi=asi,
+        mitre_atlas=["AML.T0050"],
+        csa_category=CsaCategory.AGENT_CRITICAL_SYSTEM_INTERACTION,
+        severity=severity,
+        attempt_count=1,
+        success=success,
+        confidence=confidence,
+        summary=f"{asi.value} attack landed",
+        trigger_response=response,
+        created_at=datetime(2026, 5, 27, tzinfo=UTC),
+    )
+
+
+def test_dedupe_collapses_identical_response_across_categories() -> None:
+    cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
+    findings = [
+        _dup_finding("f1", AsiCategory.ASI01, severity=Severity.CRITICAL),
+        _dup_finding("f2", AsiCategory.ASI03, severity=Severity.HIGH),
+        _dup_finding("f3", AsiCategory.ASI08, severity=Severity.MEDIUM),
+        _dup_finding("f4", AsiCategory.ASI10, severity=Severity.HIGH),
+    ]
+    deduped = cmd._dedupe_cross_category_findings(findings)
+    assert len(deduped) == 1
+    owner = deduped[0]
+    # The single owning finding is the highest-severity one; the dropped
+    # categories survive as cross-references, not as duplicate findings.
+    assert owner.asi is AsiCategory.ASI01
+    assert owner.severity is Severity.CRITICAL
+    assert owner.related_asi == ["ASI03", "ASI08", "ASI10"]
+
+
+def test_dedupe_normalises_whitespace_and_case() -> None:
+    cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
+    findings = [
+        _dup_finding("f1", AsiCategory.ASI01, response="OK,  command\nexecuted."),
+        _dup_finding("f2", AsiCategory.ASI07, response="ok, command executed."),
+    ]
+    deduped = cmd._dedupe_cross_category_findings(findings)
+    assert len(deduped) == 1
+
+
+def test_dedupe_prefers_confirmed_over_informational_owner() -> None:
+    cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
+    findings = [
+        # CRITICAL but unconfirmed vs HIGH confirmed — the confirmed finding
+        # must own the group.
+        _dup_finding("f1", AsiCategory.ASI01, severity=Severity.CRITICAL, success=False),
+        _dup_finding("f2", AsiCategory.ASI10, severity=Severity.HIGH, success=True),
+    ]
+    deduped = cmd._dedupe_cross_category_findings(findings)
+    assert len(deduped) == 1
+    assert deduped[0].id == "f2"
+    assert deduped[0].related_asi == ["ASI01"]
+
+
+def test_dedupe_keeps_distinct_responses_and_same_category_repeats() -> None:
+    cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
+    findings = [
+        # Same category, identical response twice — kept (repeat-landing is
+        # reliability signal, not cross-category duplication).
+        _dup_finding("f1", AsiCategory.ASI01),
+        _dup_finding("f2", AsiCategory.ASI01),
+        # Different response — kept.
+        _dup_finding("f3", AsiCategory.ASI03, response="a completely different reply"),
+        # No captured response — exempt from dedup.
+        _dup_finding("f4", AsiCategory.ASI05, response=None),
+        _dup_finding("f5", AsiCategory.ASI06, response=""),
+    ]
+    deduped = cmd._dedupe_cross_category_findings(findings)
+    assert [f.id for f in deduped] == ["f1", "f2", "f3", "f4", "f5"]
+
+
+def test_dedupe_owner_category_keeps_all_its_findings() -> None:
+    cmd = _commander(attacker=_FakeRealLLM(), evaluator=_FakeRealLLM())
+    findings = [
+        _dup_finding("f1", AsiCategory.ASI01, severity=Severity.CRITICAL),
+        _dup_finding("f2", AsiCategory.ASI01, severity=Severity.CRITICAL),
+        _dup_finding("f3", AsiCategory.ASI10, severity=Severity.HIGH),
+    ]
+    deduped = cmd._dedupe_cross_category_findings(findings)
+    assert {f.id for f in deduped} == {"f1", "f2"}
+    tagged = [f for f in deduped if f.related_asi]
+    assert len(tagged) == 1
+    assert tagged[0].related_asi == ["ASI10"]
 
 
 # --- #4/#20 not-covered categories --------------------------------------

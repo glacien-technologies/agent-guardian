@@ -107,6 +107,11 @@ def write_pdf_reportlab(
         ("Low", summary["low"]),
         ("Total", sum(summary.values())),
     ]
+    # #134 — severity counts are confirmed compromises only; show the
+    # unconfirmed remainder as its own (non-totalled) row when present.
+    informational = scan.informational_count()
+    if informational:
+        rows.append(("Info.", informational))
     y = height - 272 - notice_offset
     for label, count in rows:
         c.drawString(90, y, f"{label:<10}{count}")

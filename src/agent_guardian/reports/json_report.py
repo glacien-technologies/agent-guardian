@@ -150,6 +150,11 @@ def emit_json(
         "sub_scores": dict(scan.sub_scores),
         "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
         "findings_summary": scan.findings_summary(),
+        # #134 — ``findings_summary`` counts only confirmed (``success=True``)
+        # findings; this is the complement so a reader can see how many
+        # unconfirmed/informational records sit in ``findings[]`` without
+        # re-deriving it.
+        "findings_informational": scan.informational_count(),
         "coverage": coverage,
         "findings": [_finding_to_dict(f, redact) for f in scan.findings],
         "duration_seconds": scan.duration_seconds,

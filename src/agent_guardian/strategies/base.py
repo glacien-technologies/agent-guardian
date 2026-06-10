@@ -57,6 +57,7 @@ from agent_guardian.strategies.safe_testcase_prompting import (
 _LOG = logging.getLogger(__name__)
 
 __all__ = [
+    "ATTACKER_MAX_TOKENS",
     "PAIR_ROLEPLAY_PREAMBLE",
     "RED_TEAM_RETRY_PREAMBLE",
     "RED_TEAM_SYSTEM_PROMPT",
@@ -75,6 +76,18 @@ __all__ = [
     "seed_probe_id",
     "seed_text",
 ]
+
+
+# Attacker output budget (#133). The visible output of an attacker call is a
+# single attack prompt (small), but on *thinking* models (gemini-2.5-pro and
+# newer) the internal reasoning tokens count against ``maxOutputTokens``: with
+# the old 800-token cap, every output token was burned on thoughts, the API
+# returned a part-less candidate (empty text), and the whole attack lane died
+# on its first turn — exactly the failure mode already fixed for the judge
+# (see ``agents.base._JUDGE_MAX_TOKENS``). A generous explicit budget leaves a
+# thinking model ample reasoning room AND room to emit the attack prompt; for
+# non-thinking models this is only a cap, not extra spend.
+ATTACKER_MAX_TOKENS = 4096
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +371,7 @@ async def attacker_complete(
     *,
     prompt: str,
     model: str,
-    max_tokens: int = 800,
+    max_tokens: int = ATTACKER_MAX_TOKENS,
     temperature: float = 0.7,
     seed: int | None = None,
     extra_system: str | None = None,
