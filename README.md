@@ -116,7 +116,7 @@ AgentGuardian tests agentic risks that normal prompt scanners miss:
 - Trust exploitation and unsafe outputs
 - Goal drift and untraceable behavior
 
-Every probe maps to OWASP Top 10 for Agentic Applications, MITRE ATLAS, and the CSA Agentic AI Red Teaming Guide.
+Every probe maps to OWASP Top 10 for Agentic Applications, MITRE ATLAS, and the CSA Agentic AI Red Teaming Guide — full per-ASI breakdown in the [framework-coverage-matrix](https://docs.agentguardian.io/reference/framework-coverage-matrix).
 
 ## Reports & evidence
 
