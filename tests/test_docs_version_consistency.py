@@ -36,8 +36,10 @@ _GA_CLASSIFIER = "Development Status :: 5 - Production/Stable"
 # Files that promise the GA story to users; the changelog is explicitly
 # excluded — historical RC notes belong there. The roadmap moved from
 # ``docs/roadmap.md`` to ``docs/reference/roadmap.md`` in the Diátaxis
-# restructure.
-_GA_NARRATIVE_FILES = ("README.md", "docs/reference/roadmap.md")
+# restructure. The README was removed from this list when README-content
+# assertions were dropped project-wide: the README is treated as iterable
+# marketing copy, not a tested artifact.
+_GA_NARRATIVE_FILES = ("docs/reference/roadmap.md",)
 
 
 def _pyproject_text() -> str:
