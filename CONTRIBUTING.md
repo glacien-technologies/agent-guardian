@@ -12,7 +12,7 @@ Thank you for considering a contribution to AgentGuardian. We welcome bug report
 
 ## Community
 
-For real-time discussion — probe and adapter design, informal Q&A, and roadmap chat — join us on [Discord](https://discord.gg/h4FRgxvr). For long-form questions use [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions); see [SUPPORT.md](./SUPPORT.md) for the full channel matrix.
+For real-time discussion — probe and adapter design, informal Q&A, and roadmap chat — join us on [Discord](https://discord.gg/X6UFKYXdBJ). For long-form questions use [GitHub Discussions](https://github.com/glacien-technologies/agent-guardian/discussions); see [SUPPORT.md](./SUPPORT.md) for the full channel matrix.
 
 ## Developer Certificate of Origin (DCO)
 
