@@ -417,6 +417,26 @@ def test_executive_overview_asi_compact_renders_findings_pills(
         )
 
 
+def test_executive_overview_asi_compact_pills_carry_live_update_keys(
+    client: TestClient, store: ScanStore
+) -> None:
+    """#138 — the C/H/M/L pills on each ASI breakdown row each carry
+    their own ``data-live`` key so the snapshot patcher can tick the
+    counts over without an F5. Pre-#138 only the SCORE cell was wired,
+    so a row's per-severity counts froze at first-paint."""
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    for code in ("ASI01", "ASI02", "ASI10"):
+        for suffix in ("c", "h", "m", "l"):
+            assert f'data-live="asi-compact-{code}-{suffix}"' in overview_pane, (
+                f"missing data-live key for {code}-{suffix}"
+            )
+
+
 def test_executive_overview_asi_compact_dropped_weight_progress_status(
     client: TestClient, store: ScanStore
 ) -> None:

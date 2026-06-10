@@ -102,6 +102,70 @@ def test_live_snapshot_carries_full_10_axis_radar(tmp_path: Path) -> None:
     assert all(v == 0 for v in radar)
 
 
+def test_live_snapshot_carries_aggregate_severity_counts(tmp_path: Path) -> None:
+    """#138 — the snapshot exposes top-level ``critical``/``high``/
+    ``medium``/``low`` keys so ``executive_charts.js``'s severity-bar
+    subscriber can update the CRITICAL/HIGH/MEDIUM/LOW bar chart in
+    place via ``Chart.getChart(canvas)`` without a page reload."""
+    ctx = build_dashboard_context(
+        scan_id="cli-bars",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8080",
+        version_label="t",
+        scan_dir=tmp_path,
+    )
+    snap = live_snapshot(ctx)
+    for sev in ("critical", "high", "medium", "low"):
+        assert sev in snap, f"missing aggregate severity key: {sev}"
+        assert isinstance(snap[sev], int)
+        assert snap[sev] >= 0
+
+
+def test_live_snapshot_carries_per_asi_severity_counts(tmp_path: Path) -> None:
+    """#138 — the snapshot exposes per-row CRITICAL/HIGH/MEDIUM/LOW counts
+    for every ASI in the Overview compact table, so the C/H/M/L pills tick
+    over without an F5. Pending categories report 0 across all four keys."""
+    ctx = build_dashboard_context(
+        scan_id="cli-pills",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8080",
+        version_label="t",
+        scan_dir=tmp_path,
+    )
+    snap = live_snapshot(ctx)
+    # All 10 ASI categories must each carry exactly four severity-count keys.
+    for code in (f"ASI{i:02d}" for i in range(1, 11)):
+        for suffix in ("c", "h", "m", "l"):
+            key = f"asi-compact-{code}-{suffix}"
+            assert key in snap, f"missing live key: {key}"
+            assert isinstance(snap[key], int)
+            assert snap[key] >= 0
+
+
+def test_live_snapshot_carries_per_asi_score_key(tmp_path: Path) -> None:
+    """#138 — the template carries a ``data-live="asi-compact-<code>-score"``
+    on every row; pre-#138 the snapshot did NOT actually emit those keys,
+    so the patcher hit ``data[spec] === undefined`` and the score froze
+    at the first server-rendered value. Lock that the score key is now
+    emitted for every ASI so the patcher updates it live."""
+    ctx = build_dashboard_context(
+        scan_id="cli-score-keys",
+        scan=None,
+        is_running=True,
+        base_url="http://127.0.0.1:8080",
+        version_label="t",
+        scan_dir=tmp_path,
+    )
+    snap = live_snapshot(ctx)
+    for code in (f"ASI{i:02d}" for i in range(1, 11)):
+        key = f"asi-compact-{code}-score"
+        assert key in snap, f"missing live score key: {key}"
+        # Pending categories show "—"; once scored, the formatted label.
+        assert isinstance(snap[key], str)
+
+
 def _scan_with_partial_scores() -> Scan:
     """A scan where only ONE ASI category has a score; the other nine are
     absent (pending) — the mid-scan shape that used to collapse the radar."""

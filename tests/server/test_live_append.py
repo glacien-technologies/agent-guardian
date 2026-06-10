@@ -270,6 +270,50 @@ def test_layout_attaches_live_append_to_events_stream(client: TestClient, store:
     assert "/events" in body
 
 
+def test_layout_loads_recon_live_script(client: TestClient, store: ScanStore) -> None:
+    """#138 — recon-live.js owns a self-EventSource that re-fetches and
+    swaps in ``#exec-recon`` when the ``recon_done`` event arrives. The
+    layout shell must include the script so the module boots."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert "/static/recon-live.js" in body
+
+
+def test_layout_snapshot_handler_logs_errors_not_swallow(
+    client: TestClient, store: ScanStore
+) -> None:
+    """#138 — the snapshot-stream inline handler must NOT silently eat
+    errors. Per-node patch failures and JSON parse failures both have to
+    surface via ``console.error`` so a real regression is debuggable."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    # The exact silent-catch we used to ship.
+    assert "catch (err) { /* swallow */ }" not in body
+    # Both failure paths must log.
+    assert "AGSnapshotStream: applyPatch failed" in body
+    assert "AGSnapshotStream: snapshot frame parse failed" in body
+
+
+def test_layout_snapshot_stream_has_freshness_watchdog(
+    client: TestClient, store: ScanStore
+) -> None:
+    """#138 — if no ``snapshot`` event arrives within the stale window the
+    inline boot must close the EventSource and reopen it. Catches the
+    cold-window race where the page opens before the swarm starts
+    emitting and the tab silently sits on an empty stream."""
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert "SNAPSHOT_STALE_MS" in body
+    assert "armWatchdog" in body
+    assert "reopening EventSource" in body
+
+
 # ----------------------------------------------------------------------
 # 4. Snapshot-only-by-design comments have been REVERSED on all three
 # tabs. The old phrasing must be gone; the new live-append contract

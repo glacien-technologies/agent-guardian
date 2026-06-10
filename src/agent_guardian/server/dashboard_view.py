@@ -2591,6 +2591,31 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
         "phase_state": p.get("phase_state") or _empty_phase_state(),
         "started_at_unix": p.get("started_at_unix"),
     }
+    # #138 — per-row data-live keys for the Overview "Adversarial Surface
+    # Index breakdown" compact table. The template already carried a
+    # ``data-live="asi-compact-<code>-score"`` attribute on the score
+    # cell AND data-live attributes for the four C/H/M/L pills, but the
+    # snapshot never actually emitted any of these keys, so the patcher
+    # hit ``data[spec] === undefined`` and the row froze at server-render
+    # values. Emit one ``-score`` key + four severity-count keys per ASI
+    # so the breakdown table ticks over live. Cheap: 50 small values
+    # (10 ASI categories x (1 score + 4 severities)) per snapshot.
+    for row in p.get("asi_rows", []) or []:
+        code = row.get("code")
+        if not code:
+            continue
+        # The score cell shows "—" for pending categories; otherwise the
+        # server-formatted ``score_label`` (e.g. ``"82"``). Keep the same
+        # discriminator the template uses on first paint.
+        if row.get("is_pending"):
+            snapshot[f"asi-compact-{code}-score"] = "—"
+        else:
+            snapshot[f"asi-compact-{code}-score"] = row.get("score_label", "—")
+        row_findings = row.get("findings") or {}
+        snapshot[f"asi-compact-{code}-c"] = int(row_findings.get("critical", 0) or 0)
+        snapshot[f"asi-compact-{code}-h"] = int(row_findings.get("high", 0) or 0)
+        snapshot[f"asi-compact-{code}-m"] = int(row_findings.get("medium", 0) or 0)
+        snapshot[f"asi-compact-{code}-l"] = int(row_findings.get("low", 0) or 0)
     return snapshot
 
 

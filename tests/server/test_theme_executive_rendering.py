@@ -768,6 +768,38 @@ def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> N
     assert "mountCopyButtons" in body
 
 
+def test_executive_charts_js_attaches_severity_bar_live(client: TestClient) -> None:
+    """#138 — the severity bar chart must subscribe to the per-scan
+    snapshot stream and update CRITICAL/HIGH/MEDIUM/LOW counts in place
+    via ``Chart.getChart(canvas)`` + ``chart.update('none')``. Pre-#138
+    those bars only ever showed the server-rendered values."""
+    resp = client.get("/static/executive_charts.js")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "attachSeverityBarLive" in body
+    assert "updateSeverityBar" in body
+    # The radar's silent-swallow used to eat malformed-frame errors; #138
+    # logs them instead so a real regression is debuggable.
+    assert "AGRadarLive: snapshot apply failed" in body
+    # The new public surface for tests / SSE re-renders.
+    assert "updateSeverityBar: updateSeverityBar" in body
+
+
+def test_recon_live_js_is_served_and_subscribes_to_recon_done(
+    client: TestClient,
+) -> None:
+    """#138 — recon-live.js owns a self-EventSource against the per-scan
+    events stream and re-fetches the page to swap in #exec-recon when
+    ``recon_done`` fires."""
+    resp = client.get("/static/recon-live.js")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "recon_done" in body
+    assert "#exec-recon" in body
+    assert "/events" in body
+    assert "AGReconLive" in body
+
+
 def test_executive_css_carries_narrative_palette_tokens(client: TestClient) -> None:
     """The Executive stylesheet declares the Narrative palette tokens with
     the --exec- prefix (Source Serif Pro headlines, JetBrains Mono eyebrows,
