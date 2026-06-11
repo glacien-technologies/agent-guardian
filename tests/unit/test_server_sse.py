@@ -75,6 +75,115 @@ def test_stream_replay_from_disk_emits_terminator(tmp_path: Path) -> None:
     assert "event: scan_done" in kinds
 
 
+def test_stream_cross_process_running_scan_tails_disk(tmp_path: Path) -> None:
+    """#138 — when the dashboard runs in a different process from the CLI
+    (the auto-served subprocess case) the in-memory ``_running`` registry
+    and ``asyncio.Queue`` are local to the dashboard process, so events
+    the CLI emits never reach this store. The SSE endpoint must detect
+    that case (``scan.partial.json`` present, NO terminal scan file, not
+    registered in ``_running``), disk-replay every existing event, then
+    tail ``events.jsonl`` for new lines instead of sitting on the empty
+    queue and emitting a synthetic terminator.
+
+    Verifies the disk-replay portion. The tail loop is covered by
+    ``test_stream_cross_process_running_scan_streams_new_events_then_terminates``
+    below."""
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    store = ScanStore(root_dir=tmp_path)
+    scan_dir = store.scan_dir("scan-xprocess")
+    scan_dir.mkdir()
+    # Mid-flight marker: scan.partial.json present, NO terminal file.
+    partial_scan_path(scan_dir).write_text("{}", encoding="utf-8")
+    payloads = [
+        {"kind": "agent_start", "agent": "recon", "seq": 1},
+        {"kind": "finding", "agent": "recon", "seq": 2},
+    ]
+    with (scan_dir / "events.jsonl").open("w", encoding="utf-8") as fh:
+        for p in payloads:
+            fh.write(json.dumps(p) + "\n")
+
+    async def _collect_until_terminal() -> list[str]:
+        # The cross-process tail loop only exits once the terminal scan
+        # file is on disk. Drop scan.json after a short delay so the
+        # generator wraps up.
+        async def _trigger_terminal() -> None:
+            await asyncio.sleep(0.05)
+            (scan_dir / "scan.json").write_text("{}", encoding="utf-8")
+
+        out: list[str] = []
+
+        async def _consume() -> None:
+            async for chunk in stream_scan_events("scan-xprocess", store):
+                out.append(chunk)
+
+        await asyncio.gather(_consume(), _trigger_terminal())
+        return out
+
+    async def _runner() -> list[str]:
+        return await asyncio.wait_for(_collect_until_terminal(), timeout=3.0)
+
+    chunks = asyncio.run(_runner())
+    # Per W3C SSE, format_sse_event prefixes ``id: <seq>\n`` when seq is
+    # present, so chunks may begin with "id:" rather than "event:". Match
+    # the event line anywhere in the chunk.
+    assert any("event: agent_start" in c for c in chunks), (
+        "disk-replay must yield existing agent_start"
+    )
+    assert any("event: finding" in c for c in chunks), "disk-replay must yield existing finding"
+    # Exactly ONE scan_done — the synthetic one after the terminal scan
+    # file lands. Pre-#138 this branch emitted scan_done IMMEDIATELY
+    # after the replay (with the scan still mid-flight), closing the
+    # client EventSource and flipping the topbar to "Completed" while
+    # findings were still being produced.
+    done_count = sum(1 for c in chunks if "event: scan_done" in c)
+    assert done_count == 1
+
+
+def test_stream_cross_process_running_scan_streams_new_events_then_terminates(
+    tmp_path: Path,
+) -> None:
+    """#138 — a new event line appended to ``events.jsonl`` after the
+    initial replay must reach the client. Mirrors how a real scan writes
+    findings incrementally while the dashboard subprocess tails."""
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    store = ScanStore(root_dir=tmp_path)
+    scan_dir = store.scan_dir("scan-xtail")
+    scan_dir.mkdir()
+    partial_scan_path(scan_dir).write_text("{}", encoding="utf-8")
+    events_path = scan_dir / "events.jsonl"
+    with events_path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"kind": "agent_start", "agent": "recon", "seq": 1}) + "\n")
+
+    async def _drive() -> list[str]:
+        async def _append_later() -> None:
+            await asyncio.sleep(0.08)
+            with events_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"kind": "finding", "agent": "recon", "seq": 2}) + "\n")
+            await asyncio.sleep(0.08)
+            (scan_dir / "scan.json").write_text("{}", encoding="utf-8")
+
+        out: list[str] = []
+
+        async def _consume() -> None:
+            async for chunk in stream_scan_events("scan-xtail", store):
+                out.append(chunk)
+
+        await asyncio.gather(_consume(), _append_later())
+        return out
+
+    async def _runner() -> list[str]:
+        return await asyncio.wait_for(_drive(), timeout=5.0)
+
+    chunks = asyncio.run(_runner())
+    # Initial replay yielded agent_start; tail loop yielded the appended
+    # finding before the terminal file triggered the wrap-up.
+    assert any("event: agent_start" in c for c in chunks), "missing initial replay"
+    assert any("event: finding" in c for c in chunks), "missing tailed event"
+    assert sum(1 for c in chunks if "event: scan_done" in c) == 1
+
+
 def test_stream_replay_with_explicit_scan_done(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
     scan_dir = store.scan_dir("scan-disk-2")
