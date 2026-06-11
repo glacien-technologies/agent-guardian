@@ -346,37 +346,86 @@
     if (!scanId) { return; }
     if (body.getAttribute('data-is-terminal') === 'true') { return; }
     if (typeof EventSource === 'undefined') { return; }
-    if (!window.AGLiveAppend || typeof window.AGLiveAppend.attach !== 'function') {
-      return;
+    // The deferred ``live-append.js`` *should* execute before
+    // ``DOMContentLoaded`` and assign ``window.AGLiveAppend`` by then.
+    // In practice we have seen this fail (script load 404, parse error
+    // mid-file, or the module throwing before its final assignment) —
+    // and the previous silent ``return`` left Findings / Probes / Logs
+    // rows stuck at zero with no console output to help diagnose. Now
+    // we poll for the module up to ~5 s, then log to the console if it
+    // still hasn't arrived so operators can see the failure in DevTools.
+    var liveAppendRetries = 0;
+    var maxLiveAppendRetries = 50;
+    function waitForLiveAppendThenOpen() {
+      if (window.AGLiveAppend && typeof window.AGLiveAppend.attach === 'function') {
+        openStream();
+        return;
+      }
+      liveAppendRetries += 1;
+      if (liveAppendRetries > maxLiveAppendRetries) {
+        try {
+          console.error(
+            'AGEventsStream: live-append module not available after ' +
+              (maxLiveAppendRetries * 100) +
+              ' ms — Findings / Probes / Logs rows will not stream. ' +
+              'Check that /static/live-append.js loaded without error.'
+          );
+        } catch (e) {}
+        return;
+      }
+      window.setTimeout(waitForLiveAppendThenOpen, 100);
     }
     var url = '/scan/' + encodeURIComponent(scanId) + '/events';
-    // Wire live-append + the terminator onto a stream. Re-runnable so the
-    // freshness dot's Retry reopens AND re-attaches live-append (the
-    // attach is idempotent per source via its own marker attribute).
-    //
-    // #136 (live-update gaps) — surface SSE-level errors instead of
-    // silently swallowing them. The 'error' callback can fire on a
-    // transient network blip (browser auto-reconnects) AND on a
-    // terminal disconnect; log both so a real wedge is debuggable.
+    // Stream-health watchdog. If no SSE frame arrives for this window
+    // we assume the connection is wedged (proxy buffer / transient
+    // network error that the auto-reconnect didn't recover from) and
+    // reopen. 25 s is comfortably past the server's 15 s keepalive so
+    // a healthy quiet phase doesn't churn.
+    var STREAM_STALE_MS = 25000;
+    var lastFrameAt = 0;
+    var watchdogTimer = null;
+    function armWatchdog(reopen) {
+      if (watchdogTimer) { window.clearInterval(watchdogTimer); }
+      lastFrameAt = Date.now();
+      watchdogTimer = window.setInterval(function () {
+        if (Date.now() - lastFrameAt < STREAM_STALE_MS) { return; }
+        try { console.warn(
+          'AGEventsStream: no frame for', STREAM_STALE_MS, 'ms; reopening EventSource'
+        ); } catch (e) {}
+        reopen();
+      }, 5000);
+    }
     function wire(source) {
       window.AGLiveAppend.attach(source);
+      // Generic frame counter — every named-event listener bumps
+      // ``lastFrameAt`` so the watchdog stays disarmed during healthy
+      // operation. We attach to all event kinds live-append cares about
+      // PLUS the bare 'message' fallback for unnamed events.
+      var bumpFrame = function () { lastFrameAt = Date.now(); };
+      ['finding', 'agent_start', 'agent_progress', 'agent_done',
+       'agent_skipped', 'recon_done', 'reflection', 'log',
+       'heartbeat', 'phase_start', 'phase_done'].forEach(function (kind) {
+        source.addEventListener(kind, bumpFrame);
+      });
+      source.addEventListener('message', bumpFrame);
       source.addEventListener('scan_done', function () {
         if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
+        if (watchdogTimer) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
         source.close();
       });
-      // #138 — surface SSE-level errors instead of silently swallowing.
-      // The 'error' callback can fire on a transient blip (browser auto-
-      // reconnects) AND on a terminal disconnect; log both so a real
-      // wedge is debuggable.
       source.addEventListener('error', function () {
         try { console.warn('AGEventsStream: error (readyState=' + source.readyState + ')'); } catch (e) {}
       });
       return source;
     }
-    // Open the events stream (drives live-append row inserts). The
-    // freshness-dot health indicator was retired; the stream itself is
-    // unaffected.
-    wire(new EventSource(url));
+    function openStream() {
+      var currentSource = wire(new EventSource(url));
+      armWatchdog(function reopen() {
+        try { currentSource.close(); } catch (e) {}
+        currentSource = wire(new EventSource(url));
+      });
+    }
+    waitForLiveAppendThenOpen();
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);

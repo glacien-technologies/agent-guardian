@@ -232,16 +232,24 @@ async def stream_scan_events(
                     if dropped:
                         return
 
-                # Drain any new events from events.jsonl.
+                # Drain any new events from events.jsonl. Mirror the
+                # initial-replay logic exactly: events without an int seq
+                # are still yielded (the initial replay at line 188-198
+                # passes them through), so the poll loop must too —
+                # otherwise unsequenced events would be silently dropped
+                # only after the cold window, leaving the dashboard
+                # apparently stuck while events keep arriving on disk.
                 new_events: list[dict[str, Any]] = []
                 for payload in store.replay_events_from_disk(scan_id):
                     seq_val = payload.get("seq")
-                    if not isinstance(seq_val, int) or seq_val <= last_seq_yielded:
+                    if isinstance(seq_val, int) and seq_val <= last_seq_yielded:
                         continue
                     new_events.append(payload)
                 if new_events:
                     for payload in new_events:
-                        last_seq_yielded = int(payload["seq"])
+                        seq_val = payload.get("seq")
+                        if isinstance(seq_val, int):
+                            last_seq_yielded = seq_val
                         yield format_sse_event(payload.get("kind", "agent_progress"), payload)
                         if payload.get("kind") == "scan_done":
                             seen_done = True
