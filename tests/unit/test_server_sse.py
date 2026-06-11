@@ -199,6 +199,53 @@ def test_stream_cross_process_running_scan_streams_new_events_then_terminates(
     assert sum(1 for c in chunks if "event: scan_done" in c) == 1
 
 
+def test_stream_cross_process_poll_loop_yields_unsequenced_events(
+    tmp_path: Path,
+) -> None:
+    """Poll-loop symmetry: events appended to ``events.jsonl`` after the
+    initial replay must reach the client even if they lack a ``seq``
+    field. The initial-replay branch already passes them through; the
+    poll-loop branch used to drop them with a strict int-only seq
+    filter, which silently swallowed every catch-up event for any scan
+    whose writer didn't stamp seq. This locks the asymmetry fix.
+    """
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    store = ScanStore(root_dir=tmp_path)
+    scan_dir = store.scan_dir("scan-noseq")
+    scan_dir.mkdir()
+    partial_scan_path(scan_dir).write_text("{}", encoding="utf-8")
+    events_path = scan_dir / "events.jsonl"
+    with events_path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"kind": "agent_start", "agent": "recon", "seq": 1}) + "\n")
+
+    async def _drive() -> list[str]:
+        async def _append_later() -> None:
+            await asyncio.sleep(0.08)
+            # No seq field — pre-Phase-2 / legacy / writer-skipped case.
+            with events_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"kind": "finding", "agent": "recon"}) + "\n")
+            await asyncio.sleep(0.08)
+            (scan_dir / "scan.json").write_text("{}", encoding="utf-8")
+
+        out: list[str] = []
+
+        async def _consume() -> None:
+            async for chunk in stream_scan_events("scan-noseq", store):
+                out.append(chunk)
+
+        await asyncio.gather(_consume(), _append_later())
+        return out
+
+    async def _runner() -> list[str]:
+        return await asyncio.wait_for(_drive(), timeout=5.0)
+
+    chunks = asyncio.run(_runner())
+    assert any("event: finding" in c for c in chunks), (
+        "unsequenced finding event was silently dropped by the poll loop"
+    )
+
+
 def test_stream_replay_with_explicit_scan_done(tmp_path: Path) -> None:
     store = ScanStore(root_dir=tmp_path)
     scan_dir = store.scan_dir("scan-disk-2")
