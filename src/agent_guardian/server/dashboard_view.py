@@ -1537,6 +1537,23 @@ def build_dashboard_context(
     empty_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     counts = scan.findings_summary() if scan is not None else empty_counts
     findings_total = sum(counts.values())
+    # #138 diagnostic: log the inputs that drive the bar chart payload +
+    # the KPI FINDINGS tile so a stale-data report can be traced from
+    # run.log alone. Logged on every page render so the trail captures
+    # exactly what the operator saw.
+    _LOG.info(
+        "dashboard.bar_payload: scan_id=%s scan_present=%s findings_total=%d "
+        "counts={c=%d,h=%d,m=%d,l=%d} is_running=%s is_terminal=%s",
+        scan_id,
+        scan is not None,
+        findings_total,
+        counts.get("critical", 0),
+        counts.get("high", 0),
+        counts.get("medium", 0),
+        counts.get("low", 0),
+        is_running,
+        is_terminal,
+    )
     # QA — severity-bar tooltip breakdown. For each severity, the ASI
     # categories that contribute findings at that level (with per-category
     # counts), e.g. ``{"critical": [{"asi": "ASI01", "count": 2}, ...]}``.
@@ -2591,6 +2608,43 @@ def live_snapshot(ctx: DashboardContext) -> dict[str, Any]:
         "phase_state": p.get("phase_state") or _empty_phase_state(),
         "started_at_unix": p.get("started_at_unix"),
     }
+    # #138 diagnostic: log the four aggregate severity counts the snapshot
+    # emits so a "bar chart shows non-zero but KPI says 0" report is
+    # traceable from run.log.
+    _LOG.info(
+        "dashboard.live_snapshot: scan_id=%s findings=%s c=%s h=%s m=%s l=%s",
+        ctx.payload.get("scan_id"),
+        snapshot.get("findings-total"),
+        snapshot.get("critical"),
+        snapshot.get("high"),
+        snapshot.get("medium"),
+        snapshot.get("low"),
+    )
+    # #138 — per-row data-live keys for the Overview "Adversarial Surface
+    # Index breakdown" compact table. The template already carried a
+    # ``data-live="asi-compact-<code>-score"`` attribute on the score
+    # cell AND data-live attributes for the four C/H/M/L pills, but the
+    # snapshot never actually emitted any of these keys, so the patcher
+    # hit ``data[spec] === undefined`` and the row froze at server-render
+    # values. Emit one ``-score`` key + four severity-count keys per ASI
+    # so the breakdown table ticks over live. Cheap: 50 small values
+    # (10 ASI categories x (1 score + 4 severities)) per snapshot.
+    for row in p.get("asi_rows", []) or []:
+        code = row.get("code")
+        if not code:
+            continue
+        # The score cell shows "—" for pending categories; otherwise the
+        # server-formatted ``score_label`` (e.g. ``"82"``). Keep the same
+        # discriminator the template uses on first paint.
+        if row.get("is_pending"):
+            snapshot[f"asi-compact-{code}-score"] = "—"
+        else:
+            snapshot[f"asi-compact-{code}-score"] = row.get("score_label", "—")
+        row_findings = row.get("findings") or {}
+        snapshot[f"asi-compact-{code}-c"] = int(row_findings.get("critical", 0) or 0)
+        snapshot[f"asi-compact-{code}-h"] = int(row_findings.get("high", 0) or 0)
+        snapshot[f"asi-compact-{code}-m"] = int(row_findings.get("medium", 0) or 0)
+        snapshot[f"asi-compact-{code}-l"] = int(row_findings.get("low", 0) or 0)
     return snapshot
 
 

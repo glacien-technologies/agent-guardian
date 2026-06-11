@@ -346,3 +346,57 @@ def test_executive_findings_table_has_no_turn_accordion(
     assert "exec-findings-table__row--has-children" not in pane
     assert "exec-findings-table__col--toggle" not in pane
     assert "data-child-of" not in pane
+
+
+# ----------------------------------------------------------------------
+# Empty-state contract — table shell is ALWAYS in the DOM so live-append
+# can insert rows when findings arrive after page load. The empty-state
+# placeholder lives as a row inside the table (mirrors the probes-tab
+# ``exec-probes-empty-row`` pattern) and is removed by appendFinding on
+# the first insert.
+# ----------------------------------------------------------------------
+
+
+def _make_zero_findings_scan() -> Scan:
+    return Scan(
+        id="cli-findings-zero-001",
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=0,
+        band=SeverityBand.NOT_EVALUATED,
+        sub_scores={},
+        findings=[],
+        asi_scores={cat: 0.0 for cat in AsiCategory},
+        duration_seconds=0.0,
+        cost_usd=0.0,
+        tokens_total=0,
+        mode="full",
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
+    )
+
+
+def test_findings_table_present_when_zero_findings(client: TestClient, store: ScanStore) -> None:
+    scan = _make_zero_findings_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    assert 'id="exec-findings-table"' in pane
+    assert 'id="exec-findings-empty-row"' in pane
+    assert '<p class="exec-empty">Nothing flagged yet.</p>' not in pane
+    assert "Nothing flagged yet." in pane
+
+
+def test_findings_table_has_no_empty_row_when_findings_exist(
+    client: TestClient, store: ScanStore
+) -> None:
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    assert 'id="exec-findings-empty-row"' not in pane
+    assert 'id="exec-findings-table"' in pane

@@ -417,6 +417,28 @@ def test_executive_overview_asi_compact_renders_findings_pills(
         )
 
 
+def test_executive_overview_asi_compact_pills_carry_live_update_keys(
+    client: TestClient, store: ScanStore
+) -> None:
+    """#138 — the C/H/M/L pills on each ASI breakdown row each carry a
+    ``pillcolor:<severity>:<key>`` data-live spec so the snapshot
+    patcher ticks the count AND flips the pill's CSS class between the
+    severity colour and ``--zero``. Pre-#138 only ``textContent``
+    updated; the count appeared but the pill stayed grey forever."""
+    scan = _make_scan()
+    _persist(store, scan)
+    body = client.get(f"/scan/{scan.id}?theme=executive").text
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    severity_for_suffix = {"c": "critical", "h": "high", "m": "medium", "l": "low"}
+    for code in ("ASI01", "ASI02", "ASI10"):
+        for suffix, severity in severity_for_suffix.items():
+            assert (
+                f'data-live="pillcolor:{severity}:asi-compact-{code}-{suffix}"' in overview_pane
+            ), f"missing pillcolor data-live for {code}-{suffix} ({severity})"
+
+
 def test_executive_overview_asi_compact_dropped_weight_progress_status(
     client: TestClient, store: ScanStore
 ) -> None:

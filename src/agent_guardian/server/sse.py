@@ -30,6 +30,7 @@ from typing import Any
 
 from agent_guardian.core.swarm import SwarmEvent
 from agent_guardian.logging_setup import sanitize_for_log
+from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
 from agent_guardian.server.scan_store import ScanStore, event_to_payload
 
 __all__ = ["format_sse_event", "stream_scan_events"]
@@ -144,12 +145,159 @@ async def stream_scan_events(
     # either, fall back to the on-disk JSONL. We yield each event then a
     # synthetic terminator if the disk replay didn't include one.
     try:
+        scan_dir = store.scan_dir(scan_id)
+        # #138 — cross-process disk-tail detection.
+        #
+        # The CLI-spawned dashboard runs in a SEPARATE process from the CLI
+        # itself: the per-scan asyncio.Queue + in-memory ``_running``
+        # registry are LOCAL to this store, so events the CLI emits go to
+        # the CLI's queue and never reach this subprocess. Without the
+        # branch below, ``is_running`` returns True (because
+        # ``scan.partial.json`` is on disk) and we fall through to the
+        # queue-listening loop — which sits forever on an empty queue,
+        # emitting heartbeats but no events. Net effect: the dashboard
+        # appears stuck despite the scan actively producing findings.
+        #
+        # Detect that case: scan_dir is present, ``_running`` does NOT
+        # contain it (cross-process), and the terminal scan file has not
+        # been written yet. When all three hold, switch to disk-tail mode
+        # — replay everything on disk + poll events.jsonl for new lines —
+        # and only emit the terminator once ``scan.raw.json`` /
+        # ``scan.json`` lands.
+        same_process_registered = scan_id in store._running
+        # Any scan_dir without a terminal file is treated as in-flight in
+        # cross-process mode. Pre-fix this branch ALSO required
+        # ``scan.partial.json`` to be on disk — but ``partial.json`` is
+        # written only on the first ``agent_done`` (typically ~30 s after
+        # the scan starts), so a fresh tab opened during the cold window
+        # fell through to the legacy synthetic-``scan_done`` branch and
+        # the dashboard closed its EventSource before any real findings
+        # ever arrived. Dropping the partial requirement keeps the
+        # connection tailing through the cold window.
+        cross_process_in_flight = (
+            not same_process_registered
+            and scan_dir.is_dir()
+            and not is_terminal_scan_on_disk(scan_dir)
+        )
+
+        if cross_process_in_flight:
+            last_seq_yielded: int = resume_from if resume_from is not None else -1
+            seen_done = False
+
+            # Initial replay of every event already on disk.
+            for payload in store.replay_events_from_disk(scan_id):
+                seq_val = payload.get("seq")
+                if isinstance(seq_val, int):
+                    if seq_val <= last_seq_yielded:
+                        if payload.get("kind") == "scan_done":
+                            seen_done = True
+                        continue
+                    last_seq_yielded = seq_val
+                yield format_sse_event(payload.get("kind", "agent_progress"), payload)
+                if payload.get("kind") == "scan_done":
+                    seen_done = True
+
+            terminal_on_disk = is_terminal_scan_on_disk(scan_dir)
+            if terminal_on_disk or seen_done:
+                # Genuinely-completed scan: ensure we sent the terminator
+                # then close the stream.
+                if not seen_done:
+                    yield format_sse_event(
+                        "scan_done",
+                        {
+                            "kind": "scan_done",
+                            "agent": None,
+                            "asi": None,
+                            "provisional_aivss": None,
+                            "decision": None,
+                            "timestamp": "",
+                            "payload": {"replay": True},
+                        },
+                    )
+                return
+
+            # Cross-process in-flight: tail events.jsonl on a poll until
+            # the terminal scan file lands. Heartbeats keep the browser
+            # connection alive during quiet phases.
+            seconds_since_event = 0.0
+            seconds_since_heartbeat = 0.0
+            while True:
+                # Cooperative disconnect check — only the FastAPI route
+                # supplies this iterator; tests pass None.
+                if is_disconnected is not None:
+                    try:
+                        dropped = await is_disconnected.__anext__()
+                    except (StopAsyncIteration, AttributeError):
+                        dropped = False
+                    if dropped:
+                        return
+
+                # Drain any new events from events.jsonl.
+                new_events: list[dict[str, Any]] = []
+                for payload in store.replay_events_from_disk(scan_id):
+                    seq_val = payload.get("seq")
+                    if not isinstance(seq_val, int) or seq_val <= last_seq_yielded:
+                        continue
+                    new_events.append(payload)
+                if new_events:
+                    for payload in new_events:
+                        last_seq_yielded = int(payload["seq"])
+                        yield format_sse_event(payload.get("kind", "agent_progress"), payload)
+                        if payload.get("kind") == "scan_done":
+                            seen_done = True
+                    seconds_since_event = 0.0
+                    seconds_since_heartbeat = 0.0
+                else:
+                    seconds_since_event += _QUEUE_POLL_INTERVAL_SECONDS
+                    seconds_since_heartbeat += _QUEUE_POLL_INTERVAL_SECONDS
+
+                # Terminal scan file landed? Wrap up.
+                if is_terminal_scan_on_disk(scan_dir):
+                    # One final disk drain so we don't miss the very last
+                    # events that landed between the previous drain and
+                    # the terminal file write.
+                    for payload in store.replay_events_from_disk(scan_id):
+                        seq_val = payload.get("seq")
+                        if not isinstance(seq_val, int) or seq_val <= last_seq_yielded:
+                            continue
+                        last_seq_yielded = int(seq_val)
+                        yield format_sse_event(payload.get("kind", "agent_progress"), payload)
+                        if payload.get("kind") == "scan_done":
+                            seen_done = True
+                    if not seen_done:
+                        yield format_sse_event(
+                            "scan_done",
+                            {
+                                "kind": "scan_done",
+                                "agent": None,
+                                "asi": None,
+                                "provisional_aivss": None,
+                                "decision": None,
+                                "timestamp": "",
+                                "payload": {"replay": True, "from_terminal_file": True},
+                            },
+                        )
+                    return
+
+                # Heartbeats during quiet windows — mirrors the same-process
+                # branch below so the client freshness dot can stay green.
+                if seconds_since_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                    yield format_sse_event("heartbeat", {"now": time.time()})
+                    seconds_since_heartbeat = 0.0
+                if seconds_since_event >= _KEEPALIVE_INTERVAL_SECONDS:
+                    yield ": keepalive\n\n"
+                    seconds_since_event = 0.0
+
+                await asyncio.sleep(_QUEUE_POLL_INTERVAL_SECONDS)
+
+            # Unreachable; the loop only exits via `return`.
+
+        # Original disk-replay branch for completed scans whose terminator
+        # is missing from disk (tests + legacy / abnormal-exit recovery).
         if not store.is_running(scan_id) and queue.empty():
             on_disk = store.replay_events_from_disk(scan_id)
             seen_done = False
             for payload in on_disk:
-                # Phase 2 Step 2.1 — Last-Event-ID resume filter. Skip any
-                # JSONL line whose top-level ``seq`` is <= the resume cursor.
                 if resume_from is not None:
                     seq_val = payload.get("seq")
                     if isinstance(seq_val, int) and seq_val <= resume_from:

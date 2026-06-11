@@ -235,12 +235,18 @@
       try {
         var data = JSON.parse(evt.data);
         if (data && data.asi_radar) { updateAsiRadar(data.asi_radar); }
-      } catch (err) { /* swallow malformed frame */ }
+      } catch (err) {
+        try { console.error("AGRadarLive: snapshot apply failed", err); } catch (e) {}
+      }
     });
     es.addEventListener("scan_done", function () {
-      try { es.close(); } catch (err) { /* swallow */ }
+      try { es.close(); } catch (err) {
+        try { console.warn("AGRadarLive: close failed", err); } catch (e) {}
+      }
     });
-    es.onerror = function () { /* browser auto-reconnects; freshness-dot owns UI */ };
+    es.onerror = function () {
+      try { console.warn("AGRadarLive: SSE error (readyState=" + es.readyState + ")"); } catch (e) {}
+    };
   }
 
   /* ----------------------------------------------------------------- */
@@ -347,10 +353,22 @@
               callbacks: {
                 /* Body: the count line, then one line per contributing ASI
                  * category. Lets an operator see at a glance which threat
-                 * classes drive this severity without leaving Overview. */
+                 * classes drive this severity without leaving Overview.
+                 *
+                 * #138 — read the LIVE data value (``ctx.parsed.x`` for a
+                 * horizontal bar chart) instead of the ``counts`` closure
+                 * captured at mount time. ``attachSeverityBarLive``
+                 * updates ``chart.data.datasets[0].data`` on every live
+                 * snapshot, but does NOT update the closure variables.
+                 * Pre-fix the bar drew at the LIVE length while the
+                 * tooltip still reported "0 findings" because the
+                 * closure never advanced. */
                 label: function (ctx) {
                   var idx = ctx.dataIndex;
-                  var n = counts[idx] || 0;
+                  var liveVal = ctx && ctx.parsed && typeof ctx.parsed.x === "number"
+                    ? ctx.parsed.x
+                    : (counts[idx] || 0);
+                  var n = Number(liveVal) || 0;
                   var lines = [n + (n === 1 ? " finding" : " findings")];
                   var extra = asiLines[idx] || [];
                   if (extra.length) {
@@ -485,12 +503,86 @@
     });
   }
 
+  /* ----------------------------------------------------------------- */
+  /* Severity bar — live snapshot subscriber (#138)                    */
+  /* ----------------------------------------------------------------- */
+
+  /* Update the CRITICAL / HIGH / MEDIUM / LOW horizontal-bar counts in
+   * place from a snapshot payload. Uses Chart.getChart(canvas) to find
+   * every mounted instance (one per tab: overview + findings) so both
+   * tab-scoped copies stay in sync without a teardown / remount.
+   * No-op when Chart.js or the canvases are absent (graceful on tabs
+   * that haven't booted yet). */
+  function updateSeverityBar(snapshot) {
+    if (!window.Chart || !Chart.getChart) { return; }
+    if (!snapshot) { return; }
+    var critical = Number(snapshot.critical) || 0;
+    var high = Number(snapshot.high) || 0;
+    var medium = Number(snapshot.medium) || 0;
+    var low = Number(snapshot.low) || 0;
+    var nextData = [critical, high, medium, low];
+    var canvases = document.querySelectorAll("canvas.exec-severity-bar-canvas");
+    canvases.forEach(function (canvas) {
+      var chart = Chart.getChart(canvas);
+      if (!chart || !chart.data || !chart.data.datasets || !chart.data.datasets[0]) {
+        return;
+      }
+      var ds = chart.data.datasets[0];
+      // Skip the repaint when nothing changed — avoids the per-frame
+      // GPU work Chart.js does even with update("none").
+      var prev = ds.data || [];
+      if (prev[0] === nextData[0] && prev[1] === nextData[1]
+          && prev[2] === nextData[2] && prev[3] === nextData[3]) {
+        return;
+      }
+      // #138 diagnostic: log the value swap so a stale-data report can
+      // be reconstructed from the browser console after the fact. Cheap
+      // (one console.log per snapshot when the value actually changes;
+      // ~500 ms cadence at most). Comment out / remove once #138 is
+      // verified across a few real scans.
+      try {
+        console.debug(
+          "AGSeverityBarLive: ds.data",
+          prev.slice(),
+          "->",
+          nextData.slice()
+        );
+      } catch (e) {}
+      ds.data = nextData;
+      chart.update("none");
+    });
+  }
+
+  function attachSeverityBarLive() {
+    if (typeof EventSource === "undefined") { return; }
+    var body = document.body;
+    if (!body) { return; }
+    var scanId = body.getAttribute("data-scan-id");
+    if (!scanId) { return; }
+    if (body.getAttribute("data-is-terminal") === "true") { return; }
+    var url = "/scans/" + encodeURIComponent(scanId) + "/live";
+    var es;
+    try { es = new EventSource(url); }
+    catch (err) { try { console.error("AGSeverityBarLive: EventSource failed", err); } catch (e) {} return; }
+    es.addEventListener("snapshot", function (evt) {
+      try { updateSeverityBar(JSON.parse(evt.data)); }
+      catch (err) { try { console.error("AGSeverityBarLive: snapshot apply failed", err); } catch (e) {} }
+    });
+    es.addEventListener("scan_done", function () {
+      try { es.close(); } catch (e) {}
+    });
+    es.onerror = function () {
+      try { console.warn("AGSeverityBarLive: SSE error (readyState=" + es.readyState + ")"); } catch (e) {}
+    };
+  }
+
   function init() {
     mountAsiRadar();
     mountSeverityBar();
     mountCopyButtons();
     watchPanelVisibility();
     attachRadarLive();
+    attachSeverityBarLive();
   }
 
   if (document.readyState === "loading") {
@@ -504,6 +596,7 @@
     mountAsiRadar: mountAsiRadar,
     updateAsiRadar: updateAsiRadar,
     mountSeverityBar: mountSeverityBar,
+    updateSeverityBar: updateSeverityBar,
     mountCopyButtons: mountCopyButtons,
     watchPanelVisibility: watchPanelVisibility,
     readToken: readToken,

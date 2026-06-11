@@ -68,6 +68,10 @@ _LIVE_MAX_SECONDS = 1800.0
 # operators every 30 minutes on healthy long-running scans (critic
 # patch G5 / P-ScheduledReconnect of designs/sse-flow-and-live-ui.md).
 _DEADLINE_APPROACHING_LEAD_SECONDS = 30.0
+# Comment-only keepalive emitted during quiet windows when the snapshot
+# is genuinely unchanged so HTTP intermediaries don't drop the idle
+# connection. Mirrors the same-process pattern in sse.py.
+_LIVE_KEEPALIVE_SECONDS = 15.0
 
 
 def _resolve_base_url(request: Request) -> str:
@@ -121,7 +125,19 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
     # partial scan on disk and never gets ``register()``-d). The Scan's own
     # ``duration_seconds`` is the right source once the terminal file lands.
     terminal_on_disk = is_terminal_scan_on_disk(scan_dir)
-    in_flight = is_running or (scan is not None and not terminal_on_disk)
+    # Same three-clause widening as scans_live_sse so initial page render
+    # and the SSE poll see the same in_flight state. Without this, a
+    # cross-process cold-window page load renders elapsed=None and the
+    # elapsed tile shows "—" until the first SSE snapshot arrives and
+    # the client patcher flips it to a live value (visible flash).
+    # ``mtime is not None`` is the post-try sentinel for "scan_dir
+    # existed at stat-time" without adding another stat() outside the
+    # OSError guard above.
+    in_flight = (
+        is_running
+        or (scan is not None and not terminal_on_disk)
+        or (mtime is not None and not terminal_on_disk)
+    )
     elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
     ctx = build_dashboard_context(
         scan_id=scan_id,
@@ -368,6 +384,7 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
         approaching_at = deadline - _DEADLINE_APPROACHING_LEAD_SECONDS
         approaching_fired = False
         last_snapshot: dict[str, object] | None = None
+        seconds_since_keepalive = 0.0
         while True:
             now = time.monotonic()
             if now > deadline:
@@ -397,7 +414,21 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
             except OSError:
                 mtime = None
             terminal_on_disk = is_terminal_scan_on_disk(scan_dir)
-            in_flight = is_running or (scan is not None and not terminal_on_disk)
+            # Cross-process cold window: the CLI scan runs in a different
+            # subprocess from this dashboard, so ``is_running`` returns False
+            # (the in-memory registry is per-process) and ``scan`` is None
+            # until the first agent_done writes scan.partial.json. The
+            # ``mtime is not None and not terminal_on_disk`` clause keeps
+            # the snapshot live (elapsed ticks each poll, started_at_unix
+            # is non-None) during that ~60s window. Mirrors sse.py's
+            # cross_process_in_flight detection. ``mtime is not None`` is
+            # the post-try sentinel for "scan_dir existed at stat-time"
+            # without adding another stat() outside the OSError guard.
+            in_flight = (
+                is_running
+                or (scan is not None and not terminal_on_disk)
+                or (mtime is not None and not terminal_on_disk)
+            )
             elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
             ctx = build_dashboard_context(
                 scan_id=scan_id,
@@ -414,6 +445,10 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
             if snapshot != last_snapshot:
                 yield f"event: snapshot\ndata: {json.dumps(snapshot, separators=(',', ':'))}\n\n"
                 last_snapshot = snapshot
+                seconds_since_keepalive = 0.0
+            elif seconds_since_keepalive >= _LIVE_KEEPALIVE_SECONDS:
+                yield ": keepalive\n\n"
+                seconds_since_keepalive = 0.0
             # Stop the SSE stream once the terminal scan file has landed on
             # disk -- a partial mid-flight snapshot (scan.partial.json) keeps
             # the live updates flowing. Using the on-disk presence as the
@@ -425,6 +460,7 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
                 break
             try:
                 await asyncio.sleep(_LIVE_POLL_SECONDS)
+                seconds_since_keepalive += _LIVE_POLL_SECONDS
             except asyncio.CancelledError:  # pragma: no cover — client disconnect
                 break
 

@@ -63,10 +63,7 @@
      "N findings · sorted by criticality … click any row" lede was removed. #}
   <span data-live="findings-total" hidden>{{ findings_total }}</span>
 
-  {% if findings_total == 0 %}
-    <p class="exec-empty">Nothing flagged yet.</p>
-  {% else %}
-    {# QA-053 — Dropdown filter toolbar.
+  {# QA-053 — Dropdown filter toolbar.
 
        Four native ``<select>`` controls — Severity / Agent / Probe /
        ASI. The option lists are derived in Jinja from the current
@@ -193,6 +190,13 @@
           {% set _grp = _sev_groups.get(f.severity_class) %}
           {% if _grp is not none %}{% set _ = _grp.append(f) %}{% endif %}
         {% endfor %}
+        {% if findings_total == 0 %}
+          <tbody>
+            <tr id="exec-findings-empty-row">
+              <td colspan="7" class="exec-empty">Nothing flagged yet.</td>
+            </tr>
+          </tbody>
+        {% endif %}
         {% for _sev_key, _sev_items in [('critical', _sev_groups.critical),
                                          ('high', _sev_groups.high),
                                          ('medium', _sev_groups.medium),
@@ -279,7 +283,6 @@
         </div>
       </nav>
     {% endif %}
-  {% endif %}
 
   {# SSE Phase 2, Step 2.4 — live-append row template. ``live-append.js``
      clones this ``<tr>`` skeleton for every ``finding`` event arrival.
