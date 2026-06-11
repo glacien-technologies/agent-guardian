@@ -352,14 +352,10 @@
   }
 
   function openEventStreams(scanId) {
-    if (typeof EventSource === "undefined") {
-      return;
-    }
-    var url = "/scan/" + encodeURIComponent(scanId) + "/events";
-    var es;
-    try {
-      es = new EventSource(url);
-    } catch (err) {
+    var es = window.AGStreams && window.AGStreams.events
+      ? window.AGStreams.events(scanId)
+      : null;
+    if (!es) {
       return;
     }
 
@@ -474,12 +470,12 @@
 
     // Snapshot stream — reconciles state with the server every 500ms.
     // Critical for late-joining tabs where the events queue was already
-    // drained.
-    var snapUrl = "/scans/" + encodeURIComponent(scanId) + "/live";
-    var snapES;
-    try {
-      snapES = new EventSource(snapUrl);
-    } catch (err) {
+    // drained. Reuses the shared snapshot source so we don't open a
+    // second TCP connection per page.
+    var snapES = window.AGStreams && window.AGStreams.snapshot
+      ? window.AGStreams.snapshot(scanId)
+      : null;
+    if (!snapES) {
       return;
     }
     snapES.addEventListener("snapshot", function (evt) {
@@ -488,16 +484,6 @@
         reconcileFromSnapshot(data);
       }
     });
-    snapES.addEventListener("scan_done", function () {
-      try {
-        snapES.close();
-      } catch (err) {
-        /* swallow */
-      }
-    });
-    snapES.onerror = function () {
-      /* browser auto-reconnects */
-    };
   }
 
   function init() {

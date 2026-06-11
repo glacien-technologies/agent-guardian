@@ -218,19 +218,15 @@
   // own stream to the same endpoint; freshness-dot.js owns the connection
   // health UI). No-ops on terminal scans and when EventSource is unavailable.
   function attachRadarLive() {
-    if (typeof EventSource === "undefined") { return; }
     var body = document.body;
     if (!body) { return; }
     var scanId = body.getAttribute("data-scan-id");
     if (!scanId) { return; }
     if (body.getAttribute("data-is-terminal") === "true") { return; }
-    var url = "/scans/" + encodeURIComponent(scanId) + "/live";
-    var es;
-    try {
-      es = new EventSource(url);
-    } catch (err) {
-      return;
-    }
+    var es = window.AGStreams && window.AGStreams.snapshot
+      ? window.AGStreams.snapshot(scanId)
+      : null;
+    if (!es) { return; }
     es.addEventListener("snapshot", function (evt) {
       try {
         var data = JSON.parse(evt.data);
@@ -239,14 +235,6 @@
         try { console.error("AGRadarLive: snapshot apply failed", err); } catch (e) {}
       }
     });
-    es.addEventListener("scan_done", function () {
-      try { es.close(); } catch (err) {
-        try { console.warn("AGRadarLive: close failed", err); } catch (e) {}
-      }
-    });
-    es.onerror = function () {
-      try { console.warn("AGRadarLive: SSE error (readyState=" + es.readyState + ")"); } catch (e) {}
-    };
   }
 
   /* ----------------------------------------------------------------- */
@@ -554,26 +542,19 @@
   }
 
   function attachSeverityBarLive() {
-    if (typeof EventSource === "undefined") { return; }
     var body = document.body;
     if (!body) { return; }
     var scanId = body.getAttribute("data-scan-id");
     if (!scanId) { return; }
     if (body.getAttribute("data-is-terminal") === "true") { return; }
-    var url = "/scans/" + encodeURIComponent(scanId) + "/live";
-    var es;
-    try { es = new EventSource(url); }
-    catch (err) { try { console.error("AGSeverityBarLive: EventSource failed", err); } catch (e) {} return; }
+    var es = window.AGStreams && window.AGStreams.snapshot
+      ? window.AGStreams.snapshot(scanId)
+      : null;
+    if (!es) { return; }
     es.addEventListener("snapshot", function (evt) {
       try { updateSeverityBar(JSON.parse(evt.data)); }
       catch (err) { try { console.error("AGSeverityBarLive: snapshot apply failed", err); } catch (e) {} }
     });
-    es.addEventListener("scan_done", function () {
-      try { es.close(); } catch (e) {}
-    });
-    es.onerror = function () {
-      try { console.warn("AGSeverityBarLive: SSE error (readyState=" + es.readyState + ")"); } catch (e) {}
-    };
   }
 
   function init() {

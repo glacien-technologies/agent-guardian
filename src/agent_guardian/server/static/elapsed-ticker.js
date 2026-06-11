@@ -212,9 +212,6 @@
   }
 
   function openEventStreams(scanId) {
-    if (typeof EventSource === "undefined") {
-      return;
-    }
     function parsePayload(evt) {
       try {
         return JSON.parse(evt.data);
@@ -222,13 +219,9 @@
         return null;
       }
     }
-    var snapUrl = "/scans/" + encodeURIComponent(scanId) + "/live";
-    var snapES;
-    try {
-      snapES = new EventSource(snapUrl);
-    } catch (err) {
-      snapES = null;
-    }
+    var snapES = window.AGStreams && window.AGStreams.snapshot
+      ? window.AGStreams.snapshot(scanId)
+      : null;
     if (snapES) {
       snapES.addEventListener("snapshot", function (evt) {
         var data = parsePayload(evt);
@@ -236,24 +229,10 @@
           onSnapshot(data);
         }
       });
-      snapES.addEventListener("scan_done", function () {
-        try {
-          snapES.close();
-        } catch (err) {
-          /* swallow */
-        }
-      });
-      snapES.onerror = function () {
-        /* browser auto-reconnects */
-      };
     }
-    var eventsUrl = "/scan/" + encodeURIComponent(scanId) + "/events";
-    var es;
-    try {
-      es = new EventSource(eventsUrl);
-    } catch (err) {
-      es = null;
-    }
+    var es = window.AGStreams && window.AGStreams.events
+      ? window.AGStreams.events(scanId)
+      : null;
     if (es) {
       es.addEventListener("phase_start", function (evt) {
         var data = parsePayload(evt);
@@ -262,16 +241,6 @@
         }
         onPhaseStart(data.payload || data);
       });
-      es.addEventListener("scan_done", function () {
-        try {
-          es.close();
-        } catch (err) {
-          /* swallow */
-        }
-      });
-      es.onerror = function () {
-        /* browser auto-reconnects */
-      };
     }
   }
 
