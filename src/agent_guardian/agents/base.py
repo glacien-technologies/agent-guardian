@@ -2364,6 +2364,14 @@ class AsiAgent(ABC):
                         "finding_id": finding.id,
                         "id": finding.id,
                         "severity": finding.severity.value,
+                        # ``success`` distinguishes a confirmed exploit
+                        # (True) from an observed weakness / informational
+                        # finding (False). The dashboard's live-append
+                        # uses this to render the chip in a muted style
+                        # so the operator can reconcile a CRITICAL row
+                        # with the ASI category score (which excludes
+                        # ``success=False`` findings by design).
+                        "success": finding.success,
                         "asi": finding.asi.value,
                         "category": finding.csa_category.value,
                         "agent": agent_name,

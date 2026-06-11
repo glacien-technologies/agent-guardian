@@ -380,6 +380,116 @@ def _make_zero_findings_scan() -> Scan:
     )
 
 
+def _make_scan_with_informational_finding() -> Scan:
+    """Build a scan with a CRITICAL but ``success=False`` finding.
+
+    ``asi_score()`` and ``_count_findings_by_asi`` deliberately exclude
+    ``success=False`` findings from the per-category score and per-row
+    C/H/M/L counters, so this scan will display ASI03 at score 100 in
+    the Adversarial Surface Index breakdown while still rendering one
+    row in the Findings table.
+    """
+    return Scan(
+        id="cli-findings-informational-001",
+        package_version=__version__,
+        aivss_formula_version="aivss-v1",
+        probe_library_version="probes-v1",
+        target_mode="prompt",
+        target_ref="tests/example.txt",
+        tier=Tier.T2_HIGH,
+        aivss=88,
+        band=SeverityBand.GOOD,
+        sub_scores={},
+        findings=[
+            Finding(
+                id="f-info-crit-1",
+                probe_id="ASI03-PR-002",
+                asi=AsiCategory.ASI03,
+                mitre_atlas=["AML.T0054"],
+                csa_category=CsaCategory.GOAL_INSTRUCTION_MANIPULATION,
+                severity=Severity.CRITICAL,
+                attempt_count=1,
+                success=False,
+                confidence=0.5,
+                summary="observed weakness — privilege-agent did not refuse",
+                created_at=datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
+            ),
+        ],
+        asi_scores={cat: 100.0 for cat in AsiCategory},
+        duration_seconds=120.0,
+        cost_usd=0.05,
+        tokens_total=15_000,
+        mode="full",
+        engine={"commander": "stub", "attacker": "stub", "evaluator": "stub"},
+        created_at=datetime(2026, 5, 27, 12, 5, 0, tzinfo=UTC),
+    )
+
+
+def test_informational_finding_rendered_with_muted_chip(
+    client: TestClient, store: ScanStore
+) -> None:
+    """A CRITICAL finding with ``success=False`` is an observed weakness,
+    not a confirmed exploit. The Findings table must mark it so the
+    operator can reconcile the row against the ASI category score (which
+    excludes it). Otherwise a red CRITICAL chip on a row whose category
+    column reads ``100`` looks like a scoring bug.
+    """
+    scan = _make_scan_with_informational_finding()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    assert 'data-informational="true"' in pane, (
+        "the informational finding row must carry data-informational='true' "
+        "so the slideover / patcher / styles can target it"
+    )
+    assert "exec-sev-pill--informational" in pane, (
+        "the severity chip on an informational finding must wear the "
+        ".exec-sev-pill--informational class for the desaturated style"
+    )
+    assert "exec-findings-table__row--informational" in pane, (
+        "the row class must mark it as informational so the row gets "
+        "the muted treatment when selected / hovered"
+    )
+
+
+def test_slideover_uses_delegated_click_not_per_row_binding() -> None:
+    """Row activation MUST be wired via event delegation so rows
+    appended by ``live-append.js`` AFTER DOMContentLoaded are also
+    clickable.
+
+    The original implementation used ``document.querySelectorAll`` +
+    a per-row ``addEventListener`` loop inside ``attach()``. That
+    pattern only sees rows that exist at boot time — every live-
+    appended ``<tr>`` then silently ignored clicks, so the slideover
+    detail panel never opened for findings or probes that arrived
+    via SSE while the page was open.
+    """
+    from pathlib import Path
+
+    js_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "agent_guardian"
+        / "server"
+        / "static"
+        / "executive_findings.js"
+    )
+    source = js_path.read_text(encoding="utf-8")
+    assert "document.querySelectorAll(selectors.join" not in source, (
+        "executive_findings.js attached click handlers via per-row "
+        "document.querySelectorAll — live-appended rows will not be "
+        "clickable. Use delegated listeners instead."
+    )
+    assert 'role=\\"tabpanel\\"' in source or "role='tabpanel'" in source, (
+        "expected the slideover's row click listener to be delegated "
+        "from the owning tabpanel container"
+    )
+    assert "ev.target.closest" in source, (
+        "delegated click listener must use Element.closest() so live-appended "
+        "rows are matched by selector at click-time, not at boot-time"
+    )
+
+
 def test_findings_table_present_when_zero_findings(client: TestClient, store: ScanStore) -> None:
     scan = _make_zero_findings_scan()
     _persist(store, scan)

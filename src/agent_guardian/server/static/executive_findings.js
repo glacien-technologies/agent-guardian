@@ -499,31 +499,37 @@
       }
     }
 
-    // Row activation — click + Enter/Space keyboard. QA-049 wires the
-    // ``data-action="probe-row-click"`` contract on probe rows; finding
-    // rows still use the class selector for backwards compatibility.
-    var selectors = [
-      ".exec-probes-table__row",
-      "[data-action=\"probe-row-click\"]",
-      ".exec-findings-table__row",
-    ];
-    var rows = document.querySelectorAll(selectors.join(","));
-    for (var i = 0; i < rows.length; i++) {
-      (function (row) {
-        row.addEventListener("click", function (ev) {
-          // Ignore clicks on real interactive children (links etc).
-          var tag = (ev.target && ev.target.tagName) || "";
-          if (tag === "A" || tag === "BUTTON") { return; }
-          open(row);
-        });
-        row.addEventListener("keydown", function (ev) {
-          if (ev.key === "Enter" || ev.key === " ") {
-            ev.preventDefault();
-            open(row);
-          }
-        });
-      })(rows[i]);
-    }
+    // Row activation — click + Enter/Space keyboard.
+    //
+    // Previously this used document.querySelectorAll at boot to bind
+    // handlers directly to each row. That misses every row appended
+    // later by live-append.js (live findings / probes that arrive via
+    // SSE while the page is open), which silently ignored clicks.
+    //
+    // Now the listeners are delegated from the slideover's owning
+    // tabpanel so every row — server-rendered or live-appended — is
+    // covered. Scoping to the tabpanel that owns this slideover also
+    // prevents the previous double-fire where two .exec-slideover-root
+    // instances each bound to all rows via document.querySelectorAll.
+    var rowSelector =
+      ".exec-probes-table__row, " +
+      "[data-action=\"probe-row-click\"], " +
+      ".exec-findings-table__row";
+    var delegateTarget = (root.closest && root.closest("[role=\"tabpanel\"]")) || document;
+    delegateTarget.addEventListener("click", function (ev) {
+      var row = ev.target && ev.target.closest ? ev.target.closest(rowSelector) : null;
+      if (!row) { return; }
+      var tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "A" || tag === "BUTTON") { return; }
+      open(row);
+    });
+    delegateTarget.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") { return; }
+      var row = ev.target && ev.target.closest ? ev.target.closest(rowSelector) : null;
+      if (!row) { return; }
+      ev.preventDefault();
+      open(row);
+    });
 
     if (closeBtn) {
       closeBtn.addEventListener("click", close);

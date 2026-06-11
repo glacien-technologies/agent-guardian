@@ -1714,6 +1714,24 @@ body.exec-body {
 .exec-sev-pill--high { background: var(--exec-sev-high-bg); color: var(--exec-sev-high); }
 .exec-sev-pill--medium { background: var(--exec-sev-medium-bg); color: var(--exec-sev-medium); }
 .exec-sev-pill--low { background: var(--exec-sev-low-bg); color: var(--exec-sev-low); }
+/* Informational override — a finding with severity=CRITICAL but
+ * success=False is an observed weakness, not a confirmed exploit.
+ * The ASI category score deliberately ignores it, so the chip is
+ * desaturated and gets an "info" tag so the operator can reconcile
+ * the row with the per-category breakdown. */
+.exec-sev-pill--informational {
+  opacity: 0.55;
+  filter: saturate(0.4);
+  border: 1px dashed currentColor;
+}
+.exec-sev-pill__tag {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
 
 .exec-sev-bucket {
   margin: 24px 0;
