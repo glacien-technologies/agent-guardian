@@ -30,10 +30,7 @@ from typing import Any
 
 from agent_guardian.core.swarm import SwarmEvent
 from agent_guardian.logging_setup import sanitize_for_log
-from agent_guardian.server.partial_scan import (
-    is_terminal_scan_on_disk,
-    partial_scan_path,
-)
+from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
 from agent_guardian.server.scan_store import ScanStore, event_to_payload
 
 __all__ = ["format_sse_event", "stream_scan_events"]
@@ -168,11 +165,19 @@ async def stream_scan_events(
         # and only emit the terminator once ``scan.raw.json`` /
         # ``scan.json`` lands.
         same_process_registered = scan_id in store._running
+        # Any scan_dir without a terminal file is treated as in-flight in
+        # cross-process mode. Pre-fix this branch ALSO required
+        # ``scan.partial.json`` to be on disk — but ``partial.json`` is
+        # written only on the first ``agent_done`` (typically ~30 s after
+        # the scan starts), so a fresh tab opened during the cold window
+        # fell through to the legacy synthetic-``scan_done`` branch and
+        # the dashboard closed its EventSource before any real findings
+        # ever arrived. Dropping the partial requirement keeps the
+        # connection tailing through the cold window.
         cross_process_in_flight = (
             not same_process_registered
             and scan_dir.is_dir()
             and not is_terminal_scan_on_disk(scan_dir)
-            and partial_scan_path(scan_dir).is_file()
         )
 
         if cross_process_in_flight:

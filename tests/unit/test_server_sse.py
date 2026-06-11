@@ -50,6 +50,11 @@ def test_format_sse_event_minimal_payload() -> None:
 
 
 def test_stream_replay_from_disk_emits_terminator(tmp_path: Path) -> None:
+    """A scan whose terminal file lands AFTER the events stream opens
+    must replay every disk event then emit a synthetic terminator once
+    the terminal file appears. Pre-#138 fix the stream emitted the
+    terminator immediately on disk-replay-with-no-scan_done, which
+    closed the live tab during the cold window of a fresh scan."""
     store = ScanStore(root_dir=tmp_path)
     scan_dir = store.scan_dir("scan-disk")
     scan_dir.mkdir()
@@ -61,18 +66,28 @@ def test_stream_replay_from_disk_emits_terminator(tmp_path: Path) -> None:
         for p in payloads:
             fh.write(json.dumps(p) + "\n")
 
-    async def _collect() -> list[str]:
+    async def _drive() -> list[str]:
+        async def _drop_terminal_after() -> None:
+            await asyncio.sleep(0.05)
+            (scan_dir / "scan.json").write_text("{}", encoding="utf-8")
+
         out: list[str] = []
-        async for chunk in stream_scan_events("scan-disk", store):
-            out.append(chunk)
+
+        async def _consume() -> None:
+            async for chunk in stream_scan_events("scan-disk", store):
+                out.append(chunk)
+
+        await asyncio.gather(_consume(), _drop_terminal_after())
         return out
 
-    chunks = asyncio.run(_collect())
-    kinds = [c.split("\n", 1)[0] for c in chunks]
-    assert "event: agent_start" in kinds
-    assert "event: agent_done" in kinds
-    # Even without scan_done on disk, the stream should synthesise one.
-    assert "event: scan_done" in kinds
+    async def _runner() -> list[str]:
+        return await asyncio.wait_for(_drive(), timeout=3.0)
+
+    chunks = asyncio.run(_runner())
+    assert any("event: agent_start" in c for c in chunks)
+    assert any("event: agent_done" in c for c in chunks)
+    # The terminal file landing triggers the synthetic terminator.
+    assert any("event: scan_done" in c for c in chunks)
 
 
 def test_stream_cross_process_running_scan_tails_disk(tmp_path: Path) -> None:
