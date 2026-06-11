@@ -41,38 +41,23 @@
   }
 
   function attach() {
-    if (typeof EventSource === "undefined") { return; }
     var body = document.body;
     if (!body) { return; }
     var scanId = body.getAttribute("data-scan-id");
     if (!scanId) { return; }
     if (body.getAttribute("data-is-terminal") === "true") { return; }
-    var url = "/scan/" + encodeURIComponent(scanId) + "/events";
-    var es;
-    try {
-      es = new EventSource(url);
-    } catch (err) {
-      try { console.error("AGReconLive: EventSource failed", err); } catch (e) {}
-      return;
-    }
+    var es = window.AGStreams && window.AGStreams.events
+      ? window.AGStreams.events(scanId)
+      : null;
+    if (!es) { return; }
     var reloaded = false;
     es.addEventListener("recon_done", function () {
       if (reloaded) { return; }
       reloaded = true;
-      reloadReconPanel(scanId)
-        .catch(function (err) {
-          try { console.error("AGReconLive: panel refresh failed", err); } catch (e) {}
-        })
-        .then(function () {
-          try { es.close(); } catch (e) {}
-        });
+      reloadReconPanel(scanId).catch(function (err) {
+        try { console.error("AGReconLive: panel refresh failed", err); } catch (e) {}
+      });
     });
-    es.addEventListener("scan_done", function () {
-      try { es.close(); } catch (e) {}
-    });
-    es.onerror = function () {
-      try { console.warn("AGReconLive: SSE error (readyState=" + es.readyState + ")"); } catch (e) {}
-    };
   }
 
   if (document.readyState === "loading") {

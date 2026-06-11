@@ -33,6 +33,20 @@
   <link rel="stylesheet" href="/static/colors_and_type.css?v={{ package_version }}" />
   <link rel="stylesheet" href="/static/executive.css?v={{ package_version }}" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2213%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%221.6%22%2F%3E%3C%2Fsvg%3E" />
+  {# AGStreams — shared EventSource cache. MUST be the FIRST deferred
+     script in document order so every later subscriber (executive_charts.js,
+     elapsed-ticker.js, recon-live.js, phase-spine.js, the inline boots)
+     has ``window.AGStreams`` defined when their own deferred body runs.
+     Deferred scripts execute IN DOCUMENT ORDER with
+     ``document.readyState === "interactive"`` (parsing complete), which
+     means a consumer that runs init() immediately (rather than waiting
+     for DOMContentLoaded) will see ``window.AGStreams`` undefined and
+     silently skip its subscription. This is the bug that masked itself
+     as "snapshot listener not firing for the radar/severity charts" —
+     the listener was never attached. Without this consolidation each
+     live widget opens its own EventSource (~9 total per page) and
+     exhausts Chrome's HTTP/1.1 6-per-origin connection cap. #}
+  <script src="/static/streams.js?v={{ package_version }}" defer></script>
   <script src="/static/executive_tabs.js?v={{ package_version }}" defer></script>
   {# Chart.js v4 — drives the AIVSS / severity bar and ASI radar charts.
      Same CDN + version as the Narrative theme. executive_charts.js reads
@@ -173,7 +187,6 @@
     if (!scanId) { return; }
     if (body.getAttribute('data-is-terminal') === 'true') { return; }
     if (typeof EventSource === 'undefined') { return; }
-    var url = '/scans/' + encodeURIComponent(scanId) + '/live';
     function applyPatch(node, spec, data) {
       // Mode dispatch — ``text:<key>`` is the implicit default (any
       // ``data-live`` value that doesn't carry a ``attr:`` / ``pulse:``
@@ -251,67 +264,42 @@
       if (node.hasAttribute('data-elapsed-anchor')) { return; }
       node.textContent = data[spec];
     }
-    // Bind every snapshot/terminator handler onto an EventSource. Split
-    // out so the freshness dot's click-to-retry can recreate the stream
-    // AND re-bind these data handlers (a bare reopen would reconnect the
-    // socket but lose the snapshot patcher, so KPIs would stop updating
-    // after a manual Retry).
-    // Freshness watchdog. If no snapshot arrives within this window we
-    // assume the EventSource is wedged (cold-window race / proxy buffer /
-    // browser bug) and reopen the connection. The dashboard sends a
-    // snapshot every ~500 ms during a live scan, so 12 s is ~24 expected
-    // snapshots — comfortably past noise without forcing churn.
-    var SNAPSHOT_STALE_MS = 12000;
-    var lastSnapshotAt = 0;
-    var watchdogTimer = null;
-    function armWatchdog(reopen) {
-      if (watchdogTimer) { window.clearInterval(watchdogTimer); }
-      lastSnapshotAt = Date.now();
-      watchdogTimer = window.setInterval(function () {
-        if (Date.now() - lastSnapshotAt < SNAPSHOT_STALE_MS) { return; }
-        try { console.warn(
-          'AGSnapshotStream: no snapshot for', SNAPSHOT_STALE_MS, 'ms; reopening EventSource'
+    // Attach the snapshot patcher to the shared snapshot EventSource.
+    // The browser's native EventSource auto-reconnect handles transient
+    // network errors; no custom watchdog is needed here since the
+    // shared source is the only consumer of /scans/<id>/live and there
+    // is no connection-pool contention to fight through.
+    var source = window.AGStreams && window.AGStreams.snapshot
+      ? window.AGStreams.snapshot(scanId)
+      : null;
+    if (!source) {
+      try { console.error(
+        'AGSnapshotStream: AGStreams not loaded; KPIs will not live-update'
+      ); } catch (e) {}
+      return;
+    }
+    source.addEventListener('snapshot', function (evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        document.querySelectorAll('[data-live]').forEach(function (node) {
+          var spec = node.getAttribute('data-live');
+          if (!spec) { return; }
+          try {
+            applyPatch(node, spec, data);
+          } catch (patchErr) {
+            try { console.error(
+              'AGSnapshotStream: applyPatch failed for', spec, patchErr
+            ); } catch (e) {}
+          }
+        });
+      } catch (err) {
+        try { console.error(
+          'AGSnapshotStream: snapshot frame parse failed', err, evt.data
         ); } catch (e) {}
-        reopen();
-      }, 3000);
-    }
-    function wire(source) {
-      source.addEventListener('snapshot', function (evt) {
-        lastSnapshotAt = Date.now();
-        try {
-          var data = JSON.parse(evt.data);
-          document.querySelectorAll('[data-live]').forEach(function (node) {
-            var spec = node.getAttribute('data-live');
-            if (!spec) { return; }
-            try {
-              applyPatch(node, spec, data);
-            } catch (patchErr) {
-              // Per-node failure must not break the rest of the snapshot.
-              // Log so a real regression is visible instead of silent.
-              try { console.error(
-                'AGSnapshotStream: applyPatch failed for', spec, patchErr
-              ); } catch (e) {}
-            }
-          });
-        } catch (err) {
-          try { console.error(
-            'AGSnapshotStream: snapshot frame parse failed', err, evt.data
-          ); } catch (e) {}
-        }
-      });
-      source.addEventListener('scan_done', function () {
-        if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
-        if (watchdogTimer) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
-        source.close();
-      });
-      return source;
-    }
-    // Open the snapshot stream. (The freshness-dot health indicator was
-    // retired; the EventSource itself still drives live KPI patches.)
-    var currentSource = wire(new EventSource(url));
-    armWatchdog(function reopen() {
-      try { currentSource.close(); } catch (e) {}
-      currentSource = wire(new EventSource(url));
+      }
+    });
+    source.addEventListener('scan_done', function () {
+      if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
     });
     }
     if (document.readyState === 'loading') {
@@ -354,78 +342,42 @@
     // rows stuck at zero with no console output to help diagnose. Now
     // we poll for the module up to ~5 s, then log to the console if it
     // still hasn't arrived so operators can see the failure in DevTools.
+    // Wait for live-append.js to assign window.AGLiveAppend (defer-
+    // loaded; should be present by DOMContentLoaded, but a script-load
+    // failure would leave it undefined). Poll briefly, then surface a
+    // clear console.error if it never arrives.
     var liveAppendRetries = 0;
     var maxLiveAppendRetries = 50;
-    function waitForLiveAppendThenOpen() {
+    function attachWhenReady() {
       if (window.AGLiveAppend && typeof window.AGLiveAppend.attach === 'function') {
-        openStream();
+        var source = window.AGStreams && window.AGStreams.events
+          ? window.AGStreams.events(scanId)
+          : null;
+        if (!source) {
+          try { console.error(
+            'AGEventsStream: AGStreams not loaded; Findings / Probes / Logs rows will not stream'
+          ); } catch (e) {}
+          return;
+        }
+        window.AGLiveAppend.attach(source);
+        source.addEventListener('scan_done', function () {
+          if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
+        });
         return;
       }
       liveAppendRetries += 1;
       if (liveAppendRetries > maxLiveAppendRetries) {
-        try {
-          console.error(
-            'AGEventsStream: live-append module not available after ' +
-              (maxLiveAppendRetries * 100) +
-              ' ms — Findings / Probes / Logs rows will not stream. ' +
-              'Check that /static/live-append.js loaded without error.'
-          );
-        } catch (e) {}
+        try { console.error(
+          'AGEventsStream: live-append module not available after ' +
+          (maxLiveAppendRetries * 100) +
+          ' ms — Findings / Probes / Logs rows will not stream. ' +
+          'Check that /static/live-append.js loaded without error.'
+        ); } catch (e) {}
         return;
       }
-      window.setTimeout(waitForLiveAppendThenOpen, 100);
+      window.setTimeout(attachWhenReady, 100);
     }
-    var url = '/scan/' + encodeURIComponent(scanId) + '/events';
-    // Stream-health watchdog. If no SSE frame arrives for this window
-    // we assume the connection is wedged (proxy buffer / transient
-    // network error that the auto-reconnect didn't recover from) and
-    // reopen. 25 s is comfortably past the server's 15 s keepalive so
-    // a healthy quiet phase doesn't churn.
-    var STREAM_STALE_MS = 25000;
-    var lastFrameAt = 0;
-    var watchdogTimer = null;
-    function armWatchdog(reopen) {
-      if (watchdogTimer) { window.clearInterval(watchdogTimer); }
-      lastFrameAt = Date.now();
-      watchdogTimer = window.setInterval(function () {
-        if (Date.now() - lastFrameAt < STREAM_STALE_MS) { return; }
-        try { console.warn(
-          'AGEventsStream: no frame for', STREAM_STALE_MS, 'ms; reopening EventSource'
-        ); } catch (e) {}
-        reopen();
-      }, 5000);
-    }
-    function wire(source) {
-      window.AGLiveAppend.attach(source);
-      // Generic frame counter — every named-event listener bumps
-      // ``lastFrameAt`` so the watchdog stays disarmed during healthy
-      // operation. We attach to all event kinds live-append cares about
-      // PLUS the bare 'message' fallback for unnamed events.
-      var bumpFrame = function () { lastFrameAt = Date.now(); };
-      ['finding', 'agent_start', 'agent_progress', 'agent_done',
-       'agent_skipped', 'recon_done', 'reflection', 'log',
-       'heartbeat', 'phase_start', 'phase_done'].forEach(function (kind) {
-        source.addEventListener(kind, bumpFrame);
-      });
-      source.addEventListener('message', bumpFrame);
-      source.addEventListener('scan_done', function () {
-        if (window.AGScanStatus) { window.AGScanStatus.markComplete(); }
-        if (watchdogTimer) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
-        source.close();
-      });
-      source.addEventListener('error', function () {
-        try { console.warn('AGEventsStream: error (readyState=' + source.readyState + ')'); } catch (e) {}
-      });
-      return source;
-    }
-    function openStream() {
-      var currentSource = wire(new EventSource(url));
-      armWatchdog(function reopen() {
-        try { currentSource.close(); } catch (e) {}
-        currentSource = wire(new EventSource(url));
-      });
-    }
-    waitForLiveAppendThenOpen();
+    attachWhenReady();
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);

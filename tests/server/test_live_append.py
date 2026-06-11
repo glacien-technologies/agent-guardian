@@ -255,19 +255,107 @@ def test_layout_loads_live_append_script(client: TestClient, store: ScanStore) -
 
 
 def test_layout_attaches_live_append_to_events_stream(client: TestClient, store: ScanStore) -> None:
-    """The layout-shell inline script opens ``/scan/<id>/events`` and
-    calls ``AGLiveAppend.attach`` on it — that's the wiring contract.
+    """The layout-shell inline script subscribes to the shared
+    ``AGStreams.events`` source and calls ``AGLiveAppend.attach`` on
+    it — that's the wiring contract.
 
     A terminal scan should NOT open the stream (no producer left). The
     fixture scan above is non-terminal so the wiring should be present.
+    The actual URL ``/scan/<id>/events`` is constructed inside
+    ``streams.js`` from ``data-scan-id`` so the inline boot script
+    itself no longer mentions the path.
     """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
     assert "AGLiveAppend.attach" in body
-    assert "/scan/" in body
-    assert "/events" in body
+    assert "AGStreams.events" in body
+    assert "/static/streams.js" in body
+
+
+def test_streams_js_loaded_before_any_subscriber(client: TestClient, store: ScanStore) -> None:
+    """``streams.js`` must appear in document order BEFORE every script
+    that subscribes via ``window.AGStreams``.
+
+    Deferred scripts execute in document order with
+    ``document.readyState === "interactive"`` once parsing completes,
+    which means a consumer like ``executive_charts.js`` that calls
+    ``init()`` immediately (instead of waiting for DOMContentLoaded)
+    will see ``window.AGStreams`` undefined and silently skip its
+    subscription — leaving the radar / severity-bar / phase-spine
+    widgets stuck at their server-rendered baseline forever.
+
+    This test reads the rendered HTML and asserts the script-tag
+    ordering directly so a future re-shuffle (e.g. tidying the head)
+    that moves streams.js back below a consumer fails immediately
+    with a precise error message.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+
+    def pos(needle: str) -> int:
+        i = body.find(needle)
+        assert i != -1, f"missing {needle} in rendered HTML"
+        return i
+
+    streams_pos = pos("/static/streams.js")
+    for consumer in (
+        "/static/executive_charts.js",
+        "/static/elapsed-ticker.js",
+        "/static/recon-live.js",
+    ):
+        consumer_pos = pos(consumer)
+        assert streams_pos < consumer_pos, (
+            f"streams.js (pos {streams_pos}) must load BEFORE {consumer} "
+            f"(pos {consumer_pos}) so the consumer's deferred init() sees "
+            "window.AGStreams already defined"
+        )
+
+
+def test_executive_modules_route_event_sources_through_agstreams() -> None:
+    """Chrome's HTTP/1.1 per-origin connection cap is 6. When each live
+    widget opened its own ``new EventSource(...)`` against the two
+    pool-relevant endpoints (``/scan/<id>/events`` and
+    ``/scans/<id>/live``), the page accumulated ~9 long-lived TCP
+    connections and the overflow queued forever, starving the events
+    stream. This test locks the consolidation contract: every executive
+    module that opens those two endpoints must route through
+    ``window.AGStreams``, not ``new EventSource`` directly.
+
+    Exemptions:
+        - ``streams.js`` — IS the shared cache; must call ``new EventSource``.
+        - ``swarm.js`` — legacy swarm view, not loaded by the executive
+          theme (no contribution to its connection pool).
+        - ``reflections.js`` — different endpoint
+          (``/scans/<id>/reflections.sse``) and a different uvicorn
+          route; outside the events/live pool.
+        - ``freshness-dot.js`` — only opens an EventSource when
+          explicitly invoked to reconnect a wedged stream; not a
+          standalone subscriber.
+    """
+    import re
+    from pathlib import Path
+
+    static_dir = (
+        Path(__file__).resolve().parents[2] / "src" / "agent_guardian" / "server" / "static"
+    )
+    exempt = {"streams.js", "swarm.js", "reflections.js", "freshness-dot.js"}
+    pool_endpoints = re.compile(r"['\"]/scans?/['\"]|/events|/live")
+    new_es = re.compile(r"new\s+EventSource\s*\(")
+    offenders: list[str] = []
+    for js_path in static_dir.glob("*.js"):
+        if js_path.name in exempt:
+            continue
+        source = js_path.read_text(encoding="utf-8")
+        if new_es.search(source) and pool_endpoints.search(source):
+            offenders.append(js_path.name)
+    assert offenders == [], (
+        "These executive modules still open EventSources against the pool "
+        "endpoints directly instead of routing through `window.AGStreams`: " + ", ".join(offenders)
+    )
 
 
 def test_layout_loads_recon_live_script(client: TestClient, store: ScanStore) -> None:
@@ -298,20 +386,24 @@ def test_layout_snapshot_handler_logs_errors_not_swallow(
     assert "AGSnapshotStream: snapshot frame parse failed" in body
 
 
-def test_layout_snapshot_stream_has_freshness_watchdog(
-    client: TestClient, store: ScanStore
-) -> None:
-    """#138 — if no ``snapshot`` event arrives within the stale window the
-    inline boot must close the EventSource and reopen it. Catches the
-    cold-window race where the page opens before the swarm starts
-    emitting and the tab silently sits on an empty stream."""
+def test_layout_snapshot_stream_uses_shared_source(client: TestClient, store: ScanStore) -> None:
+    """The snapshot KPI patcher must subscribe to the shared
+    ``AGStreams.snapshot`` source rather than opening its own
+    EventSource. Without this consolidation the page accumulates 4+
+    redundant snapshot connections (one per widget) and starves the
+    HTTP/1.1 connection pool. The custom freshness watchdog that
+    previously fronted ``new EventSource`` was dropped — the shared
+    source relies on the browser's native EventSource auto-reconnect.
+    """
     scan = _make_scan()
     _persist(store, scan)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     body = resp.text
-    assert "SNAPSHOT_STALE_MS" in body
-    assert "armWatchdog" in body
-    assert "reopening EventSource" in body
+    assert "AGStreams.snapshot" in body
+    assert "/static/streams.js" in body
+    # The retired watchdog code must not have crept back in.
+    assert "SNAPSHOT_STALE_MS" not in body
+    assert "armWatchdog" not in body
 
 
 # ----------------------------------------------------------------------
