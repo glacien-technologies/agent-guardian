@@ -274,6 +274,47 @@ def test_layout_attaches_live_append_to_events_stream(client: TestClient, store:
     assert "/static/streams.js" in body
 
 
+def test_streams_js_loaded_before_any_subscriber(client: TestClient, store: ScanStore) -> None:
+    """``streams.js`` must appear in document order BEFORE every script
+    that subscribes via ``window.AGStreams``.
+
+    Deferred scripts execute in document order with
+    ``document.readyState === "interactive"`` once parsing completes,
+    which means a consumer like ``executive_charts.js`` that calls
+    ``init()`` immediately (instead of waiting for DOMContentLoaded)
+    will see ``window.AGStreams`` undefined and silently skip its
+    subscription — leaving the radar / severity-bar / phase-spine
+    widgets stuck at their server-rendered baseline forever.
+
+    This test reads the rendered HTML and asserts the script-tag
+    ordering directly so a future re-shuffle (e.g. tidying the head)
+    that moves streams.js back below a consumer fails immediately
+    with a precise error message.
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+
+    def pos(needle: str) -> int:
+        i = body.find(needle)
+        assert i != -1, f"missing {needle} in rendered HTML"
+        return i
+
+    streams_pos = pos("/static/streams.js")
+    for consumer in (
+        "/static/executive_charts.js",
+        "/static/elapsed-ticker.js",
+        "/static/recon-live.js",
+    ):
+        consumer_pos = pos(consumer)
+        assert streams_pos < consumer_pos, (
+            f"streams.js (pos {streams_pos}) must load BEFORE {consumer} "
+            f"(pos {consumer_pos}) so the consumer's deferred init() sees "
+            "window.AGStreams already defined"
+        )
+
+
 def test_executive_modules_route_event_sources_through_agstreams() -> None:
     """Chrome's HTTP/1.1 per-origin connection cap is 6. When each live
     widget opened its own ``new EventSource(...)`` against the two

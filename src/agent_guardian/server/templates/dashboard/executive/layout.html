@@ -33,6 +33,20 @@
   <link rel="stylesheet" href="/static/colors_and_type.css?v={{ package_version }}" />
   <link rel="stylesheet" href="/static/executive.css?v={{ package_version }}" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2213%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%221.6%22%2F%3E%3C%2Fsvg%3E" />
+  {# AGStreams — shared EventSource cache. MUST be the FIRST deferred
+     script in document order so every later subscriber (executive_charts.js,
+     elapsed-ticker.js, recon-live.js, phase-spine.js, the inline boots)
+     has ``window.AGStreams`` defined when their own deferred body runs.
+     Deferred scripts execute IN DOCUMENT ORDER with
+     ``document.readyState === "interactive"`` (parsing complete), which
+     means a consumer that runs init() immediately (rather than waiting
+     for DOMContentLoaded) will see ``window.AGStreams`` undefined and
+     silently skip its subscription. This is the bug that masked itself
+     as "snapshot listener not firing for the radar/severity charts" —
+     the listener was never attached. Without this consolidation each
+     live widget opens its own EventSource (~9 total per page) and
+     exhausts Chrome's HTTP/1.1 6-per-origin connection cap. #}
+  <script src="/static/streams.js?v={{ package_version }}" defer></script>
   <script src="/static/executive_tabs.js?v={{ package_version }}" defer></script>
   {# Chart.js v4 — drives the AIVSS / severity bar and ASI radar charts.
      Same CDN + version as the Narrative theme. executive_charts.js reads
@@ -52,15 +66,6 @@
      patch G16/P9). ``setTimeout``-driven (NOT ``setInterval``) so
      ``prefers-reduced-motion`` users fall back cleanly to the server's
      ``elapsed_label`` refresh (critic patch G20/P20). #}
-  {# AGStreams — shared EventSource cache. Loaded FIRST (before any
-     module that subscribes to /scan/<id>/events or /scans/<id>/live)
-     so every later module reuses one of two cached sources rather
-     than opening its own. Without this, each live widget (severity
-     bar, ASI radar, phase spine, elapsed ticker, recon panel, log
-     tail, live-append) opens its own EventSource — ~9 total per
-     page — exhausting Chrome's HTTP/1.1 6-per-origin connection cap
-     and starving the queued ones forever. #}
-  <script src="/static/streams.js?v={{ package_version }}" defer></script>
   <script src="/static/elapsed-ticker.js?v={{ package_version }}" defer></script>
   {# The SSE "LIVE/STALE/OFFLINE" freshness dot was retired — it tracked event-
      stream health, which read as a confusing second status next to the scan
