@@ -197,11 +197,21 @@
         ? document.body.getAttribute("data-scan-id") || ""
         : "";
 
+    // ``success=False`` → informational/unconfirmed finding. The ASI
+    // category score deliberately excludes it (scoring.py), so the
+    // chip is rendered muted with an "info" tag so the operator can
+    // reconcile the row with the per-category breakdown.
+    var success = p.success;
+    var informational = success === false;
     row.setAttribute("data-finding-id", fid);
     row.setAttribute("data-severity", sev);
+    row.setAttribute("data-informational", informational ? "true" : "false");
     row.setAttribute("data-asi", asi);
     row.setAttribute("data-agent", agent);
     row.setAttribute("data-probe", probe);
+    if (informational) {
+      row.classList.add("exec-findings-table__row--informational");
+    }
     if (scanId && fid) {
       row.setAttribute(
         "data-finding-href",
@@ -211,7 +221,26 @@
     var pill = row.querySelector('[data-slot="sev-pill"]');
     if (pill) {
       pill.classList.add("exec-sev-pill--" + sev);
-      pill.setAttribute("aria-label", (SEVERITY_LABELS[sev] || sev) + " severity");
+      if (informational) {
+        pill.classList.add("exec-sev-pill--informational");
+        pill.setAttribute(
+          "title",
+          "Observed weakness — not a confirmed exploit. Does not affect the ASI category score."
+        );
+      }
+      pill.setAttribute(
+        "aria-label",
+        (SEVERITY_LABELS[sev] || sev) + " severity" + (informational ? " (informational)" : "")
+      );
+    }
+    if (informational) {
+      var label = row.querySelector('[data-slot="sev-label"]');
+      if (label && label.parentNode) {
+        var tag = document.createElement("small");
+        tag.className = "exec-sev-pill__tag";
+        tag.textContent = "info";
+        label.parentNode.appendChild(tag);
+      }
     }
     fillSlot(row, "sev-label", SEVERITY_LABELS[sev] || sev);
     fillSlot(row, "asi", asi || "—");

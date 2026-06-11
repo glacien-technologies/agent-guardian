@@ -394,6 +394,17 @@ def _findings_page(
     end = min(start + per_page, total)
     items: list[dict[str, Any]] = []
     for f in sorted_findings[start:end]:
+        # Findings with ``success=False`` are *observed weaknesses* — a
+        # risky behaviour the target engaged in without a confirmed
+        # exploit artifact. The scoring path (`asi_score()` and
+        # `_count_findings_by_asi`) deliberately excludes these from
+        # the ASI category score, so a row whose severity is CRITICAL
+        # but informational=True will read as 1 critical finding in
+        # the Findings table while the ASI03 column shows 100 / 0/0/0/0.
+        # The template uses the `informational` flag to render those
+        # rows with a muted chip + tooltip instead of the solid-red
+        # CRITICAL chip so the contradiction is self-explaining.
+        informational = not f.success
         items.append(
             {
                 "id": f.id,
@@ -404,6 +415,7 @@ def _findings_page(
                 "summary": f.summary,
                 "severity_label": f.severity.value.upper(),
                 "severity_class": f.severity.value.lower(),
+                "informational": informational,
                 "created_label": f.created_at.strftime("%H:%M:%S"),
                 # QA-051 — runtime agent name (e.g. ``goal-hijack-agent``)
                 # populated in-place by ``_attach_evidence_to_findings`` from

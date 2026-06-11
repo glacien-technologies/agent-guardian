@@ -217,23 +217,30 @@
                    detail drawer, not as inline child rows in the table. #}
                 {% set _ev_first = (f.evidence | first) if f.evidence else None %}
                 {% set _turn_label = (_ev_first.turn if _ev_first and _ev_first.turn else None) %}
-                <tr class="exec-findings-table__row"
+                <tr class="exec-findings-table__row{% if f.informational %} exec-findings-table__row--informational{% endif %}"
                     data-source="finding"
                     data-finding-id="{{ f.id }}"
                     data-finding-href="/scan/{{ scan_id }}/finding/{{ f.id }}"
                     data-severity="{{ f.severity_class }}"
+                    data-informational="{{ 'true' if f.informational else 'false' }}"
                     data-asi="{{ f.asi_code }}"
                     data-agent="{{ f.agent_name or '' }}"
                     data-probe="{{ f.probe_id or '' }}"
                     tabindex="0"
                     role="button"
                     aria-controls="exec-finding-slideover"
-                    aria-label="Open finding {{ f.id }} ({{ f.severity_label }} severity)">
+                    aria-label="Open finding {{ f.id }} ({{ f.severity_label }} severity{% if f.informational %} · informational, not a confirmed exploit{% endif %})">
                   <td class="exec-findings-table__cell exec-findings-table__cell--sev">
-                    <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}"
-                          aria-label="{{ f.severity_label }} severity">
+                    {# Informational rows (success=False) get a muted chip
+                       so the user can reconcile a CRITICAL row with the
+                       ASI03 score column that ignores it. The tooltip
+                       explains why the row's severity doesn't move the
+                       per-category score. #}
+                    <span class="exec-sev-pill exec-sev-pill--{{ f.severity_class }}{% if f.informational %} exec-sev-pill--informational{% endif %}"
+                          {% if f.informational %}title="Observed weakness — not a confirmed exploit. Does not affect the ASI category score."{% endif %}
+                          aria-label="{{ f.severity_label }} severity{% if f.informational %} (informational)"{% else %}"{% endif %}>
                       <span class="exec-sev-pill__dot" aria-hidden="true"></span>
-                      {{ f.severity_label }}
+                      {{ f.severity_label }}{% if f.informational %} <small class="exec-sev-pill__tag">info</small>{% endif %}
                     </span>
                   </td>
                   <td class="exec-findings-table__cell exec-findings-table__cell--asi">
