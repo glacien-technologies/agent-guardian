@@ -86,6 +86,17 @@
 
 <div class="exec-slideover-sheet" data-slideover-sheet data-slideover-kind="{{ _kind }}">
 
+  {# Evidence chain — surfaced at the TOP so an operator can click straight
+     into the JSONL events for forensic replay without scrolling past the
+     whole conversation thread. Tester report #16. The same anchor remains
+     accessible via the body block above (and any deep-link mentions). #}
+  <p class="exec-probe__evidence exec-probe__evidence--top">
+    <a class="exec-probe__evidence-link"
+       href="/scan/{{ scan_id }}/events/view{% if ctx.probe_id %}?probe={{ ctx.probe_id }}{% endif %}"
+       target="_blank"
+       rel="noopener">View JSONL events for this {{ _kind }} →</a>
+  </p>
+
   {% if _is_recon %}
   {# ----- 1r. Recon header (capability probing — no ASI/finding metadata) ----- #}
   <p class="exec-probe__label">Recon probe</p>

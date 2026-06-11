@@ -80,10 +80,12 @@
           aria-controls="exec-finding-slideover"
           aria-label="Open {{ g.turn_count }}-turn conversation for {{ g.agent or 'unknown agent' }}">
         <td class="exec-probes-table__cell--agent">
-          <code class="exec-probes-table__asi">{{ g.asi_category or '—' }}</code>
-          <span class="exec-probes-table__agent">{{ g.agent or '—' }}</span>
-          {# RUNS — turn count moved next to the ASI badge (was a far-right column). #}
-          <span class="exec-probes-table__runs">{{ g.turn_count }} run{{ '' if g.turn_count == 1 else 's' }}</span>
+          <div class="exec-probes-table__agent-head">
+            <code class="exec-probes-table__asi">{{ g.asi_category or '—' }}</code>
+            <span class="exec-probes-table__agent">{{ g.agent or '—' }}</span>
+            {# RUNS — turn count moved next to the ASI badge (was a far-right column). #}
+            <span class="exec-probes-table__runs">{{ g.turn_count }} run{{ '' if g.turn_count == 1 else 's' }}</span>
+          </div>
         </td>
         <td class="exec-probes-table__cell--status">
           {# Run status — completed / running / skipped. Server-rendered from the

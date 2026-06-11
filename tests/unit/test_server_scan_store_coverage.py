@@ -485,6 +485,39 @@ def test_list_scans_page_skips_running_ids_in_index(tmp_path: Path) -> None:
     assert page[0].is_running is True
 
 
+def test_list_scans_page_cross_process_partial_carries_running_status(
+    tmp_path: Path,
+) -> None:
+    """Tester report #1 + #8 — a CLI-spawned scan that lives only on disk
+    (no in-memory _running entry, no index row) must surface ``status='running'``
+    in its ScanSummary, not the dataclass default ``'completed'``. The Scan
+    history template branches on ``status``, not ``is_running``, so without
+    this the live scan painted as a 'done' pill while the operator could
+    still see it generating events.
+    """
+    import time as _time
+
+    from agent_guardian.server.partial_scan import partial_scan_path
+
+    store = ScanStore(root_dir=tmp_path)
+    scan_dir = store.scan_dir("cli-partial-live")
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    # A fresh partial — no terminal file. mtime is "now", which is well
+    # within the disk-running fix-up's _stale_after_seconds window.
+    partial = partial_scan_path(scan_dir)
+    partial.write_text("{}", encoding="utf-8")
+    _time.sleep(0.01)
+    page, total = store.list_scans_page(offset=0, limit=10)
+    assert total == 1
+    row = page[0]
+    assert row.scan_id == "cli-partial-live"
+    assert row.is_running is True
+    assert row.status == "running", (
+        f"cross-process in-flight scan must surface status='running' so the "
+        f"home.html template paints the live pill; got {row.status!r}"
+    )
+
+
 def test_list_scans_page_running_with_partial_scan_uses_partial_fields(
     tmp_path: Path,
 ) -> None:

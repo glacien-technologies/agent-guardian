@@ -134,7 +134,31 @@ function wireRefreshControls() {
   }
 }
 
+function wireBandFilter() {
+  // Tester report #15 — filter the scan-history table by band. Reads the
+  // dropdown's value and hides every <tr data-row-band> whose band does
+  // not match (empty value = show all). The filter is applied again after
+  // every refresh because the table body is replaced wholesale.
+  const sel = document.getElementById("band-filter");
+  if (!sel) return;
+  function applyFilter() {
+    const target = sel.value || "";
+    const rows = document.querySelectorAll("tr[data-row-band]");
+    rows.forEach((row) => {
+      const band = row.getAttribute("data-row-band") || "";
+      row.hidden = target !== "" && band !== target;
+    });
+  }
+  sel.addEventListener("change", applyFilter);
+  const body = document.getElementById("scan-list-body");
+  if (body && typeof MutationObserver !== "undefined") {
+    const obs = new MutationObserver(applyFilter);
+    obs.observe(body, { childList: true, subtree: true });
+  }
+}
+
 wireDeleteButtons();
 wireCopyButtons();
 localizeTimes();
 wireRefreshControls();
+wireBandFilter();

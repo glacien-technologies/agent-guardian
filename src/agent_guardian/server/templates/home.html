@@ -20,6 +20,20 @@
   <div class="section-head">
     <h2 id="history-heading" class="section-title">Recent scans ({{ scans|length }})</h2>
     <div class="refresh-controls">
+      {# Tester report #15 — band filter dropdown. Hides scans whose
+         BAND column does not match the selected value (empty = show all). #}
+      <label class="band-filter-controls" for="band-filter">
+        <span class="band-filter-label">Band:</span>
+        <select id="band-filter" class="band-filter-select">
+          <option value="">All bands</option>
+          <option value="excellent">Excellent</option>
+          <option value="good">Good</option>
+          <option value="warning">Warning</option>
+          <option value="poor">Poor</option>
+          <option value="critical">Critical</option>
+          <option value="not_evaluated">Not evaluated</option>
+        </select>
+      </label>
       <button type="button" id="refresh-scans" class="btn-refresh" title="Refresh the scan list">↻ Refresh</button>
       <label class="auto-refresh"><input type="checkbox" id="auto-refresh-scans"> Auto-refresh</label>
     </div>
@@ -42,7 +56,7 @@
       </thead>
       <tbody>
         {% for s in scans %}
-        <tr data-row-scan-id="{{ s.scan_id }}">
+        <tr data-row-scan-id="{{ s.scan_id }}" data-row-band="{{ (s.band or '')|lower }}">
           <td>
             {% if s.status == 'running' %}
             <span class="pill pill-running">live</span>

@@ -2826,7 +2826,7 @@ def print_scan_urls(
 # ---------------------------------------------------------------------------
 
 
-def _await_plan_confirmation(
+async def _await_plan_confirmation(
     *,
     yes: bool,
     timeout_seconds: float = 10.0,
@@ -2847,8 +2847,17 @@ def _await_plan_confirmation(
 
         Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 10s)
 
-    then :func:`select.select` on ``stdin`` until either the timer fires
-    or any input arrives. ``KeyboardInterrupt`` → ``"abort"``.
+    then suspend on a thread-executor-backed ``stdin.readline`` wrapped in
+    :func:`asyncio.wait_for`. The native asyncio SIGINT handler installed by
+    ``asyncio.run`` cancels the running task, which arrives as either
+    ``KeyboardInterrupt`` or ``asyncio.CancelledError`` at the await point;
+    both → ``"abort"``. ``asyncio.TimeoutError`` → ``"proceed"``.
+
+    Tester report #18 — the previous synchronous ``select.select(...)``
+    implementation blocked the event-loop thread, so the SIGINT signal
+    only flagged the task for cancellation but the syscall restarted
+    (PEP 475) and the timer ran to completion regardless. Switching to
+    the await-able executor lets the cancellation actually deliver.
 
     Returns one of the literal strings ``"proceed"`` or ``"abort"``.
     """
@@ -2883,14 +2892,15 @@ def _await_plan_confirmation(
         return "proceed"
 
     try:
-        import select
-
-        ready, _, _ = select.select([inp], [], [], timeout_seconds)
-        if ready:
-            with contextlib.suppress(Exception):
-                inp.readline()
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(None, inp.readline),
+            timeout=timeout_seconds,
+        )
         return "proceed"
-    except KeyboardInterrupt:
+    except TimeoutError:
+        return "proceed"
+    except (KeyboardInterrupt, asyncio.CancelledError):
         return "abort"
     except Exception:  # pragma: no cover - defensive (closed stdin etc.)
         return "proceed"
@@ -3837,7 +3847,7 @@ async def _run_scan(
 
         Console().print(build_plan_panel(plan_ctx))
 
-        decision = _await_plan_confirmation(yes=yes)
+        decision = await _await_plan_confirmation(yes=yes)
         if decision == "abort":
             typer.echo("aborted at scan-plan confirmation.", err=True)
             try:
@@ -3880,7 +3890,7 @@ async def _run_scan(
             base_url=auto_serve_base_url,
             debug_format="json",
         )
-        decision = _await_plan_confirmation(yes=yes)
+        decision = await _await_plan_confirmation(yes=yes)
         if decision == "abort":
             typer.echo("aborted at scan-plan confirmation.", err=True)
             try:

@@ -371,37 +371,40 @@
           onClick: function (_evt, els) {
             if (!els.length) { return; }
             var idx = els[0].index;
-            /* QA-13a — open the Findings tab and apply the matching severity
-             * filter, so a bar click drills straight into those findings.
-             * The tab switch is idempotent when already on Findings. */
+            /* Open the Findings tab and apply the matching severity filter,
+             * so a bar click drills straight into those findings. The tab
+             * switch is idempotent when already on Findings. Previously the
+             * filter was gated on an exact <option> match in the current
+             * page of findings; that silently no-op'd when the clicked
+             * severity wasn't in the visible page (tester report #3). The
+             * unconditional set+dispatch lets the filter apply correctly
+             * whenever the option exists; when it doesn't, the .value
+             * assignment is a no-op and the tab switch is still helpful. */
             var sev = severities[idx];
             var findingsTab = document.getElementById("tab-findings");
             if (findingsTab) { findingsTab.click(); }
             var sevSelect = document.getElementById("exec-findings-filter-severity");
             if (sevSelect && sev) {
-              var hasOption = false;
-              for (var oi = 0; oi < sevSelect.options.length; oi += 1) {
-                if (sevSelect.options[oi].value === sev) { hasOption = true; break; }
-              }
-              if (hasOption) {
-                sevSelect.value = sev;
-                sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
-              }
+              sevSelect.value = sev;
+              sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
             }
-            /* Then scroll the matching severity grouping into view. */
+            /* Then scroll the matching severity grouping into view. Defer
+             * the scroll until after the browser computes layout for the
+             * just-revealed Findings panel — without rAF the call fires
+             * before the panel is painted and the scroll lands at 0. */
             var anchor = anchors[idx];
             if (!anchor) { return; }
-            /* getElementById is safer than querySelector when anchor is a
-             * "#id" string and avoids throwing on malformed selectors. */
             var target = anchor.charAt(0) === "#"
               ? document.getElementById(anchor.slice(1))
               : document.querySelector(anchor);
             if (!target) { return; }
             var prefersReduced = window.matchMedia
               && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            target.scrollIntoView({
-              behavior: prefersReduced ? "auto" : "smooth",
-              block: "start",
+            window.requestAnimationFrame(function () {
+              target.scrollIntoView({
+                behavior: prefersReduced ? "auto" : "smooth",
+                block: "start",
+              });
             });
           },
         },

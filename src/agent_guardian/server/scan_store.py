@@ -788,7 +788,19 @@ class ScanStore:
                     is_live = (now - partial.stat().st_mtime) < _stale_after_seconds
                 except OSError:  # pragma: no cover -- defensive
                     is_live = False
-                s = dataclasses.replace(s, is_running=is_live, aivss=None, band=None)
+                # ``status`` must move with ``is_running`` — the Scan history
+                # template branches on ``s.status``, not ``s.is_running``, so
+                # leaving status at its dataclass default ``"completed"`` would
+                # paint a live CLI scan as "done" while is_running=True
+                # (tester report #1 + #8). For a stale/orphaned partial scan
+                # we surface "failed" so the operator can clean it up.
+                s = dataclasses.replace(
+                    s,
+                    is_running=is_live,
+                    status="running" if is_live else "failed",
+                    aivss=None,
+                    band=None,
+                )
             fixed.append(s)
         completed_summaries = fixed
 

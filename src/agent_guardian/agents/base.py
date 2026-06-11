@@ -1837,12 +1837,17 @@ class AsiAgent(ABC):
             # operator sees: who ran, what probe, what prompt prefix went out,
             # what target prefix came back, and how the judge ruled. Full
             # bodies (prompt + target_response + reasoning) remain at DEBUG
-            # above so forensic replay loses nothing. Pad prefixes to 50 chars
-            # so the line stays scannable in scrollback.
+            # above so forensic replay loses nothing. The JSONL events view
+            # surfaces this message verbatim with no further trimming, so
+            # surfacing the FULL prompt + response (newlines collapsed)
+            # keeps the consolidated narration scannable in scrollback AND
+            # readable in the operator's JSONL viewer — the previous
+            # ``[:50]`` slice + literal `…` looked like JSON corruption in
+            # the dashboard (tester report #13).
             _probe_id_meta = result.metadata.get("seed_id", "") if result.metadata else ""
             _probe_id = str(_probe_id_meta) if _probe_id_meta else "-"
-            _prompt_prefix = (result.text or "").replace("\n", " ")[:50]
-            _response_prefix = (target_response or "").replace("\n", " ")[:50]
+            _prompt_text = (result.text or "").replace("\n", " ")
+            _response_text = (target_response or "").replace("\n", " ")
             _verdict_word = (verdict.verdict or "inconclusive").upper()
             # Normalise "fail" -> EXPLOITED and "pass" -> DEFENDED so the
             # narration reads as security analysis, not LLM-judge jargon.
@@ -1852,11 +1857,11 @@ class AsiAgent(ABC):
                 "INCONCLUSIVE": "INCONCLUSIVE",
             }.get(_verdict_word, _verdict_word)
             _LOG.info(
-                "[%s] probe %s | prompt %s… | response %s… | verdict %s conf=%.2f",
+                "[%s] probe %s | prompt %s | response %s | verdict %s conf=%.2f",
                 agent_name,
                 _probe_id,
-                _prompt_prefix,
-                _response_prefix,
+                _prompt_text,
+                _response_text,
                 _verdict_label,
                 verdict.confidence,
             )

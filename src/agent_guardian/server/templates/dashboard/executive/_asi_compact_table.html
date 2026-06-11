@@ -37,8 +37,12 @@
     <span class="exec-asi-compact__head" role="columnheader" scope="col">ASI</span>
     <span class="exec-asi-compact__head" role="columnheader" scope="col">Category</span>
     <span class="exec-asi-compact__head exec-asi-compact__head--num"
-          role="columnheader" scope="col">Score</span>
-    <span class="exec-asi-compact__head" role="columnheader" scope="col">C / H / M / L</span>
+          role="columnheader" scope="col"
+          title="Score = severity x reliability of attacks that landed. Higher is stronger. Below 70 = at-risk. A single high-reliability medium can drop the score sharply; an informational (success=False) finding does not move the score."
+          aria-label="Score (higher is stronger)">Score</span>
+    <span class="exec-asi-compact__head" role="columnheader" scope="col"
+          title="Counts of CONFIRMED findings (success=True) in this category. Informational findings — visible on the Findings tab with a muted chip — are excluded from these counts by design."
+          aria-label="Confirmed finding counts by severity (critical / high / medium / low)">C / H / M / L</span>
   </li>
   {% for row in asi_rows %}
     {% set _f = row.findings %}

@@ -463,11 +463,26 @@ def test_recon_done_populates_recon_agent_turns_from_probe_count() -> None:
     assert tui._state.agent_turns["recon-agent"] == (17, 17)
 
 
-def test_recon_done_without_probes_leaves_turns_unset() -> None:
-    """No probes sent → no synthetic Turns entry (row still renders "—")."""
+def test_recon_done_without_probes_or_payload_falls_back_to_zero_turns() -> None:
+    """Tester report #2 — when ``recon_progress`` events never fired AND the
+    ``recon_done`` payload also doesn't carry probes_sent / turns (the legacy
+    payload shape), the TUI should still populate the AGENT x TURNS cell so
+    it reads ``0/0`` rather than the bare ``—`` placeholder. The previous
+    behavior of leaving the cell unset misled operators into thinking recon
+    hadn't run at all."""
     tui = ScanTUI(scan_id="s", target_ref="t", tier="auto")
     tui.handle_event(_phase_event("recon_done"))
-    assert "recon-agent" not in tui._state.agent_turns
+    assert tui._state.agent_turns.get("recon-agent") == (0, 0)
+
+
+def test_recon_done_uses_payload_probes_sent_when_progress_missing() -> None:
+    """Tester report #2 — for the white-box early-return path, recon doesn't
+    emit any ``recon_progress`` events, so the running ``recon_probes_sent``
+    counter is 0. The fix forwards the authoritative count on the
+    ``recon_done`` payload so the AGENT x TURNS cell still reads ``N/N``."""
+    tui = ScanTUI(scan_id="s", target_ref="t", tier="auto")
+    tui.handle_event(_phase_event("recon_done", probes_sent=13, turns=13))
+    assert tui._state.agent_turns.get("recon-agent") == (13, 13)
 
 
 def test_next_phase_after_unknown_returns_done() -> None:

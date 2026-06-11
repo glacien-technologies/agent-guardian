@@ -605,11 +605,21 @@ def test_build_plan_context_drops_unknown_role() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _await_sync(coro: Any) -> str:
+    """Run an awaitable from a sync test body."""
+    import asyncio
+
+    return asyncio.run(coro)
+
+
 def test_await_proceeds_on_yes_flag() -> None:
     """``yes=True`` short-circuits without touching stdin/stdout."""
     out = _FakeTty(tty=True)
     inp = _FakeTty(tty=True)
-    assert _await_plan_confirmation(yes=True, stdin=inp, stdout=out, environ={}) == "proceed"
+    assert (
+        _await_sync(_await_plan_confirmation(yes=True, stdin=inp, stdout=out, environ={}))
+        == "proceed"
+    )
     assert out.getvalue() == ""  # no prompt printed
 
 
@@ -617,14 +627,20 @@ def test_await_proceeds_on_non_tty_stdout() -> None:
     """A non-TTY stdout (piped) auto-proceeds."""
     out = _FakeTty(tty=False)
     inp = _FakeTty(tty=True)
-    assert _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}) == "proceed"
+    assert (
+        _await_sync(_await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}))
+        == "proceed"
+    )
 
 
 def test_await_proceeds_on_non_tty_stdin() -> None:
     """A non-TTY stdin auto-proceeds even when stdout is interactive."""
     out = _FakeTty(tty=True)
     inp = _FakeTty(tty=False)
-    assert _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}) == "proceed"
+    assert (
+        _await_sync(_await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}))
+        == "proceed"
+    )
 
 
 def test_await_proceeds_on_ci_env() -> None:
@@ -632,7 +648,9 @@ def test_await_proceeds_on_ci_env() -> None:
     out = _FakeTty(tty=True)
     inp = _FakeTty(tty=True)
     assert (
-        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={"CI": "true"})
+        _await_sync(
+            _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={"CI": "true"})
+        )
         == "proceed"
     )
 
@@ -642,25 +660,44 @@ def test_await_proceeds_on_env_override() -> None:
     out = _FakeTty(tty=True)
     inp = _FakeTty(tty=True)
     assert (
-        _await_plan_confirmation(
-            yes=False,
-            stdin=inp,
-            stdout=out,
-            environ={"AGENT_GUARDIAN_NO_PLAN_CONFIRM": "1"},
+        _await_sync(
+            _await_plan_confirmation(
+                yes=False,
+                stdin=inp,
+                stdout=out,
+                environ={"AGENT_GUARDIAN_NO_PLAN_CONFIRM": "1"},
+            )
         )
         == "proceed"
     )
 
 
 def test_await_proceeds_on_timeout() -> None:
-    """TTY with empty stdin + no input within the timeout proceeds."""
+    """TTY with empty stdin + no input within the timeout proceeds.
+
+    The new implementation runs ``stdin.readline`` in a thread executor and
+    wraps it with ``asyncio.wait_for``. A FakeTty.readline that hangs
+    forever forces the wait_for path to fire its TimeoutError.
+    """
+    import threading
+
+    block = threading.Event()
+
+    class _BlockingTty(_FakeTty):
+        def readline(self, _size: int = -1, /) -> str:
+            block.wait()
+            return ""
+
     out = _FakeTty(tty=True)
-    inp = _FakeTty(tty=True)
-    # Tiny timeout so the test is fast; select.select will return
-    # immediately when stdin has no data and the timer is 0.
-    result = _await_plan_confirmation(
-        yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.05
-    )
+    inp = _BlockingTty(tty=True)
+    try:
+        result = _await_sync(
+            _await_plan_confirmation(
+                yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.05
+            )
+        )
+    finally:
+        block.set()
     assert result == "proceed"
     # The prompt line should have been printed.
     assert "Press Enter" in out.getvalue()
@@ -670,20 +707,30 @@ def test_await_proceeds_on_enter_keypress() -> None:
     """TTY with newline ready on stdin proceeds (Enter accepted)."""
     out = _FakeTty(tty=True)
     inp = _FakeTty(tty=True, content="\n")
-    result = _await_plan_confirmation(
-        yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=1.0
+    result = _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=1.0)
     )
     assert result == "proceed"
 
 
 def test_await_aborts_on_keyboard_interrupt() -> None:
-    """A ``KeyboardInterrupt`` during select returns abort."""
+    """A ``KeyboardInterrupt`` during the readline wait returns abort.
+
+    With the asyncio-native implementation, KeyboardInterrupt arrives as
+    either KeyboardInterrupt or asyncio.CancelledError at the await point.
+    Simulating with a stdin.readline that raises directly covers the
+    KeyboardInterrupt path.
+    """
+
+    class _RaisingTty(_FakeTty):
+        def readline(self, _size: int = -1, /) -> str:
+            raise KeyboardInterrupt
+
     out = _FakeTty(tty=True)
-    inp = _FakeTty(tty=True)
-    with patch("select.select", side_effect=KeyboardInterrupt):
-        result = _await_plan_confirmation(
-            yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.05
-        )
+    inp = _RaisingTty(tty=True)
+    result = _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.5)
+    )
     assert result == "abort"
 
 
