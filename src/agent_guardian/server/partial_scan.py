@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 from agent_guardian._version import __version__
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.models.finding import Finding
 from agent_guardian.models.scan import Scan
 from agent_guardian.models.severity import SeverityBand
 from agent_guardian.models.tier import Tier
@@ -174,21 +175,29 @@ def build_partial_scan(swarm: SwarmCommander) -> Scan:
     target_mode: str = fingerprint.mode if fingerprint is not None else "prompt"
     target_ref: str = fingerprint.ref if fingerprint is not None else swarm.config.scan_id
 
-    # Per-ASI score: 100 minus a coarse penalty per finding category, clamped
-    # to [0, 100]. This mirrors the direction of compute_aivss without
-    # depending on it -- the final score lands when the swarm's finalise
-    # phase writes scan.raw.json. Categories with no findings yet stay at
-    # 100, which the view-model interprets as "covered, clean so far".
-    per_asi_findings: dict[AsiCategory, int] = {cat: 0 for cat in AsiCategory}
+    # Per-ASI provisional score via the same ``asi_score()`` formula the
+    # finalise phase uses (PRD §6 Step 2) so the dashboard's radar +
+    # breakdown table tick over with real numbers as findings arrive
+    # instead of staying flagged "pending" until end-of-scan. Categories
+    # that have at least one finding OR a completed agent report get a
+    # provisional value (real findings -> score < 100, completed-agent /
+    # no-findings -> 100); categories with neither stay absent from the
+    # dict so the dashboard renders them as "queued" rather than
+    # fabricating coverage that hasn't happened yet.
+    from agent_guardian.core.scoring import asi_score as _asi_score
+
+    per_asi_findings: dict[AsiCategory, list[Finding]] = {cat: [] for cat in AsiCategory}
     for finding in findings:
-        per_asi_findings[finding.asi] = per_asi_findings.get(finding.asi, 0) + 1
+        per_asi_findings.setdefault(finding.asi, []).append(finding)
+    completed_categories: set[AsiCategory] = {
+        r.asi_category for r in swarm._agent_reports if r.asi_category is not None
+    }
     asi_scores: dict[AsiCategory, float] = {}
-    for cat, count in per_asi_findings.items():
-        # Only surface a score for categories whose agent has actually run --
-        # the dashboard's _asi_rows() then renders the others as "queued"
-        # rather than fabricating coverage we don't yet have.
-        if any(r.asi_category is cat for r in swarm._agent_reports if r.asi_category is not None):
-            asi_scores[cat] = max(0.0, 100.0 - 20.0 * count)
+    for cat, cat_findings in per_asi_findings.items():
+        has_real_evidence = bool(cat_findings) or cat in completed_categories
+        if not has_real_evidence:
+            continue
+        asi_scores[cat] = _asi_score(cat_findings)
 
     # Live cost / tokens read off the same counter objects the budget
     # watchdog samples (so the at-a-glance widget never lags those counters
