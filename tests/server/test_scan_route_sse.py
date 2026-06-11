@@ -155,8 +155,13 @@ def test_live_sse_skips_duplicate_snapshot_and_polls(
 ) -> None:
     """Two polls on the same running scan yield exactly one snapshot.
 
-    Locks branch 230→239 (``if snapshot != last_snapshot`` takes the
-    falsy path on the second iteration) AND lines 242-243 (the
+    Same-process path: ``_register_running`` puts the scan in
+    ``store._running`` so ``is_running=True`` → ``in_flight=True`` →
+    ``elapsed`` is mtime-based. The snapshot is identical across the
+    test's <0.15s window because ``mtime`` does not change and the
+    formatted elapsed string rounds to the same value. Locks branch
+    230→239 (``if snapshot != last_snapshot`` takes the falsy path on
+    the second iteration) AND lines 242-243 (the
     ``await asyncio.sleep(_LIVE_POLL_SECONDS)`` tick that fires between
     iterations when scan_done has not yet been reached).
     """
@@ -195,6 +200,47 @@ def test_live_sse_404_for_unknown_scan(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # SSE Phase 1, Step 5 — ``deadline_approaching`` 30s before the soft cap
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Cross-process cold-window — scan_dir exists but is not registered in
+# _running and no partial/terminal file is present yet. Without the
+# scan_dir.is_dir() clause in in_flight, elapsed stays None and the
+# snapshot is suppressed for the full cold window.
+# ---------------------------------------------------------------------------
+
+
+def test_live_sse_cold_window_cross_process_yields_snapshot(
+    client: TestClient,
+    store: ScanStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cross-process cold window: scan_dir exists but the scan is not
+    in ``store._running`` (CLI in a different subprocess) and no
+    partial/terminal file is present yet. The snapshot must still be
+    yielded so the browser doesn't sit on an empty stream during T+0
+    to T+~60s.
+    """
+    monkeypatch.setattr(scan_route, "_LIVE_MAX_SECONDS", 0.15)
+    monkeypatch.setattr(scan_route, "_LIVE_POLL_SECONDS", 0.0)
+    scan_id = "cli-cold-window-xprocess"
+    store.scan_dir(scan_id).mkdir(parents=True, exist_ok=True)
+    with client.stream("GET", f"/scans/{scan_id}/live") as resp:
+        assert resp.status_code == 200
+        lines = _drain_sse(resp, max_lines=16)
+    snapshot_events = [ln for ln in lines if ln.startswith("event: snapshot")]
+    assert len(snapshot_events) >= 1, lines
+    # The cold-window fix lives in the snapshot PAYLOAD — started_at_unix
+    # must be non-None (mtime-derived) so the client's elapsed ticker has
+    # an anchor and the snapshot differs across polls. Without the
+    # scan_dir.is_dir() clause in in_flight, started_at_unix would be
+    # None and elapsed would be the static "00:00" string.
+    data_lines = [ln for ln in lines if ln.startswith("data: ") and "started_at_unix" in ln]
+    assert data_lines, lines
+    import json as _json
+
+    payload = _json.loads(data_lines[0][len("data: ") :])
+    assert payload.get("started_at_unix") is not None, payload
 
 
 def test_live_sse_emits_deadline_approaching_before_deadline(
@@ -238,5 +284,6 @@ def test_qa022_locking_coverage_smoke() -> None:
     """
     assert hasattr(scan_route, "_LIVE_MAX_SECONDS")
     assert hasattr(scan_route, "_LIVE_POLL_SECONDS")
+    assert hasattr(scan_route, "_LIVE_KEEPALIVE_SECONDS")
     assert hasattr(scan_route, "_started_at_label")
     assert scan_route._started_at_label(None) == ""

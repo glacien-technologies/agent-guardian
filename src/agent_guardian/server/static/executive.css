@@ -792,6 +792,10 @@ body.exec-body {
   background: none;
   border-radius: 0;
 }
+#exec-findings-empty-row td.exec-empty {
+  background: none;
+  border-radius: 0;
+}
 
 /* ============================================================
  * 6. (removed) AIVSS hero card — QA-042 (2026-06-03)

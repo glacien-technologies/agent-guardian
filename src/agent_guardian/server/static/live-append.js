@@ -600,6 +600,8 @@
         tbody.setAttribute("data-severity", sev);
         table.appendChild(tbody);
       }
+      var er = document.getElementById("exec-findings-empty-row");
+      if (er) { er.remove(); }
       var pass = passesFindingsFilter(row);
       if (!pass) { row.classList.add("is-filtered-out"); }
       tbody.appendChild(row);

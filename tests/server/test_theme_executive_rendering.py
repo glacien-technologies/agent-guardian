@@ -501,6 +501,9 @@ def test_executive_clean_control_renders_all_4_tabs(client: TestClient, store: S
     assert "Nothing flagged yet." in body
     assert "No probe attempts recorded yet — they appear here as the swarm runs." in body
     assert "No log events recorded yet." in body
+    # The findings table shell is always rendered so live-append can
+    # insert rows when findings arrive after page load.
+    assert 'id="exec-findings-table"' in body
 
 
 # ---------------------------------------------------------------------------
@@ -879,8 +882,10 @@ def test_executive_clean_control_renders_all_new_partials(
     assert 'data-component="aivss-hero"' not in body
     assert 'data-component="aivss-gauge"' not in body
     assert 'data-component="asi-rows"' not in body
-    # The findings empty-state copy is still wired through.
+    # The findings empty-state copy is still wired through, and the
+    # findings table shell is always in the DOM so live-append can land.
     assert "Nothing flagged yet." in body
+    assert 'id="exec-findings-table"' in body
 
 
 # ---------------------------------------------------------------------------
