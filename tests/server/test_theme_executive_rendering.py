@@ -768,6 +768,22 @@ def test_executive_charts_js_is_served_with_token_reads(client: TestClient) -> N
     assert "mountCopyButtons" in body
 
 
+def test_executive_charts_js_tooltip_reads_live_data_not_stale_closure(
+    client: TestClient,
+) -> None:
+    """#138 — the severity-bar tooltip ``label`` callback must read the
+    LIVE value (``ctx.parsed.x`` for a horizontal bar chart) instead of
+    the ``counts`` array captured in closure at mount time. Pre-fix the
+    bar drew at the LIVE length while the tooltip still reported
+    "0 findings" because the closure never advanced past first-paint."""
+    resp = client.get("/static/executive_charts.js")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "ctx.parsed.x" in body, (
+        "tooltip label must use ctx.parsed.x (live data) instead of counts closure"
+    )
+
+
 def test_executive_charts_js_attaches_severity_bar_live(client: TestClient) -> None:
     """#138 — the severity bar chart must subscribe to the per-scan
     snapshot stream and update CRITICAL/HIGH/MEDIUM/LOW counts in place

@@ -353,10 +353,22 @@
               callbacks: {
                 /* Body: the count line, then one line per contributing ASI
                  * category. Lets an operator see at a glance which threat
-                 * classes drive this severity without leaving Overview. */
+                 * classes drive this severity without leaving Overview.
+                 *
+                 * #138 — read the LIVE data value (``ctx.parsed.x`` for a
+                 * horizontal bar chart) instead of the ``counts`` closure
+                 * captured at mount time. ``attachSeverityBarLive``
+                 * updates ``chart.data.datasets[0].data`` on every live
+                 * snapshot, but does NOT update the closure variables.
+                 * Pre-fix the bar drew at the LIVE length while the
+                 * tooltip still reported "0 findings" because the
+                 * closure never advanced. */
                 label: function (ctx) {
                   var idx = ctx.dataIndex;
-                  var n = counts[idx] || 0;
+                  var liveVal = ctx && ctx.parsed && typeof ctx.parsed.x === "number"
+                    ? ctx.parsed.x
+                    : (counts[idx] || 0);
+                  var n = Number(liveVal) || 0;
                   var lines = [n + (n === 1 ? " finding" : " findings")];
                   var extra = asiLines[idx] || [];
                   if (extra.length) {
@@ -523,6 +535,19 @@
           && prev[2] === nextData[2] && prev[3] === nextData[3]) {
         return;
       }
+      // #138 diagnostic: log the value swap so a stale-data report can
+      // be reconstructed from the browser console after the fact. Cheap
+      // (one console.log per snapshot when the value actually changes;
+      // ~500 ms cadence at most). Comment out / remove once #138 is
+      // verified across a few real scans.
+      try {
+        console.debug(
+          "AGSeverityBarLive: ds.data",
+          prev.slice(),
+          "->",
+          nextData.slice()
+        );
+      } catch (e) {}
       ds.data = nextData;
       chart.update("none");
     });
