@@ -675,29 +675,29 @@ def test_await_proceeds_on_env_override() -> None:
 def test_await_proceeds_on_timeout() -> None:
     """TTY with empty stdin + no input within the timeout proceeds.
 
-    The new implementation runs ``stdin.readline`` in a thread executor and
-    wraps it with ``asyncio.wait_for``. A FakeTty.readline that hangs
-    forever forces the wait_for path to fire its TimeoutError.
+    The new implementation wraps ``stdin.readline`` in
+    ``asyncio.wait_for(loop.run_in_executor(...), timeout=...)``. The
+    timeout path is verified by patching ``asyncio.wait_for`` to raise
+    ``TimeoutError`` directly — using a real blocking ``readline``
+    would deadlock on Python 3.11 because ``asyncio.run`` waits for
+    every executor thread to finish during loop shutdown, and the
+    thread can only exit AFTER the test's ``finally`` releases it,
+    which only runs once ``asyncio.run`` returns.
     """
-    import threading
-
-    block = threading.Event()
-
-    class _BlockingTty(_FakeTty):
-        def readline(self, _size: int = -1, /) -> str:
-            block.wait()
-            return ""
+    import asyncio as _asyncio
 
     out = _FakeTty(tty=True)
-    inp = _BlockingTty(tty=True)
-    try:
+    inp = _FakeTty(tty=True)
+
+    async def _raise_timeout(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError
+
+    with patch.object(_asyncio, "wait_for", _raise_timeout):
         result = _await_sync(
             _await_plan_confirmation(
                 yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.05
             )
         )
-    finally:
-        block.set()
     assert result == "proceed"
     # The prompt line should have been printed.
     assert "Press Enter" in out.getvalue()
