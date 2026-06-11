@@ -381,17 +381,42 @@
     // network error that the auto-reconnect didn't recover from) and
     // reopen. 25 s is comfortably past the server's 15 s keepalive so
     // a healthy quiet phase doesn't churn.
+    //
+    // CRITICAL: ``lastFrameAt`` MUST be reset both when arming and on
+    // every reopen — otherwise the watchdog stays stuck above the stale
+    // threshold and reopens once per check-tick (5 s) rather than once
+    // per stale-window (25 s), producing the very connection-storm it
+    // was meant to prevent. The reopen counter is a defence-in-depth
+    // backstop: if reopens keep failing back-to-back we eventually stop
+    // trying and surface a console error so an operator sees the
+    // wedge rather than silently burning the Chrome connection pool.
     var STREAM_STALE_MS = 25000;
+    var STREAM_REOPEN_MAX = 6;
     var lastFrameAt = 0;
     var watchdogTimer = null;
+    var reopenCount = 0;
     function armWatchdog(reopen) {
       if (watchdogTimer) { window.clearInterval(watchdogTimer); }
       lastFrameAt = Date.now();
       watchdogTimer = window.setInterval(function () {
         if (Date.now() - lastFrameAt < STREAM_STALE_MS) { return; }
+        reopenCount += 1;
+        if (reopenCount > STREAM_REOPEN_MAX) {
+          try { console.error(
+            'AGEventsStream: ' + STREAM_REOPEN_MAX +
+            ' consecutive reopens without a frame — giving up to avoid a connection storm. ' +
+            'Check the server is delivering text/event-stream on /scan/<id>/events.'
+          ); } catch (e) {}
+          window.clearInterval(watchdogTimer);
+          watchdogTimer = null;
+          return;
+        }
         try { console.warn(
-          'AGEventsStream: no frame for', STREAM_STALE_MS, 'ms; reopening EventSource'
+          'AGEventsStream: no frame for', STREAM_STALE_MS, 'ms; reopening EventSource (attempt ' + reopenCount + ')'
         ); } catch (e) {}
+        // Reset BEFORE reopen so the next check-tick gives the fresh
+        // connection a full STREAM_STALE_MS window to deliver something.
+        lastFrameAt = Date.now();
         reopen();
       }, 5000);
     }
@@ -399,9 +424,12 @@
       window.AGLiveAppend.attach(source);
       // Generic frame counter — every named-event listener bumps
       // ``lastFrameAt`` so the watchdog stays disarmed during healthy
-      // operation. We attach to all event kinds live-append cares about
-      // PLUS the bare 'message' fallback for unnamed events.
-      var bumpFrame = function () { lastFrameAt = Date.now(); };
+      // operation. The first real frame also resets the reopen counter
+      // so a recovered connection gets its full reopen budget back.
+      var bumpFrame = function () {
+        lastFrameAt = Date.now();
+        reopenCount = 0;
+      };
       ['finding', 'agent_start', 'agent_progress', 'agent_done',
        'agent_skipped', 'recon_done', 'reflection', 'log',
        'heartbeat', 'phase_start', 'phase_done'].forEach(function (kind) {
