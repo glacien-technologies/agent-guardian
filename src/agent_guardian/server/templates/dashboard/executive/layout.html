@@ -205,6 +205,43 @@
         }
         return;
       }
+      if (spec.indexOf('pillcolor:') === 0) {
+        // ``data-live="pillcolor:<severity>:<key>"`` updates BOTH the
+        // pill text and toggles its CSS class between the severity
+        // colour and ``zero``. Used by the ASI breakdown C/H/M/L pills
+        // so a count that ticks from 0 to >0 also flips from a grey
+        // ``--zero`` to the severity-coloured ``--<severity>`` skin.
+        // The full class name lives in the template so we only need to
+        // know the severity slug here.
+        var pcRest = spec.substring(10);
+        var pcSep = pcRest.indexOf(':');
+        if (pcSep < 0) { return; }
+        var pcSeverity = pcRest.substring(0, pcSep);
+        var pcKey = pcRest.substring(pcSep + 1);
+        if (data[pcKey] === undefined) { return; }
+        var pcVal = data[pcKey];
+        var pcText = String(pcVal);
+        if (node.textContent !== pcText) { node.textContent = pcText; }
+        var numeric = Number(pcVal) || 0;
+        // Discover the pill's base class so we can scope the toggle:
+        // the markup uses ``exec-asi-compact__pill--<severity>`` and
+        // ``exec-asi-compact__pill--zero``. Other pill families can
+        // adopt the same mode by following the ``__pill--<x>`` shape.
+        var baseClass = null;
+        for (var ci = 0; ci < node.classList.length; ci += 1) {
+          var cn = node.classList[ci];
+          if (/__pill--/.test(cn)) { baseClass = cn.replace(/--[^_]+$/, "--"); break; }
+        }
+        if (!baseClass) { baseClass = "exec-asi-compact__pill--"; }
+        if (numeric > 0) {
+          node.classList.remove(baseClass + "zero");
+          node.classList.add(baseClass + pcSeverity);
+        } else {
+          node.classList.remove(baseClass + pcSeverity);
+          node.classList.add(baseClass + "zero");
+        }
+        return;
+      }
       // Default text mode. The ELAPSED tile is special: once the
       // ticker has stamped a ``data-elapsed-anchor`` it owns the text;
       // the snapshot writer would otherwise stomp the ticker's tick

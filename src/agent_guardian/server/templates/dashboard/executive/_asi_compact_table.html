@@ -59,21 +59,22 @@
         {% if row.is_pending %}—{% else %}{{ row.score_label }}{% endif %}
       </span>
       <span class="exec-asi-compact__findings" aria-label="Findings by severity">
-        {# #138 — each pill carries its own ``data-live`` key so the four
-           counts (C/H/M/L) tick over without an F5. The colour class is
-           still server-rendered on first paint; the snapshot only updates
-           the text. #}
+        {# #138 — each pill carries its own ``pillcolor:<sev>:<key>``
+           data-live spec so the four counts (C/H/M/L) tick AND the
+           CSS class flips between the severity colour and ``--zero``
+           as findings arrive. Pre-#138 only ``textContent`` updated,
+           so the count appeared correctly but stayed grey. #}
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.critical %}critical{% else %}zero{% endif %}"
-              data-live="asi-compact-{{ row.code }}-c"
+              data-live="pillcolor:critical:asi-compact-{{ row.code }}-c"
               title="Critical findings">{{ _f.critical | default(0) }}</span>
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.high %}high{% else %}zero{% endif %}"
-              data-live="asi-compact-{{ row.code }}-h"
+              data-live="pillcolor:high:asi-compact-{{ row.code }}-h"
               title="High findings">{{ _f.high | default(0) }}</span>
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.medium %}medium{% else %}zero{% endif %}"
-              data-live="asi-compact-{{ row.code }}-m"
+              data-live="pillcolor:medium:asi-compact-{{ row.code }}-m"
               title="Medium findings">{{ _f.medium | default(0) }}</span>
         <span class="exec-asi-compact__pill exec-asi-compact__pill--{% if _f.low %}low{% else %}zero{% endif %}"
-              data-live="asi-compact-{{ row.code }}-l"
+              data-live="pillcolor:low:asi-compact-{{ row.code }}-l"
               title="Low findings">{{ _f.low | default(0) }}</span>
       </span>
     </li>
