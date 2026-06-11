@@ -80,10 +80,12 @@
         data-turn-count="0"
         aria-controls="exec-finding-slideover">
       <td class="exec-probes-table__cell--agent">
-        <code class="exec-probes-table__asi" data-slot="asi"></code>
-        <span class="exec-probes-table__agent" data-slot="agent"></span>
-        {# RUNS — turn count lives next to the ASI badge now (no far-right column). #}
-        <span class="exec-probes-table__runs" data-slot="turn"></span>
+        <div class="exec-probes-table__agent-head">
+          <code class="exec-probes-table__asi" data-slot="asi"></code>
+          <span class="exec-probes-table__agent" data-slot="agent"></span>
+          {# RUNS — turn count lives next to the ASI badge now (no far-right column). #}
+          <span class="exec-probes-table__runs" data-slot="turn"></span>
+        </div>
       </td>
       <td class="exec-probes-table__cell--status">
         <span class="exec-probe-status exec-probe-status--running" data-slot="status">Running</span>

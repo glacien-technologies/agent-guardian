@@ -93,9 +93,11 @@
     --exec-brand-strong: #c4b5fd;
     --exec-brand-tint: #1e1a2e;
     --exec-code-bg: #1f1f23;
-    --exec-sev-critical: #f87171;
+    /* Widened critical/high delta so a CRITICAL vertex on the ASI radar
+     * is unambiguously red vs HIGH's amber, not two warm-leaning corals. */
+    --exec-sev-critical: #ef4444;
     --exec-sev-critical-bg: #2c1414;
-    --exec-sev-high: #fb923c;
+    --exec-sev-high: #f59e0b;
     --exec-sev-high-bg: #2a1a0d;
     --exec-sev-medium: #facc15;
     --exec-sev-medium-bg: #281f0a;
@@ -2697,6 +2699,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-probe__evidence {
   margin: 0 0 8px 0;
 }
+/* Top-of-sheet variant for the evidence link — sits above the title so an
+ * operator can jump to the JSONL events without scrolling past the whole
+ * conversation thread. Tester report #16. */
+.exec-probe__evidence--top {
+  margin: 0 0 14px 0;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--exec-border-subtle);
+}
 .exec-probe__evidence-link {
   font-family: var(--exec-font-mono);
   font-size: 12px;
@@ -3353,12 +3363,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   margin-right: 6px;
 }
 /* Agent cell is a 3-part row: [ASI badge] [agent name …flex] [runs →right].
-   Flexbox keeps the RUNS count right-aligned to the column edge so it forms a
-   clean vertical line across rows regardless of agent-name length, and the
-   name truncates with an ellipsis rather than shoving RUNS out of alignment. */
-.exec-probes-table__cell--agent {
+ * Applying `display: flex` directly to the `<td>` broke its participation in
+ * `table-layout: fixed`, so the AGENT column drifted out of alignment with
+ * its `<th>`. Now the flex container is the inner `.exec-probes-table__agent-head`
+ * div; the cell itself stays a normal `display: table-cell`. */
+.exec-probes-table__agent-head {
   display: flex;
   align-items: flex-start;
+  width: 100%;
 }
 .exec-probes-table__agent {
   flex: 1 1 auto;
@@ -3658,8 +3670,9 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-slideover__title {
   font-family: var(--exec-font-serif);
   font-size: 20px;
-  line-height: 1.3;
+  line-height: 1.4;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--exec-ink);
   margin: 0 0 16px 0;
   word-break: break-word;
@@ -3738,14 +3751,14 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-slideover-thread__conf {
   font-family: var(--exec-font-mono);
   font-size: 11px;
-  color: var(--exec-ink-subtle);
+  color: var(--exec-ink-muted);
 }
 .exec-slideover-thread__label {
   font-family: var(--exec-font-mono);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--exec-ink-subtle);
+  color: var(--exec-ink-muted);
   margin: 6px 0 2px 0;
 }
 .exec-slideover-thread__prompt,
@@ -3831,7 +3844,7 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--exec-ink-subtle);
+  color: var(--exec-ink-muted);
 }
 .exec-chat__text {
   margin: 0;
@@ -3861,7 +3874,7 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--exec-ink-subtle);
+  color: var(--exec-ink-muted);
 }
 .exec-chat__render-pill:hover { color: var(--exec-ink); }
 .exec-chat__raw-view {

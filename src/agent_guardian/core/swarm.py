@@ -904,6 +904,15 @@ class SwarmCommander:
                     "is_multi_agent": fingerprint.is_multi_agent,
                     "touches_pii": fingerprint.touches_pii,
                     "mode": fingerprint.mode,
+                    # Forward the ground-truth probe / turn counts so the
+                    # TUI never has to render "—" for recon-agent in the
+                    # AGENT x TURNS column. The white-box early-return
+                    # path doesn't emit any ``recon_progress`` events, so
+                    # the TUI's running ``recon_probes_sent`` counter stays
+                    # at 0 and falls back to "—" without this. Tester
+                    # report #2.
+                    "probes_sent": _recon_probes_sent,
+                    "turns": (recon_report.turns if recon_report is not None else 0),
                 },
             )
         )

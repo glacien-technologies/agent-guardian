@@ -109,7 +109,21 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         mtime = scan_dir.stat().st_mtime if scan_dir.is_dir() else None
     except OSError:
         mtime = None
-    started_label = _started_at_label(mtime)
+    # Same STABLE elapsed anchor used by the SSE stream (#20). The
+    # directory mtime bumps every time partial.json is replaced, so
+    # using it directly resets the elapsed clock to 0 every probe.
+    # ``events.jsonl`` is created once at scan-start and never
+    # re-created (appends don't bump the parent dir mtime), so its
+    # ctime/birthtime is a stable scan-start anchor.
+    try:
+        _events_path = scan_dir / "events.jsonl"
+        _anchor_stat = _events_path.stat() if _events_path.is_file() else scan_dir.stat()
+        stable_anchor: float | None = (
+            getattr(_anchor_stat, "st_birthtime", None) or _anchor_stat.st_ctime
+        )
+    except OSError:
+        stable_anchor = None
+    started_label = _started_at_label(stable_anchor if stable_anchor is not None else mtime)
 
     page_param = request.query_params.get("page")
     try:
@@ -138,7 +152,8 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         or (scan is not None and not terminal_on_disk)
         or (mtime is not None and not terminal_on_disk)
     )
-    elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
+    _anchor = stable_anchor if stable_anchor is not None else mtime
+    elapsed = max(0.0, time.time() - _anchor) if (in_flight and _anchor is not None) else None
     ctx = build_dashboard_context(
         scan_id=scan_id,
         scan=scan,
@@ -385,6 +400,26 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
         approaching_fired = False
         last_snapshot: dict[str, object] | None = None
         seconds_since_keepalive = 0.0
+        # Cache a STABLE scan-start anchor for elapsed computation.
+        #
+        # The directory mtime updates on every atomic ``tmp → replace``
+        # write of ``scan.partial.json`` (after every probe), so reading
+        # ``scan_dir.stat().st_mtime`` on each loop iteration collapsed
+        # the elapsed counter toward 0 every ~3 seconds. Use the ctime /
+        # birthtime of ``events.jsonl`` instead — that file is touch()-ed
+        # exactly once at scan start by ``make_events_writer`` and is
+        # never re-created, only appended (appending does NOT bump the
+        # parent directory's mtime). Fall back to scan_dir ctime if the
+        # events file hasn't been created yet (very early cold window).
+        # Tester report #20.
+        _scan_dir = store.scan_dir(scan_id)
+        _stable_anchor: float | None = None
+        try:
+            _events_jsonl = _scan_dir / "events.jsonl"
+            _anchor_stat = _events_jsonl.stat() if _events_jsonl.is_file() else _scan_dir.stat()
+            _stable_anchor = getattr(_anchor_stat, "st_birthtime", None) or _anchor_stat.st_ctime
+        except OSError:
+            _stable_anchor = None
         while True:
             now = time.monotonic()
             if now > deadline:
@@ -429,7 +464,15 @@ async def scans_live_sse(request: Request, scan_id: str) -> StreamingResponse:
                 or (scan is not None and not terminal_on_disk)
                 or (mtime is not None and not terminal_on_disk)
             )
-            elapsed = max(0.0, time.time() - mtime) if (in_flight and mtime is not None) else None
+            # Elapsed reads from the STABLE anchor (events.jsonl ctime)
+            # captured once before the loop, NOT from scan_dir.mtime
+            # which bumps on every partial.json write. mtime is still
+            # consulted to gate liveness / the "Started" pretty-label
+            # but never to drive the elapsed counter.
+            _anchor = _stable_anchor if _stable_anchor is not None else mtime
+            elapsed = (
+                max(0.0, time.time() - _anchor) if (in_flight and _anchor is not None) else None
+            )
             ctx = build_dashboard_context(
                 scan_id=scan_id,
                 scan=scan,

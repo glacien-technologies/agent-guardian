@@ -389,9 +389,22 @@ class ScanTUI:
             # without this the recon-agent row rendered "—" as if it had run
             # zero turns. Each capability probe is one recon turn; show it as
             # n/n (terminal == the agent reached its final count).
-            if self._state.recon_probes_sent > 0:
-                n = self._state.recon_probes_sent
-                self._state.agent_turns[_RECON_AGENT] = (n, n)
+            #
+            # Tester report #2 — for the white-box early-return path no
+            # ``recon_progress`` events fire, so ``recon_probes_sent``
+            # stays at 0 and the table reads "—" / "0/0". Fall back to the
+            # ``probes_sent`` / ``turns`` carried on the recon_done payload
+            # so the cell is always populated.
+            _payload = event.payload if isinstance(event.payload, dict) else {}
+            _ps_raw = _payload.get("probes_sent")
+            _tn_raw = _payload.get("turns")
+            _fallback_n: int = 0
+            if isinstance(_ps_raw, int):
+                _fallback_n = _ps_raw
+            elif isinstance(_tn_raw, int):
+                _fallback_n = _tn_raw
+            n: int = self._state.recon_probes_sent or _fallback_n
+            self._state.agent_turns[_RECON_AGENT] = (n, n)
             # Flush the last (current) band durably — it never saw a "next band"
             # to trigger its print.
             if self._state.recon_activity:

@@ -205,6 +205,39 @@ code, .mono {
   background: var(--accent);
   box-shadow: 0 0 16px var(--accent-glow);
 }
+/* Brand logo — replaces the bare .brand-dot in the site-nav so the shield
+ * SVG appears next to "AgentGuardian" instead of a plain coloured circle.
+ * Tester report #12. */
+.brand-logo {
+  height: 22px;
+  width: auto;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Band filter control on the Scan history page — small inline dropdown
+ * that hides scans whose band does not match the selection. Sits next to
+ * the existing Refresh / Auto-refresh controls. Tester report #15. */
+.band-filter-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  font-size: 13px;
+}
+.band-filter-label {
+  color: var(--muted, #9aa0a6);
+}
+.band-filter-select {
+  background: var(--bg-elev, transparent);
+  color: inherit;
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
 
 .nav-links {
   list-style: none;
