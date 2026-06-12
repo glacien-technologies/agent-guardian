@@ -2,13 +2,41 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 permissions:
   contents: read
+
+# Cost-control notes (2026-06-12).
+#
+# GitHub-hosted runner billing model (Org Free plan, confirmed against
+# the official docs at https://docs.github.com/en/billing/managing-billing-for-github-actions):
+#
+#   * Linux (`ubuntu-*`) on a PUBLIC repo is genuinely free — there is no
+#     shared minute pool, no cap, no cross-charge to the org's allowance.
+#     We can run as many Linux jobs as we want here without affecting the
+#     14 private repos under glacien-technologies.
+#
+#   * macOS (`macos-*`) is classified as a "larger runner" and is ALWAYS
+#     charged, even for public repositories. macOS minutes consume the
+#     org-level allowance shared with every private repo on the org.
+#     One stuck CI run alone (e.g. PR #151's 6-hour deadlock × 3 jobs
+#     × 10x multiplier) can burn the entire monthly Free-plan budget.
+#
+# Concrete policy applied in this file:
+#   1. The per-PR test matrix is ubuntu-only. macOS testing moved to a
+#      separate `test-macos` job that runs only on release tag pushes
+#      (`refs/tags/v*.*.*`) — we still get macOS coverage before
+#      shipping to PyPI, just not on every PR.
+#   2. Every job has `timeout-minutes`. A runaway test must die in 30
+#      minutes, not 360, so a single mistake can't burn ~3,600
+#      macOS-billing-minutes the way PR #151 nearly did.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
@@ -19,6 +47,7 @@ jobs:
       - run: uv run ruff format --check .
   type:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
@@ -27,19 +56,23 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run mypy src/agent_guardian
   test:
-    # Test matrix: ubuntu + macos only. Windows is tracked as v1.1 (Guardian backlog QA-038):
-    # the framework relies on POSIX-shaped fixture paths, asyncio subprocess teardown,
-    # and SO_REUSEADDR semantics that differ on Windows. Windows support requires a
-    # dedicated portability pass before re-enabling.
+    # Per-PR test matrix: ubuntu only across all supported Python versions.
+    # Windows is tracked as v1.1 (Guardian backlog QA-038): the framework
+    # relies on POSIX-shaped fixture paths, asyncio subprocess teardown,
+    # and SO_REUSEADDR semantics that differ on Windows. Python 3.10 is
+    # dropped: it has a known asyncio subprocess teardown bug
+    # (BaseSubprocessTransport.__del__ runs after the loop is closed)
+    # that was fixed in 3.11. ``pyproject.toml`` declares
+    # ``requires-python = ">=3.11"`` to match.
     #
-    # Python 3.10 is also dropped: it has a known asyncio subprocess teardown bug
-    # (BaseSubprocessTransport.__del__ runs after the loop is closed) that was fixed
-    # in 3.11. ``pyproject.toml`` declares ``requires-python = ">=3.11"`` to match.
-    runs-on: ${{ matrix.os }}
+    # macOS testing now runs in the separate ``test-macos`` job below,
+    # only on release-tag pushes — see the header comment for the
+    # cost rationale.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -61,14 +94,40 @@ jobs:
       - run: uv run pytest --cov=agent_guardian --cov-report=xml --cov-report=term --cov-fail-under=90
       - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354  # v6
         # Standard §11.1 — single canonical Codecov upload. Gate on the
-        # ubuntu / 3.11 leg so the cross-platform matrix doesn't
-        # double-count coverage or race the Codecov upload token.
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        # 3.11 leg so the cross-version matrix doesn't double-count
+        # coverage or race the Codecov upload token.
+        if: matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  # macOS smoke test — runs ONLY on release tag pushes (``v*.*.*``).
+  # Per-PR macOS coverage was removed in favour of running this on the
+  # release commit so the cross-platform contract is still verified
+  # before each PyPI publish, without burning the org's monthly macOS
+  # allowance on every iterative PR. One run per release tag instead
+  # of three runs per PR is a ~30x reduction in billed macOS minutes
+  # on a typical week (5 PRs → 1 release).
+  test-macos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: uv python install ${{ matrix.python-version }}
+      - name: Install deps
+        run: uv sync --extra dev --extra aws --extra otel
+      - run: uv run pytest --cov=agent_guardian --cov-report=term --cov-fail-under=90
   licenses:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
@@ -92,6 +151,7 @@ jobs:
   # is tuned against the existing dashboard/reporting code.
   sast:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -132,6 +192,7 @@ jobs:
   # benign test fixtures.
   secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
