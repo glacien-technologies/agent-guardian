@@ -135,19 +135,40 @@ INDEX_FILENAME: str = "_index.json"
 STALE_RUNNING_AFTER_SECONDS = 900
 
 
-def _derive_status(*, is_running: bool, has_score: bool, mtime: float | None, now: float) -> str:
+def _derive_status(
+    *,
+    is_running: bool,
+    has_score: bool,
+    mtime: float | None,
+    now: float,
+    completeness_pct: float | None = None,
+) -> str:
     """Map a scan's persisted signals to a terminal dashboard status (issue #112).
 
     Returns one of ``running`` / ``completed`` / ``failed``. A row flagged
     running but untouched past :data:`STALE_RUNNING_AFTER_SECONDS` is ``failed``
     (it never reached ``scan_done``); a finalised row with no real score is
-    ``failed``; otherwise ``completed``.
+    ``failed``; a finalised row with a score AND ``completeness_pct < 100`` is
+    ``failed`` (issue #112 reopen — a crashed scan still hits ``_finalise()``
+    and writes a default AIVSS=100, which the original #120 gate accepted as
+    "completed"); otherwise ``completed``.
+
+    ``completeness_pct=None`` preserves the pre-fix behaviour for legacy
+    index rows persisted before ``Scan.completeness`` was wired through here,
+    so old runs in operators' dashboards don't retroactively flip to failed.
     """
     if is_running:
         if mtime is not None and (now - mtime) > STALE_RUNNING_AFTER_SECONDS:
             return "failed"
         return "running"
-    return "completed" if has_score else "failed"
+    if not has_score:
+        return "failed"
+    # Issue #112 reopen — a finalised row whose completeness percent is
+    # below 100 ran only part of its plan. Even with a persisted AIVSS, it
+    # is not a real result.
+    if completeness_pct is not None and completeness_pct < 100.0:
+        return "failed"
+    return "completed"
 
 
 @dataclass(frozen=True)
@@ -545,6 +566,10 @@ class ScanStore:
             "findings_count": None,
             "created_at": None,
             "is_running": is_running,
+            # Issue #112 reopen — persist the run's completeness percent so
+            # ``_derive_status`` can distinguish a real "completed" scan from
+            # a finalised partial run that wrote a default AIVSS=100.
+            "completeness_pct": None,
         }
         scan = self.load_completed(scan_id)
         if scan is not None:
@@ -556,6 +581,9 @@ class ScanStore:
                     "target_mode": scan.target_mode,
                     "findings_count": len(scan.findings),
                     "created_at": scan.created_at.isoformat() if scan.created_at else None,
+                    "completeness_pct": (
+                        scan.completeness.pct if scan.completeness is not None else None
+                    ),
                 }
             )
         index[scan_id] = row
@@ -644,6 +672,11 @@ class ScanStore:
                     if isinstance(row.get("findings_count"), int)
                     else None
                 )
+                _completeness_pct = (
+                    float(row["completeness_pct"])
+                    if isinstance(row.get("completeness_pct"), (int, float))
+                    else None
+                )
                 _status = _derive_status(
                     is_running=bool(row.get("is_running")),
                     has_score=_aivss is not None,
@@ -651,6 +684,7 @@ class ScanStore:
                         float(row["mtime"]) if isinstance(row.get("mtime"), (int, float)) else None
                     ),
                     now=time.time(),
+                    completeness_pct=_completeness_pct,
                 )
                 # #112 — a failed/stuck scan must not display a real-looking
                 # score; blank the numeric columns so only the status shows.
