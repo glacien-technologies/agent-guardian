@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+_LOG = logging.getLogger(__name__)
 
 _ENV_FLAG = "AGENT_GUARDIAN_TEST_HOOKS"
 

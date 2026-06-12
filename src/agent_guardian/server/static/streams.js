@@ -61,4 +61,20 @@
       return getOrCreate("/scans/" + encodeURIComponent(scanId) + "/live");
     },
   };
+
+  // Playwright test hook — synthesises an SSE event of the given kind
+  // on the cached EventSource for a scan, so E2E tests can drive the
+  // live-append UI without launching a real backend scan. No-op in
+  // production because nothing calls this. Namespaced under
+  // ``__ag_test_*`` so any future code reading window globals knows
+  // immediately what it's for.
+  window.__ag_test_dispatch_sse = function (scanId, kind, payload) {
+    if (!scanId || !kind) { return false; }
+    var url = "/scan/" + encodeURIComponent(scanId) + "/events";
+    var es = cache[url];
+    if (!es) { return false; }
+    var ev = new MessageEvent(kind, { data: JSON.stringify(payload || {}) });
+    es.dispatchEvent(ev);
+    return true;
+  };
 })();
