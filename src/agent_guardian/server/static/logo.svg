@@ -1,17 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none" role="img" aria-label="AgentGuardian">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="AgentGuardian">
   <title>AgentGuardian</title>
-  <defs>
-    <linearGradient id="ag-shield-grad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#8B5CF6"/>
-      <stop offset="100%" stop-color="#7C3AED"/>
-    </linearGradient>
-  </defs>
-  <path d="M16 2.5 4.5 6.25v9.4c0 6.6 4.7 12.5 11.5 14.35 6.8-1.85 11.5-7.75 11.5-14.35V6.25L16 2.5z"
-        fill="url(#ag-shield-grad)" stroke="#5B21B6" stroke-width="1.25" stroke-linejoin="round"/>
-  <path d="M16 2.5 4.5 6.25v9.4c0 6.6 4.7 12.5 11.5 14.35V2.5z"
-        fill="#A78BFA" opacity="0.35"/>
-  <text x="16" y="20" text-anchor="middle"
-        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        font-size="10" font-weight="700" letter-spacing="0.5"
-        fill="#fafaf7">AG</text>
+  <!-- Canonical Aegis Keyline mark — single source of truth lives in
+       the agent_guardian_web repo at public/aegis-keyline.svg. Stroke
+       uses currentColor so the dashboard's topbar text-colour drives
+       it (white on dark, ink #111013 on light). -->
+  <path d="M16 3 L27 6 V14 C27 21 22.5 26 16 29 C9.5 26 5 21 5 14 V6 Z"/>
+  <path d="M16 6.2 L24 8.4 V14 C24 19.4 20.5 23.4 16 25.6 C11.5 23.4 8 19.4 8 14 V8.4 Z" stroke-width="1.1"/>
+  <path d="M12.6 15.6 L15.2 18.4 L19.6 11.8" stroke="#8B5CF6"/>
 </svg>
