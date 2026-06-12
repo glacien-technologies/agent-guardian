@@ -183,4 +183,18 @@ def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:
     # OpenAPI surface (not that we expose OpenAPI publicly).
     app.include_router(health.router)
 
+    # Playwright-test-only router, gated behind ``AGENT_GUARDIAN_TEST_HOOKS=1``.
+    # The module raises at import time when the env var is not set, so this
+    # branch is the only legal way to bring it in — accidentally including it
+    # from anywhere else in a production deployment is a hard crash, not a
+    # silent capability leak.
+    if os.environ.get("AGENT_GUARDIAN_TEST_HOOKS") == "1":
+        # The router module raises at import time if the env var is unset, so
+        # Pyright's import resolver legitimately can't see it without running
+        # the same env check itself. Use importlib to defer resolution.
+        import importlib
+
+        test_hooks_mod = importlib.import_module("agent_guardian.server.routes.test_hooks")
+        app.include_router(test_hooks_mod.router)
+
     return app

@@ -39,3 +39,17 @@ repos:
           - structlog>=24.4
           - fastapi>=0.115
           - jinja2>=3.1
+  - repo: local
+    hooks:
+      # UI E2E suite — Playwright + Chromium against a real uvicorn
+      # subprocess. Runs ONLY when dashboard-related files are staged
+      # (templates / static / routes / tests/e2e), so backend-only
+      # commits don't pay the ~5-second cost. The script soft-skips when
+      # Playwright isn't installed in .venv so the hook never blocks a
+      # commit on infra-not-installed.
+      - id: ui-e2e-on-dashboard-change
+        name: UI E2E (only when dashboard files change)
+        entry: scripts/precommit-ui-tests.sh
+        language: script
+        pass_filenames: true
+        files: ^(src/agent_guardian/server/(templates|static|routes)/|tests/e2e/)

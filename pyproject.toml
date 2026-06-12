@@ -224,6 +224,14 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6.0",
+  # Playwright + pytest-playwright drive the E2E UI suite under
+  # ``tests/e2e/`` from the pre-commit hook (script:
+  # ``scripts/precommit-ui-tests.sh``). Lives in ``dev`` (not a separate
+  # ``e2e`` extra) so a fresh ``uv pip install -e .[dev]`` is everything
+  # a contributor needs before the hook fires. Chromium itself ships via
+  # ``playwright install chromium`` after install.
+  "playwright>=1.50",
+  "pytest-playwright>=0.7",
   "ruff>=0.8",
   "mypy>=1.13",
   "hypothesis>=6.115",
@@ -438,7 +446,11 @@ norecursedirs = [
   "venv",
   ".venv",
 ]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config --ignore=tests/e2e"
+# ``tests/e2e`` carries Playwright UI tests that require a running
+# uvicorn subprocess + Chromium. Excluded from the default collect via
+# ``--ignore``; opt in by running ``pytest tests/e2e/`` explicitly (the
+# pre-commit hook ``scripts/precommit-ui-tests.sh`` does this).
 markers = [
   "phaseA: Phase A audit-tagged tests (sibling-strategy carryover, etc.)",
   "phaseB: Phase B audit-tagged tests (mutators, judges, seed store, sibling map, H-CoT, ATLAS enum)",
