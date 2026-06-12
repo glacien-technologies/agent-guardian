@@ -82,6 +82,11 @@ class Scan(BaseModel):
     sub_scores: dict[str, float]
     findings: list[Finding]
     asi_scores: dict[AsiCategory, float]
+    # Total probes attempted (loaded + dispatched) per ASI category. Used
+    # by scoring as the denominator so 1 medium across 17 probes scores
+    # ~98 instead of 60 (tester report #4). Empty dict for back-compat
+    # with on-disk Scan JSON written before the field existed.
+    probes_per_category: dict[AsiCategory, int] = Field(default_factory=dict)
     duration_seconds: float = Field(ge=0.0)
     cost_usd: float = Field(ge=0.0)
     # Total tokens consumed (input + output) across attacker / evaluator /

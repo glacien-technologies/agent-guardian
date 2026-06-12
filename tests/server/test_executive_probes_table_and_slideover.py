@@ -240,6 +240,36 @@ def test_executive_probes_row_carries_probe_id_and_tabindex(
 # ---------------------------------------------------------------------------
 
 
+def test_slideover_ids_are_unique_across_findings_and_probes_tabs(
+    client: TestClient, store: ScanStore
+) -> None:
+    """Tester report #19 — the findings-tab and probes-tab slideover
+    partials must render with DISTINCT DOM ids. Before the fix both
+    tabs included `_finding_slideover.html` which hardcoded the ids
+    `exec-finding-slideover-root` and `exec-finding-slideover`, so the
+    page had two elements with the same id and ``getElementById``
+    returned whichever node came first. Operators then saw the wrong
+    detail panel pop open depending on document order."""
+    scan = _make_scan()
+    scan_dir = _persist(store, scan)
+    _seed_memory_jsonl(scan_dir, count=2)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    # Each id appears exactly once across the WHOLE page.
+    assert body.count('id="exec-finding-slideover"') == 1, (
+        "findings slideover id should appear once and only inside Findings tab"
+    )
+    assert body.count('id="exec-probe-slideover"') == 1, (
+        "probes slideover id should appear once and only inside Probes tab"
+    )
+    assert body.count('id="exec-finding-slideover-root"') == 1
+    assert body.count('id="exec-probe-slideover-root"') == 1
+    # aria-labelledby is also kind-scoped so screen readers announce the
+    # right dialog when each slideover opens.
+    assert body.count('id="exec-finding-slideover-title"') == 1
+    assert body.count('id="exec-probe-slideover-title"') == 1
+
+
 def test_executive_probes_slideover_partial_mounted_once_per_tab(
     client: TestClient, store: ScanStore
 ) -> None:
@@ -248,8 +278,15 @@ def test_executive_probes_slideover_partial_mounted_once_per_tab(
     _seed_memory_jsonl(scan_dir, count=2)
     resp = client.get(f"/scan/{scan.id}?theme=executive")
     pane = _probes_pane(resp.text)
-    assert pane.count('id="exec-finding-slideover"') == 1
-    assert pane.count('id="exec-finding-slideover-root"') == 1
+    # Tester report #19 — the probes-tab slideover must have its OWN id,
+    # not the same `exec-finding-slideover` id the findings-tab slideover
+    # uses. Sharing the id put two elements with the same DOM id on the
+    # page, and getElementById landed non-deterministically on whichever
+    # one came first — so opening a probe sometimes surfaced the finding
+    # slideover and vice versa.
+    assert pane.count('id="exec-probe-slideover"') == 1
+    assert pane.count('id="exec-probe-slideover-root"') == 1
+    assert pane.count('id="exec-finding-slideover"') == 0
     # Carries the kind marker so the shared JS can branch.
     assert 'data-slideover-kind="probe"' in pane
 
@@ -616,7 +653,7 @@ def test_executive_probes_clean_control_empty_state_preserved(
     # The table scaffold + slide-over now ALWAYS render (live-append target),
     # even with zero probe groups.
     assert 'class="exec-probes-table"' in pane
-    assert 'id="exec-finding-slideover"' in pane
+    assert 'id="exec-probe-slideover"' in pane
     # But the empty render still carries ZERO clickable agent rows — the
     # placeholder row is not a probe-row-click target.
     assert pane.count('data-action="probe-row-click"') == 0

@@ -38,7 +38,7 @@
     <span class="exec-asi-compact__head" role="columnheader" scope="col">Category</span>
     <span class="exec-asi-compact__head exec-asi-compact__head--num"
           role="columnheader" scope="col"
-          title="Score = severity x reliability of attacks that landed. Higher is stronger. Below 70 = at-risk. A single high-reliability medium can drop the score sharply; an informational (success=False) finding does not move the score."
+          title="Score = 100 x (1 - average severity-weighted failure across ALL probes attempted in this category). Higher is stronger. Below 70 = at-risk. Informational (success=False) findings are excluded."
           aria-label="Score (higher is stronger)">Score</span>
     <span class="exec-asi-compact__head" role="columnheader" scope="col"
           title="Counts of CONFIRMED findings (success=True) in this category. Informational findings — visible on the Findings tab with a muted chip — are excluded from these counts by design."

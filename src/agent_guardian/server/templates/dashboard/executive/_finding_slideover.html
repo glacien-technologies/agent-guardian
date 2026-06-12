@@ -22,16 +22,24 @@
        backdrop click + Esc + close-button click all dismiss.
 #}
 {% set _kind = kind | default('probe') %}
+{# Tester report #19 — the slideover root + aside ids now interpolate the
+   kind so the Findings and Probes tabs render UNIQUE DOM ids
+   (`exec-finding-slideover-root`/`-slideover` for Findings,
+   `exec-probe-slideover-root`/`-slideover` for Probes). Previously both
+   tabs shared the same id and `getElementById` returned whichever node
+   came first in document order, so opening a probe row sometimes
+   surfaced the finding-tab slideover and vice versa.
+   `aria-labelledby` similarly scoped per-kind. #}
 <div class="exec-slideover-root"
-     id="exec-finding-slideover-root"
+     id="exec-{{ _kind }}-slideover-root"
      data-slideover-kind="{{ _kind }}"
      hidden>
   <div class="exec-slideover__backdrop" data-slideover-backdrop></div>
   <aside class="exec-slideover"
-         id="exec-finding-slideover"
+         id="exec-{{ _kind }}-slideover"
          role="dialog"
          aria-modal="true"
-         aria-labelledby="exec-slideover-title"
+         aria-labelledby="exec-{{ _kind }}-slideover-title"
          tabindex="-1">
     <header class="exec-slideover__head">
       <div class="exec-slideover__chips">
@@ -54,7 +62,7 @@
       </button>
     </header>
     <h2 class="exec-slideover__title"
-        id="exec-slideover-title"
+        id="exec-{{ _kind }}-slideover-title"
         data-slideover-summary>—</h2>
     <div class="exec-slideover__body" data-slideover-body>
       {# JS-rendered: request prompt, target response, judge reasoning. #}

@@ -2745,6 +2745,19 @@ class SwarmCommander:
         # unchanged; the list surfaces a "thinly tested" state for the report
         # renderer and dashboard tile.
         undertested = self._undertested_categories(findings)
+        # Tester report #4 — gather attempted-probe counts per ASI from the
+        # agent reports so asi_score divides by the FULL probe pool (not
+        # just landed probes). Reports written before this field existed
+        # carry probes_attempted_count=0 → falls back to legacy denominator.
+        probes_per_category: dict[AsiCategory, int] = {}
+        for report in self._agent_reports:
+            if report.asi_category is None:
+                continue
+            n = getattr(report, "probes_attempted_count", 0) or 0
+            if n > 0:
+                probes_per_category[report.asi_category] = (
+                    probes_per_category.get(report.asi_category, 0) + n
+                )
         result: AivssResult = compute_aivss(
             findings,
             probes=[],
@@ -2752,6 +2765,7 @@ class SwarmCommander:
             not_covered=not_covered,
             undertested=undertested,
             never_launched=never_launched,
+            probes_per_category=probes_per_category,
         )
         # #1 — detect whether a real LLM produced the verdicts. A stub
         # evaluator/attacker can never flag a finding, so the numeric AIVSS is
@@ -2941,6 +2955,7 @@ class SwarmCommander:
             sub_scores=sub_scores,
             findings=findings,
             asi_scores=asi_scores,
+            probes_per_category=probes_per_category,
             duration_seconds=max(0.0, duration),
             cost_usd=cost_usd,
             tokens_total=tokens_total,
