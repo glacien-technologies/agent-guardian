@@ -138,7 +138,14 @@ def test_build_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("spec", "key_env", "base_url"),
+    # NB: parameter is named ``gateway_base_url`` (not ``base_url``) to
+    # avoid a fixture-name collision with the function-scope ``base_url``
+    # fixture from ``pytest-base-url`` (pulled in transitively by
+    # ``pytest-playwright`` for the E2E suite under ``tests/e2e``). When
+    # both names are in play pytest raises ScopeMismatch at collection
+    # time. Renaming the parametrize argument is the cheapest fix and
+    # keeps the e2e dev dep working without disabling the plugin globally.
+    ("spec", "key_env", "gateway_base_url"),
     [
         (
             "openrouter:anthropic/claude-3.5-sonnet",
@@ -155,13 +162,13 @@ def test_build_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_build_gateways(
-    monkeypatch: pytest.MonkeyPatch, spec: str, key_env: str, base_url: str
+    monkeypatch: pytest.MonkeyPatch, spec: str, key_env: str, gateway_base_url: str
 ) -> None:
     monkeypatch.setenv(key_env, "gw-key")
     llm = build_llm(spec, "attacker")
     assert isinstance(llm, OpenAICompatClient)
     assert not isinstance(llm, OpenAIClient)
-    assert llm.base_url == base_url
+    assert llm.base_url == gateway_base_url
     assert llm.api_key == "gw-key"
     _close(llm)
 

@@ -43,12 +43,17 @@ _GATEWAYS = [
 ]
 
 
-@pytest.mark.parametrize(("provider", "base_url"), _GATEWAYS)
+@pytest.mark.parametrize(("provider", "gateway_base_url"), _GATEWAYS)
 @respx.mock
-async def test_gateway_happy_path_exact_url_and_auth(provider: str, base_url: str) -> None:
-    expected_url = f"{base_url}/chat/completions"
+async def test_gateway_happy_path_exact_url_and_auth(provider: str, gateway_base_url: str) -> None:
+    # NB: parameter is named ``gateway_base_url`` (not ``base_url``) to
+    # avoid the function-scope ``base_url`` fixture from
+    # ``pytest-base-url`` (transitively pulled in by
+    # ``pytest-playwright`` for the E2E suite). See the matching note
+    # in ``test_llm_registry.py::test_build_gateways``.
+    expected_url = f"{gateway_base_url}/chat/completions"
     route = respx.post(expected_url).mock(return_value=Response(200, json=_ok_body()))
-    llm = OpenAICompatClient(provider=provider, base_url=base_url, api_key="gw-key")
+    llm = OpenAICompatClient(provider=provider, base_url=gateway_base_url, api_key="gw-key")
     resp = await llm.complete(_req())
     assert resp.text == "ack"
     assert resp.provider == provider

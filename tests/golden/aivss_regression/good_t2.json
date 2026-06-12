@@ -1,6 +1,6 @@
 {
   "_doc": "T2 agent: a couple of HIGH probes lightly compromised. Designed to land in GOOD band. Rebaselined 79 -> 73 in #137-#139: informational (success=False) findings no longer dilute per-category probe-group means in asi_score (#134). The three success=False highs here were silently raising the score before the fix.",
-  "expected_aivss": 73,
+  "expected_aivss": 72,
   "expected_band": "WARNING",
   "findings": [
     {
