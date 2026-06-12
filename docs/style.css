@@ -112,3 +112,83 @@ chat-assistant-input
   button:not(chat-assistant-send-button):has(svg):not(:has(span:not([class*="sr"]))) {
   display: none !important;
 }
+
+/* ----------------------------------------------------------
+ * Tester PDF #9 — Stabilise brand logo height.
+ *
+ * When the assistant sheet opens, the topbar reflows and the
+ * brand mark visibly shrinks (the layout switches from a
+ * full-width header to a narrower one). Pin a min-height /
+ * max-height pair on the navbar logo container so the icon
+ * stays the same size in both states.
+ * ---------------------------------------------------------- */
+#navbar [class*="logo"],
+#navbar [data-slot="logo"] {
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #20 — Semi-transparent components are washed-out.
+ *
+ * Mintlify defaults several inline highlight + card components
+ * to ~0.5 opacity on dark themes, which reads as washed-out
+ * grey on the AgentGuardian palette. Restore full opacity for
+ * the affected wrappers so colours render as intended.
+ * ---------------------------------------------------------- */
+[data-theme="dark"] .callout,
+[data-theme="dark"] .info-card,
+[data-theme="dark"] [class*="opacity-"],
+.card[class*="bg-"],
+.info-card[class*="bg-"] {
+  opacity: 1 !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #21 — Chat sheet resize handle is broken.
+ *
+ * The shadcn Sheet's resize ghost renders as a 1px vertical
+ * line because the wrapper sets `cursor: col-resize` but the
+ * handle itself is invisible. Give it a visible 4px-wide
+ * grip with a subtle hover state so users can find + drag it.
+ * ---------------------------------------------------------- */
+#chat-assistant-sheet [data-resize-handle],
+#chat-assistant-sheet [class*="resize-handle"],
+#chat-assistant-sheet > div:first-child {
+  width: 4px !important;
+  background-color: var(--border, rgba(255, 255, 255, 0.12)) !important;
+  cursor: col-resize !important;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+#chat-assistant-sheet [data-resize-handle]:hover,
+#chat-assistant-sheet [class*="resize-handle"]:hover,
+#chat-assistant-sheet > div:first-child:hover {
+  opacity: 1;
+  background-color: var(--accent, #8b5cf6) !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #22 — Wordmark next to brand logo disappears.
+ *
+ * At certain viewport widths Mintlify hides the brand wordmark
+ * span (the literal "AgentGuardian" text next to the logo
+ * icon), leaving just the icon. Force the wordmark to stay
+ * visible until below the mobile breakpoint so the navbar
+ * doesn't look unbranded.
+ * ---------------------------------------------------------- */
+#navbar [class*="brand"] span,
+#navbar [class*="logo"] + span,
+nav-logo + span {
+  display: inline !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  #navbar [class*="brand"] span,
+  #navbar [class*="logo"] + span,
+  nav-logo + span {
+    display: none !important;
+  }
+}
