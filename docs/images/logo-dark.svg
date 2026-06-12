@@ -1,1 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 48" width="280" height="48"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A78BFA"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient></defs><g transform="translate(4,6)"><path d="M18 0 L0 6 V19 C0 28 7 36 18 38 C29 36 36 28 36 19 V6 Z" fill="url(#g)"/><text x="18" y="26" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-weight="800" font-size="16" fill="#0f172a" letter-spacing="-0.5">AG</text></g><text x="52" y="32" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-weight="700" font-size="22" fill="#fafaf7" letter-spacing="-0.5">AgentGuardian</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="#FAFAFA" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="AgentGuardian">
+  <title>AgentGuardian</title>
+  <path d="M16 3 L27 6 V14 C27 21 22.5 26 16 29 C9.5 26 5 21 5 14 V6 Z"/>
+  <path d="M16 6.2 L24 8.4 V14 C24 19.4 20.5 23.4 16 25.6 C11.5 23.4 8 19.4 8 14 V8.4 Z" stroke-width="1.1"/>
+  <path d="M12.6 15.6 L15.2 18.4 L19.6 11.8" stroke="#8B5CF6"/>
+</svg>

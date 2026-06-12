@@ -44,26 +44,28 @@
 /* ----------------------------------------------------------
  * Tester #10 — Brand icon size.
  *
- * The wordmark SVGs (`docs/images/logo-light.svg` /
- * `docs/images/logo-dark.svg`) are authored at 280x48 but
- * Mintlify clamps them to roughly 24 px which makes the brand
- * read as a tiny chip. Also: when the Ask Assistant sheet
- * opens, the navbar reflows and the logo gets compressed
- * further. Lock the logo height + flex-shrink so it always
- * renders at a readable size, regardless of panel state.
+ * The brand marks (`docs/images/logo-light.svg` /
+ * `docs/images/logo-dark.svg`) are the canonical Aegis Keyline
+ * shield from the agent_guardian_web repo — a 32x32 square
+ * SVG. Mintlify clamps the rendered height to roughly 24px,
+ * and when the Ask Assistant sheet opens the navbar reflows
+ * and the logo gets compressed further. Lock the height +
+ * flex-shrink so the shield always renders at a readable size,
+ * regardless of panel state. 32px matches the SVG's native
+ * viewBox so the strokes stay crisp.
  * ---------------------------------------------------------- */
 nav-logo {
-  height: 36px !important;
-  max-height: 36px !important;
-  width: auto !important;
+  height: 32px !important;
+  max-height: 32px !important;
+  width: 32px !important;
   flex-shrink: 0 !important;
 }
 
 nav-logo img,
 nav-logo svg {
-  height: 36px !important;
-  width: auto !important;
-  max-height: 36px !important;
+  height: 32px !important;
+  width: 32px !important;
+  max-height: 32px !important;
 }
 
 /* Hold the topbar height so opening the side panel cannot
