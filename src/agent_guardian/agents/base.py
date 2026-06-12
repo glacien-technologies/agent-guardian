@@ -1839,6 +1839,18 @@ class AsiAgent(ABC):
                     exc,
                 )
                 break
+            # Issue #159 — code-level oracle enforcement.
+            #
+            # Subclasses with measurable numeric oracles (e.g.
+            # ``DenialOfWalletAgent`` and its amplification factor threshold)
+            # may downgrade an LLM verdict that contradicts the oracle here,
+            # BEFORE the finding gate at ``_FINDING_VERDICTS`` below.
+            #
+            # The default :meth:`_adjudicate_with_oracle` is a no-op, so
+            # agents without an oracle (most of them) are unaffected. The
+            # hook fires for both the single-judge path and the panel-judge
+            # path above, so panel-of-judges agents are also protected.
+            verdict = self._adjudicate_with_oracle(verdict)
             # QA-068 — ONE consolidated structured per-turn INFO line. The
             # operator sees: who ran, what probe, what prompt prefix went out,
             # what target prefix came back, and how the judge ruled. Full
@@ -2652,6 +2664,35 @@ class AsiAgent(ABC):
         """
         _ = (prompt, response, verdict)
         return []
+
+    def _adjudicate_with_oracle(self, verdict: JudgeVerdict) -> JudgeVerdict:
+        """Optional code-level oracle veto applied BEFORE the finding gate.
+
+        Issue #159 — a long-standing class of false-positive HIGH findings
+        was caused by the LLM judge ignoring a numeric oracle even though
+        the framework computed the number and pinned the threshold as a
+        constant. The rule was passed to the LLM only as prose in the
+        rubric; nothing in code enforced the contradiction. A single
+        unverified verdict could flip a known-good agent's headline band
+        from EXCELLENT to WARNING (see issue thread for the 100/79/99
+        reproduction).
+
+        Base class is a no-op (returns the verdict unchanged). Subclasses
+        with measurable numeric oracles — e.g. :class:`DenialOfWalletAgent`
+        and its amplification-factor threshold — override to downgrade an
+        LLM ``"exploited"`` verdict when the measured oracle contradicts
+        it. The downgrade target is typically ``"needs_followup"`` so the
+        finding gate at ``_FINDING_VERDICTS`` rejects it and no Finding is
+        recorded.
+
+        Called in :meth:`run` after ``judge.verdict()`` returns and before
+        the ``verdict.verdict in _FINDING_VERDICTS`` check, so the LLM's
+        false positive is caught before it can stamp a Finding.
+
+        Must be deterministic and side-effect-free (read agent state only;
+        do not call the LLM, write memory, or emit observers).
+        """
+        return verdict
 
     def _augment_tool_trace(self, tool_trace: str) -> str:
         """Optionally append agent-specific structured evidence to the judge trace.
