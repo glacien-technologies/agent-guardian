@@ -4310,3 +4310,51 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-logs-refresh:hover {
   border-color: var(--exec-brand);
 }
+
+/* ============================================================
+ * Tester PDF (2026-06-12) — dashboard polish bundle (#168)
+ *
+ * Five items in this bundle (4, 5, 11, 13, 29). 11/13/29 land here
+ * as CSS-only tweaks; 4 (radar polygon severity colour) needs a JS
+ * change in charts.js; 5 (probes page alignment) requires Playwright
+ * to identify the offending viewport — deferred to a follow-up.
+ * ============================================================ */
+
+/* PDF #11 — Findings + probes detail-modal body text was too dim
+ * against the dark theme. Bump to the strong ink colour so the
+ * contrast ratio clears WCAG AA. */
+.exec-finding-detail__body,
+.exec-finding-detail__body p,
+.exec-probe-detail__body,
+.exec-probe-detail__body p,
+[data-detail-body],
+[data-detail-body] p {
+  color: var(--exec-ink) !important;
+}
+
+/* PDF #13 — Finding body paragraph was rendering tight; bump
+ * letter-spacing by 0.01em so the dark-on-dark text reads more
+ * comfortably. Doesn't touch monospace or table cells. */
+.exec-finding-detail__body,
+.exec-finding-detail__body p,
+.exec-probe-detail__body,
+.exec-probe-detail__body p,
+[data-detail-body],
+[data-detail-body] p {
+  letter-spacing: 0.01em;
+}
+
+/* PDF #29 — Active-tab underline width was tied to the tab box
+ * (left: 0.75rem; right: 0.75rem of the padding), which produced
+ * different visible underline lengths for "Overview" vs "Findings"
+ * vs "Probes" vs "Logs". Switch to a centered, text-width-derived
+ * underline so each tab's underline reads as the same proportion. */
+.exec-tabbar [role="tab"][aria-selected="true"]::after {
+  /* Override the per-side padding-anchored coordinates. */
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%);
+  /* Underline 60% of the tab text width — visually balanced
+   * across "Logs" (4 chars) through "Overview" (8 chars). */
+  width: 60%;
+}
