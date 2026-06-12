@@ -349,5 +349,6 @@
     {{ findings_payload_json | safe }}
   </script>
 
+  {% set kind = "finding" %}
   {% include "dashboard/executive/_finding_slideover.html" %}
 </section>

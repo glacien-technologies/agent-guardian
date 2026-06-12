@@ -156,6 +156,61 @@ def test_asi_score_aggregates_multiple_probes_by_arithmetic_mean() -> None:
     assert asi_score(findings) == pytest.approx(60.0)
 
 
+def test_compute_aivss_threads_probes_per_category_into_asi_score() -> None:
+    """Tester report #4 — passing ``probes_per_category`` into compute_aivss
+    must dilute the per-category mean. A single medium across 17 probes in
+    ASI01 should score ~98, not 60."""
+    from agent_guardian.core.scoring import compute_aivss
+    from agent_guardian.models.tier import Tier
+
+    finding = _finding(
+        fid="f1",
+        probe_id="A",
+        asi=AsiCategory.ASI01,
+        severity=Severity.MEDIUM,
+        success=True,
+        attempts=1,
+    )
+    result_legacy = compute_aivss([finding], probes=[], tier=Tier.T2_HIGH)
+    assert result_legacy.asi_scores[AsiCategory.ASI01] == pytest.approx(60.0)
+    result_with_count = compute_aivss(
+        [finding],
+        probes=[],
+        tier=Tier.T2_HIGH,
+        probes_per_category={AsiCategory.ASI01: 17},
+    )
+    assert result_with_count.asi_scores[AsiCategory.ASI01] == pytest.approx(97.65, abs=0.1)
+
+
+def test_asi_score_divides_by_total_probes_when_supplied() -> None:
+    """Tester report #4 — denominator is the FULL probe pool, not landed
+    probes only. One medium finding across 17 probes scored ~98 (1 of 17
+    went wrong), not 60 (1 of 1 went wrong). 1 medium across 1 probe
+    still scores 60 — the only thing tested broke."""
+    one_medium = [
+        _finding(fid="f1", probe_id="A", severity=Severity.MEDIUM, success=True, attempts=1)
+    ]
+    # Legacy behavior: divisor falls back to len(by_probe) = 1 → 60.
+    assert asi_score(one_medium) == pytest.approx(60.0)
+    # 1 medium across 1 attempted probe — same as legacy.
+    assert asi_score(one_medium, total_probes=1) == pytest.approx(60.0)
+    # 1 medium across 17 attempted probes — score climbs near 100 because
+    # 16 of those probes were defended.
+    # Math: weighted_fail = 1.0 (reliability) * 0.4 (medium weight) = 0.4
+    # mean = 0.4 / 17 ≈ 0.0235; score = 100 * (1 - 0.0235) ≈ 97.65
+    assert asi_score(one_medium, total_probes=17) == pytest.approx(97.65, abs=0.1)
+    # If the supplied total is smaller than the landed-probe count
+    # (defensive — shouldn't happen in practice), the divisor stays at
+    # the landed count so the score doesn't artificially inflate.
+    two_mediums_two_probes = [
+        _finding(fid="f1", probe_id="A", severity=Severity.MEDIUM, success=True, attempts=1),
+        _finding(fid="f2", probe_id="B", severity=Severity.MEDIUM, success=True, attempts=1),
+    ]
+    assert asi_score(two_mediums_two_probes, total_probes=1) == pytest.approx(
+        asi_score(two_mediums_two_probes)
+    )
+
+
 def test_asi_score_ignores_informational_findings() -> None:
     # #134 — an informational (success=False) finding must have zero scoring
     # effect: it used to form its own probe group at reliability 0.0, diluting

@@ -308,6 +308,9 @@ def _asi_rows(
     """Build the ten ASI breakdown rows."""
     rows: list[dict[str, Any]] = []
     asi_scores: dict[AsiCategory, float] = scan.asi_scores if scan is not None else {}
+    probes_per_category: dict[AsiCategory, int] = (
+        getattr(scan, "probes_per_category", {}) or {} if scan is not None else {}
+    )
     for code, (title, subtitle, weight, weight_high) in _ASI_ROW_META.items():
         asi_enum = AsiCategory(code)
         score_raw = asi_scores.get(asi_enum)
@@ -316,6 +319,14 @@ def _asi_rows(
         findings = findings_by_asi.get(code, {"critical": 0, "high": 0, "medium": 0, "low": 0})
         is_attention = (score_val < 70.0 and not is_pending) or findings["critical"] > 0
         status_label, status_class = _status_for_row(scan, is_pending)
+        # Tester report #4 — surface the denominator the formula now uses so
+        # an operator can read "1 medium of 17 probes = 98" and understand
+        # why the score isn't 60 anymore. Falls back to em-dash when the
+        # field is absent (older Scan JSON written before rc20).
+        probes_total = int(probes_per_category.get(asi_enum, 0) or 0)
+        landed_total = (
+            findings["critical"] + findings["high"] + findings["medium"] + findings["low"]
+        )
         rows.append(
             {
                 "code": code,
@@ -328,6 +339,9 @@ def _asi_rows(
                 "weight_label": f"{weight:.1f}",
                 "weight_high": weight_high,
                 "findings": findings,
+                "probes_total": probes_total,
+                "landed_total": landed_total,
+                "coverage_label": (f"{landed_total} / {probes_total}" if probes_total > 0 else "—"),
                 "status_label": status_label,
                 "status_class": status_class,
             }

@@ -259,6 +259,12 @@ class AgentReport:
     # ``None`` when the agent short-circuited before any judged turn (recon /
     # not-applicable / egress-only runs).
     run_result: AsiRunResult | None = None
+    # Total probes (seeds) the agent attempted in this category, regardless
+    # of whether each probe ultimately landed or was defended. Scoring uses
+    # this as the denominator so a single bad probe across 17 attempts
+    # doesn't look like a 1-of-1 disaster (tester report #4). Default 0 keeps
+    # backward compat with on-disk reports written before the field existed.
+    probes_attempted_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -2258,6 +2264,12 @@ class AsiAgent(ABC):
             tokens_consumed=tokens,
             not_tested_turns=not_tested_turns,
             run_result=run_result,
+            # Tester report #4 — the scoring denominator now divides by
+            # total probes ATTEMPTED in this category, not landed probes.
+            # The seed index is keyed by probe_id and built once at
+            # _setup_seeds time, so its size is the canonical "how many
+            # probes did this agent load for this category" count.
+            probes_attempted_count=len(getattr(self, "_seed_index", {}) or {}),
         )
 
     # ------------------------------------------------------------------

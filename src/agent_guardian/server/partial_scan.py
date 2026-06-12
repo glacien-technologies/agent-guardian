@@ -192,12 +192,37 @@ def build_partial_scan(swarm: SwarmCommander) -> Scan:
     completed_categories: set[AsiCategory] = {
         r.asi_category for r in swarm._agent_reports if r.asi_category is not None
     }
+    # Tester report #4 — provisional asi_score divides by the FULL probe
+    # pool (loaded seeds) rather than landed-probes only, so a single
+    # medium finding from a 17-probe run reads as ~98 (not 60). Reads
+    # from completed agent reports first (authoritative count); falls
+    # back to the running agents' active seed index when an agent is
+    # still in flight.
+    probes_per_category: dict[AsiCategory, int] = {}
+    for report in swarm._agent_reports:
+        if report.asi_category is None:
+            continue
+        n = getattr(report, "probes_attempted_count", 0) or 0
+        if n > 0:
+            probes_per_category[report.asi_category] = (
+                probes_per_category.get(report.asi_category, 0) + n
+            )
+    for active_agent in getattr(swarm, "_active_agents", []) or []:
+        cat = getattr(active_agent, "asi_category", None)
+        if cat is None or cat in probes_per_category:
+            continue
+        seed_index = getattr(active_agent, "_seed_index", None) or {}
+        if seed_index:
+            probes_per_category[cat] = len(seed_index)
     asi_scores: dict[AsiCategory, float] = {}
     for cat, cat_findings in per_asi_findings.items():
         has_real_evidence = bool(cat_findings) or cat in completed_categories
         if not has_real_evidence:
             continue
-        asi_scores[cat] = _asi_score(cat_findings)
+        asi_scores[cat] = _asi_score(
+            cat_findings,
+            total_probes=probes_per_category.get(cat, 0),
+        )
 
     # Live cost / tokens read off the same counter objects the budget
     # watchdog samples (so the at-a-glance widget never lags those counters
@@ -253,6 +278,7 @@ def build_partial_scan(swarm: SwarmCommander) -> Scan:
         sub_scores={},
         findings=findings,
         asi_scores=asi_scores,
+        probes_per_category=probes_per_category,
         duration_seconds=duration,
         cost_usd=max(0.0, live_cost),
         tokens_total=live_tokens,
