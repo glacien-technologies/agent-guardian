@@ -1,0 +1,112 @@
+/* ============================================================
+ * AgentGuardian docs — Mintlify custom CSS overrides
+ *
+ * Mintlify auto-injects any .css file placed at the docs root
+ * (no docs.json reference needed). Each block here is tagged
+ * with the corresponding tester report item so future readers
+ * understand why a global !important is in play.
+ * ============================================================ */
+
+/* ----------------------------------------------------------
+ * Tester #11 — Move the Ask Assistant panel to the RIGHT.
+ *
+ * Mintlify's #chat-assistant-sheet is a shadcn Sheet that
+ * mounts on the LEFT and pushes #content-area to the right,
+ * leaving a wide blank gutter on the left that obscures the
+ * docs and shortens the reading column. Pin the sheet to the
+ * right edge of the viewport so the main content keeps its
+ * full reading width; the sheet floats over the right margin
+ * (matching how AI side-panels typically dock in tools like
+ * Cursor / GitHub Copilot Chat).
+ * ---------------------------------------------------------- */
+#chat-assistant-sheet {
+  position: fixed !important;
+  left: auto !important;
+  right: 0 !important;
+  border-left: 1px solid var(--border, rgba(0, 0, 0, 0.08)) !important;
+  border-right: none !important;
+  /* Soft inner shadow on the left edge separates the panel
+     from the docs content underneath. */
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Keep the docs reading column at full width regardless of
+ * whether the assistant panel is open. */
+#content-area {
+  max-width: none !important;
+  margin-right: 0 !important;
+}
+
+#sidebar {
+  flex-shrink: 0;
+}
+
+/* ----------------------------------------------------------
+ * Tester #10 — Brand icon size.
+ *
+ * The wordmark SVGs (`docs/images/logo-light.svg` /
+ * `docs/images/logo-dark.svg`) are authored at 280x48 but
+ * Mintlify clamps them to roughly 24 px which makes the brand
+ * read as a tiny chip. Also: when the Ask Assistant sheet
+ * opens, the navbar reflows and the logo gets compressed
+ * further. Lock the logo height + flex-shrink so it always
+ * renders at a readable size, regardless of panel state.
+ * ---------------------------------------------------------- */
+nav-logo {
+  height: 36px !important;
+  max-height: 36px !important;
+  width: auto !important;
+  flex-shrink: 0 !important;
+}
+
+nav-logo img,
+nav-logo svg {
+  height: 36px !important;
+  width: auto !important;
+  max-height: 36px !important;
+}
+
+/* Hold the topbar height so opening the side panel cannot
+ * reflow the navbar (which is what shrunk the logo). */
+#navbar {
+  min-height: 64px !important;
+  align-items: center !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester #7 — Hide the file-attach affordance in Ask Assistant.
+ *
+ * Mintlify's chat input row renders a paperclip "attach file"
+ * button next to the send button. The docs assistant is a Q&A
+ * over the AgentGuardian docs corpus — it has no use for an
+ * attached file (the user can't paste a corpus shard mid-chat),
+ * so the affordance is confusing. There's no docs.json toggle
+ * to disable just the attach button (the Mintlify dashboard
+ * only allows on/off for the whole assistant), so we hide it
+ * via CSS.
+ *
+ * Three layered selectors so a Mintlify rename of the aria
+ * label still gets caught by the icon-only fallback:
+ *   (a) aria-label substring match — most robust to icon swaps
+ *   (b) explicit #chat-assistant-textarea wrapper match
+ *   (c) icon-only-button fallback inside chat-assistant-input
+ *       that excludes the documented send button.
+ * ---------------------------------------------------------- */
+chat-assistant-input button[aria-label*="attach" i],
+chat-assistant-input button[aria-label*="file" i],
+chat-assistant-input button[aria-label*="upload" i],
+#chat-assistant-textarea button[aria-label*="attach" i],
+#chat-assistant-textarea button[aria-label*="file" i],
+#chat-assistant-textarea button[aria-label*="upload" i] {
+  display: none !important;
+}
+
+/* Fallback: hide any icon-only button inside the chat input
+ * row that is NOT the send button. The send button uses the
+ * documented `chat-assistant-send-button` element selector
+ * (a custom element wrapping its own <button>); siblings to
+ * it that contain only an <svg> are upload/attach affordances. */
+chat-assistant-input
+  button:not(chat-assistant-send-button):has(svg):not(:has(span:not([class*="sr"]))) {
+  display: none !important;
+}
