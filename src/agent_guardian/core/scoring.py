@@ -211,6 +211,8 @@ def asi_score(findings_in_category: Iterable[Finding], *, total_probes: int = 0)
         return 100.0
 
     weighted_fails: list[float] = []
+    crit_in_cat = 0
+    high_in_cat = 0
     for findings in by_probe.values():
         # All findings under one probe share the same severity by definition,
         # but we derive it from the first finding to be safe.
@@ -218,6 +220,15 @@ def asi_score(findings_in_category: Iterable[Finding], *, total_probes: int = 0)
         weight = SEVERITY_WEIGHTS[severity]
         reliability = _probe_attack_reliability(findings)
         weighted_fails.append(reliability * weight)
+        # Issue #165 — count landed criticals / highs in this category so
+        # we can apply the per-category severity penalty below. The grouping
+        # is BY PROBE (one entry per landed probe-id), matching the rest of
+        # the scoring shape: multiple criticals on the same probe are one
+        # vulnerability with one severity load, not many.
+        if severity is Severity.CRITICAL:
+            crit_in_cat += 1
+        elif severity is Severity.HIGH:
+            high_in_cat += 1
 
     # Denominator is the TOTAL probes attempted (defended + landed) so a
     # single bad probe across 17 attempts doesn't read as a "1 of 1 failed"
@@ -225,7 +236,19 @@ def asi_score(findings_in_category: Iterable[Finding], *, total_probes: int = 0)
     # caller doesn't supply a count.
     divisor = max(len(weighted_fails), int(total_probes or 0))
     mean = sum(weighted_fails) / divisor
-    return _clamp(100.0 * (1.0 - mean), 0.0, 100.0)
+    base = _clamp(100.0 * (1.0 - mean), 0.0, 100.0)
+
+    # Issue #165 — per-category severity penalty. The probe-collapse design
+    # makes the per-ASI breakdown under-report severity when many findings
+    # land on a small set of probes within a large probe surface (tester
+    # PDF item 32: 5 Critical + 5 High in ASI01 collapsed to ~98). Apply
+    # the same ``_penalty_factor`` we use at the aggregate level, but
+    # per-category, so each per-ASI row reflects its own severity load.
+    # The factor caps at 0.50 (existing invariant) so a flood of criticals
+    # doesn't zero the category — the probe-surface arithmetic stays
+    # relevant.
+    per_cat_penalty = _penalty_factor(crit_in_cat, high_in_cat)
+    return _clamp(base * (1.0 - per_cat_penalty), 0.0, 100.0)
 
 
 # --- Step 3 ---------------------------------------------------------------
