@@ -152,6 +152,22 @@ Opt-in usage telemetry. `agent-guardian telemetry enable` records the
 consent decision; `agent-guardian telemetry status` prints the current
 state.
 
+### `models`
+
+```text
+agent-guardian models list
+agent-guardian models list --provider openai
+```
+
+Inspect the LLM provider/model ids the framework knows about. `models
+list` prints every supported provider plus its stable id allow-list —
+the same data the fail-fast model validator uses to power the "did you
+mean" suggestion when an unknown `--model` is rejected. Pass any id
+straight to `--model <provider>:<id>`. Use `--provider <name>` to
+narrow to a single provider; gateway- or deployment-scoped providers
+(azure, openrouter, groq, together, fireworks, vllm) are listed
+without a static corpus because their catalogs vary per account.
+
 ### `contract`
 
 ```text
