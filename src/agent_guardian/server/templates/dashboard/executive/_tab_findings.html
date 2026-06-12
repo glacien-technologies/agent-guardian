@@ -96,6 +96,14 @@
       {% if f.asi_code and f.asi_code not in _asi_values %}{% set _ = _asi_values.append(f.asi_code) %}{% endif %}
       {% if f.probe_id and f.probe_id not in _probe_values %}{% set _ = _probe_values.append(f.probe_id) %}{% endif %}
     {% endfor %}
+    {# Tester PDF item 30 — when there are no findings (initial paint
+       on a running scan) AND none of the filter-value arrays carry
+       anything, the wrapper div still renders and shows up as an
+       empty horizontal "component" between the page header and the
+       table. Skip rendering it entirely in that case; ``live-append.js``
+       will rebuild it as findings arrive. #}
+    {% set _has_filter_values = _sev_values or _agent_values or _probe_values or _asi_values %}
+    {% if findings_page or _has_filter_values %}
     <div class="exec-findings-filter"
          id="exec-findings-filter"
          role="group"
@@ -162,6 +170,7 @@
         of <span data-counter-total>{{ findings_page | length }}</span> findings
       </div>
     </div>
+    {% endif %}
     <div class="exec-findings-table-wrap">
       <table class="exec-findings-table"
              id="exec-findings-table"

@@ -53,7 +53,13 @@ def _render_agent_table(state: DashboardState) -> Table:
         status_style = _STATUS_STYLE[status]
         asi_style = f"asi.{asi}" if asi.startswith("ASI") else "status.pending"
         turn_pair = state.agent_turns.get(name)
-        turn_str = f"{turn_pair[0]}/{turn_pair[1]}" if turn_pair else "—"
+        # Tester PDF item 1 — a completed agent with ``(0, 0)`` turns
+        # reads as "0/0" which looks like the run silently produced
+        # nothing. Show "—" for a genuinely-zero-turn run AND for a
+        # completed recon-agent that emitted no progress events (the
+        # white-box early-return path), so the cell is consistent with
+        # the rest of the "no useful number" indicators in the table.
+        turn_str = f"{turn_pair[0]}/{turn_pair[1]}" if turn_pair and turn_pair != (0, 0) else "—"
         # PhaseC — append plan badge + attachment glyph when present.
         plan_label = state.agent_plan_label.get(name, "")
         if plan_label:
