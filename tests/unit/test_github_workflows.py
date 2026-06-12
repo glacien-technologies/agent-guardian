@@ -196,20 +196,59 @@ def test_link_check_fails_on_broken_links() -> None:
 # -------------------------------------------------------------------------- ci
 
 
-def test_ci_test_matrix_covers_supported_oses() -> None:
+def test_ci_per_pr_test_matrix_is_ubuntu_only() -> None:
+    """Per-PR ``test`` job must NOT include macOS in its matrix.
+
+    macOS runners always bill against the org-level Actions allowance,
+    even on public repos (they are classified as "larger runners" per
+    GitHub's billing model). Running the macOS matrix on every PR
+    drains the same minute pool the org's private repos share. The
+    cross-platform contract is exercised by the separate ``test-macos``
+    job which runs only on release tag pushes.
+
+    Windows is also excluded (Guardian backlog QA-038 — v1.1
+    portability milestone). Python 3.10 is excluded — it has a known
+    asyncio subprocess teardown bug fixed in 3.11.
+    ``pyproject.toml`` declares ``requires-python>=3.11`` to match.
+    """
     data = _load_workflow("ci.yml")
     matrix = data["jobs"]["test"]["strategy"]["matrix"]
-    # Windows is deliberately excluded (Guardian backlog QA-038 — v1.1
-    # portability milestone). Restoring it requires Rich Console / SO_REUSEADDR
-    # / path-separator / asyncio-teardown portability work first.
-    assert sorted(matrix["os"]) == sorted(["ubuntu-latest", "macos-latest"])
-    # Python 3.10 is excluded — it has a known asyncio subprocess teardown
-    # bug fixed in 3.11. ``pyproject.toml`` declares ``requires-python>=3.11``
-    # to match.
+    # No ``os`` axis on the per-PR test matrix — the job's runs-on is
+    # the fixed string ``ubuntu-latest``.
+    assert "os" not in matrix, (
+        "the per-PR ``test`` job must NOT have an ``os`` matrix axis; "
+        "macOS testing belongs in the gated ``test-macos`` job"
+    )
+    assert data["jobs"]["test"]["runs-on"] == "ubuntu-latest"
     assert set(matrix["python-version"]) == {"3.11", "3.12", "3.13"}
 
 
-def test_ci_codecov_only_runs_on_ubuntu_3_11() -> None:
+def test_ci_macos_job_only_runs_on_release_tags() -> None:
+    """``test-macos`` exists, mirrors the Python matrix, and only fires
+    on release tag pushes (``refs/tags/v*.*.*``).
+
+    This is the cost guard: macOS minutes get spent at most once per
+    PyPI release (~1/week historically), not three times per PR.
+    """
+    data = _load_workflow("ci.yml")
+    job = data["jobs"].get("test-macos")
+    assert job is not None, "test-macos job is missing from ci.yml"
+    assert job["runs-on"] == "macos-latest"
+    condition = job.get("if", "")
+    assert "startsWith(github.ref, 'refs/tags/v')" in condition, (
+        f"test-macos must be gated to release tag pushes, got: {condition!r}"
+    )
+    assert set(job["strategy"]["matrix"]["python-version"]) == {"3.11", "3.12", "3.13"}
+
+
+def test_ci_codecov_uploads_once_on_python_3_11() -> None:
+    """Codecov gating must keep exactly one upload step on the 3.11 leg.
+
+    With the matrix collapsed to ubuntu-only, the gate no longer needs
+    ``matrix.os ==``; ``matrix.python-version == '3.11'`` is sufficient
+    to single out one of the three runs. Double-uploads would race the
+    Codecov token + double-count coverage (Standard §11.1).
+    """
     data = _load_workflow("ci.yml")
     steps = data["jobs"]["test"]["steps"]
     codecov_steps = [
@@ -219,8 +258,25 @@ def test_ci_codecov_only_runs_on_ubuntu_3_11() -> None:
     ]
     assert len(codecov_steps) == 1, "expected exactly one Codecov upload step"
     condition = codecov_steps[0].get("if", "")
-    assert "ubuntu-latest" in condition
     assert "3.11" in condition
+    # The collapsed matrix has no ``os`` axis, so the prior
+    # ``matrix.os == 'ubuntu-latest'`` clause would always be true
+    # and is intentionally absent.
+    assert "matrix.os" not in condition
+
+
+def test_ci_every_job_has_a_timeout() -> None:
+    """Every job MUST declare ``timeout-minutes`` so a stuck run cannot
+    burn the account-level 6-hour cap (PR #151 ran for 6 hours on
+    macOS before being killed by GitHub's own ceiling). The 30-minute
+    test ceiling caps the worst case at ~1/12 of that."""
+    data = _load_workflow("ci.yml")
+    missing = [name for name, job in data["jobs"].items() if "timeout-minutes" not in job]
+    assert missing == [], (
+        f"these CI jobs have no timeout-minutes set: {missing}. "
+        "Every job must declare one or a deadlock burns the org's "
+        "Actions allowance until GitHub's 6-hour cap kills it."
+    )
 
 
 def test_ci_install_step_uses_dev_aws_otel_extras() -> None:
