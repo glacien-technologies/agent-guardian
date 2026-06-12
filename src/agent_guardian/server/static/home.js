@@ -97,6 +97,19 @@ async function refreshScanList() {
       current.replaceWith(fresh);
       wireDeleteButtons();
       localizeTimes();
+      // Tester PDF item 28 — re-apply the band filter after the body
+      // replacement. The MutationObserver hooked into the OLD body in
+      // ``wireBandFilter()`` is orphaned by ``replaceWith``, so without
+      // this call the dropdown still reads e.g. "Warning" but the
+      // refreshed table renders every row (filter visually "resets").
+      const sel = document.getElementById("band-filter");
+      if (sel && sel.value) {
+        const target = sel.value;
+        document.querySelectorAll("tr[data-row-band]").forEach((row) => {
+          const band = row.getAttribute("data-row-band") || "";
+          row.hidden = band !== target;
+        });
+      }
     }
   } catch (_e) {
     /* ignore — a failed refresh just keeps the current view */
