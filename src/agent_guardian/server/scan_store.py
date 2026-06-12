@@ -203,6 +203,15 @@ class ScanSummary:
 
 
 def _default_root_dir() -> Path:
+    """Resolve the default scan-store root.
+
+    Honours ``AGENT_GUARDIAN_SCAN_STORE_ROOT`` so the E2E suite can point
+    a uvicorn subprocess at a tmpdir without racing the user's local
+    dashboard state. Falls back to the documented home path otherwise.
+    """
+    env = os.environ.get("AGENT_GUARDIAN_SCAN_STORE_ROOT")
+    if env:
+        return Path(env).expanduser()
     return Path.home() / ".agentguardian" / "scans"
 
 

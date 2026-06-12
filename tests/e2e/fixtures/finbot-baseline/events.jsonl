@@ -1,0 +1,8 @@
+{"kind": "recon_done", "delta_ms": 100, "payload": {"probes_sent": 6}}
+{"kind": "agent_start", "delta_ms": 50, "agent": "goal-hijack-agent"}
+{"kind": "finding", "delta_ms": 200, "payload": {"finding_id": "f-001"}}
+{"kind": "finding", "delta_ms": 150, "payload": {"finding_id": "f-002"}}
+{"kind": "agent_start", "delta_ms": 50, "agent": "tool-abuse-agent"}
+{"kind": "finding", "delta_ms": 200, "payload": {"finding_id": "f-003"}}
+{"kind": "finding", "delta_ms": 200, "payload": {"finding_id": "f-004"}}
+{"kind": "scan_done", "delta_ms": 100, "payload": {"aivss": 78, "band": "Good", "findings": 9}}

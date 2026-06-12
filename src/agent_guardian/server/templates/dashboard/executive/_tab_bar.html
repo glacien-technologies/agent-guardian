@@ -20,29 +20,34 @@
 <h2 id="executive-tablist-label" class="exec-sr-only">Scan dashboard sections</h2>
 <div role="tablist"
      aria-labelledby="executive-tablist-label"
-     class="exec-tabbar">
+     class="exec-tabbar"
+     data-testid="tabs-tablist">
   <button id="tab-overview"
           type="button"
           role="tab"
           aria-selected="true"
           aria-controls="tabpanel-overview"
-          tabindex="0">Overview<span class="exec-tab__badge" data-badge data-tab="overview"></span></button>
+          tabindex="0"
+          data-testid="tabs-button-overview">Overview<span class="exec-tab__badge" data-badge data-tab="overview"></span></button>
   <button id="tab-findings"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-findings"
-          tabindex="-1">Findings<span class="exec-tab__badge" data-badge data-tab="findings"></span></button>
+          tabindex="-1"
+          data-testid="tabs-button-findings">Findings<span class="exec-tab__badge" data-badge data-tab="findings"></span></button>
   <button id="tab-probes"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-probes"
-          tabindex="-1">Probes<span class="exec-tab__badge" data-badge data-tab="probes"></span></button>
+          tabindex="-1"
+          data-testid="tabs-button-probes">Probes<span class="exec-tab__badge" data-badge data-tab="probes"></span></button>
   <button id="tab-logs"
           type="button"
           role="tab"
           aria-selected="false"
           aria-controls="tabpanel-logs"
-          tabindex="-1">Logs<span class="exec-tab__badge" data-badge data-tab="logs"></span></button>
+          tabindex="-1"
+          data-testid="tabs-button-logs">Logs<span class="exec-tab__badge" data-badge data-tab="logs"></span></button>
 </div>
