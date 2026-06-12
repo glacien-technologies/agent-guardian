@@ -67,6 +67,7 @@ from agent_guardian.llm import (
     BaseLLM,
     LLMError,
 )
+from agent_guardian.llm.validation import KNOWN_MODELS
 from agent_guardian.logging_setup import configure_logging
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.scan import Scan
@@ -200,6 +201,68 @@ telemetry_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(telemetry_app, name="telemetry")
+
+# Issue #150 — the fail-fast model validator (see ``llm/validation.py``)
+# tells operators who pass an unknown ``--model`` to "Run `agent-guardian
+# models list` to see all available ids" on multiple not-found branches.
+# Before this sub-app existed, that suggestion was a dead end. ``models
+# list`` now surfaces the same ``KNOWN_MODELS`` allow-list the validator
+# itself reads from, so the error message points at a real command. Keep
+# the two in lockstep: any new provider added to KNOWN_MODELS shows up
+# here automatically.
+models_app = typer.Typer(
+    name="models",
+    help="Inspect supported LLM provider/model ids.",
+    no_args_is_help=True,
+)
+app.add_typer(models_app, name="models")
+
+
+@models_app.command("list")
+def models_list(
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help=(
+            "Filter to a single provider (e.g. openai, anthropic, gemini, "
+            "vertex). Omit to list every supported provider."
+        ),
+    ),
+) -> None:
+    """List the LLM provider/model ids the framework knows about.
+
+    These ids power the validator's ``did you mean`` suggestion. Pass any
+    of them directly to ``--model <provider>:<id>``. Providers whose
+    catalogs are gateway- or deployment-scoped (azure, openrouter, groq,
+    together, fireworks, vllm) are listed without a static id corpus —
+    the validator probes their live ``/models`` endpoint instead.
+    """
+    if provider is not None and provider not in KNOWN_MODELS:
+        supported = ", ".join(sorted(KNOWN_MODELS))
+        typer.echo(
+            f"Unknown provider {provider!r}. Supported providers: {supported}.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    items = (
+        [(provider, KNOWN_MODELS[provider])]
+        if provider is not None
+        else sorted(KNOWN_MODELS.items())
+    )
+
+    for prov, ids in items:
+        if ids:
+            typer.echo(f"{prov}:")
+            for mid in ids:
+                typer.echo(f"  {prov}:{mid}")
+        else:
+            typer.echo(
+                f"{prov}: (gateway/deployment-scoped — no static id list; "
+                "the validator probes the live /models endpoint)"
+            )
+
 
 contract_app = typer.Typer(
     name="contract",
