@@ -25,10 +25,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import io
 import json
 import logging
 import os
 import sys
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -2889,6 +2891,48 @@ def print_scan_urls(
 # ---------------------------------------------------------------------------
 
 
+def _drain_stale_stdin(inp: Any) -> None:
+    """Best-effort drain of any already-queued bytes on ``inp``.
+
+    The plan panel can take several hundred ms to render. An impatient
+    operator who hits Enter or any other key while the panel is being
+    drawn would otherwise have those bytes sitting in the OS-level
+    stdin buffer, which means the subsequent ``inp.readline()`` call
+    returns *immediately* and the 10-second confirmation window
+    collapses to ~0s. We poll ``select.select`` with a zero timeout
+    and read whatever's already available before starting the wait.
+
+    Non-POSIX platforms (or stdin objects without a real fileno) are
+    skipped silently — this is a best-effort hardening, not a contract.
+    """
+    fileno_attr = getattr(inp, "fileno", None)
+    if not callable(fileno_attr):
+        return
+    try:
+        fd = fileno_attr()
+    except (OSError, ValueError, io.UnsupportedOperation):
+        return
+    if not isinstance(fd, int) or fd < 0:
+        return
+    try:
+        import select as _select
+    except ImportError:  # pragma: no cover - select is stdlib everywhere
+        return
+    try:
+        while True:
+            ready, _, _ = _select.select([fd], [], [], 0)
+            if not ready:
+                return
+            try:
+                chunk = os.read(fd, 4096)
+            except (BlockingIOError, OSError):
+                return
+            if not chunk:
+                return
+    except (OSError, ValueError):
+        return
+
+
 async def _await_plan_confirmation(
     *,
     yes: bool,
@@ -2896,6 +2940,7 @@ async def _await_plan_confirmation(
     stdin: Any = None,
     stdout: Any = None,
     environ: dict[str, str] | None = None,
+    monotonic: Any = None,
 ) -> str:
     """Return ``"proceed"`` when the operator accepts or the timer fires.
 
@@ -2906,15 +2951,20 @@ async def _await_plan_confirmation(
     * ``$CI=true`` (or ``1`` / ``yes`` / ``on``).
     * stdin / stdout is not a TTY (e.g. ``agent-guardian scan ... | cat``).
 
-    Interactive path: print
+    Interactive path:
 
-        Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 10s)
-
-    then suspend on a thread-executor-backed ``stdin.readline`` wrapped in
-    :func:`asyncio.wait_for`. The native asyncio SIGINT handler installed by
-    ``asyncio.run`` cancels the running task, which arrives as either
-    ``KeyboardInterrupt`` or ``asyncio.CancelledError`` at the await point;
-    both → ``"abort"``. ``asyncio.TimeoutError`` → ``"proceed"``.
+    1. Drain any stale bytes already queued on stdin (an operator who
+       hit Enter during the panel render would otherwise collapse the
+       wait to ~0s — see :func:`_drain_stale_stdin`).
+    2. Print a one-line prompt and tick a visible countdown each
+       second so the operator can see the abort window shrinking.
+    3. Suspend on a thread-executor-backed ``stdin.readline`` wrapped
+       in :func:`asyncio.wait_for`, polling at 1 s granularity. The
+       native asyncio SIGINT handler installed by ``asyncio.run``
+       cancels the running task, which arrives as either
+       ``KeyboardInterrupt`` or ``asyncio.CancelledError`` at the
+       await point; both → ``"abort"``. Exhausting the budget →
+       ``"proceed"``.
 
     Tester report #18 — the previous synchronous ``select.select(...)``
     implementation blocked the event-loop thread, so the SIGINT signal
@@ -2927,6 +2977,7 @@ async def _await_plan_confirmation(
     env = environ if environ is not None else dict(os.environ)
     out = stdout if stdout is not None else sys.stdout
     inp = stdin if stdin is not None else sys.stdin
+    clock = monotonic if monotonic is not None else time.monotonic
 
     if yes:
         return "proceed"
@@ -2942,31 +2993,68 @@ async def _await_plan_confirmation(
     if not (callable(isatty_in) and isatty_in()):
         return "proceed"
 
-    # Interactive path — print the prompt + wait for either Enter or timeout.
-    try:
-        out.write(
-            f"Press Enter to proceed, Ctrl-C to abort. (auto-proceed in {int(timeout_seconds)}s)\n"
-        )
-        flush_fn = getattr(out, "flush", None)
-        if callable(flush_fn):
-            with contextlib.suppress(Exception):
-                flush_fn()
-    except Exception:  # pragma: no cover - defensive
-        return "proceed"
+    # Drain any pre-buffered bytes before we start the wait — see docstring.
+    with contextlib.suppress(Exception):
+        _drain_stale_stdin(inp)
 
+    write = getattr(out, "write", None)
+    flush_fn = getattr(out, "flush", None)
+
+    def _emit(line: str) -> None:
+        if not callable(write):
+            return
+        try:
+            write(line)
+        except (OSError, ValueError):
+            return
+        if callable(flush_fn):
+            with contextlib.suppress(OSError, ValueError):
+                flush_fn()
+
+    total = max(0.0, float(timeout_seconds))
+    # Initial prompt — kept as a full line so it survives even if the
+    # later \r-overwritten countdown is not supported by the terminal.
+    _emit(f"Press Enter to proceed, Ctrl-C to abort. (auto-proceed in {int(total)}s)\n")
+
+    loop = asyncio.get_running_loop()
+    readline_future = loop.run_in_executor(None, inp.readline)
+    start = clock()
+    last_displayed: int | None = None
     try:
-        loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
-            loop.run_in_executor(None, inp.readline),
-            timeout=timeout_seconds,
-        )
-        return "proceed"
-    except TimeoutError:
-        return "proceed"
+        while True:
+            elapsed = clock() - start
+            remaining = total - elapsed
+            if remaining <= 0:
+                return "proceed"
+            # Tick the countdown once per whole second, on a carriage
+            # return so it overwrites in place rather than spamming the
+            # scrollback. The trailing spaces erase the previous wider
+            # value when ticking from e.g. "10s" down to "9s ".
+            display = int(remaining + 0.999)  # ceil so we see "10" first
+            if display != last_displayed:
+                _emit(f"\r  auto-proceed in {display:2d}s ...   ")
+                last_displayed = display
+            # Wait at most until the next whole-second boundary so the
+            # countdown stays smooth; Enter wakes us instantly.
+            slice_budget = min(1.0, remaining)
+            try:
+                await asyncio.wait_for(asyncio.shield(readline_future), timeout=slice_budget)
+            except TimeoutError:
+                continue
+            # readline returned (Enter pressed, or EOF). Either way we
+            # proceed — explicit consent is the strongest possible signal.
+            _emit("\n")
+            return "proceed"
     except (KeyboardInterrupt, asyncio.CancelledError):
+        _emit("\n")
         return "abort"
-    except Exception:  # pragma: no cover - defensive (closed stdin etc.)
-        return "proceed"
+    finally:
+        # Clear the countdown line on the way out so subsequent log
+        # output starts at column 0 cleanly.
+        if last_displayed is not None:
+            _emit("\r" + " " * 40 + "\r")
+        if not readline_future.done():
+            readline_future.cancel()
 
 
 def _resolve_plan_target_mode(

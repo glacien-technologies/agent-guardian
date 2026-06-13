@@ -735,6 +735,206 @@ def test_await_aborts_on_keyboard_interrupt() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Scout-prescribed: the 10-second wait must honour its full duration
+# unless explicitly overridden — bug fix regression tests.
+# ---------------------------------------------------------------------------
+
+
+def _fake_clock_factory(ticks: list[float]) -> Any:
+    """Return a ``monotonic`` substitute that walks through ``ticks`` in order.
+
+    Each call to the returned callable yields the next value, repeating the
+    last one when the list is exhausted. This lets a test simulate "10 s of
+    real time" without the test itself sleeping.
+    """
+    state = {"i": 0}
+
+    def _clock() -> float:
+        idx = min(state["i"], len(ticks) - 1)
+        state["i"] += 1
+        return ticks[idx]
+
+    return _clock
+
+
+def test_scan_plan_wait_honors_ten_seconds_by_default(monkeypatch: Any) -> None:
+    """The countdown loop walks the full timeout budget before proceeding.
+
+    We replace the executor-backed readline with a future that never
+    resolves and drive ``monotonic`` from a fake clock so the loop has
+    to observe ten one-second ticks before timing out.
+    """
+    import asyncio as _asyncio
+
+    out = _FakeTty(tty=True)
+    inp = _FakeTty(tty=True)
+
+    # 0.0 -> initial start; then 0.5, 1.5, ..., 9.5 (always remaining > 0);
+    # then 10.0 and beyond (remaining hits 0 → proceed).
+    ticks = [0.0] + [0.5 + n for n in range(10)] + [10.0, 10.0]
+    clock = _fake_clock_factory(ticks)
+
+    async def _slice_returns_timeout(*_args: Any, **_kwargs: Any) -> Any:
+        # Simulate the per-second slice elapsing with no Enter pressed.
+        raise TimeoutError
+
+    monkeypatch.setattr(_asyncio, "wait_for", _slice_returns_timeout)
+
+    result = _await_sync(
+        _await_plan_confirmation(
+            yes=False,
+            stdin=inp,
+            stdout=out,
+            environ={},
+            timeout_seconds=10.0,
+            monotonic=clock,
+        )
+    )
+    assert result == "proceed"
+    rendered = out.getvalue()
+    # The countdown must have ticked at least one observable second.
+    assert "auto-proceed in" in rendered
+    assert "10s" in rendered  # initial line uses the full 10s budget
+    assert " 1s" in rendered  # we walked all the way down
+
+
+def test_scan_plan_wait_short_circuits_on_yes_flag() -> None:
+    """``yes=True`` returns immediately without printing the prompt."""
+    out = _FakeTty(tty=True)
+    inp = _FakeTty(tty=True)
+    result = _await_sync(
+        _await_plan_confirmation(yes=True, stdin=inp, stdout=out, environ={}, timeout_seconds=10.0)
+    )
+    assert result == "proceed"
+    assert out.getvalue() == ""
+
+
+def test_scan_plan_wait_short_circuits_on_no_tui_flag() -> None:
+    """A non-TTY stdout (the practical effect of ``--no-tui``) skips the wait."""
+    out = _FakeTty(tty=False)
+    inp = _FakeTty(tty=True)
+    result = _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=10.0)
+    )
+    assert result == "proceed"
+    assert out.getvalue() == ""
+
+
+def test_scan_plan_keyboard_interrupt_aborts_cleanly() -> None:
+    """``KeyboardInterrupt`` raised inside the readline executor → abort."""
+
+    class _RaisingTty(_FakeTty):
+        def readline(self, _size: int = -1, /) -> str:
+            raise KeyboardInterrupt
+
+    out = _FakeTty(tty=True)
+    inp = _RaisingTty(tty=True)
+    result = _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=0.5)
+    )
+    assert result == "abort"
+
+
+def test_scan_plan_enter_proceeds_immediately() -> None:
+    """A newline already waiting on stdin lets Enter resolve the wait fast."""
+    out = _FakeTty(tty=True)
+    inp = _FakeTty(tty=True, content="\n")
+    result = _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=2.0)
+    )
+    assert result == "proceed"
+
+
+def test_scan_plan_timeout_default_not_zero() -> None:
+    """Sanity guard: the default ``timeout_seconds`` keyword is still 10s.
+
+    A future refactor that accidentally reverts the default to 0 (or
+    drops the keyword) would otherwise let the panel flash by; we
+    inspect the bound default so the regression is caught at import.
+    """
+    import inspect
+
+    from agent_guardian.cli import _await_plan_confirmation as fn
+
+    sig = inspect.signature(fn)
+    default = sig.parameters["timeout_seconds"].default
+    assert default == 10.0
+
+
+def test_scan_plan_wait_with_framework_mode_same_as_endpoint() -> None:
+    """Framework-mode scans hit the same gate; no special-case bypass exists.
+
+    We confirm by reading the source of the CLI module and checking
+    that every call to ``_await_plan_confirmation`` is parameter-only
+    keyed on ``yes`` — no call site forwards ``framework`` or otherwise
+    branches the wait behaviour on the target mode.
+    """
+    import inspect
+    import re
+
+    from agent_guardian import cli as cli_mod
+
+    src = inspect.getsource(cli_mod)
+    # Strip the definition itself so we only inspect call sites.
+    call_sites = re.findall(
+        r"_await_plan_confirmation\([^)]*\)",
+        src.replace("async def _await_plan_confirmation", "DEFN_SKIPPED"),
+    )
+    assert call_sites, "expected at least one call site"
+    # Every call site forwards only ``yes=...`` (no per-mode branching).
+    for site in call_sites:
+        assert "yes=" in site, site
+        assert "framework" not in site, site
+        assert "target_mode" not in site, site
+
+
+def test_scan_plan_wait_respects_ci_environment_variable() -> None:
+    """``$CI=true`` short-circuits the wait without rendering the countdown."""
+    out = _FakeTty(tty=True)
+    inp = _FakeTty(tty=True)
+    result = _await_sync(
+        _await_plan_confirmation(
+            yes=False,
+            stdin=inp,
+            stdout=out,
+            environ={"CI": "true"},
+            timeout_seconds=10.0,
+        )
+    )
+    assert result == "proceed"
+    assert out.getvalue() == ""
+
+
+def test_scan_plan_wait_drains_stale_stdin_before_waiting(monkeypatch: Any) -> None:
+    """A newline that was already queued in stdin must NOT collapse the wait.
+
+    The bug being fixed: the panel takes hundreds of ms to render, and an
+    impatient operator who hits Enter during the render lands a "\\n" in
+    the OS-level stdin buffer. Without a drain, ``readline()`` returns
+    immediately and the 10-second window flashes by — exactly what the
+    user reported. We assert the drain hook is invoked before the wait
+    starts.
+    """
+    import agent_guardian.cli as cli_mod
+
+    drained: list[Any] = []
+    original = cli_mod._drain_stale_stdin
+
+    def _track(inp: Any) -> None:
+        drained.append(inp)
+        original(inp)
+
+    monkeypatch.setattr(cli_mod, "_drain_stale_stdin", _track)
+
+    out = _FakeTty(tty=True)
+    inp = _FakeTty(tty=True, content="\n")
+    _await_sync(
+        _await_plan_confirmation(yes=False, stdin=inp, stdout=out, environ={}, timeout_seconds=1.0)
+    )
+    assert drained == [inp]
+
+
+# ---------------------------------------------------------------------------
 # Integration — scan command honours the --no-plan and abort paths
 # ---------------------------------------------------------------------------
 
