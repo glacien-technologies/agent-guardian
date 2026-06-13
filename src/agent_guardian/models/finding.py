@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
@@ -12,6 +15,21 @@ from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
 
 __all__ = ["Finding"]
+
+
+def _wilson_lower_bound(successes: int, trials: int) -> float:
+    # Inlined mirror of ``agent_guardian.core.pov.runner.wilson_lower_bound``
+    # so this leaf model module stays free of ``core``-layer imports (the full
+    # ``core/__init__.py`` pulls in ``models.scan`` which would cycle back
+    # through this file). Honest about small N: 1/2 → ~0.09, 5/5 → ~0.57.
+    if trials <= 0:
+        return 0.0
+    z = 1.96
+    phat = successes / trials
+    denom = 1.0 + z * z / trials
+    centre = phat + z * z / (2 * trials)
+    margin = z * math.sqrt((phat * (1.0 - phat) + z * z / (4 * trials)) / trials)
+    return max(0.0, (centre - margin) / denom)
 
 
 class Finding(BaseModel):
@@ -81,3 +99,42 @@ class Finding(BaseModel):
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.
     model_config = ConfigDict(frozen=True, extra="ignore")
+
+    @property
+    def pov_reliability_effective(self) -> float | None:
+        # Issue #159 — single source of truth for "how repeatable is this
+        # finding?", used by ``scoring._is_band_eligible``. Priority:
+        # 1. Explicit ``pov_reliability`` (PoV-runner output, already
+        #    Wilson-lower-bounded). Trusted as-is.
+        # 2. Parsed ``reproduced_n_of_m`` as Wilson lower bound — so a 1/2 reads
+        #    as ~0.09 rather than naive 0.5 (chance-level evidence shouldn't
+        #    contribute to a band flip).
+        # 3. ``None`` when neither was measured. Callers treat ``None`` as the
+        #    legacy band-eligible path (don't accidentally drop pre-#159
+        #    findings).
+        if self.pov_reliability is not None:
+            return self.pov_reliability
+        if self.reproduced_n_of_m is None:
+            return None
+        try:
+            successes_s, trials_s = self.reproduced_n_of_m.split("/", 1)
+            successes = int(successes_s)
+            trials = int(trials_s)
+        except (ValueError, AttributeError):
+            return None
+        if trials <= 0 or successes < 0 or successes > trials:
+            return None
+        return _wilson_lower_bound(successes, trials)
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_asi_id_alias(
+        self, handler: Callable[[Finding], dict[str, Any]]
+    ) -> dict[str, Any]:
+        # Issue #159 — downstream consumers (SARIF emitter, dashboard, scan
+        # property bag) read ``asi_id``; the model field is ``asi``. Emit both
+        # keys with the same string value so neither consumer breaks while we
+        # keep a single field of truth on the model.
+        data = handler(self)
+        if "asi" in data and "asi_id" not in data:
+            data["asi_id"] = data["asi"]
+        return data
