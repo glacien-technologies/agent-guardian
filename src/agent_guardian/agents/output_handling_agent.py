@@ -26,8 +26,9 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from agent_guardian.adapters.base import TargetFingerprint
 from agent_guardian.agents import recon_templating as rt
@@ -124,6 +125,9 @@ class _CanaryReflectionJudge(Judge):
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
         probe_expectation: str = "",  # D3 — accepted for parity; heuristic ignores it
+        seed: int | None = None,  # L1 — accepted for parity; canary heuristic is deterministic
+        consensus_n: int = 1,  # L2 — accepted for parity; canary heuristic needs no consensus
+        consensus_runner: Callable[..., Any] | None = None,
     ) -> JudgeVerdict:
         match = reflects_canary(target_response)
         if match is not None:
@@ -135,7 +139,13 @@ class _CanaryReflectionJudge(Judge):
                 evidence=match,
             )
         return await super().verdict(
-            prompt, target_response, conversation=conversation, tool_trace=tool_trace
+            prompt,
+            target_response,
+            conversation=conversation,
+            tool_trace=tool_trace,
+            seed=seed,
+            consensus_n=consensus_n,
+            consensus_runner=consensus_runner,
         )
 
 

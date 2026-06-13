@@ -1365,6 +1365,14 @@ class SwarmCommander:
             # bar). FAST/SMART stay single-pass. Same private-attribute
             # indirection as the probe cap to keep the public AsiAgent API stable.
             agent._retrials = 1 if (self.config.mode or ScanMode.FULL) is ScanMode.FULL else 0  # type: ignore[attr-defined]
+            # Variance-reduction L1 — thread scan-level mode + seed onto every
+            # agent so attacker_complete / judge.verdict / _judge_with_consensus
+            # can pin temperature=0 in authoritative modes and forward the
+            # provider's seed knob. Same private-attribute pattern as the
+            # probe cap / retrials / pretext toggles above.
+            _resolved_mode = self.config.mode or ScanMode.FULL
+            agent._scan_mode = _resolved_mode.value  # type: ignore[attr-defined]
+            agent._scan_seed = self.rng_seed  # type: ignore[attr-defined]
             # M2 roadmap #1 -- propagate the pretext-framing toggle onto the
             # agent; it reads ``_enable_pretext`` when building its
             # StrategyContext (same private-attribute indirection as the probe
@@ -1970,6 +1978,11 @@ class SwarmCommander:
                         model=self.config.evaluator_model,
                         max_tokens=5,
                         temperature=0.0,
+                        # Variance-reduction L1 — thread --seed into the
+                        # POV-gate judge call so deterministic-replay
+                        # providers (OpenAI / Ollama / Gemini / Vertex)
+                        # reproduce the same yes/no verdict on re-run.
+                        seed=self.rng_seed,
                     )
                 )
             except Exception as exc:  # pragma: no cover — defensive; gate must not crash
@@ -2008,6 +2021,11 @@ class SwarmCommander:
                         model=self.config.evaluator_model,
                         max_tokens=80,
                         temperature=0.0,
+                        # Variance-reduction L1 — same scan seed threaded
+                        # into the critic-rubric judge call so the four
+                        # axes (evidence/specificity/novelty/fp_risk)
+                        # reproduce on same-seed re-run.
+                        seed=self.rng_seed,
                     )
                 )
             except Exception as exc:  # pragma: no cover — defensive

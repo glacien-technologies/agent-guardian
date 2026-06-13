@@ -376,6 +376,7 @@ async def attacker_complete(
     seed: int | None = None,
     extra_system: str | None = None,
     generation_mode: str = "safe-testcase",
+    scan_mode: str = "",
 ) -> tuple[str, bool]:
     """Call the attacker LLM with refusal-resistant framing and refusal handling.
 
@@ -420,6 +421,13 @@ async def attacker_complete(
     system_content = base_system
     if extra_system:
         system_content = f"{base_system}\n\n{extra_system}"
+    # Variance-reduction L1 — in authoritative modes (smart / full) pin the
+    # attacker temperature to 0 so re-runs against the same target with the
+    # same ``--seed`` produce the same headline band. Fast mode keeps the
+    # caller's temperature (default 0.7) so exploration speed is unchanged.
+    # Unknown / empty scan_mode also keeps the caller's value (back-compat
+    # for tests and ad-hoc callers that never wire a mode).
+    effective_temperature = 0.0 if scan_mode.lower() in {"smart", "full"} else temperature
     first_req = LLMRequest(
         messages=[
             LLMMessage(role="system", content=system_content),
@@ -427,7 +435,7 @@ async def attacker_complete(
         ],
         model=model,
         max_tokens=max_tokens,
-        temperature=temperature,
+        temperature=effective_temperature,
         seed=seed,
     )
     first_resp = await llm.complete(first_req)
@@ -445,6 +453,14 @@ async def attacker_complete(
         )
         return first_text, False
 
+    # Authoritative-mode pin still applies on the retry — the refusal-escape
+    # temperature bump is a fast-mode exploration trick. In smart/full the
+    # retry uses the same temperature=0 so the recovery path stays
+    # reproducible; the safe-testcase retry preamble alone is what unblocks
+    # the refusal in authoritative modes.
+    retry_temperature = (
+        0.0 if scan_mode.lower() in {"smart", "full"} else min(1.0, temperature + 0.2)
+    )
     retry_req = LLMRequest(
         messages=[
             LLMMessage(role="system", content=system_content),
@@ -452,8 +468,9 @@ async def attacker_complete(
         ],
         model=model,
         max_tokens=max_tokens,
-        # Bump temperature on retry to escape the deterministic refusal mode.
-        temperature=min(1.0, temperature + 0.2),
+        # Bump temperature on retry to escape the deterministic refusal mode
+        # — except in authoritative modes (see above).
+        temperature=retry_temperature,
         seed=seed,
     )
     retry_resp = await llm.complete(retry_req)
@@ -613,6 +630,17 @@ class StrategyContext:
     # the re-ask budget so a stuck attacker can't loop forever.
     sent_probe_norms: list[str] = field(default_factory=list)
     consecutive_dedup_rejects: int = 0
+    # Variance-reduction L1 — scan-level mode + seed plumbed by the agent layer.
+    # ``scan_mode`` lets :func:`attacker_complete` pin temperature=0 in the
+    # authoritative modes (``"smart"`` / ``"full"``) while leaving ``"fast"``
+    # at the higher temperature for exploration speed. ``scan_seed`` threads
+    # the CLI ``--seed`` flag into every ``LLMRequest.seed`` so providers that
+    # honour it (OpenAI / Ollama / Gemini / Vertex) produce reproducible
+    # generations on re-run. Both default to safe back-compat values: empty
+    # string disables the mode-aware pin, ``None`` keeps the provider's own
+    # randomness so legacy callers see no behaviour change.
+    scan_mode: str = ""
+    scan_seed: int | None = None
 
 
 class Strategy(ABC):

@@ -149,6 +149,8 @@ class TAPStrategy(Strategy):
             prompt=branch_text,
             model=self.ctx.attacker_model,
             extra_system=self._attack_system_extra(),
+            seed=self.ctx.scan_seed,
+            scan_mode=self.ctx.scan_mode,
         )
         refusal_text = ""
         if refused:
@@ -196,6 +198,8 @@ class TAPStrategy(Strategy):
                 model=self.ctx.attacker_model,
                 temperature=0.0,
                 extra_system=extra_sys,
+                seed=self.ctx.scan_seed,
+                scan_mode=self.ctx.scan_mode,
             )
             scored.append((_parse_score(score_text), cand))
 

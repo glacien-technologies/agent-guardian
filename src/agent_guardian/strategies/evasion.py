@@ -116,10 +116,23 @@ def _stealth_modifier(
 class EvasionGenerator:
     """Generate detection-evasion variants for the operator's own monitors."""
 
-    def __init__(self, attacker_llm: BaseLLM, model: str, *, max_attempts: int = 3) -> None:
+    def __init__(
+        self,
+        attacker_llm: BaseLLM,
+        model: str,
+        *,
+        max_attempts: int = 3,
+        scan_mode: str = "",
+        scan_seed: int | None = None,
+    ) -> None:
         self._llm = attacker_llm
         self._model = model
         self._max_attempts = max(1, max_attempts)
+        # Variance-reduction L1 — same plumb as ``StrategyContext`` so the
+        # active evasion attacker call also runs at temperature=0 in
+        # authoritative modes and threads the scan's ``--seed``.
+        self._scan_mode = scan_mode
+        self._scan_seed = scan_seed
 
     async def evade(
         self,
@@ -161,6 +174,8 @@ class EvasionGenerator:
                     "red-team of the operator's OWN detectors, to surface gaps in "
                     "their monitoring coverage. Stay within scan RoE."
                 ),
+                seed=self._scan_seed,
+                scan_mode=self._scan_mode,
             )
             variant = text.strip() if not refused else flagged_request
             variant_flagged = await detector.flags(variant, "")
