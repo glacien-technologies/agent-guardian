@@ -1095,7 +1095,7 @@ class AsiAgent(ABC):
 
         Only fires when the agent's verdict path opts in (probe severity
         HIGH/CRITICAL in authoritative modes — see :meth:`_consensus_n`),
-        so the ~3× judge cost is paid only on the small slice of turns
+        so the ~3x judge cost is paid only on the small slice of turns
         where headline-band variance matters.
         """
         import asyncio as _asyncio
@@ -1166,7 +1166,7 @@ class AsiAgent(ABC):
         Returns ``3`` only when the probe's authored severity is HIGH or
         CRITICAL AND the scan is in an authoritative mode (``smart`` /
         ``full``). Every other case stays on the single-call path so the
-        ~3× judge cost is paid only where headline-band variance matters.
+        ~3x judge cost is paid only where headline-band variance matters.
 
         When no probe seed is available (e.g. PAIR refinement turns
         generated from the attacker LLM) we fall back to the agent's

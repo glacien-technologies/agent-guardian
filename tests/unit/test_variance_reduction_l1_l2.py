@@ -92,7 +92,7 @@ def _judge(*, stub: _RecordingLLM | None = None) -> Judge:
     return judge
 
 
-def _agent_with_stub(stub_llm) -> AsiAgent:  # type: ignore[name-defined]
+def _agent_with_stub(stub_llm):  # type: ignore[no-untyped-def]
     """Build a minimal AsiAgent harness wrapping the stub LLM."""
 
     from agent_guardian.agents.privilege import PrivilegeAgent
@@ -165,7 +165,7 @@ async def test_judge_request_seed_is_none_when_not_set() -> None:
 @pytest.mark.asyncio
 async def test_judge_with_consensus_calls_evaluator_3_times() -> None:
     """L2: ``_judge_with_consensus(n=3)`` issues exactly three judge LLM
-    calls; the consensus path is what makes the ~3× cost on the
+    calls; the consensus path is what makes the ~3x cost on the
     HIGH/CRITICAL slice acceptable — we must actually pay for the seats.
     """
     stub = _RecordingLLM(
@@ -253,7 +253,7 @@ async def test_judge_with_consensus_handles_all_three_distinct() -> None:
 @pytest.mark.asyncio
 async def test_judge_with_consensus_n_equals_one_is_pass_through() -> None:
     """L2 cost-control: ``_judge_with_consensus(n=1)`` is the cheap path
-    — exactly one LLM call. The ~3× cost is only paid on the gated slice.
+    — exactly one LLM call. The ~3x cost is only paid on the gated slice.
     """
     stub = _RecordingLLM()
     agent = _agent_with_stub(stub)
@@ -269,7 +269,7 @@ async def test_judge_with_consensus_n_equals_one_is_pass_through() -> None:
 
 def test_consensus_n_returns_three_for_high_severity_probe_in_smart_mode() -> None:
     """L2 gating: HIGH/CRITICAL probe severity in ``smart`` mode →
-    ``_consensus_n`` returns 3. The framework must only pay the 3× judge
+    ``_consensus_n`` returns 3. The framework must only pay the 3x judge
     cost on the slice that can move the band.
     """
 
