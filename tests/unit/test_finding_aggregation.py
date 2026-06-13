@@ -394,3 +394,105 @@ def test_aggregate_representative_attempt_selection() -> None:
     f = agent._aggregate_attempts_to_findings()[0]
     assert f.verdict_v2 == "exploited"
     assert f.trigger_prompt == "p1"
+
+
+# ---------------------------------------------------------------------------
+# Swarm-level same-id dedup (cross-agent collapse)
+# ---------------------------------------------------------------------------
+
+
+def test_swarm_same_id_dedup_collapses_two_findings_with_identical_id() -> None:
+    """When two agents both fire the same probe (e.g. output-handling-agent
+    AND identity-leak-agent both lit ASI03-PII-001), the deterministic
+    Finding.id is identical. SwarmCommander._dedupe_same_id_findings must
+    collapse them into ONE Finding with merged attempts (renumbered to
+    1..N) and recomputed Wilson confidence.
+    """
+    from agent_guardian.core.swarm import SwarmCommander
+    from agent_guardian.models.csa import CsaCategory
+    from agent_guardian.models.severity import Severity
+
+    shared_id = _deterministic_finding_id("ASI03-PII-001", AsiCategory.ASI03)
+
+    f1 = Finding(
+        id=shared_id,
+        probe_id="ASI03-PII-001",
+        asi=AsiCategory.ASI03,
+        mitre_atlas=["AML.T0035"],
+        csa_category=CsaCategory.HALLUCINATION_EXPLOITATION,
+        severity=Severity.HIGH,
+        attempt_count=2,
+        success_count=2,
+        success=True,
+        confidence=0.342,
+        verdict_v2="exploited",
+        summary="output-handling-agent: leaked PII",
+        created_at=datetime(2026, 6, 13, 12, 0, tzinfo=UTC),
+        attempts=[
+            _t(sequence=1, success=True, id="f-att001"),
+            _t(sequence=2, success=True, id="f-att002"),
+        ],
+    )
+    f2 = Finding(
+        id=shared_id,
+        probe_id="ASI03-PII-001",
+        asi=AsiCategory.ASI03,
+        mitre_atlas=["AML.T0035"],
+        csa_category=CsaCategory.HALLUCINATION_EXPLOITATION,
+        severity=Severity.HIGH,
+        attempt_count=2,
+        success_count=1,
+        success=True,
+        confidence=0.094,
+        verdict_v2="exploited",
+        summary="identity-leak-agent: leaked PII",
+        created_at=datetime(2026, 6, 13, 12, 0, tzinfo=UTC),
+        attempts=[
+            _t(sequence=1, success=False, id="f-att101", verdict_v2="vulnerable"),
+            _t(sequence=2, success=True, id="f-att102"),
+        ],
+    )
+
+    # _dedupe_same_id_findings is an instance method but uses no instance
+    # state beyond _LOG; SwarmCommander.__new__ avoids __init__ wiring.
+    cmd = SwarmCommander.__new__(SwarmCommander)
+    merged = cmd._dedupe_same_id_findings([f1, f2])
+
+    assert len(merged) == 1, "two same-id Findings must collapse to one"
+    m = merged[0]
+    assert m.id == shared_id
+    assert len(m.attempts) == 4, "attempts must be the union (2 + 2)"
+    # Sequence renumbered contiguously 1..4
+    assert [a.sequence for a in m.attempts] == [1, 2, 3, 4]
+    assert m.attempt_count == 4
+    assert m.success_count == 3  # 2 from f1, 1 from f2
+    # Wilson 3/4 ≈ 0.30 (close to 0.30, not exact due to z=1.96 formula)
+    assert 0.25 < m.confidence < 0.40
+
+
+def test_swarm_same_id_dedup_passes_singletons_unchanged() -> None:
+    """A Finding with a unique id passes through the dedup unchanged."""
+    from agent_guardian.core.swarm import SwarmCommander
+    from agent_guardian.models.csa import CsaCategory
+    from agent_guardian.models.severity import Severity
+
+    unique_id = _deterministic_finding_id("ASI01-GH-001", AsiCategory.ASI01)
+    f = Finding(
+        id=unique_id,
+        probe_id="ASI01-GH-001",
+        asi=AsiCategory.ASI01,
+        mitre_atlas=["AML.T0051"],
+        csa_category=CsaCategory.GOAL_INSTRUCTION_MANIPULATION,
+        severity=Severity.HIGH,
+        attempt_count=1,
+        success_count=1,
+        success=True,
+        confidence=0.207,
+        verdict_v2="exploited",
+        summary="goal-hijack-agent",
+        created_at=datetime(2026, 6, 13, 12, 0, tzinfo=UTC),
+        attempts=[_t(sequence=1, success=True, id="f-att200")],
+    )
+    cmd = SwarmCommander.__new__(SwarmCommander)
+    result = cmd._dedupe_same_id_findings([f])
+    assert result == [f]

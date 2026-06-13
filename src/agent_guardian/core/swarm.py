@@ -86,8 +86,9 @@ from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.logging_setup import log_agent_io
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.models.attempt import Attempt
 from agent_guardian.models.csa import CsaCategory
-from agent_guardian.models.finding import Finding
+from agent_guardian.models.finding import Finding, _wilson_lower_bound
 from agent_guardian.models.scan import BudgetReport, Scan, ScanCompleteness
 from agent_guardian.models.severity import Severity, SeverityBand, band_for_score
 from agent_guardian.models.swarm_brief import AgentBrief, SwarmBrief
@@ -2787,6 +2788,80 @@ class SwarmCommander:
         text = " ".join((finding.trigger_response or "").split()).casefold()
         return text or None
 
+    def _dedupe_same_id_findings(self, findings: list[Finding]) -> list[Finding]:
+        """Collapse Findings that share the deterministic ``id`` into one.
+
+        Phase 1 of the Finding-aggregation redesign aggregates attempts to
+        a Finding per ``(probe_id, asi)`` *inside* each AsiAgent. Two
+        different agents that both happen to fire the same probe (the
+        seeded probe corpus is cross-cutting: ``ASI03-PII-001`` can land
+        in output-handling-agent AND identity-leak-agent) therefore emit
+        two Findings whose ids collide — ``Finding.id`` is
+        ``f"f-{sha256(f'{probe_id}:{asi.value}').hexdigest()[:12]}"`` and
+        is deterministic by design (see §II.C of the design doc).
+
+        This pass closes the gap. For each group of Findings sharing an
+        ``id``, merge their ``attempts`` lists, re-key ``sequence`` to be
+        contiguous across the merged list, recompute ``success_count`` /
+        ``attempt_count`` / ``confidence`` (Wilson lower bound), and keep
+        the representative-Attempt's narrative fields from the
+        highest-confidence Finding in the group. Singletons pass through
+        unchanged.
+
+        Runs BEFORE ``_dedupe_cross_category_findings`` so the
+        byte-identical-response heuristic sees one merged record per
+        vulnerability instead of N pre-merge mirrors.
+        """
+        groups: dict[str, list[Finding]] = {}
+        for finding in findings:
+            groups.setdefault(finding.id, []).append(finding)
+
+        merged: list[Finding] = []
+        for group in groups.values():
+            if len(group) == 1:
+                merged.append(group[0])
+                continue
+            # Choose the representative from the highest-confidence Finding
+            # in the group — that one already won its agent's intra-agent
+            # aggregation tiebreak and carries the strongest narrative.
+            rep = max(group, key=lambda f: (f.success, f.confidence, f.attempt_count))
+            all_attempts: list[Attempt] = []
+            for finding in group:
+                all_attempts.extend(finding.attempts)
+            # Re-key sequence so it reads as a contiguous 1..N across the
+            # merged list; preserves original order within each agent.
+            renumbered: list[Attempt] = []
+            for new_seq, attempt in enumerate(all_attempts, start=1):
+                if attempt.sequence == new_seq:
+                    renumbered.append(attempt)
+                else:
+                    renumbered.append(attempt.model_copy(update={"sequence": new_seq}))
+            success_count = sum(1 for a in renumbered if a.success)
+            attempt_count = len(renumbered)
+            confidence = _wilson_lower_bound(success_count, attempt_count)
+            merged.append(
+                rep.model_copy(
+                    update={
+                        "attempts": renumbered,
+                        "attempt_count": attempt_count,
+                        "success_count": success_count,
+                        "confidence": confidence,
+                        "success": success_count >= 1,
+                    }
+                )
+            )
+            _LOG.debug(
+                "swarm same-id dedup: collapsed %d Findings on id=%s into 1 "
+                "(attempts=%d, success=%d/%d, confidence=%.3f)",
+                len(group),
+                rep.id,
+                attempt_count,
+                success_count,
+                attempt_count,
+                confidence,
+            )
+        return merged
+
     def _dedupe_cross_category_findings(self, findings: list[Finding]) -> list[Finding]:
         """Collapse byte-identical target responses recorded under several ASI
         categories into a single owning finding (#136).
@@ -3232,6 +3307,18 @@ class SwarmCommander:
         # findings don't inflate AIVSS. Default-off; v1 path unchanged.
         if self.config.enable_pov_gate:
             findings = await self._apply_pov_gate(findings)
+        # Phase 1 of the Finding-aggregation redesign (design doc:
+        # docs/_design/finding-aggregation-redesign-2026-06.md) — collapse
+        # same-id findings emitted by different agents into one Finding with
+        # merged ``attempts``. The intra-agent aggregator in
+        # ``AsiAgent._aggregate_attempts_to_findings`` only sees the agent's
+        # own attempts; when two agents both fire the same probe (e.g.
+        # output-handling-agent and identity-leak-agent both lit
+        # ASI03-PII-001), the deterministic Finding.id collides and the
+        # operator-visible result is two rows for one vulnerability. This
+        # pass runs BEFORE cross-category dedup so the byte-identical-
+        # response heuristic sees the merged record.
+        findings = self._dedupe_same_id_findings(findings)
         # #136 — collapse byte-identical target responses recorded by several
         # concurrent ASI lanes into one owning finding (cross-references kept
         # on ``related_asi``) BEFORE scoring, so one behaviour can't be counted
