@@ -209,10 +209,10 @@ def test_resolve_parent_probe_id_non_mutant_passthrough() -> None:
 # --- Aggregator behaviour ----------------------------------------------
 
 
-def test_aggregate_single_attempt_one_finding() -> None:
+async def test_aggregate_single_attempt_one_finding() -> None:
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert len(findings) == 1
     f = findings[0]
     assert f.probe_id == "ASI03-PII-001"
@@ -224,12 +224,12 @@ def test_aggregate_single_attempt_one_finding() -> None:
     assert f.attempts[0].id == "f-att001"
 
 
-def test_aggregate_four_successes_collapse_to_one() -> None:
+async def test_aggregate_four_successes_collapse_to_one() -> None:
     """The motivating reproduction: cli-397b6d788333 ASI03-PII-001 x4 turns."""
     agent = _agent()
     for i in range(1, 5):
         agent._attempt_records.append(_t(sequence=i))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert len(findings) == 1
     f = findings[0]
     assert f.attempt_count == 4
@@ -242,12 +242,12 @@ def test_aggregate_four_successes_collapse_to_one() -> None:
     assert {a.id for a in f.attempts} == {f"f-att{i:03d}" for i in range(1, 5)}
 
 
-def test_aggregate_mixed_verdicts_same_probe() -> None:
+async def test_aggregate_mixed_verdicts_same_probe() -> None:
     """1 exploited + 1 vulnerable on the same probe → one Finding, mixed Attempts."""
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1, success=False))  # vulnerable
     agent._attempt_records.append(_t(sequence=2, success=True))  # exploited
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert len(findings) == 1
     f = findings[0]
     assert f.attempt_count == 2
@@ -261,12 +261,12 @@ def test_aggregate_mixed_verdicts_same_probe() -> None:
     assert verdicts == ["exploited", "vulnerable"]
 
 
-def test_aggregate_mutant_collapses_to_parent_probe() -> None:
+async def test_aggregate_mutant_collapses_to_parent_probe() -> None:
     """A mutant probe id (`<parent>-mutant-<op>`) collapses into the parent bucket."""
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1, probe_id="ASI03-PII-001"))
     agent._attempt_records.append(_t(sequence=2, probe_id="ASI03-PII-001-mutant-xor"))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     # One Finding, keyed off the parent.
     assert len(findings) == 1
     f = findings[0]
@@ -280,12 +280,12 @@ def test_aggregate_mutant_collapses_to_parent_probe() -> None:
     }
 
 
-def test_aggregate_verify_turn_dedup_when_identical() -> None:
+async def test_aggregate_verify_turn_dedup_when_identical() -> None:
     """A verify turn with the SAME verdict as the prior Attempt is dropped."""
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1, success=True))
     agent._attempt_records.append(_t(sequence=2, success=True, is_verify_turn=True))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert len(findings) == 1
     f = findings[0]
     # Verify-turn record discarded → attempt_count drops from 2 to 1.
@@ -293,14 +293,14 @@ def test_aggregate_verify_turn_dedup_when_identical() -> None:
     assert f.success_count == 1
 
 
-def test_aggregate_verify_turn_kept_when_distinct() -> None:
+async def test_aggregate_verify_turn_kept_when_distinct() -> None:
     """A verify turn that FLIPS the verdict survives — it's real signal."""
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1, success=True))
     agent._attempt_records.append(
         _t(sequence=2, success=False, is_verify_turn=True, verdict_v2="vulnerable")
     )
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert len(findings) == 1
     f = findings[0]
     # Distinct verdicts → both Attempts survive.
@@ -308,7 +308,7 @@ def test_aggregate_verify_turn_kept_when_distinct() -> None:
     assert f.success_count == 1
 
 
-def test_aggregate_wilson_lower_bound_4_of_4_approx_0_575() -> None:
+async def test_aggregate_wilson_lower_bound_4_of_4_approx_0_575() -> None:
     """4/4 successes → Finding.confidence matches the canonical Wilson formula.
 
     The design doc cites ~0.575 in prose; the actual Wilson(z=1.96) value
@@ -319,16 +319,16 @@ def test_aggregate_wilson_lower_bound_4_of_4_approx_0_575() -> None:
     agent = _agent()
     for i in range(1, 5):
         agent._attempt_records.append(_t(sequence=i))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     assert findings[0].confidence == pytest.approx(_wilson_lower_bound(4, 4), abs=1e-6)
 
 
-def test_aggregate_wilson_lower_bound_1_of_2_approx_0_09() -> None:
+async def test_aggregate_wilson_lower_bound_1_of_2_approx_0_09() -> None:
     """1/2 successes → Finding.confidence ≈ 0.09 (Wilson lower bound)."""
     agent = _agent()
     agent._attempt_records.append(_t(sequence=1, success=True))
     agent._attempt_records.append(_t(sequence=2, success=False))
-    findings = agent._aggregate_attempts_to_findings()
+    findings = await agent._aggregate_attempts_to_findings()
     f = findings[0]
     assert f.success_count == 1
     assert f.attempt_count == 2
@@ -336,7 +336,7 @@ def test_aggregate_wilson_lower_bound_1_of_2_approx_0_09() -> None:
     assert 0.05 < f.confidence < 0.15  # spot-check the 0.09-ish range
 
 
-def test_aggregate_representative_attempt_selection() -> None:
+async def test_aggregate_representative_attempt_selection() -> None:
     """Rep = max(success, -sequence) — highest success, then lowest sequence.
 
     Locked rule from design §III.C step 4:
@@ -355,7 +355,7 @@ def test_aggregate_representative_attempt_selection() -> None:
     agent._attempt_records.append(
         _t(sequence=2, success=True, verdict_v2="exploited", trigger_prompt="p2")
     )
-    f = agent._aggregate_attempts_to_findings()[0]
+    f = (await agent._aggregate_attempts_to_findings())[0]
     assert f.verdict_v2 == "exploited"
     assert f.trigger_prompt == "p2"
 
@@ -367,7 +367,7 @@ def test_aggregate_representative_attempt_selection() -> None:
     agent._attempt_records.append(
         _t(sequence=2, success=False, verdict_v2="vulnerable", trigger_prompt="p2")
     )
-    f = agent._aggregate_attempts_to_findings()[0]
+    f = (await agent._aggregate_attempts_to_findings())[0]
     assert f.verdict_v2 == "exploited"
     assert f.trigger_prompt == "p1"
 
@@ -379,7 +379,7 @@ def test_aggregate_representative_attempt_selection() -> None:
     agent._attempt_records.append(
         _t(sequence=2, success=False, verdict_v2="vulnerable", trigger_prompt="p2")
     )
-    f = agent._aggregate_attempts_to_findings()[0]
+    f = (await agent._aggregate_attempts_to_findings())[0]
     assert f.verdict_v2 == "vulnerable"
     assert f.trigger_prompt == "p1"
 
@@ -391,7 +391,7 @@ def test_aggregate_representative_attempt_selection() -> None:
     agent._attempt_records.append(
         _t(sequence=2, success=True, verdict_v2="exploited", trigger_prompt="p2")
     )
-    f = agent._aggregate_attempts_to_findings()[0]
+    f = (await agent._aggregate_attempts_to_findings())[0]
     assert f.verdict_v2 == "exploited"
     assert f.trigger_prompt == "p1"
 
@@ -401,7 +401,7 @@ def test_aggregate_representative_attempt_selection() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_swarm_same_id_dedup_collapses_two_findings_with_identical_id() -> None:
+async def test_swarm_same_id_dedup_collapses_two_findings_with_identical_id() -> None:
     """When two agents both fire the same probe (e.g. output-handling-agent
     AND identity-leak-agent both lit ASI03-PII-001), the deterministic
     Finding.id is identical. SwarmCommander._dedupe_same_id_findings must
@@ -496,3 +496,94 @@ def test_swarm_same_id_dedup_passes_singletons_unchanged() -> None:
     cmd = SwarmCommander.__new__(SwarmCommander)
     result = cmd._dedupe_same_id_findings([f])
     assert result == [f]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — LLM rollup helper
+# ---------------------------------------------------------------------------
+
+
+class _FakeEvalLLM:
+    """Stub evaluator LLM that returns a canned string and records the prompt."""
+
+    def __init__(self, response_text: str = "Operator-facing rollup of N attempts.") -> None:
+        self.response_text = response_text
+        self.last_prompt: str = ""
+        self.call_count = 0
+
+    async def complete(self, request):  # type: ignore[no-untyped-def]
+        self.call_count += 1
+        self.last_prompt = request.messages[0].content if request.messages else ""
+
+        class _Resp:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        return _Resp(self.response_text)
+
+
+class _RaisingEvalLLM:
+    async def complete(self, request):  # type: ignore[no-untyped-def]
+        raise RuntimeError("provider down")
+
+
+async def test_synthesize_finding_summary_appends_corroboration_tail() -> None:
+    """The framework must always append 'Reproduced in X of Y attempts.' tail,
+    even if the LLM body forgets to mention it. This guarantees the
+    operator sees the aggregate signal."""
+    agent = _agent()
+    fake = _FakeEvalLLM(response_text="Agent leaked customer PII.")
+    agent.evaluator_llm = fake  # type: ignore[assignment]
+    bucket = [
+        _t(sequence=1, success=True),
+        _t(sequence=2, success=True),
+        _t(sequence=3, success=False, verdict_v2="vulnerable"),
+    ]
+    summary = await agent._synthesize_finding_summary(
+        probe_id="ASI03-PII-001",
+        asi=AsiCategory.ASI03,
+        bucket=bucket,
+        fallback="fallback",
+    )
+    assert summary == "Agent leaked customer PII. Reproduced in 2 of 3 attempts."
+    assert fake.call_count == 1
+    # Prompt must include the structured fields per the design §III.C contract.
+    assert "Probe: ASI03-PII-001" in fake.last_prompt
+    assert "ASI category: ASI03" in fake.last_prompt
+    assert "Attempts: 2/3 succeeded" in fake.last_prompt
+
+
+async def test_synthesize_finding_summary_falls_back_when_llm_raises() -> None:
+    """An LLM error must not break aggregation — fall back to the rep
+    Attempt's per-turn summary so no Finding is ever empty-summary."""
+    agent = _agent()
+    agent.evaluator_llm = _RaisingEvalLLM()  # type: ignore[assignment]
+    bucket = [_t(sequence=1, success=True)]
+    summary = await agent._synthesize_finding_summary(
+        probe_id="ASI03-PII-001",
+        asi=AsiCategory.ASI03,
+        bucket=bucket,
+        fallback="legacy per-turn summary",
+    )
+    assert summary == "legacy per-turn summary"
+
+
+async def test_synthesize_finding_summary_deterministic_prompt_for_same_bucket() -> None:
+    """The prompt construction must be byte-identical given the same bucket —
+    a precondition for evaluator LLM reproducibility under temperature=0."""
+    agent = _agent()
+    fake_a = _FakeEvalLLM()
+    fake_b = _FakeEvalLLM()
+    bucket = [
+        _t(sequence=1, success=True, verdict_v2="exploited"),
+        _t(sequence=2, success=False, verdict_v2="vulnerable"),
+    ]
+    agent.evaluator_llm = fake_a  # type: ignore[assignment]
+    await agent._synthesize_finding_summary(
+        probe_id="ASI03-PII-001", asi=AsiCategory.ASI03, bucket=bucket, fallback=""
+    )
+    agent.evaluator_llm = fake_b  # type: ignore[assignment]
+    await agent._synthesize_finding_summary(
+        probe_id="ASI03-PII-001", asi=AsiCategory.ASI03, bucket=bucket, fallback=""
+    )
+    assert fake_a.last_prompt == fake_b.last_prompt
