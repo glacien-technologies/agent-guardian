@@ -689,6 +689,57 @@ def test_executive_overview_renders_severity_bars_partial(
     assert "Findings by severity" in overview_pane
 
 
+def test_overview_severity_table_links_carry_drill_down_attrs(
+    client: TestClient, store: ScanStore
+) -> None:
+    """Bug — Overview "Show data table" severity links must drill into the
+    Findings tab with the matching severity filter applied.
+
+    The Chart.js bar onClick already does this (executive_charts.js
+    ``drillIntoSeverity``). But the data-table renders a plain
+    ``<a href="#exec-sev-{sev}">`` link that previously bypassed the
+    drill-down — clicking it tried to scroll to an anchor inside a
+    ``hidden`` tabpanel and went nowhere visible.
+
+    Contract:
+    - Each row's link carries ``data-severity="{critical|high|medium|low}"``
+      so the JS click delegate keys off it to switch tab + set filter.
+    - Each link carries ``data-anchor="#exec-sev-{sev}"`` so the JS
+      delegate can scroll without re-deriving the anchor from ``href``.
+    - The link STILL carries ``href="#exec-sev-{sev}"`` so no-JS clients
+      get the anchor-scroll fallback (degrades gracefully).
+    - All four severities must be present even when count==0 (low is 0
+      in the fixture; the link must still render so the table reads
+      consistently across scans).
+    """
+    scan = _make_scan()
+    _persist(store, scan)
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    body = resp.text
+    assert resp.status_code == 200
+    idx = body.find('id="tabpanel-overview"')
+    next_idx = body.find('id="tabpanel-findings"', idx)
+    overview_pane = body[idx:next_idx]
+    # The severity bars data-table is what we're guarding.
+    assert 'data-component="severity-bars"' in overview_pane
+    for sev in ("critical", "high", "medium", "low"):
+        # The drill-down attribute is the new contract.
+        assert f'data-severity="{sev}"' in overview_pane, (
+            f"severity table link for {sev} missing data-severity attribute "
+            f"— the click delegate cannot drill into the Findings tab without it"
+        )
+        # The anchor data-attr lets the delegate scroll without re-parsing href.
+        assert f'data-anchor="#exec-sev-{sev}"' in overview_pane, (
+            f"severity table link for {sev} missing data-anchor — "
+            f"delegate cannot resolve the scroll target reliably"
+        )
+        # The href is preserved for no-JS fallback.
+        assert f'href="#exec-sev-{sev}"' in overview_pane, (
+            f"severity table link for {sev} lost its href — no-JS clients "
+            f"will see a bare label instead of an anchor link"
+        )
+
+
 def test_executive_findings_tab_keeps_severity_jump_anchors(
     client: TestClient, store: ScanStore
 ) -> None:

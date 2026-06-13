@@ -54,7 +54,16 @@
         {% for row in _severity_rows %}
           <tr>
             <th scope="row">
-              <a class="exec-chart__data-link" href="{{ row.anchor }}">{{ row.label }}</a>
+              {# Bug — Overview "Show data table" severity links must drill
+                 into the Findings tab with the matching severity filter
+                 applied (mirrors the bar-chart onClick contract on
+                 executive_charts.js). ``href`` is kept so no-JS clients
+                 still get an anchor scroll; ``data-severity`` is what
+                 the click delegate keys off to switch tab + set filter. #}
+              <a class="exec-chart__data-link"
+                 href="{{ row.anchor }}"
+                 data-severity="{{ row.severity }}"
+                 data-anchor="{{ row.anchor }}">{{ row.label }}</a>
             </th>
             <td>{{ row.count }}</td>
           </tr>

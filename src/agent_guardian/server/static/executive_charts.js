@@ -241,7 +241,74 @@
   /* Chart: severity bar                                               */
   /* ----------------------------------------------------------------- */
 
+  /* Shared drill-down helper — invoked by BOTH the Chart.js bar onClick
+   * (programmatic, severity + anchor lookup) AND the data-table link
+   * click delegate (DOM event, severity + anchor read from data-*).
+   *
+   * Contract: open the Findings tab, set the severity filter to the
+   * clicked severity (when the dropdown exists), then scroll the
+   * matching ``#exec-sev-{severity}`` grouping into view inside the
+   * just-revealed Findings panel.
+   *
+   * The tab switch is idempotent when already on Findings. The filter
+   * dispatch is unconditional — see tester report #3 history above; an
+   * exact <option> match check would silently no-op when the clicked
+   * severity has no current-page rows. Scroll is deferred via rAF so
+   * the browser computes layout for the freshly-revealed panel before
+   * we scroll (otherwise the call fires pre-paint and lands at 0).
+   */
+  function drillIntoSeverity(severity, anchor) {
+    var findingsTab = document.getElementById("tab-findings");
+    if (findingsTab) { findingsTab.click(); }
+    var sevSelect = document.getElementById("exec-findings-filter-severity");
+    if (sevSelect && severity) {
+      sevSelect.value = severity;
+      sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    if (!anchor) { return; }
+    var target = anchor.charAt(0) === "#"
+      ? document.getElementById(anchor.slice(1))
+      : document.querySelector(anchor);
+    if (!target) { return; }
+    var prefersReduced = window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.requestAnimationFrame(function () {
+      target.scrollIntoView({
+        behavior: prefersReduced ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  }
+
+  /* Data-table link delegate — wire once per page. Real ``<a href>``
+   * stays so a no-JS client still gets the anchor-scroll fallback;
+   * when JS is on, we ``preventDefault`` and run the canonical
+   * drill-down so the click feels identical to a bar click. Bound on
+   * ``document`` because the data-table partial can be re-rendered by
+   * a tab swap or HTMX exchange — a delegated listener survives both
+   * without rebinding. Marker attribute on document prevents double-
+   * bind under hot reload / mountSeverityBar being called again. */
+  function bindSeverityDataLinkDelegate() {
+    if (document.documentElement.getAttribute("data-exec-sev-link-wired") === "1") {
+      return;
+    }
+    document.documentElement.setAttribute("data-exec-sev-link-wired", "1");
+    document.addEventListener("click", function (evt) {
+      var link = evt.target.closest && evt.target.closest("a.exec-chart__data-link[data-severity]");
+      if (!link) { return; }
+      var severity = link.getAttribute("data-severity");
+      if (!severity) { return; }
+      var anchor = link.getAttribute("data-anchor") || link.getAttribute("href");
+      evt.preventDefault();
+      drillIntoSeverity(severity, anchor);
+    });
+  }
+
   function mountSeverityBar() {
+    /* Wire the data-table link delegate first — it works even when
+     * Chart.js is missing (no-canvas fallback) so the operator can
+     * still drill from the rendered table. */
+    bindSeverityDataLinkDelegate();
     if (!window.Chart) { return; }
     /* Multi-canvas init — one Chart.js instance per `.exec-severity-bar-canvas`.
      * Overview and Findings each ship their own canvas with a tab-scoped id
@@ -371,41 +438,7 @@
           onClick: function (_evt, els) {
             if (!els.length) { return; }
             var idx = els[0].index;
-            /* Open the Findings tab and apply the matching severity filter,
-             * so a bar click drills straight into those findings. The tab
-             * switch is idempotent when already on Findings. Previously the
-             * filter was gated on an exact <option> match in the current
-             * page of findings; that silently no-op'd when the clicked
-             * severity wasn't in the visible page (tester report #3). The
-             * unconditional set+dispatch lets the filter apply correctly
-             * whenever the option exists; when it doesn't, the .value
-             * assignment is a no-op and the tab switch is still helpful. */
-            var sev = severities[idx];
-            var findingsTab = document.getElementById("tab-findings");
-            if (findingsTab) { findingsTab.click(); }
-            var sevSelect = document.getElementById("exec-findings-filter-severity");
-            if (sevSelect && sev) {
-              sevSelect.value = sev;
-              sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
-            }
-            /* Then scroll the matching severity grouping into view. Defer
-             * the scroll until after the browser computes layout for the
-             * just-revealed Findings panel — without rAF the call fires
-             * before the panel is painted and the scroll lands at 0. */
-            var anchor = anchors[idx];
-            if (!anchor) { return; }
-            var target = anchor.charAt(0) === "#"
-              ? document.getElementById(anchor.slice(1))
-              : document.querySelector(anchor);
-            if (!target) { return; }
-            var prefersReduced = window.matchMedia
-              && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            window.requestAnimationFrame(function () {
-              target.scrollIntoView({
-                behavior: prefersReduced ? "auto" : "smooth",
-                block: "start",
-              });
-            });
+            drillIntoSeverity(severities[idx], anchors[idx]);
           },
         },
       });
