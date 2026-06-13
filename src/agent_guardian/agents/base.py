@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -204,6 +205,14 @@ class CostTrajectory:
     cumulative_input_tokens: int = 0
     cumulative_output_tokens: int = 0
     peak_turn_af: float = 0.0
+    # Issue #159 — per-turn snapshot, separate from the running peak. PR #160
+    # gated the DoW veto on ``peak_turn_af`` which is sticky once any earlier
+    # turn spikes: every later turn then reads peak ≥ 5.0 and the veto allows
+    # "exploited" through even when this turn's actual AF is 1.6. The veto now
+    # reads ``last_turn_af`` (this-turn-only) so the cliff is closed.
+    last_turn_input_tokens: int = 0
+    last_turn_output_tokens: int = 0
+    last_turn_af: float = 0.0
 
     def observe(self, input_tokens: int, output_tokens: int) -> None:
         """Fold one turn's input/output token estimates into the trajectory."""
@@ -213,6 +222,9 @@ class CostTrajectory:
         self.cumulative_input_tokens += it
         self.cumulative_output_tokens += ot
         turn_af = (ot / it) if it else 0.0
+        self.last_turn_input_tokens = it
+        self.last_turn_output_tokens = ot
+        self.last_turn_af = turn_af
         if turn_af > self.peak_turn_af:
             self.peak_turn_af = turn_af
 
@@ -725,6 +737,34 @@ def _parse_scenario_batch_payload(text: str) -> list[Any] | None:
 
 def _utcnow() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def _pov_reliability_from_reproduced(reproduced_n_of_m: str | None) -> float | None:
+    # Issue #159 — parse the framework-measured repeat-trial consistency string
+    # ``"<successes>/<trials>"`` into a Wilson-lower-bound reliability so the
+    # scoring band-cap gate can read a numeric value. Mirrors the parsing in
+    # :attr:`Finding.pov_reliability_effective` so a finding constructed via
+    # ``_build_finding`` arrives at the scorer with ``pov_reliability`` already
+    # populated (rather than relying on the lazy property at scoring time, which
+    # would silently no-op when the property is bypassed by tests or external
+    # consumers that read ``Finding.pov_reliability`` directly). ``None`` when
+    # nothing was measured — the scorer treats ``None`` as legacy-band-eligible.
+    if reproduced_n_of_m is None:
+        return None
+    try:
+        successes_s, trials_s = reproduced_n_of_m.split("/", 1)
+        successes = int(successes_s)
+        trials = int(trials_s)
+    except (ValueError, AttributeError):
+        return None
+    if trials <= 0 or successes < 0 or successes > trials:
+        return None
+    z = 1.96
+    phat = successes / trials
+    denom = 1.0 + z * z / trials
+    centre = phat + z * z / (2 * trials)
+    margin = z * math.sqrt((phat * (1.0 - phat) + z * z / (4 * trials)) / trials)
+    return max(0.0, (centre - margin) / denom)
 
 
 # QA-068 — bounded single-line preview for the per-turn DEBUG-text path. The
@@ -2006,6 +2046,17 @@ class AsiAgent(ABC):
                 # is the boolean mirror the SSE/TUI consumers read directly.
                 "intent": str(strat_meta.get("intent", "attack")),
                 "verify": bool(strat_meta.get("verify", False)),
+                # Issue #159 — surface the framework's measured cost-trajectory
+                # signals on every turn record so the DoW veto + post-hoc
+                # forensics can see the exact AF / token numbers that fed (or
+                # failed to feed) the adjudicator. ``current_turn_af`` is this
+                # turn only; ``trajectory_af`` is the run cumulative; legacy
+                # ``peak_turn_af`` is the run-level sticky max kept for parity.
+                "current_turn_af": self._cost_trajectory.last_turn_af,
+                "trajectory_af": self._cost_trajectory.trajectory_af,
+                "peak_turn_af": self._cost_trajectory.peak_turn_af,
+                "last_turn_output_tokens": self._cost_trajectory.last_turn_output_tokens,
+                "cumulative_output_tokens": self._cost_trajectory.cumulative_output_tokens,
             }
             # PhaseC — lift multi-turn plan + attachment summary onto the
             # top-level record so the TUI / SSE consumers don't have to
@@ -2643,6 +2694,14 @@ class AsiAgent(ABC):
             evidence_quote=(verdict.evidence or "").strip()[:2048],
             # D1 — FULL-mode repeat-trial consistency ("3/3"), or None.
             reproduced_n_of_m=reproduced_n_of_m,
+            # Issue #159 — stamp ``pov_reliability`` from the repeat-trial
+            # consistency string so :func:`core.scoring._is_band_eligible` has
+            # a numeric reliability signal to gate the band cap on. We only
+            # stamp when the caller hasn't already passed an explicit value
+            # (e.g. the PoV runner's measured reliability is preserved). The
+            # parsing logic lives in ``Finding.pov_reliability_effective`` so
+            # the model stays the single source of truth.
+            pov_reliability=_pov_reliability_from_reproduced(reproduced_n_of_m),
             # D3 — what the target should have done (from the probe corpus).
             # D3/#82 — expected_safe_behavior may come from the dispatched seed
             # OR (for generated turns that fire no corpus seed) the representative
