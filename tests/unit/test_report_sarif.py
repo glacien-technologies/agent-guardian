@@ -201,3 +201,61 @@ def test_sarif_schema_loader_is_cached() -> None:
     a = _load_sarif_schema()
     b = _load_sarif_schema()
     assert a is b
+
+
+# --- GitHub Code Scanning requires >=1 location per result --------------
+# Regression: GHAS rejected uploads with
+# "locationFromSarifResult: expected at least one location" because results
+# carried no ``locations`` key. Every result must now point at the scan target.
+
+
+def test_emit_sarif_every_result_has_a_location() -> None:
+    log = emit_sarif(make_scan())
+    results = log["runs"][0]["results"]
+    assert results  # guard: the fixture has findings
+    for result in results:
+        locations = result.get("locations")
+        assert locations, "GHAS rejects a result with no location"
+        uri = locations[0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert uri, "the location URI must be non-empty"
+        assert locations[0]["physicalLocation"]["region"]["startLine"] == 1
+
+
+def test_emit_sarif_location_uri_tracks_prompt_target() -> None:
+    # The shared fixture is a prompt target (ref "prompt.txt").
+    log = emit_sarif(make_scan())
+    uri = log["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
+        "uri"
+    ]
+    assert uri == "prompt.txt"
+
+
+def test_emit_sarif_partial_fingerprints_are_unique_per_finding() -> None:
+    # Distinct findings (even when they share a probe/ruleId + the one target
+    # location) must keep distinct fingerprints so GHAS does not collapse them.
+    log = emit_sarif(make_scan())
+    fingerprints = [
+        r["partialFingerprints"]["agentGuardianFindingId/v1"] for r in log["runs"][0]["results"]
+    ]
+    assert len(fingerprints) == len(set(fingerprints))
+
+
+@pytest.mark.parametrize(
+    ("target_mode", "target_ref", "expected"),
+    [
+        ("framework", "app.agent:graph", "app/agent.py"),
+        ("framework", "my_app.graph:graph", "my_app/graph.py"),
+        ("code", "pkg.mod:fn", "pkg/mod.py"),
+        ("code", "src/app/main.py:run", "src/app/main.py"),
+        ("code", "src/app/main.py", "src/app/main.py"),
+        ("prompt", "prompts/system.txt", "prompts/system.txt"),
+        ("http", "https://my-agent.example.com/chat", "my-agent.example.com/chat"),
+        ("http", "http://localhost:8080/", "localhost:8080"),
+        ("framework", "", "agentguardian/scan-target"),
+        ("framework", "   ", "agentguardian/scan-target"),
+    ],
+)
+def test_artifact_uri_mapping(target_mode: str, target_ref: str, expected: str) -> None:
+    from agent_guardian.reports.sarif import _artifact_uri
+
+    assert _artifact_uri(target_mode, target_ref) == expected

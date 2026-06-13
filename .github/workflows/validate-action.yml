@@ -45,6 +45,18 @@ jobs:
           uv build
           ls -la dist/
 
+      # Use the hosted CPython (clean site-packages) for the pre-install +
+      # smoke run. The runner's *system* python (ubuntu-latest = 24.04) ships
+      # an apt-installed pyOpenSSL in /usr/lib/python3/dist-packages that is
+      # incompatible with our cryptography>=43 — importing it raises
+      # "module 'lib' has no attribute 'GEN_EMAIL'". setup-python's interpreter
+      # does not put dist-packages on sys.path, so the stale shim never loads.
+      # Pin matches the composite action's python-version so the wheel installed
+      # here is reused by `uses: ./.github/actions/agentguardian-scan` below.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+
       - name: Pre-install local wheel so the action reuses it
         run: |
           # dist/*.whl is a locally-built wheel of THIS project, not a PyPI

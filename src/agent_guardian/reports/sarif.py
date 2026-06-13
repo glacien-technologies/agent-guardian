@@ -23,6 +23,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +138,72 @@ def _build_rules(findings: list[Finding]) -> list[dict[str, Any]]:
     return [rules[rule_id] for rule_id in sorted(rules)]
 
 
-def _build_result(finding: Finding) -> dict[str, Any]:
+# GitHub Code Scanning rejects any SARIF result without at least one location
+# ("locationFromSarifResult: expected at least one location"). AgentGuardian
+# findings are behavioural — a runtime attack on a live agent, not a static
+# defect tied to a file:line — so there is no natural source location. We
+# synthesise a single stable, non-empty, repo-relative-looking URI from the
+# scan target so every result carries a valid ``physicalLocation`` and GHAS
+# accepts the upload. This sentinel is the last-resort value when the target
+# ref is empty, so the SARIF never violates the GHAS contract.
+_FALLBACK_TARGET_URI = "agentguardian/scan-target"
+
+# Matches a leading URI scheme (``https://`` …) so HTTP endpoint targets become
+# clean relative-looking paths (GHAS treats a scheme-qualified absolute URI as
+# non-source and would not surface it inline).
+_URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
+
+
+def _artifact_uri(target_mode: str, target_ref: str) -> str:
+    """Best-effort repo-relative URI describing the scanned target.
+
+    Always returns a non-empty string (falling back to
+    :data:`_FALLBACK_TARGET_URI`) so every SARIF result can carry a location:
+
+    - ``http``      → endpoint with its scheme + surrounding slashes stripped
+      (``https://a.example.com/chat`` → ``a.example.com/chat``).
+    - ``framework`` / ``code`` → the part before any ``:attr`` selector; a
+      dotted module is turned into a path (``app.agent:graph`` → ``app/agent.py``)
+      so it usually maps onto the real source file, while an existing path
+      (contains ``/`` or ends ``.py``) is kept as-is.
+    - ``prompt``    → the prompt file path as-is.
+    """
+    ref = (target_ref or "").strip()
+    if not ref:
+        return _FALLBACK_TARGET_URI
+    if target_mode == "http":
+        stripped = _URI_SCHEME_RE.sub("", ref).strip("/")
+        return stripped or _FALLBACK_TARGET_URI
+    # Drop a trailing ``:attr`` / ``:obj`` selector shared by code + framework
+    # refs (e.g. ``module:graph``); the scan target is the module/file itself.
+    head = ref.split(":", 1)[0].strip() or ref
+    if target_mode == "prompt":
+        return head
+    # framework / code (and any future mode): keep real paths, otherwise map a
+    # dotted module onto a file path.
+    if "/" in head or head.endswith(".py"):
+        return head
+    return head.replace(".", "/") + ".py"
+
+
+def _build_locations(uri: str) -> list[dict[str, Any]]:
+    """One file-level physical location pointing at the scan target.
+
+    GHAS requires ``physicalLocation.artifactLocation.uri``; the ``region`` pins
+    a deterministic ``startLine`` so the codeql-action's fingerprinting is
+    stable across re-runs.
+    """
+    return [
+        {
+            "physicalLocation": {
+                "artifactLocation": {"uri": uri},
+                "region": {"startLine": 1},
+            }
+        }
+    ]
+
+
+def _build_result(finding: Finding, target_uri: str) -> dict[str, Any]:
     # #134 — an informational finding (success=False: unconfirmed
     # ``vulnerable`` / capability-exposure note) must not annotate CI at its
     # severity face value; it is emitted at SARIF level ``note`` so a build
@@ -167,12 +233,21 @@ def _build_result(finding: Finding) -> dict[str, Any]:
         props["pov_reference"] = finding.pov_reference
     if finding.pov_reliability is not None:
         props["pov_reliability"] = finding.pov_reliability
-    return {
+    result: dict[str, Any] = {
         "ruleId": finding.probe_id,
         "level": level,
         "message": {"text": finding.summary},
+        # GHAS requires >=1 location per result; all findings share the single
+        # target location (the scanned agent), distinguished by fingerprint.
+        "locations": _build_locations(target_uri),
         "properties": props,
     }
+    # A stable per-finding fingerprint stops GHAS from collapsing distinct
+    # findings that share a probe (ruleId) and the single target location into
+    # one alert. ``finding.id`` is unique per finding within a scan.
+    if finding.id:
+        result["partialFingerprints"] = {"agentGuardianFindingId/v1": str(finding.id)}
+    return result
 
 
 # Stage 1B — contract-provenance keys lifted from ``scan.audit`` onto
@@ -241,6 +316,8 @@ def emit_sarif(scan: Scan, *, redact: bool = True, validate: bool = True) -> dic
     has already validated upstream (benchmarks, internal pipeline glue).
     """
     findings = [redact_finding(f, enabled=redact) for f in scan.findings]
+    # One synthetic location for the whole run — the scanned agent target.
+    target_uri = _artifact_uri(scan.target_mode, scan.target_ref)
     run: dict[str, Any] = {
         "tool": {
             "driver": {
@@ -252,7 +329,7 @@ def emit_sarif(scan: Scan, *, redact: bool = True, validate: bool = True) -> dic
             }
         },
         "automationDetails": {"id": scan.id},
-        "results": [_build_result(f) for f in findings],
+        "results": [_build_result(f, target_uri) for f in findings],
         "properties": {
             # Full scan-level context (target / mode / engine / cost / tokens /
             # duration / honesty signals + posture) so a SARIF consumer can
