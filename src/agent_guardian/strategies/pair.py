@@ -201,6 +201,8 @@ class PAIRStrategy(Strategy):
             prompt=refine_text,
             model=self.ctx.attacker_model,
             extra_system=self._attack_system_extra(),
+            seed=self.ctx.scan_seed,
+            scan_mode=self.ctx.scan_mode,
         )
         refusal_text: str | None = None
         if refused:

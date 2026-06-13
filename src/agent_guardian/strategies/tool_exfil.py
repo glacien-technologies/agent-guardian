@@ -157,6 +157,8 @@ class ToolExfilStrategy(Strategy):
             prompt=prompt,
             model=self.ctx.attacker_model,
             extra_system=self._attack_system_extra(),
+            seed=self.ctx.scan_seed,
+            scan_mode=self.ctx.scan_mode,
         )
 
         self._turn_count += 1

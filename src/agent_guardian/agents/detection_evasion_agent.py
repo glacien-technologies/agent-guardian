@@ -233,6 +233,12 @@ class DetectionEvasionAgent(AsiAgent):
                     messages=[LLMMessage(role="user", content=prompt)],
                     model=self.evaluator_model,
                     max_tokens=8,
+                    # Variance-reduction L1 — the intent-preservation
+                    # judge is a binary verdict; pin temperature=0 and
+                    # thread the scan seed so a same-seed re-run produces
+                    # the same INTENT_PRESERVED / INTENT_LOST decision.
+                    temperature=0.0,
+                    seed=getattr(self, "_scan_seed", None),
                 )
             )
         except Exception as exc:  # pragma: no cover — defensive: conservative on error

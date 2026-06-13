@@ -50,7 +50,7 @@ from agent_guardian.adapters.response_envelope import envelope_from_target
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.core.roe import EgressRefused
 from agent_guardian.core.run_aggregator import aggregate_run_verdicts
-from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.logging_setup import log_agent_io, structured_logging_enabled
 from agent_guardian.models.asi import AsiCategory
@@ -427,6 +427,9 @@ class Judge:
         conversation: str = "",
         tool_trace: str = "(none — black-box target)",
         probe_expectation: str = "",
+        seed: int | None = None,
+        consensus_n: int = 1,
+        consensus_runner: Callable[..., Any] | None = None,
     ) -> JudgeVerdict:
         """Render a structured v2 verdict from the FULL conversation.
 
@@ -437,6 +440,22 @@ class Judge:
         (D3) folds the per-probe expected-safe-behavior / expected-evidence into
         the success rubric so the judge scores against the specific probe's
         expectation, not only the category-level definition (empty = legacy).
+
+        Variance-reduction L1 — ``seed`` is forwarded to providers that honour
+        it (OpenAI / Ollama / Gemini / Vertex) so same-seed re-runs return the
+        same verdict; Anthropic / Bedrock ignore the field silently
+        (:class:`~agent_guardian.llm.base.LLMRequest`). The judge is also
+        always pinned to ``temperature=0`` (unchanged from the previous
+        behaviour) — this kwarg only adds the missing deterministic-replay
+        knob.
+
+        Variance-reduction L2 — when ``consensus_n > 1`` the call routes
+        through ``consensus_runner(request, n) -> LLMResponse`` (typically
+        :meth:`AsiAgent._judge_with_consensus`) so the judge LLM is sampled
+        N times at ``temperature=0`` and majority-voted. When
+        ``consensus_runner`` is ``None`` the consensus path is skipped and
+        the single-call legacy behaviour runs — keeps unit tests and ad-hoc
+        callers (e.g. PanelJudge seats) on the cheap path.
         """
         success_criteria = self._rubric.success_criteria
         if probe_expectation:
@@ -449,16 +468,19 @@ class Judge:
             prompt=prompt,
             response=target_response,
         )
-        resp = await self._llm.complete(
-            LLMRequest(
-                messages=[LLMMessage(role="user", content=message)],
-                model=self._model,
-                temperature=0.0,
-                # Generous budget so the verdict JSON is never truncated by a
-                # thinking model's reasoning tokens (see ``_JUDGE_MAX_TOKENS``).
-                max_tokens=_JUDGE_MAX_TOKENS,
-            )
+        request = LLMRequest(
+            messages=[LLMMessage(role="user", content=message)],
+            model=self._model,
+            temperature=0.0,
+            # Generous budget so the verdict JSON is never truncated by a
+            # thinking model's reasoning tokens (see ``_JUDGE_MAX_TOKENS``).
+            max_tokens=_JUDGE_MAX_TOKENS,
+            seed=seed,
         )
+        if consensus_n > 1 and consensus_runner is not None:
+            resp = await consensus_runner(request, n=consensus_n)
+        else:
+            resp = await self._llm.complete(request)
         parsed = _parse_verdict_payload(resp.text)
         # Full judge I/O for troubleshooting (the prompt + raw output already
         # carry the reasoning; surface verdict/confidence as grep-able fields).
@@ -1049,6 +1071,123 @@ class AsiAgent(ABC):
                 rubric=self.judge_rubric(),
             )
 
+    async def _judge_with_consensus(self, request: LLMRequest, *, n: int = 3) -> LLMResponse:
+        """Issue ``n`` parallel judge LLM calls and return the majority verdict's response.
+
+        Variance-reduction L2 — the same-target/same-seed scan reproduced
+        three different headline bands across three runs because a single
+        flaky verdict could flip a finding from ``defended`` to
+        ``exploited``. This wrapper samples the judge LLM ``n`` times at
+        ``temperature=0`` (the request already carries it), parses each
+        response into a :class:`JudgeVerdict`, and returns the
+        :class:`LLMResponse` from the verdict that appears most often.
+
+        Failure handling matches the spec:
+
+        * a call that raises is recorded as a "could not vote" seat; the
+          tally proceeds on whatever calls succeeded;
+        * if fewer than two calls succeed (e.g. the judge LLM is failing
+          systemically), the helper falls back to a single fresh call so
+          the caller still gets a usable response;
+        * on a complete tie (e.g. three distinct verdicts) the first
+          successful response is returned — same behaviour as the
+          single-call legacy path.
+
+        Only fires when the agent's verdict path opts in (probe severity
+        HIGH/CRITICAL in authoritative modes — see :meth:`_consensus_n`),
+        so the ~3x judge cost is paid only on the small slice of turns
+        where headline-band variance matters.
+        """
+        import asyncio as _asyncio
+
+        if n <= 1:
+            return await self.evaluator_llm.complete(request)
+
+        results: list[Any] = await _asyncio.gather(
+            *(self.evaluator_llm.complete(request) for _ in range(n)),
+            return_exceptions=True,
+        )
+        successes: list[LLMResponse] = []
+        failures = 0
+        for r in results:
+            if isinstance(r, BaseException):
+                failures += 1
+                _LOG.debug(
+                    "judge consensus: call raised %s: %s — recorded as 'could not vote'",
+                    type(r).__name__,
+                    r,
+                )
+            else:
+                successes.append(r)
+
+        if len(successes) < 2:
+            # Spec: "if fewer than 2 succeed, fall back to single-call
+            # behaviour" — issue one fresh call rather than re-using a
+            # potentially-degraded single seat, so the caller always gets
+            # a response that did not itself flake.
+            _LOG.debug(
+                "judge consensus: %d/%d calls succeeded (failures=%d) — "
+                "falling back to a single fresh call",
+                len(successes),
+                n,
+                failures,
+            )
+            if successes:
+                return successes[0]
+            return await self.evaluator_llm.complete(request)
+
+        # Tally verdicts across the successful responses. An unparseable
+        # response is bucketed under the sentinel ``"__unparseable__"`` so
+        # it doesn't silently win against a single real verdict.
+        buckets: dict[str, list[LLMResponse]] = {}
+        for resp in successes:
+            parsed = _parse_verdict_payload(resp.text)
+            key = parsed.verdict if parsed is not None else "__unparseable__"
+            buckets.setdefault(key, []).append(resp)
+
+        # Majority: the bucket with the most entries. On a tie (e.g. 1-1-1)
+        # ``max`` picks the first one inserted — i.e. the first call's
+        # verdict — which matches the spec's "first if all distinct".
+        winning_key = max(buckets, key=lambda k: len(buckets[k]))
+        winners = buckets[winning_key]
+        _LOG.debug(
+            "judge consensus: n=%d successes=%d majority=%r count=%d/%d",
+            n,
+            len(successes),
+            winning_key,
+            len(winners),
+            len(successes),
+        )
+        return winners[0]
+
+    def _consensus_n(self, probe_seed: ProbeSeed | None) -> int:
+        """Pick the consensus N for the current verdict call.
+
+        Returns ``3`` only when the probe's authored severity is HIGH or
+        CRITICAL AND the scan is in an authoritative mode (``smart`` /
+        ``full``). Every other case stays on the single-call path so the
+        ~3x judge cost is paid only where headline-band variance matters.
+
+        When no probe seed is available (e.g. PAIR refinement turns
+        generated from the attacker LLM) we fall back to the agent's
+        ``default_severity`` so a HIGH-severity agent's verdict-stage
+        flakes are still suppressed.
+        """
+        mode = getattr(self, "_scan_mode", "")
+        if mode.lower() not in {"smart", "full"}:
+            return 1
+        severity = None
+        if probe_seed is not None and probe_seed.severity:
+            try:
+                severity = Severity(probe_seed.severity)
+            except ValueError:
+                severity = None
+        if severity is None:
+            severity = self.default_severity
+        if severity in {Severity.HIGH, Severity.CRITICAL}:
+            return 3
+        return 1
+
     def is_applicable(self, fingerprint: TargetFingerprint) -> bool:
         """Return True if this agent has anything useful to do against the target.
 
@@ -1185,6 +1324,14 @@ class AsiAgent(ABC):
             f"CONTEXT_HINTS: {', '.join(brief.context_hints) if brief.context_hints else '(none)'}\n"
             f"N_SCENARIOS: {n}\n"
         )
+        # Variance-reduction L1 — in authoritative modes (smart/full) the
+        # goal-specific scenario attacker call runs at temperature=0 so the
+        # generated scenario batch is reproducible across same-seed runs;
+        # fast mode keeps the original temperature=1.0 for exploration
+        # speed. The provider seed knob is threaded so honouring providers
+        # reproduce the batch verbatim.
+        _scan_mode = getattr(self, "_scan_mode", "")
+        _attacker_temp = 0.0 if _scan_mode.lower() in {"smart", "full"} else 1.0
         try:
             resp = await self.attacker_llm.complete(
                 LLMRequest(
@@ -1198,7 +1345,8 @@ class AsiAgent(ABC):
                     # JSON so the batch failed to parse and the intent never
                     # reached attacks. Keep ample headroom.
                     max_tokens=8000,
-                    temperature=1.0,
+                    temperature=_attacker_temp,
+                    seed=getattr(self, "_scan_seed", None),
                 )
             )
         except Exception as exc:
@@ -1427,6 +1575,13 @@ class AsiAgent(ABC):
             surface_notes=surface_notes,
             enable_pretext=getattr(self, "_enable_pretext", False),
             enable_indirect=getattr(self, "_enable_indirect", False),
+            # Variance-reduction L1 — thread the scan-level mode + seed so
+            # ``attacker_complete`` can pin temperature=0 in authoritative
+            # modes (smart/full) and forward the provider's seed knob.
+            # Defaults (empty / None) keep legacy callers and unit tests
+            # unchanged.
+            scan_mode=getattr(self, "_scan_mode", ""),
+            scan_seed=getattr(self, "_scan_seed", None),
         )
         try:
             strategy = self.strategy_stack(ctx)
@@ -1840,6 +1995,10 @@ class AsiAgent(ABC):
                         f"Evidence of compromise to look for: {_seed_obj.expected_evidence}"
                     )
                 probe_expectation = " ".join(_exp_parts)
+            # Variance-reduction L2 — gate the consensus path on probe
+            # severity AND authoritative mode. Cheap to compute, gates
+            # ~10-15% of judge calls.
+            consensus_n = self._consensus_n(_seed_obj)
             try:
                 # Phase B.B4 — prefer the optional PanelJudge over the
                 # single Judge when configured. Both expose the same
@@ -1853,6 +2012,9 @@ class AsiAgent(ABC):
                         agent_name,
                         turns + 1,
                     )
+                    # PanelJudge already runs a multi-seat ensemble — the
+                    # L2 single-judge N-vote doesn't apply. Thread the seed
+                    # only.
                     verdict = await self.panel_judge.verdict(
                         result.text,
                         target_response,
@@ -1867,6 +2029,9 @@ class AsiAgent(ABC):
                         conversation=conversation_str,
                         tool_trace=tool_trace_str,
                         probe_expectation=probe_expectation,
+                        seed=getattr(self, "_scan_seed", None),
+                        consensus_n=consensus_n,
+                        consensus_runner=(self._judge_with_consensus if consensus_n > 1 else None),
                     )
             except Exception as exc:  # pragma: no cover — defensive: judge should not raise
                 terminated_by = "error"
