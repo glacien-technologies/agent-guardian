@@ -71,9 +71,7 @@ def _commander(*, memory: SharedMemory, mode: ScanMode = ScanMode.FAST) -> Swarm
             evaluator_model="openai:gpt-4o",
             commander_model="anthropic:claude",
         ),
-        target=PromptAdapter(
-            "t", llm=StubScript().default("ok").build(), model="stub", ref="t"
-        ),
+        target=PromptAdapter("t", llm=StubScript().default("ok").build(), model="stub", ref="t"),
         attacker_llm=_FakeRealLLM(),
         evaluator_llm=_FakeRealLLM(),
         commander_llm=StubLLM(default="ok"),
@@ -105,9 +103,7 @@ def _write_turn(memory: SharedMemory, turn: dict[str, object]) -> None:
         fh.write(json.dumps(rec) + "\n")
 
 
-def _defended_attempt(
-    asi: AsiCategory, *, seed_id: str, refused: bool = True
-) -> dict[str, object]:
+def _defended_attempt(asi: AsiCategory, *, seed_id: str, refused: bool = True) -> dict[str, object]:
     """Build a judged-turn record where the TARGET (not the attacker) refused."""
     return {
         "asi_category": asi.value,
@@ -209,9 +205,7 @@ def test_dirty_target_with_findings_unaffected_by_fix_a(tmp_path) -> None:  # ty
     refusal-credit math — Fix A operates only on the no-finding branch."""
     memory = SharedMemory("fix-a-dirty", root_dir=tmp_path)
     for seed in ("s1", "s2", "s3"):
-        _write_turn(
-            memory, _defended_attempt(AsiCategory.ASI06, seed_id=seed, refused=True)
-        )
+        _write_turn(memory, _defended_attempt(AsiCategory.ASI06, seed_id=seed, refused=True))
     cmd = _commander(memory=memory)
     cmd._agent_reports = [_agent_report(AsiCategory.ASI06, turns=3, findings=1)]
     finding = Finding(
@@ -253,9 +247,7 @@ def test_refusal_credit_requires_both_attempt_count_and_refusal_rate(tmp_path) -
     # ASI08: 4 attempts, 1 refused (rate=0.25, attempts>=2 but rate<0.6 -> kept).
     _write_turn(memory, _defended_attempt(AsiCategory.ASI08, seed_id="b1", refused=True))
     for seed in ("b2", "b3", "b4"):
-        _write_turn(
-            memory, _defended_attempt(AsiCategory.ASI08, seed_id=seed, refused=False)
-        )
+        _write_turn(memory, _defended_attempt(AsiCategory.ASI08, seed_id=seed, refused=False))
     cmd = _commander(memory=memory)
     cmd._agent_reports = [
         _agent_report(AsiCategory.ASI07, turns=1),
@@ -276,9 +268,7 @@ def test_no_findings_no_credit_even_with_high_attempt_count(tmp_path) -> None:  
     memory = SharedMemory("fix-a-no-refusal", root_dir=tmp_path)
     # 4 attempts, ZERO refusals (target ignored / non-refusal silence).
     for seed in ("s1", "s2", "s3", "s4"):
-        _write_turn(
-            memory, _defended_attempt(AsiCategory.ASI09, seed_id=seed, refused=False)
-        )
+        _write_turn(memory, _defended_attempt(AsiCategory.ASI09, seed_id=seed, refused=False))
     cmd = _commander(memory=memory)
     cmd._agent_reports = [_agent_report(AsiCategory.ASI09, turns=4)]
     assert cmd._undertested_categories(findings=[]) == {AsiCategory.ASI09}
