@@ -136,9 +136,16 @@ chat-assistant-input
  * grey on the AgentGuardian palette. Restore full opacity for
  * the affected wrappers so colours render as intended.
  * ---------------------------------------------------------- */
+/* Bug 8 fix — chat panel was blank because the prior
+ * [data-theme="dark"] [class*="opacity-"] selector matched every
+ * descendant of #chat-assistant-sheet that uses an opacity-*
+ * Tailwind utility (Mintlify uses them for the sheet's mount
+ * fade-in and for muted-state children), pinning them to
+ * opacity:1 !important during the animation and leaving the
+ * panel as an unresolved dark rectangle. Narrow the override to
+ * the documented card/callout wrappers only. */
 [data-theme="dark"] .callout,
 [data-theme="dark"] .info-card,
-[data-theme="dark"] [class*="opacity-"],
 .card[class*="bg-"],
 .info-card[class*="bg-"] {
   opacity: 1 !important;
@@ -178,17 +185,33 @@ chat-assistant-input
  * visible until below the mobile breakpoint so the navbar
  * doesn't look unbranded.
  * ---------------------------------------------------------- */
-#navbar [class*="brand"] span,
-#navbar [class*="logo"] + span,
-nav-logo + span {
+/* Bug 9 fix — wordmark was hidden because the live navbar DOM
+ * has no visible wordmark <span> at all: Mintlify only renders
+ * the two <img class="nav-logo"> brand marks inside the brand
+ * anchor, plus an sr-only span ("AgentGuardian home page") for
+ * accessibility. The prior `nav-logo + span`, `[class*="logo"] +
+ * span`, and `[class*="brand"] span` selectors targeted siblings
+ * / descendants that never existed, so the rule was a no-op AND
+ * risked unhiding the sr-only label if the DOM shifted. Narrow
+ * to a wordmark-specific hook (`[class*="wordmark"]`,
+ * `[data-slot="brand-text"]`) and explicitly exclude `.sr-only`,
+ * so the override only fires if Mintlify reintroduces a real
+ * visible wordmark element. */
+#navbar [class*="wordmark"]:not(.sr-only),
+#navbar [data-slot="brand-text"]:not(.sr-only),
+#navbar [class*="brand"] span:not(.sr-only),
+#navbar [class*="logo"] + span:not(.sr-only),
+nav-logo + span:not(.sr-only) {
   display: inline !important;
   white-space: nowrap;
 }
 
 @media (max-width: 480px) {
-  #navbar [class*="brand"] span,
-  #navbar [class*="logo"] + span,
-  nav-logo + span {
+  #navbar [class*="wordmark"]:not(.sr-only),
+  #navbar [data-slot="brand-text"]:not(.sr-only),
+  #navbar [class*="brand"] span:not(.sr-only),
+  #navbar [class*="logo"] + span:not(.sr-only),
+  nav-logo + span:not(.sr-only) {
     display: none !important;
   }
 }
