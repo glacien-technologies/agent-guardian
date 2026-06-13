@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- **SARIF results now carry a location so GitHub Code Scanning accepts the upload.** Every `result` in the emitted SARIF previously omitted `locations`, so `github/codeql-action/upload-sarif` rejected the file with `locationFromSarifResult: expected at least one location` and no findings reached the Security tab — the SARIF was schema-valid (the bundled SARIF 2.1.0 schema permits location-less results) but GHAS-incompatible, and the project's own `validate-action.yml` never exercised the upload path (`upload-sarif: false`) so it went unnoticed. AgentGuardian findings are behavioural (a runtime attack on a live agent), so each result now points at a single synthesised, repo-relative URI derived from the scan target (`--framework-ref app.agent:graph` → `app/agent.py`, `--system-prompt prompts/sys.txt` → `prompts/sys.txt`, `--endpoint https://a/chat` → `a/chat`, empty → `agentguardian/scan-target`) plus a stable per-finding `partialFingerprints` entry so GHAS does not collapse distinct findings that share a probe rule and the one target location.
 
 ## [1.0.0rc14] — 2026-06-09
 
