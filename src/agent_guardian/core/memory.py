@@ -190,6 +190,33 @@ def _redact_payload(record_type: RecordType, payload: dict[str, Any]) -> dict[st
         value = out.get(field_name)
         if isinstance(value, str) and value:
             out[field_name] = redactor.redact(value)
+    # rc29 finding-aggregation redesign — a Finding now carries a nested
+    # ``attempts`` list whose Attempt records duplicate the leak-prone fields
+    # (``summary``, ``trigger_prompt``, ``trigger_response``, ``evidence_quote``)
+    # at the per-turn level. The legacy compat reader for a v1 record also
+    # synthesises this list from the outer fields. Walk the list and redact
+    # the per-Attempt copies so the durable JSONL never persists the raw
+    # secret values that the outer-level redaction caught.
+    if record_type == "finding":
+        attempts_payload = out.get("attempts")
+        if isinstance(attempts_payload, list) and attempts_payload:
+            redacted_attempts: list[Any] = []
+            for raw_attempt in attempts_payload:
+                if not isinstance(raw_attempt, dict):
+                    redacted_attempts.append(raw_attempt)
+                    continue
+                inner = dict(raw_attempt)
+                for inner_field in (
+                    "summary",
+                    "trigger_prompt",
+                    "trigger_response",
+                    "evidence_quote",
+                ):
+                    inner_value = inner.get(inner_field)
+                    if isinstance(inner_value, str) and inner_value:
+                        inner[inner_field] = redactor.redact(inner_value)
+                redacted_attempts.append(inner)
+            out["attempts"] = redacted_attempts
     return out
 
 
