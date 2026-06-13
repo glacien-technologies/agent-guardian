@@ -224,9 +224,9 @@ def test_emit_sarif_every_result_has_a_location() -> None:
 def test_emit_sarif_location_uri_tracks_prompt_target() -> None:
     # The shared fixture is a prompt target (ref "prompt.txt").
     log = emit_sarif(make_scan())
-    uri = log["runs"][0]["results"][0]["locations"][0]["physicalLocation"][
-        "artifactLocation"
-    ]["uri"]
+    uri = log["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
+        "uri"
+    ]
     assert uri == "prompt.txt"
 
 
@@ -235,8 +235,7 @@ def test_emit_sarif_partial_fingerprints_are_unique_per_finding() -> None:
     # location) must keep distinct fingerprints so GHAS does not collapse them.
     log = emit_sarif(make_scan())
     fingerprints = [
-        r["partialFingerprints"]["agentGuardianFindingId/v1"]
-        for r in log["runs"][0]["results"]
+        r["partialFingerprints"]["agentGuardianFindingId/v1"] for r in log["runs"][0]["results"]
     ]
     assert len(fingerprints) == len(set(fingerprints))
 
