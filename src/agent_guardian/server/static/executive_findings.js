@@ -612,7 +612,12 @@
         }
       }
       if (visibleSlot) { visibleSlot.textContent = String(visible); }
-      if (totalSlot) { totalSlot.textContent = String(rows.length); }
+      // Bug #17 — Never overwrite the total slot from the rendered DOM
+      // (rows.length is the current page's row count, ~10-15). The
+      // template seeds it with pagination.total (~40) and live-append's
+      // bumpFindingsCounter keeps it in sync as new findings stream in.
+      // The filter only narrows the numerator; the denominator (the
+      // universe of findings across all pages) stays put.
     }
 
     for (var i = 0; i < selects.length; i++) {

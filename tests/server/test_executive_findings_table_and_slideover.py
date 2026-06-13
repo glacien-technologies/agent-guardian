@@ -327,6 +327,50 @@ def test_executive_findings_counter_present(client: TestClient, store: ScanStore
     assert 'data-counter-total="3"' in pane
 
 
+def test_executive_findings_counter_uses_pagination_total_not_page_size(
+    client: TestClient, store: ScanStore
+) -> None:
+    """Bug #17 — top header counter reports the grand total across every
+    page, not just the current page's row count.
+
+    Previously the template seeded ``data-counter-total`` from
+    ``findings_page | length`` (10-15 per page), so the top counter
+    showed "Showing 10 of 10" while the bottom pagination footer showed
+    "Showing 1-10 of 40" — the two numbers contradicted each other.
+    The fix seeds both slots from ``pagination.total`` (the grand
+    total) so the operator reads one consistent universe.
+
+    Acceptance: a scan with 40 findings on page 1 (default per_page=15)
+    must render ``data-counter-total="40"`` in both the wrapper
+    attribute and the inner ``<span>``, NOT ``data-counter-total="15"``.
+    """
+    # 40 findings — needs three pages at per_page=15. Default page is 1,
+    # which renders 15 rows; the counter total must still read 40.
+    severities = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW]
+    asis = [AsiCategory.ASI01, AsiCategory.ASI02, AsiCategory.ASI03, AsiCategory.ASI04]
+    findings = [_make_finding(f"f-{i:02d}", severities[i % 4], asis[i % 4]) for i in range(40)]
+    scan = _make_scan()
+    scan = scan.model_copy(update={"findings": findings})
+    _persist(store, scan)
+
+    resp = client.get(f"/scan/{scan.id}?theme=executive")
+    pane = _findings_pane(resp.text)
+    # Both slots must read the grand total. The current-page size (15)
+    # must NOT appear as a counter denominator — that's the bug we
+    # fixed.
+    assert 'data-counter-total="40"' in pane
+    assert "of <span data-counter-total>40</span> findings" in pane
+    # Negative: the per-page count must NOT be the denominator anywhere
+    # in the counter wrapper.
+    counter_chunk = _slice(
+        pane,
+        'id="exec-findings-filter-counter"',
+        "</div>",
+    )
+    assert 'data-counter-total="15"' not in counter_chunk
+    assert "of <span data-counter-total>15</span>" not in counter_chunk
+
+
 # ----------------------------------------------------------------------
 # In-row turn accordion removed — one clean row per finding
 # ----------------------------------------------------------------------

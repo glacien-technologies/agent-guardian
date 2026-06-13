@@ -161,7 +161,18 @@
           if (ok) { visible++; }
         }
         if (countEl) {
-          countEl.textContent = "Showing " + visible + " of " + rows.length + " events";
+          // Bug #18 — When level chips or the search box hide some
+          // rows, append "(N hidden by filter)" so the operator reads
+          // the gap between header lede ("3061 events") and visible
+          // ("2856") as a client-side filter, not a streaming-vs-
+          // rendered mismatch between two disagreeing sources. Both
+          // the header and the footer denominators continue to
+          // reference the same universe (logs_tail length, live-bumped
+          // by bumpLogsCounter on every reflection event).
+          var hidden = rows.length - visible;
+          var label = "Showing " + visible + " of " + rows.length + " events";
+          if (hidden > 0) { label += " (" + hidden + " hidden by filter)"; }
+          countEl.textContent = label;
         }
         if (noMatchEl) {
           noMatchEl.hidden = visible !== 0;
