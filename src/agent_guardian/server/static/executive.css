@@ -4344,17 +4344,23 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
   letter-spacing: 0.01em;
 }
 
-/* PDF #29 — Active-tab underline width was tied to the tab box
- * (left: 0.75rem; right: 0.75rem of the padding), which produced
- * different visible underline lengths for "Overview" vs "Findings"
- * vs "Probes" vs "Logs". Switch to a centered, text-width-derived
- * underline so each tab's underline reads as the same proportion. */
+/* PDF #29 / Bug #14 — Active-tab underline width was tied to the tab
+ * box (left: 0.75rem; right: 0.75rem of the padding-box), which produced
+ * different visible underline lengths for "Overview" vs "Findings" vs
+ * "Probes" vs "Logs". Suppress the padding-anchored pseudo-element and
+ * use a real text-decoration underline so the rule tracks each tab's
+ * actual rendered text width exactly. The badge chip opts out so the
+ * underline only spans the label glyphs. */
 .exec-tabbar [role="tab"][aria-selected="true"]::after {
-  /* Override the per-side padding-anchored coordinates. */
-  left: 50% !important;
-  right: auto !important;
-  transform: translateX(-50%);
-  /* Underline 60% of the tab text width — visually balanced
-   * across "Logs" (4 chars) through "Overview" (8 chars). */
-  width: 60%;
+  content: none;
+}
+.exec-tabbar [role="tab"][aria-selected="true"] {
+  text-decoration: underline;
+  text-decoration-color: var(--exec-brand);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.6rem;
+  text-decoration-skip-ink: none;
+}
+.exec-tabbar [role="tab"][aria-selected="true"] .exec-tab__badge {
+  text-decoration: none;
 }

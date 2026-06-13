@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from agent_guardian.server.auth import require_dashboard_auth
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
 
 __all__ = ["DEFAULT_PAGE_SIZE", "MAX_PAGE_SIZE", "router"]
+
+# Browsers auto-request ``/favicon.ico`` regardless of whatever
+# ``<link rel="icon">`` the document declares. Serve the canonical
+# Aegis Keyline mark for that path too so the URL bar shows the
+# AgentGuardian shield on every dashboard surface (Bug #16).
+_FAVICON_PATH: Path = Path(__file__).resolve().parents[1] / "static" / "favicon.svg"
 
 router = APIRouter()
 
@@ -61,3 +69,16 @@ async def home(
             "page_title": "Scan history",
         },
     )
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    """Serve the canonical Aegis Keyline shield for ``/favicon.ico``.
+
+    Browsers auto-request this path even when an explicit ``<link rel="icon">``
+    points elsewhere — without a handler they log a 404 and (on some
+    browsers) fall back to a generic globe icon. Returning the SVG keeps
+    the dashboard tab consistent with the explicit favicon links in the
+    templates (see Bug #16).
+    """
+    return FileResponse(_FAVICON_PATH, media_type="image/svg+xml")
