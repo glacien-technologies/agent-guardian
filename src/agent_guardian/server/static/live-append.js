@@ -589,6 +589,14 @@
     if (totalSlot) {
       var t = parseInt(totalSlot.textContent || "0", 10) || 0;
       totalSlot.textContent = String(t + 1);
+      // Bug #17 — keep the wrapper's ``data-counter-total`` attribute
+      // in lockstep with the inner span. The wrapper attribute is the
+      // initial-paint source the executive_findings.js filter pass
+      // reads to skip overwriting the universe on every dropdown
+      // change; if it drifts, the next filter pass would resurface
+      // the stale pagination.total instead of the live-bumped count.
+      var attrTotal = parseInt(counter.getAttribute("data-counter-total") || "0", 10) || 0;
+      counter.setAttribute("data-counter-total", String(attrTotal + 1));
     }
     if (visibleSlot && visibleDelta) {
       var v = parseInt(visibleSlot.textContent || "0", 10) || 0;

@@ -163,11 +163,17 @@
           </select>
         </div>
       {% endif %}
+      {# Bug #17 — Both counter slots now read ``pagination.total`` (the
+         grand total across every page) so the top "Showing X of Y"
+         label matches the bottom pagination footer's "Showing start-end
+         of total" label. Previously both were seeded with
+         ``findings_page | length`` (current-page item count, 10-15) so
+         the top reported "10 of 10" while the bottom reported "of 40". #}
       <div class="exec-findings-filter__counter" id="exec-findings-filter-counter"
-           data-counter-total="{{ findings_page | length }}"
+           data-counter-total="{{ pagination.total }}"
            aria-live="polite">
         Showing <span data-counter-visible>{{ findings_page | length }}</span>
-        of <span data-counter-total>{{ findings_page | length }}</span> findings
+        of <span data-counter-total>{{ pagination.total }}</span> findings
       </div>
     </div>
     {% endif %}
