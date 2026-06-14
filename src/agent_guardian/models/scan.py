@@ -162,6 +162,20 @@ class Scan(BaseModel):
     # scans without any undertested categories. Stored as a sorted list of the
     # raw ASI string values so the model stays JSON-round-trip safe.
     undertested: list[str] = Field(default_factory=list)
+    # Issue #207 — ASI categories the swarm declared inapplicable to this
+    # target (recon ruled the agent class out, e.g. ``a2a-agent`` skipped on
+    # a non-a2a fingerprint, ``code-exec-agent`` skipped on a tool-less
+    # target). ``asi_scores[cat]`` is held at 0.0 for the untested-is-not-
+    # clean floor at the data layer, and the AIVSS aggregate already excludes
+    # these via ``_tier_weighted_aggregate_excluding`` so the headline is
+    # correct — but the per-ASI heatmap, markdown table, PDF, JUnit and JSON
+    # renderers were reading ``asi_scores`` blindly and surfacing a deep-red
+    # ``0`` next to (e.g.) "Agent Discovery / A2A" on a target where the
+    # category was correctly skipped. Persisting ``never_launched`` lets
+    # every renderer show **N/A** instead of a misleading 0. Sorted list of
+    # raw ASI string values for JSON-round-trip safety; empty for back-compat
+    # with older Scan JSON.
+    never_launched: list[str] = Field(default_factory=list)
     # v1.1 — coverage grade summarising how thoroughly the swarm exercised
     # the target. ``A`` = every ASI category covered by real evidence;
     # ``F`` = no coverage at all. Persisted onto the Scan so an operator can
