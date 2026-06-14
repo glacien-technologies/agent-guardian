@@ -113,14 +113,46 @@ class GeminiClient(BaseLLM):
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMResponseFormatError(f"gemini: malformed response: {exc}") from exc
         if not text:
+            # Gemini returns ``text=""`` for several distinct upstream failure
+            # modes, each of which needs a different remediation. Issue #197 —
+            # a single WARN line was conflating thinking-budget exhaustion
+            # (raise ``max_output_tokens``) with structural failures
+            # (``MALFORMED_FUNCTION_CALL`` — no token tuning will help) and
+            # safety-filter blocks (``SAFETY`` / ``RECITATION`` — caller's
+            # fallback IS the correct path, not a bug). Operators triaging
+            # these logs were being sent down the budget-tuning road for
+            # symptoms that were actually structural or content-policy. Split
+            # the message by ``finishReason`` so the diagnostic guides the
+            # correct remediation.
             thought_tokens = int((data.get("usageMetadata") or {}).get("thoughtsTokenCount", 0))
-            _LOG.warning(
-                "gemini: empty candidate text (finishReason=%s, thoughtsTokenCount=%d) — "
-                "a thinking model likely consumed the whole maxOutputTokens budget on "
-                "reasoning; returning empty text for the caller's fallback path",
-                raw_finish,
-                thought_tokens,
-            )
+            if raw_finish == "MALFORMED_FUNCTION_CALL":
+                _LOG.warning(
+                    "gemini: empty candidate text (finishReason=MALFORMED_FUNCTION_CALL) — "
+                    "model emitted a malformed function-call payload; returning empty text "
+                    "for the caller's fallback path (raising max_output_tokens will NOT help)"
+                )
+            elif raw_finish in ("MAX_TOKENS", "STOP") and thought_tokens > 0:
+                _LOG.warning(
+                    "gemini: empty candidate text (finishReason=%s, thoughtsTokenCount=%d) — "
+                    "a thinking model consumed the whole max_output_tokens budget on "
+                    "reasoning; raise max_output_tokens to see real text",
+                    raw_finish,
+                    thought_tokens,
+                )
+            elif raw_finish in ("SAFETY", "RECITATION"):
+                _LOG.info(
+                    "gemini: empty candidate text (finishReason=%s) — provider safety/"
+                    "recitation filter blocked the response; caller's fallback path will "
+                    "handle it",
+                    raw_finish,
+                )
+            else:
+                _LOG.warning(
+                    "gemini: empty candidate text (finishReason=%s, thoughtsTokenCount=%d) — "
+                    "unrecognised empty-response shape; returning empty text for fallback",
+                    raw_finish,
+                    thought_tokens,
+                )
         prompt_tokens = int(usage_meta.get("promptTokenCount", 0))
         completion_tokens = int(usage_meta.get("candidatesTokenCount", 0))
         total_tokens = int(usage_meta.get("totalTokenCount", prompt_tokens + completion_tokens))
