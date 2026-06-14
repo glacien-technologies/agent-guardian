@@ -872,14 +872,28 @@ class SwarmCommander:
     # ------------------------------------------------------------------
 
     async def _phase_recon(self) -> None:
+        # Issue #206 — derive an implicit recon ceiling when overall wall
+        # is set and the operator didn't pass an explicit recon budget.
+        # Pre-fix the recon agent would happily probe a tool-rich target
+        # for 80%+ of the scan's overall budget — on the rc33 auditor-fast
+        # repro (8 declared tools) recon ate 240s of a 300s overall budget,
+        # leaving the swarm 60s to do everything else; result: completeness
+        # = 0%, band = not_evaluated. Cap recon at min(180s, 30% of overall)
+        # by default so a tool-rich target can't starve the attack phase.
+        effective_recon_cap = self.config.recon_wall_seconds
+        if effective_recon_cap is None and self.config.overall_wall_seconds is not None:
+            implicit_cap = min(180.0, 0.30 * self.config.overall_wall_seconds)
+            effective_recon_cap = max(30.0, implicit_cap)
+            _LOG.info(
+                "phase recon: deriving implicit cap=%.1fs (30%% of overall_wall=%.1fs, "
+                "min 30s, max 180s) -- pass --recon-budget-seconds to override (#206)",
+                effective_recon_cap,
+                self.config.overall_wall_seconds,
+            )
         _LOG.info(
             "phase recon: starting (scan_id=%s, wall_budget=%s)",
             self.config.scan_id,
-            (
-                f"{self.config.recon_wall_seconds:.1f}s"
-                if self.config.recon_wall_seconds is not None
-                else "uncapped"
-            ),
+            (f"{effective_recon_cap:.1f}s" if effective_recon_cap is not None else "uncapped"),
         )
         recon_started = time.monotonic()
         # SSE Phase 1, Step 1 — wall-clock anchor matched to the monotonic
@@ -928,7 +942,7 @@ class SwarmCommander:
             audit_rounds=self.config.recon_audit_rounds,
             budget=AgentBudget(
                 tokens_remaining=150_000,
-                wall_seconds_remaining=self.config.recon_wall_seconds,
+                wall_seconds_remaining=effective_recon_cap,
                 # Black-box audit: ~5 action probes + 3 memory-test turns +
                 # up to recon_audit_rounds deepening turns. The hard stop is the
                 # recon_wall_seconds wait_for below, not this cap.
@@ -941,12 +955,12 @@ class SwarmCommander:
         try:
             recon_report = await asyncio.wait_for(
                 recon.run(self.target, self.memory),
-                timeout=self.config.recon_wall_seconds,
+                timeout=effective_recon_cap,
             )
         except TimeoutError:
             _LOG.warning(
                 "recon timed out after %.1fs -- using minimal fingerprint",
-                self.config.recon_wall_seconds,
+                effective_recon_cap,
             )
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.warning(
@@ -1753,6 +1767,54 @@ class SwarmCommander:
                 # above for the same public-API-stability reason.
                 agent._observer = self._emit
                 report = await agent.run(self.target, self.memory)
+        except asyncio.CancelledError:
+            # Issue #205 — when ``overall_wall_seconds`` expires, the swarm's
+            # outer ``asyncio.wait_for`` cancels in-flight agent tasks via
+            # ``CancelledError`` (a ``BaseException`` subclass; the
+            # ``except Exception`` branch below does NOT catch it). Pre-fix
+            # the cancelled agent's ``AgentReport`` was never appended,
+            # ``_never_launched_categories`` saw the agent missing, and
+            # scoring assigned ``_NOT_COVERED_SCORE = 0.0`` to its ASI —
+            # even when the agent had run a dozen judged-defended turns
+            # against the target. Live evidence: rc33 auditor-full scan
+            # ``cli-c69c9b2f47df`` published ASI05=0.0 after 12 turns
+            # because code-exec-agent was mid-turn-13 when the budget
+            # expired. Synthesise a ``terminated_by="cancelled"`` report,
+            # append it, emit the agent_done event, donate the budget,
+            # then re-raise so asyncio finishes unwinding the TaskGroup
+            # cleanly.
+            _LOG.warning(
+                "agent %s cancelled by outer wall-budget expiry — "
+                "synthesising 'cancelled' AgentReport so scoring keeps "
+                "the ASI category as launched (issue #205)",
+                name,
+            )
+            report = AgentReport(
+                agent=name,
+                asi_category=agent.asi_category,
+                findings_count=0,
+                turns=0,
+                duration_seconds=0.0,
+                terminated_by="cancelled",
+                notes="cancelled mid-run by outer wall-budget expiry",
+            )
+            self._agent_reports.append(report)
+            self._emit(
+                SwarmEvent(
+                    kind="agent_done",
+                    timestamp=_utcnow(),
+                    agent=name,
+                    asi=agent.asi_category,
+                    payload={
+                        "findings_count": report.findings_count,
+                        "turns": report.turns,
+                        "duration_seconds": report.duration_seconds,
+                        "terminated_by": report.terminated_by,
+                    },
+                )
+            )
+            self._donate_budget(agent)
+            raise
         except Exception as exc:
             _LOG.warning("agent %s raised %s: %s", name, type(exc).__name__, exc)
             report = AgentReport(
@@ -3287,6 +3349,15 @@ class SwarmCommander:
             mode=effective_mode.value,
             mode_authoritative=mode_authoritative,
             undertested=undertested_values,
+            # Issue #207 — surface never-launched ASI categories alongside
+            # the existing undertested + coverage_grade signals so dashboards
+            # / report renderers can show "N/A" rather than rendering the
+            # 0.0 sentinel as a deep-red zero next to a category that was
+            # correctly skipped by recon (e.g. a2a-agent on a non-a2a
+            # fingerprint). The AIVSS aggregate already excludes these via
+            # ``_tier_weighted_aggregate_excluding``; persisting the set
+            # closes the gap between the score and the presentation.
+            never_launched=sorted(c.value for c in result.never_launched),
             coverage_grade=result.coverage_grade,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
             budget=self._build_budget_report(),
