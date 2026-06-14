@@ -311,13 +311,26 @@ def _asi_rows(
     probes_per_category: dict[AsiCategory, int] = (
         getattr(scan, "probes_per_category", {}) or {} if scan is not None else {}
     )
+    # Issue #207 — categories the swarm declared inapplicable to this
+    # target (e.g. a2a-agent skipped on a non-a2a fingerprint). Render
+    # these as N/A rather than the misleading deep-red 0 that lives in
+    # asi_scores for the untested-is-not-clean data floor. Older Scan
+    # JSON without the field deserialises to [] so the renderer reads
+    # an empty set and the existing per-ASI shape is unchanged.
+    never_launched: set[str] = (
+        set(getattr(scan, "never_launched", None) or []) if scan is not None else set()
+    )
     for code, (title, subtitle, weight, weight_high) in _ASI_ROW_META.items():
         asi_enum = AsiCategory(code)
         score_raw = asi_scores.get(asi_enum)
         is_pending = score_raw is None
+        is_not_applicable = code in never_launched
         score_val = float(score_raw) if score_raw is not None else 0.0
         findings = findings_by_asi.get(code, {"critical": 0, "high": 0, "medium": 0, "low": 0})
-        is_attention = (score_val < 70.0 and not is_pending) or findings["critical"] > 0
+        # Don't paint N/A categories as "attention" — they're skipped by design.
+        is_attention = not is_not_applicable and (
+            (score_val < 70.0 and not is_pending) or findings["critical"] > 0
+        )
         status_label, status_class = _status_for_row(scan, is_pending)
         # Tester report #4 — surface the denominator the formula now uses so
         # an operator can read "1 medium of 17 probes = 98" and understand
@@ -333,8 +346,11 @@ def _asi_rows(
                 "name": title,
                 "subtitle": subtitle,
                 "score_pct": _fmt_pct(score_val if not is_pending else 12.0),
-                "score_label": f"{round(score_val)}",
+                # Issue #207 — render "N/A" for never-launched categories so
+                # the heatmap doesn't depress an inapplicable lane to red 0.
+                "score_label": ("N/A" if is_not_applicable else f"{round(score_val)}"),
                 "is_pending": is_pending,
+                "is_not_applicable": is_not_applicable,
                 "is_attention": is_attention,
                 "weight_label": f"{weight:.1f}",
                 "weight_high": weight_high,
