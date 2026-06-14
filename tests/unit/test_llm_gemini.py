@@ -237,6 +237,89 @@ async def test_gemini_thought_only_candidate_returns_empty_text() -> None:
 
 
 @respx.mock
+async def test_gemini_empty_candidate_warn_split_by_finish_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #197 — the empty-candidate WARN must reflect the *actual* upstream
+    failure mode, not blanket-blame ``max_output_tokens``.
+
+    Pre-fix every ``text == ""`` response produced the same WARN body asserting
+    that a thinking model "likely consumed the whole maxOutputTokens budget on
+    reasoning" — true for ``finishReason=STOP`` with ``thoughtsTokenCount > 0``
+    but misleading for ``MALFORMED_FUNCTION_CALL`` (structural failure, no
+    token tuning helps) and ``SAFETY``/``RECITATION`` (provider safety filter,
+    caller's fallback IS the right path, not a bug).
+
+    Locks the four-way dispatch: the operator triaging these logs reads the
+    correct remediation each time.
+    """
+
+    async def _capture(payload: dict[str, object]) -> tuple[str, str]:
+        respx.post(_HAPPY_URL).mock(return_value=Response(200, json=payload))
+        llm = GeminiClient(api_key="k")
+        caplog.clear()
+        with caplog.at_level("INFO", logger="agent_guardian.llm.gemini"):
+            await llm.complete(_req())
+        await llm.aclose()
+        # Find the empty-candidate record; the parser may emit additional
+        # debug records before/after it, so filter by message substring.
+        for rec in caplog.records:
+            if "empty candidate text" in rec.getMessage():
+                return rec.levelname, rec.getMessage()
+        return "(absent)", "(absent)"
+
+    # STOP with thoughtsTokenCount>0 → the real budget-exhaustion case.
+    level, msg = await _capture(
+        {
+            "candidates": [{"content": {"role": "model"}, "finishReason": "STOP"}],
+            "usageMetadata": {"thoughtsTokenCount": 800, "promptTokenCount": 5},
+        }
+    )
+    assert level == "WARNING"
+    assert "thoughtsTokenCount=800" in msg
+    assert "raise max_output_tokens" in msg
+
+    # MALFORMED_FUNCTION_CALL — structural, no token tuning helps.
+    level, msg = await _capture(
+        {
+            "candidates": [
+                {"content": {"role": "model"}, "finishReason": "MALFORMED_FUNCTION_CALL"}
+            ],
+            "usageMetadata": {"thoughtsTokenCount": 0, "promptTokenCount": 5},
+        }
+    )
+    assert level == "WARNING"
+    assert "MALFORMED_FUNCTION_CALL" in msg
+    assert "will NOT help" in msg
+    # The misleading "thinking model consumed budget" framing must not appear
+    # on the structural-failure path.
+    assert "thinking model" not in msg
+
+    # SAFETY — provider filter, downgraded to INFO so the caller's fallback
+    # path doesn't read as a bug worth paging on.
+    level, msg = await _capture(
+        {
+            "candidates": [{"content": {"role": "model"}, "finishReason": "SAFETY"}],
+            "usageMetadata": {"promptTokenCount": 5},
+        }
+    )
+    assert level == "INFO"
+    assert "SAFETY" in msg
+    assert "safety" in msg.lower()
+
+    # Unknown finishReason → generic WARN fallback (don't silently swallow).
+    level, msg = await _capture(
+        {
+            "candidates": [{"content": {"role": "model"}, "finishReason": "OTHER"}],
+            "usageMetadata": {"promptTokenCount": 5},
+        }
+    )
+    assert level == "WARNING"
+    assert "OTHER" in msg
+    assert "unrecognised" in msg.lower() or "unrecognized" in msg.lower()
+
+
+@respx.mock
 async def test_gemini_missing_content_returns_empty_text() -> None:
     # Sibling shape: candidate with no ``content`` key at all (seen on some
     # SAFETY/MAX_TOKENS terminations). Same tolerance as the Vertex parser.
