@@ -192,6 +192,12 @@ def emit_json(
         # downstream consumer can refuse a "100 / EXCELLENT" verdict on a scan
         # whose coverage_grade is D or worse without re-deriving it.
         "undertested": list(scan.undertested),
+        # Issue #207 — categories the swarm declared inapplicable for this
+        # target (fingerprint-driven skip, e.g. a2a-agent on a non-a2a
+        # target). Renderers / dashboards / SARIF consumers branch on
+        # this to show N/A instead of the misleading deep-red 0 sitting
+        # in asi_scores[cat] for these categories.
+        "never_launched": list(scan.never_launched),
         "coverage_grade": scan.coverage_grade,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo

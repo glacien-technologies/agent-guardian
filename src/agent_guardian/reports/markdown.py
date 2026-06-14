@@ -84,6 +84,28 @@ def _undertested_badge_line(scan: Scan) -> str:
     )
 
 
+def _never_launched_badge_line(scan: Scan) -> str:
+    """A "not applicable" notice when the scan declared categories
+    inapplicable to the target fingerprint (issue #207).
+
+    Without this notice, a reader sees a deep-red 0 next to (e.g.) ASI07
+    on a target with no multi-agent surface and reads it as a finding.
+    Empty string when no never-launched categories so the markdown layout
+    stays unchanged for ordinary scans.
+    """
+    if not scan.never_launched:
+        return ""
+    pretty = ", ".join(f"`{_html_escape(cat)}`" for cat in scan.never_launched)
+    return (
+        "> **Not applicable for this target** — the following categor"
+        f"{'y was' if len(scan.never_launched) == 1 else 'ies were'} "
+        "skipped because recon ruled the agent class out of scope (e.g. "
+        "a multi-agent probe on a single-agent target). The AIVSS aggregate "
+        f"excludes {'this category' if len(scan.never_launched) == 1 else 'these categories'} "
+        f"already; render as **N/A** rather than 0: {pretty}.\n"
+    )
+
+
 def _summary_table(scan: Scan) -> str:
     summary = scan.findings_summary()
     table = (
@@ -232,6 +254,10 @@ def emit_markdown(scan: Scan, *, top_n: int = TOP_FINDINGS_DEFAULT, redact: bool
     if undertested_notice:
         parts.append("\n")
         parts.append(undertested_notice)
+    never_launched_notice = _never_launched_badge_line(scan)
+    if never_launched_notice:
+        parts.append("\n")
+        parts.append(never_launched_notice)
     parts.extend(
         [
             "\n## Severity summary\n\n",

@@ -51,7 +51,11 @@
         + (_f.medium | default(0))
         + (_f.low | default(0)) %}
     {% set _score_pct = row.score_pct | default(0) %}
-    {% set _row_critical = (not row.is_pending) and (_score_pct | float < 40.0) %}
+    {# Issue #207 — never-launched (N/A) rows must not render as critical
+       red. The underlying asi_scores[cat]=0.0 is a data-floor sentinel,
+       not a real low score. ``row.is_not_applicable`` is False on older
+       row dicts (server pinning) so the gate degrades gracefully. #}
+    {% set _row_critical = (not row.is_pending) and (not row.is_not_applicable | default(false)) and (_score_pct | float < 40.0) %}
     <li class="exec-asi-compact__row
                {% if row.is_attention %}exec-asi-compact__row--attention{% endif %}
                {% if _row_critical %}exec-asi-compact__row--critical{% endif %}"

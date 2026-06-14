@@ -61,6 +61,15 @@ def scan_property_bag(scan: Scan) -> dict[str, Any]:
         "findings_summary": scan.findings_summary(),
         "engine": dict(scan.engine) if scan.engine is not None else None,
         "undertested": list(scan.undertested),
+        # Issue #207 — categories the swarm declared inapplicable for this
+        # target (fingerprint-driven skip; e.g. a2a-agent on a non-a2a
+        # target). Distinct signal from undertested: undertested = thinly
+        # tested, never_launched = the agent class itself didn't apply.
+        # Always-emit (parallels undertested) so downstream consumers
+        # branch on a stable key. The AIVSS aggregate already excludes
+        # these via _tier_weighted_aggregate_excluding; emitting the set
+        # closes the gap between the score and the renderer.
+        "never_launched": list(scan.never_launched),
     }
     if scan.budget is not None:
         bag["budget"] = scan.budget.model_dump(mode="json")
