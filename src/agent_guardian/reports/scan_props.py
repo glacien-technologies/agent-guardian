@@ -75,6 +75,10 @@ def scan_property_bag(scan: Scan) -> dict[str, Any]:
         # "scanner-side budget loss" vs "out of scope" distinctly.
         "recon_truncated": scan.recon_truncated,
         "recon_completion_pct": scan.recon_completion_pct,
+        # Issue #215 — commander planner outcome (adaptive / uniform /
+        # None) so SARIF + signed bag + dashboard SSE consumers can
+        # branch on adaptive-vs-uniform.
+        "planner_fallback": scan.planner_fallback,
     }
     if scan.budget is not None:
         bag["budget"] = scan.budget.model_dump(mode="json")
