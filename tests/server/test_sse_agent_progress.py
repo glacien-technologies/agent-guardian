@@ -68,7 +68,11 @@ def test_agent_progress_lands_in_events_jsonl_with_full_payload(tmp_path: Path) 
     fake.observer(_progress_event(turn=3, probe_id="TA-007"))  # type: ignore[misc]
 
     jsonl = tmp_path / "scan-progress-jsonl" / "events.jsonl"
-    lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    # Issue #221 — events.jsonl now starts with a {"kind":"_meta", ...}
+    # schema-version header; skip it so this test asserts on the real
+    # events only.
+    all_lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    lines = [ln for ln in all_lines if ln.get("kind") != "_meta"]
     assert len(lines) == 3
     assert all(ln["kind"] == "agent_progress" for ln in lines)
     # Per-scan monotonic seq starts at 0 (Phase 2 Step 2.1 contract).

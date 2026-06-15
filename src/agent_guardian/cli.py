@@ -1593,6 +1593,33 @@ def verify(
     if not path.exists():
         typer.echo(f"path not found: {path}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
+    # Issue #213 — `agent-guardian scan --bundle X.zip` produces a directory
+    # at X.zip containing `bundle_<id>/manifest.json` (NOT a real zip).
+    # Pre-fix, `verify path/to/bundle.zip` would treat the directory as a
+    # non-.json file and exit 2. Now we recurse: if the user pointed
+    # `verify` at a directory, discover the manifest.json beneath it and
+    # verify that.
+    if path.is_dir():
+        # Prefer the canonical bundle layout (bundle_<id>/manifest.json),
+        # then fall back to any manifest.json anywhere beneath. A missing
+        # manifest is a real error -- surface it cleanly.
+        manifests = sorted(path.glob("*/manifest.json")) or sorted(path.rglob("manifest.json"))
+        if not manifests:
+            typer.echo(
+                f"no manifest.json found beneath {path} -- expected bundle layout is "
+                f"<path>/bundle_<id>/manifest.json (#213).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        if len(manifests) > 1:
+            typer.echo(
+                f"multiple manifest.json under {path} ({len(manifests)} matches) -- "
+                f"point --path at a single bundle directory.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        path = manifests[0]
+        typer.echo(f"verifying bundle manifest: {path}")
     suffix = path.suffix.lower()
     if suffix != ".json":
         typer.echo(
