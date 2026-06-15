@@ -3241,7 +3241,12 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
    the widest pill ("NEEDS FOLLOW-UP"). Everything left over goes to SUMMARY. */
 .exec-probes-table__col--agent { width: 15rem; }
 .exec-probes-table__col--status { width: 5.5rem; }
-.exec-probes-table__col--verdict { width: 7.5rem; }
+/* Wide enough for the longest pill ("NEEDS FOLLOW-UP") PLUS the cell's 12px
+   gutters. Under `box-sizing: border-box` the column width includes its 24px
+   horizontal padding, so 7.5rem (120px) left only ~96px of content space and
+   the nowrap pill bled ~24px into the SUMMARY column. 9.5rem keeps the pill
+   inside its own cell. */
+.exec-probes-table__col--verdict { width: 9.5rem; }
 .exec-probes-table__col--summary { width: auto; }  /* the rest of the row */
 
 /* Run-status pill (Probes table STATUS column) — completed / running / skipped.
@@ -3296,6 +3301,25 @@ details[open] > .exec-details-toggle .exec-details-toggle__label::after {
 .exec-probes-table__agent-head {
   display: flex;
   align-items: center;
+}
+/* "ASI" header label — same fixed footprint as the body's ASI badge
+   (`.exec-probes-table__asi`: min-width 3.4rem, centred, 6px right margin) so
+   the word sits over the badge and the "AGENT" label below starts exactly
+   where the agent name starts. No background/border — it's a label, not a
+   pill. */
+.exec-probes-table__asi-head {
+  flex: 0 0 auto;
+  min-width: 3.4rem;
+  box-sizing: border-box;
+  text-align: center;
+  padding: 1px 6px;
+  margin-right: 6px;
+}
+/* "AGENT" header label — fills the remaining space exactly like the body
+   agent-name cell so the two left edges line up. */
+.exec-probes-table__agent-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .exec-probes-table__runs-head {
   margin-left: auto;

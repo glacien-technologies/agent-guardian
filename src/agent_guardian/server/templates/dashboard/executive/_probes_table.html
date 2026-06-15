@@ -1,9 +1,9 @@
 {# Executive — Probes tab compact table (QA-032 / QA-049 / BUG-1 / per-agent
    grouping 2026-06-03).
 
-   A 5-column scannable table:
+   A 4-column scannable table:
 
-     AGENT · ASI  |  VERDICT  |  TURNS  |  LAST ACTIVITY  |  (row opens modal)
+     ASI · AGENT · RUNS  |  STATUS  |  VERDICT  |  SUMMARY  |  (row opens modal)
 
    One ROW PER AGENT (operator feedback 2026-06-03)
    -----------------------------------------------
@@ -45,12 +45,15 @@
   <thead>
     <tr>
       <th scope="col" class="exec-probes-table__col--agent">
-        {# Inner flex wrapper mirrors the body cell: "AGENT · ASI" left, "RUNS"
-           pushed right so the header label sits directly above the
-           right-aligned run counts. Wrapper (not the th itself) so the th stays
-           a table-cell and the fixed column width is preserved. #}
+        {# Inner flex wrapper mirrors the body cell's THREE parts 1:1 so each
+           header word sits directly above its data: the "ASI" label occupies
+           the same fixed-width slot as the ASI badge, "AGENT" lines up with
+           the agent name, and "RUNS" is pushed right above the right-aligned
+           run counts. Wrapper (not the th itself) so the th stays a table-cell
+           and the fixed column width is preserved. #}
         <span class="exec-probes-table__agent-head">
-          <span>AGENT &middot; ASI</span>
+          <span class="exec-probes-table__asi-head">ASI</span>
+          <span class="exec-probes-table__agent-label">AGENT</span>
           <span class="exec-probes-table__runs-head">RUNS</span>
         </span>
       </th>
