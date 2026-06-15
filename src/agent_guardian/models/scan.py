@@ -176,6 +176,22 @@ class Scan(BaseModel):
     # raw ASI string values for JSON-round-trip safety; empty for back-compat
     # with older Scan JSON.
     never_launched: list[str] = Field(default_factory=list)
+    # Issue #206 follow-up (rc35 deep-review M2 + L8) — recon-truncation
+    # observability. ``recon_truncated`` is True when the recon phase hit
+    # its wall-budget cap before producing a complete fingerprint, which
+    # is the most common cause of an unexpectedly empty ``baseline_tools``
+    # + a populated ``never_launched``. Without this signal, a CI consumer
+    # reading ``never_launched=[ASI02,ASI04,ASI07,ASI10]`` cannot tell
+    # whether those agent classes are genuinely out of scope on this
+    # target (clean signal) or whether recon ran out of budget before
+    # discovering them (scanner-side budget loss — a re-run with
+    # ``--recon-budget-seconds`` may surface them). ``recon_completion_pct``
+    # is ``measured_duration / cap_seconds`` clamped to [0, 100] so a
+    # dashboard can render a progress meter on the recon phase. Both
+    # default to safe values (``False`` / ``None``) so older Scan JSON
+    # round-trips unchanged.
+    recon_truncated: bool = False
+    recon_completion_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     # v1.1 — coverage grade summarising how thoroughly the swarm exercised
     # the target. ``A`` = every ASI category covered by real evidence;
     # ``F`` = no coverage at all. Persisted onto the Scan so an operator can
