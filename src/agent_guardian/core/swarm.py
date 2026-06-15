@@ -105,6 +105,46 @@ __all__ = [
 
 _LOG = logging.getLogger(__name__)
 
+
+# Issue #206 follow-up (rc35 deep-review C1) — implicit recon-cap policy.
+#
+# PR #208 first shipped this as an inline ``min(180, 0.30 * overall_wall)``
+# floored at 30s. The rc35 deep-review found the multiplier was too tight
+# on the FAST preset: 0.30 * 300 = 90s undershot rc32's natural recon P50
+# of 109s on the finbot testbench, so 31 of 33 fast scans logged
+# "recon timed out after 90.0s" and ended with baseline_tools=[]. Lifting
+# the multiplier to 0.40 AND adding a 120s floor brings fast preset recon
+# back over the natural P50, without changing smart/full presets (both
+# clamp to the 180s ceiling either way). Extracted as a pure module
+# function so the policy is unit-testable in isolation.
+_RECON_IMPLICIT_CAP_MAX_S: float = 180.0
+_RECON_IMPLICIT_CAP_MIN_S: float = 30.0
+_RECON_IMPLICIT_CAP_PRESET_FLOOR_S: float = 120.0
+_RECON_IMPLICIT_CAP_MULTIPLIER: float = 0.40
+
+
+def _derive_implicit_recon_cap(overall_wall_seconds: float) -> float:
+    """Pick the implicit recon ceiling from the overall wall budget.
+
+    Policy: ``clamp(max(0.40 * overall, 120s), 30s, 180s)``. The 120s
+    preset floor only kicks in when the multiplier underflows it — for
+    tiny overall budgets (< ~75s) the absolute 30s floor takes over.
+
+    Always returns a finite positive number; never raises.
+    """
+    implicit = _RECON_IMPLICIT_CAP_MULTIPLIER * overall_wall_seconds
+    # Preset floor lifts the fast preset out of the rc35 C1 regression.
+    # Only apply when overall_wall is big enough that 120s is a reasonable
+    # slice of it -- for micro budgets fall through to the absolute floor.
+    if (
+        implicit < _RECON_IMPLICIT_CAP_PRESET_FLOOR_S
+        and overall_wall_seconds >= _RECON_IMPLICIT_CAP_PRESET_FLOOR_S
+    ):
+        implicit = _RECON_IMPLICIT_CAP_PRESET_FLOOR_S
+    # Clamp into the absolute [30s, 180s] envelope.
+    return max(_RECON_IMPLICIT_CAP_MIN_S, min(_RECON_IMPLICIT_CAP_MAX_S, implicit))
+
+
 # Fix A (#issue-clean-defended-target) — refusal-as-coverage credit.
 #
 # A hardened target that refuses every attack terminates attacker agents
@@ -725,6 +765,18 @@ class SwarmCommander:
         # Set True when the finalise phase hit the USD hard-ceiling and skipped
         # remaining paid work (PoV-gate / critic). Surfaced in the report.
         self._finalise_truncated: bool = False
+        # Issue #206 follow-up (rc35 deep-review M2) — recon-truncation
+        # observability. ``_recon_truncated`` is set True when the recon
+        # phase hit the wall-budget (implicit OR explicit) before
+        # producing a full fingerprint, so the swarm carries on with a
+        # minimal fingerprint. ``_recon_cap_seconds`` records the budget
+        # cap that was applied (None when recon was uncapped). Both are
+        # surfaced on the Scan headline so a never_launched=[ASI02,...]
+        # outcome reads as "scanner-side budget loss" not "target is out
+        # of scope for these agent classes".
+        self._recon_truncated: bool = False
+        self._recon_duration_seconds: float = 0.0
+        self._recon_cap_seconds: float | None = None
         self._cancel_event = asyncio.Event()
         self._agent_reports: list[AgentReport] = []
         # Fix A — number of ASI categories rescued from undertested by the
@@ -878,18 +930,27 @@ class SwarmCommander:
         # for 80%+ of the scan's overall budget — on the rc33 auditor-fast
         # repro (8 declared tools) recon ate 240s of a 300s overall budget,
         # leaving the swarm 60s to do everything else; result: completeness
-        # = 0%, band = not_evaluated. Cap recon at min(180s, 30% of overall)
-        # by default so a tool-rich target can't starve the attack phase.
+        # = 0%, band = not_evaluated.
+        #
+        # rc35 deep-review C1 follow-up: the original 0.30 multiplier was
+        # too tight on the FAST preset (0.30 * 300 = 90s, below rc32's
+        # natural recon P50 of 109s on the finbot testbench). Lifted to
+        # 0.40 with a 120s preset floor; the smart/full presets still
+        # clamp to the 180s ceiling. See _derive_implicit_recon_cap above.
+        cap_source: str
         effective_recon_cap = self.config.recon_wall_seconds
         if effective_recon_cap is None and self.config.overall_wall_seconds is not None:
-            implicit_cap = min(180.0, 0.30 * self.config.overall_wall_seconds)
-            effective_recon_cap = max(30.0, implicit_cap)
+            effective_recon_cap = _derive_implicit_recon_cap(self.config.overall_wall_seconds)
+            cap_source = "implicit"
             _LOG.info(
-                "phase recon: deriving implicit cap=%.1fs (30%% of overall_wall=%.1fs, "
-                "min 30s, max 180s) -- pass --recon-budget-seconds to override (#206)",
+                "phase recon: deriving implicit cap=%.1fs (40%% of overall_wall=%.1fs, "
+                "preset floor 120s, abs floor 30s, abs ceiling 180s) -- pass "
+                "--recon-budget-seconds to override (#206)",
                 effective_recon_cap,
                 self.config.overall_wall_seconds,
             )
+        else:
+            cap_source = "explicit" if effective_recon_cap is not None else "uncapped"
         _LOG.info(
             "phase recon: starting (scan_id=%s, wall_budget=%s)",
             self.config.scan_id,
@@ -951,6 +1012,8 @@ class SwarmCommander:
             on_reflection=self._make_reflection_sink("recon-agent"),
             on_probe=_on_recon_probe,
         )
+        # Track the cap so the Scan headline can carry the truncation signal.
+        self._recon_cap_seconds = effective_recon_cap
         recon_report: AgentReport | None = None
         try:
             recon_report = await asyncio.wait_for(
@@ -958,16 +1021,28 @@ class SwarmCommander:
                 timeout=effective_recon_cap,
             )
         except TimeoutError:
+            # rc35 deep-review L8 — attribute the cap source explicitly so an
+            # operator can tell whether the timeout came from their own
+            # ``--recon-budget-seconds`` or from the implicit policy.
+            cap_source_label = {
+                "implicit": "implicit cap (0.40 * overall_wall, see #206)",
+                "explicit": "explicit --recon-budget-seconds override",
+                "uncapped": "uncapped",
+            }.get(cap_source, cap_source)
             _LOG.warning(
-                "recon timed out after %.1fs -- using minimal fingerprint",
+                "recon timed out after %.1fs (%s) -- using minimal fingerprint; "
+                "downstream never_launched is scanner-side budget loss, not target posture (#206, M2)",
                 effective_recon_cap,
+                cap_source_label,
             )
+            self._recon_truncated = True
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.warning(
                 "recon failed (%s: %s) -- using minimal fingerprint",
                 type(exc).__name__,
                 exc,
             )
+            self._recon_truncated = True
 
         if recon_report is not None:
             self._agent_reports.append(recon_report)
@@ -1006,6 +1081,10 @@ class SwarmCommander:
             )
         )
         recon_duration = time.monotonic() - recon_started
+        # rc35 deep-review M2 — store the measured duration so the Scan
+        # headline can carry recon_completion_pct. Even on a TimeoutError
+        # we still want a measured duration (it'll be ~= the cap).
+        self._recon_duration_seconds = recon_duration
         _LOG.info(
             "phase recon: done (duration=%.1fs, notes=%r)",
             recon_duration,
@@ -3358,6 +3437,24 @@ class SwarmCommander:
             # ``_tier_weighted_aggregate_excluding``; persisting the set
             # closes the gap between the score and the presentation.
             never_launched=sorted(c.value for c in result.never_launched),
+            # Issue #206 follow-up (rc35 deep-review M2) — recon-truncation
+            # signal. recon_completion_pct is duration / cap clamped to
+            # [0, 100]; None when recon was uncapped (cap_seconds is None).
+            recon_truncated=self._recon_truncated,
+            recon_completion_pct=(
+                round(
+                    max(
+                        0.0,
+                        min(
+                            100.0,
+                            100.0 * self._recon_duration_seconds / self._recon_cap_seconds,
+                        ),
+                    ),
+                    2,
+                )
+                if self._recon_cap_seconds is not None and self._recon_cap_seconds > 0.0
+                else None
+            ),
             coverage_grade=result.coverage_grade,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
             budget=self._build_budget_report(),

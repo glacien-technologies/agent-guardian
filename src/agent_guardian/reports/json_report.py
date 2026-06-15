@@ -198,6 +198,12 @@ def emit_json(
         # this to show N/A instead of the misleading deep-red 0 sitting
         # in asi_scores[cat] for these categories.
         "never_launched": list(scan.never_launched),
+        # Issue #206 follow-up (rc35 deep-review M2) — recon-truncation
+        # signal. Lets consumers distinguish "agent classes correctly out
+        # of scope" from "scanner-side budget loss" when never_launched
+        # is non-empty.
+        "recon_truncated": scan.recon_truncated,
+        "recon_completion_pct": scan.recon_completion_pct,
         "coverage_grade": scan.coverage_grade,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo
