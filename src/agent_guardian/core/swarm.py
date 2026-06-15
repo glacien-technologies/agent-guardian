@@ -784,9 +784,17 @@ class SwarmCommander:
                     label="evaluator-as-judge",
                 ),
             ]
+            # Issue #229 — pass min_judges=3 to materialise PR #187's L2
+            # escalation (3-vote majority on HIGH/CRITICAL verdicts). The
+            # 2-spec default panel pads to 3 seats by re-seating one of the
+            # existing LLMs with a distinct label; the dispatch log shows
+            # three separate vote dispatches per verdict instead of two.
+            # ``JudgePanelConfig.min_judges`` already documents this as the
+            # default (3); pre-fix the field was declared but never read.
             self._panel_judge = PanelJudge(
                 specs=panel_specs,
                 cross_family_enforced=getattr(config, "judge_cross_family_enforced", False),
+                min_judges=3,
             )
         except Exception as e:
             _LOG.debug(
