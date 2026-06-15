@@ -72,6 +72,19 @@ class _StubAgent:
         # doesn't blow up on the stub.
         self.budget = AgentBudget()
 
+    def _snapshot_tokens(self) -> dict[str, int]:
+        # Issue #214 — the cancel/error synthesis now calls
+        # ``agent._snapshot_tokens()`` to carry partial-turn spend
+        # into the AgentReport. Stub returns an all-zero shape so the
+        # test path stays valid.
+        return {
+            "attacker_input": 0,
+            "attacker_output": 0,
+            "evaluator_input": 0,
+            "evaluator_output": 0,
+            "total": 0,
+        }
+
     async def run(self, target: Any, memory: Any) -> AgentReport:
         # Sleep forever — the test cancels us mid-await to simulate
         # ``asyncio.wait_for`` firing on the overall wall budget.
@@ -181,6 +194,10 @@ async def test_normal_exception_path_still_synthesises_error_report() -> None:
 
         async def run(self, target: Any, memory: Any) -> AgentReport:
             raise RuntimeError("synthetic break")
+
+        def _snapshot_tokens(self) -> dict[str, int]:
+            # Issue #214 — error path now reads partial-turn spend.
+            return {"total": 0}
 
     report = await swarm._run_agent_with_observer(_BrokenAgent())  # type: ignore[arg-type]
     assert report.terminated_by == "error"
