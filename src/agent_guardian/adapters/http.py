@@ -483,8 +483,36 @@ class HttpAdapter(TargetAdapter):
                 )
             return data
 
+        # Issue #224 — belt-and-suspenders wall-clock cap on the entire
+        # send_raw call (across all retries). Pre-fix the retry path
+        # could burn (max_retries + 1) * timeout_seconds + backoff if
+        # the target stalled hard on every retry, because with_backoff
+        # accepts a ``cancel_event`` / ``deadline_monotonic`` but the
+        # adapter never wired one through. On the rc35 matrix scan #06
+        # (seed=12345) this manifested as a 300s wallclock burn against
+        # a 60s per-call timeout. The cap below kills a runaway
+        # ``send_raw`` after roughly ``(max_retries + 1) * timeout +
+        # backoff_sum + safety_buffer`` seconds even when the outer
+        # cancel_event was never plumbed, surfacing as a clean
+        # ``TargetTimeoutError`` rather than a frozen scan.
+        #
+        # The fuller fix (thread the swarm's ``cancel_event`` /
+        # ``deadline_monotonic`` through every transport caller) is
+        # tracked for a follow-up milestone — touches 6+ files across
+        # cli.py + factory + transports.
+        outer_cap = self._timeout_seconds * (self._max_retries + 1) + 30.0
         async with self._semaphore:
-            return await with_backoff(_attempt, max_retries=self._max_retries)
+            try:
+                return await asyncio.wait_for(
+                    with_backoff(_attempt, max_retries=self._max_retries),
+                    timeout=outer_cap,
+                )
+            except TimeoutError as exc:
+                raise TargetTimeoutError(
+                    f"http: send_raw exceeded outer wall cap of {outer_cap:.1f}s "
+                    f"(timeout_seconds={self._timeout_seconds}, max_retries={self._max_retries}) "
+                    f"-- target stalled across every retry (#224)"
+                ) from exc
 
     async def aclose(self) -> None:
         """Close the underlying httpx client if we own it."""
