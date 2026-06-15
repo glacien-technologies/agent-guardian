@@ -380,90 +380,148 @@ def _status_for_row(scan: Scan | None, is_pending: bool) -> tuple[str, str]:
     return ("running", "running")
 
 
-def _findings_page(
-    scan: Scan | None,
+# QA-048 — severity sort rank (critical first) so the unified Findings table
+# reads top-down by criticality, with ASI ASC as the in-band tie-breaker.
+_SEV_RANK: dict[Severity, int] = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 3,
+}
+
+
+def _finding_to_item(f: Finding) -> dict[str, Any]:
+    """Project a single :class:`Finding` into the Findings-table row dict."""
+    # Findings with ``success=False`` are *observed weaknesses* — a risky
+    # behaviour the target engaged in without a confirmed exploit artifact.
+    # The scoring path (`asi_score()` and `_count_findings_by_asi`)
+    # deliberately excludes these from the ASI category score, so a row whose
+    # severity is CRITICAL but informational=True reads as 1 critical finding
+    # in the Findings table while the ASI03 column shows 100 / 0/0/0/0. The
+    # template uses the `informational` flag to render those rows with a muted
+    # chip + tooltip instead of the solid-red CRITICAL chip so the
+    # contradiction is self-explaining.
+    informational = not f.success
+    return {
+        "id": f.id,
+        "asi_code": f.asi.value,
+        "atlas": [t for t in f.mitre_atlas],
+        "csa_code": f.csa_category.value,
+        "probe_id": f.probe_id,
+        "summary": f.summary,
+        "severity_label": f.severity.value.upper(),
+        "severity_class": f.severity.value.lower(),
+        "informational": informational,
+        "created_label": f.created_at.strftime("%H:%M:%S"),
+        # QA-051 — runtime agent name (e.g. ``goal-hijack-agent``) populated
+        # in-place by ``_attach_evidence_to_findings`` from the matched probe's
+        # ``agent`` field. Defaults to ``""`` so the Findings table renders an
+        # em-dash when no probe correlation exists (static / recon findings).
+        "agent_name": "",
+    }
+
+
+def _build_finding_items(scan: Scan | None) -> list[dict[str, Any]]:
+    """Return **every** finding row dict for ``scan`` (NOT paginated).
+
+    Sorted severity DESC (critical → low) then ASI ASC (ASI01 → ASI02 → …)
+    so the QA-048 unified Findings table reads top-down by criticality with
+    stable ASI grouping inside each band.
+
+    Pagination is intentionally deferred to :func:`_paginate_finding_items`:
+    the caller attaches evidence (which fills ``agent_name``), derives the
+    dropdown option lists from this whole-scan set, applies the active
+    dropdown filters, and only *then* paginates — so a filter selected on
+    page 1 reaches matching findings on every page (QA-053 server-side
+    filtering; the dropdowns are no longer scoped to one page's rows).
+    """
+    if scan is None:
+        return []
+    sorted_findings = sorted(
+        scan.findings,
+        key=lambda f: (_SEV_RANK[f.severity], f.asi.value, f.created_at),
+    )
+    return [_finding_to_item(f) for f in sorted_findings]
+
+
+def _collect_findings_filter_values(items: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Derive the dropdown option lists from the WHOLE finding set (QA-053).
+
+    Each dimension lists only values that at least one finding *anywhere in
+    the scan* carries (no dead options), so the operator can filter to a
+    severity / agent / probe / ASI that lives on another page. Severity keeps
+    its canonical critical→low order; the other dimensions sort alphabetically.
+    """
+    present_sev: set[str] = set()
+    agents: set[str] = set()
+    probes: set[str] = set()
+    asis: set[str] = set()
+    for it in items:
+        if it.get("severity_class"):
+            present_sev.add(it["severity_class"])
+        if it.get("agent_name"):
+            agents.add(it["agent_name"])
+        if it.get("probe_id"):
+            probes.add(it["probe_id"])
+        if it.get("asi_code"):
+            asis.add(it["asi_code"])
+    return {
+        "severity": [s for s in ("critical", "high", "medium", "low") if s in present_sev],
+        "agent": sorted(agents),
+        "probe": sorted(probes),
+        "asi": sorted(asis),
+    }
+
+
+def _apply_findings_filters(
+    items: list[dict[str, Any]],
+    *,
+    severity: str,
+    agent: str,
+    probe: str,
+    asi: str,
+) -> list[dict[str, Any]]:
+    """Filter ``items`` by the active dropdown selections (AND across dimensions).
+
+    Each argument is the empty string when its dropdown is on "All …". The
+    filter runs over the whole scan's findings *before* pagination so a
+    selection reaches matching findings on any page.
+    """
+    out = items
+    if severity:
+        out = [i for i in out if i.get("severity_class") == severity]
+    if agent:
+        out = [i for i in out if (i.get("agent_name") or "") == agent]
+    if probe:
+        out = [i for i in out if (i.get("probe_id") or "") == probe]
+    if asi:
+        out = [i for i in out if (i.get("asi_code") or "") == asi]
+    return out
+
+
+def _paginate_finding_items(
+    items: list[dict[str, Any]],
     *,
     page: int,
     per_page: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Return ``(page_items, pagination_meta)`` for the findings feed.
-
-    Findings are sorted severity DESC (critical → high → medium → low) then
-    ASI ASC (ASI01 → ASI02 → …) so the QA-048 unified Findings table reads
-    top-down by criticality with stable ASI grouping inside each band.
-    """
-    if scan is None:
-        empty_pagination: dict[str, Any] = {
-            "total": 0,
-            "current": 1,
-            "total_pages": 1,
-            "start": 0,
-            "end": 0,
-            "pages": [],
-        }
-        return [], empty_pagination
-    sev_rank = {
-        Severity.CRITICAL: 0,
-        Severity.HIGH: 1,
-        Severity.MEDIUM: 2,
-        Severity.LOW: 3,
-    }
-    # QA-048 tie-breaker — sort by ``asi_code`` ASC inside a severity band so
-    # the unified findings table groups rows of the same ASI together for
-    # quick scanning. ``created_at`` falls in last as a final stable key.
-    sorted_findings = sorted(
-        scan.findings,
-        key=lambda f: (sev_rank[f.severity], f.asi.value, f.created_at),
-    )
-    total = len(sorted_findings)
+    """Slice an already-filtered+sorted finding list into one page + pager meta."""
+    total = len(items)
     page = max(1, page)
     per_page = max(1, min(per_page, 100))
     total_pages = max(1, math.ceil(total / per_page))
     page = min(page, total_pages)
     start = (page - 1) * per_page
     end = min(start + per_page, total)
-    items: list[dict[str, Any]] = []
-    for f in sorted_findings[start:end]:
-        # Findings with ``success=False`` are *observed weaknesses* — a
-        # risky behaviour the target engaged in without a confirmed
-        # exploit artifact. The scoring path (`asi_score()` and
-        # `_count_findings_by_asi`) deliberately excludes these from
-        # the ASI category score, so a row whose severity is CRITICAL
-        # but informational=True will read as 1 critical finding in
-        # the Findings table while the ASI03 column shows 100 / 0/0/0/0.
-        # The template uses the `informational` flag to render those
-        # rows with a muted chip + tooltip instead of the solid-red
-        # CRITICAL chip so the contradiction is self-explaining.
-        informational = not f.success
-        items.append(
-            {
-                "id": f.id,
-                "asi_code": f.asi.value,
-                "atlas": [t for t in f.mitre_atlas],
-                "csa_code": f.csa_category.value,
-                "probe_id": f.probe_id,
-                "summary": f.summary,
-                "severity_label": f.severity.value.upper(),
-                "severity_class": f.severity.value.lower(),
-                "informational": informational,
-                "created_label": f.created_at.strftime("%H:%M:%S"),
-                # QA-051 — runtime agent name (e.g. ``goal-hijack-agent``)
-                # populated in-place by ``_attach_evidence_to_findings`` from
-                # the matched probe's ``agent`` field. Defaults to ``""`` so
-                # the Findings table can render an em-dash when no probe
-                # correlation exists (static / recon-derived findings).
-                "agent_name": "",
-            }
-        )
     pagination: dict[str, Any] = {
         "total": total,
         "current": page,
         "total_pages": total_pages,
         "start": start + 1 if total > 0 else 0,
         "end": end,
-        "pages": list(range(1, total_pages + 1)),
+        "pages": list(range(1, total_pages + 1)) if total > 0 else [],
     }
-    return items, pagination
+    return items[start:end], pagination
 
 
 # Per-finding evidence cap. Noisy attacks (10+ turns on a single probe_id) would
@@ -1564,6 +1622,10 @@ def build_dashboard_context(
     started_at_label: str = "",
     page: int = 1,
     per_page: int = 15,
+    f_severity: str | None = None,
+    f_agent: str | None = None,
+    f_probe: str | None = None,
+    f_asi: str | None = None,
     is_terminal: bool | None = None,
     scan_dir: Path | None = None,
 ) -> DashboardContext:
@@ -1626,13 +1688,41 @@ def build_dashboard_context(
         score_sublabel = "tier-weighted, provisional"
 
     asi_rows = _asi_rows(scan, findings_by_asi)
-    findings_page, pagination = _findings_page(scan, page=page, per_page=per_page)
+    # QA-053 (server-side filtering) — build EVERY finding row up-front (not
+    # just the current page) so the dropdown filters and pagination operate
+    # over the whole scan. Evidence (and the derived ``agent_name``) must be
+    # attached to ALL rows before the Agent dropdown options + the agent
+    # filter can be computed.
+    _all_finding_items = _build_finding_items(scan)
     # Evidence wiring: attach the verbatim probe attempts (prompt / response /
-    # reasoning) that correlate to each finding row. Done post-_findings_page
-    # so the function signature stays stable and other callers (SSE diff,
-    # report exporter) don't have to re-derive the join.
+    # reasoning) that correlate to each finding row, and fill ``agent_name``.
     _probes_list_for_evidence = _assemble_probes_list(scan_dir)
-    _attach_evidence_to_findings(findings_page, _probes_list_for_evidence)
+    _attach_evidence_to_findings(_all_finding_items, _probes_list_for_evidence)
+    # Dropdown option lists come from the WHOLE scan so a severity / agent /
+    # probe / ASI that only appears on a later page is still selectable from
+    # page 1 (the bug this fixes: options were scoped to the current page).
+    findings_filter_values = _collect_findings_filter_values(_all_finding_items)
+    # Clamp the requested filters to the available options — an unknown / stale
+    # URL value is treated as "All …" (no filter) rather than forcing an empty
+    # table. ``None in [...]`` is False, so missing params clamp to "".
+    active_filters = {
+        "severity": (f_severity or "").lower()
+        if (f_severity or "").lower() in findings_filter_values["severity"]
+        else "",
+        "agent": f_agent if f_agent in findings_filter_values["agent"] else "",
+        "probe": f_probe if f_probe in findings_filter_values["probe"] else "",
+        "asi": f_asi if f_asi in findings_filter_values["asi"] else "",
+    }
+    _filtered_items = _apply_findings_filters(
+        _all_finding_items,
+        severity=active_filters["severity"],
+        agent=active_filters["agent"],
+        probe=active_filters["probe"],
+        asi=active_filters["asi"],
+    )
+    findings_page, pagination = _paginate_finding_items(
+        _filtered_items, page=page, per_page=per_page
+    )
     # ``scan_finalized`` must be the REAL "scan has finished" signal, NOT
     # ``scan is not None``: during a live scan the dashboard loads a PARTIAL
     # ``Scan`` from the on-disk snapshot, so ``scan`` is non-None while the scan
@@ -1924,6 +2014,12 @@ def build_dashboard_context(
         # Findings feed
         "findings_page": findings_page,
         "pagination": pagination,
+        # QA-053 — dropdown option lists (whole-scan, no dead options) + the
+        # currently-active filter selections. The template renders the
+        # dropdowns from these and marks the active value ``selected``; the
+        # pager links carry the active filters so paging keeps the filter.
+        "findings_filter_values": findings_filter_values,
+        "findings_filters": active_filters,
         # Reproducibility
         "package_version": package_version,
         "aivss_formula_version": aivss_formula_version,

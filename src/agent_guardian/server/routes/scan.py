@@ -131,6 +131,15 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
     except ValueError:
         page = 1
 
+    # QA-053 — findings dropdown filters. Read from the URL so a filter
+    # selected on page 1 reaches matching findings on any page (the server
+    # filters the whole scan, then paginates). ``build_dashboard_context``
+    # clamps unknown / stale values back to "All …".
+    f_severity = request.query_params.get("fsev")
+    f_agent = request.query_params.get("fagent")
+    f_probe = request.query_params.get("fprobe")
+    f_asi = request.query_params.get("fasi")
+
     base_url = _resolve_base_url(request)
     # Elapsed clock: prefer wall-clock from the scan-dir mtime whenever the
     # scan is still in flight -- that covers both the in-process path
@@ -163,6 +172,10 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
         elapsed_seconds=elapsed,
         started_at_label=started_label,
         page=page,
+        f_severity=f_severity,
+        f_agent=f_agent,
+        f_probe=f_probe,
+        f_asi=f_asi,
         is_terminal=terminal_on_disk and not is_running,
         scan_dir=scan_dir,
     )
