@@ -99,7 +99,9 @@ def test_events_jsonl_carries_seq_as_top_level_field(tmp_path: Path) -> None:
     fake.observer(_event("agent_done"))
 
     jsonl = tmp_path / "scan-jsonl" / "events.jsonl"
-    lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    # Issue #221 — skip the {"kind":"_meta", ...} schema-version header.
+    all_lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    lines = [ln for ln in all_lines if ln.get("kind") != "_meta"]
     assert len(lines) == 2
     assert lines[0]["seq"] == 0
     assert lines[1]["seq"] == 1
