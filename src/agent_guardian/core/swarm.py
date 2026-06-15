@@ -1883,6 +1883,15 @@ class SwarmCommander:
                 "the ASI category as launched (issue #205)",
                 name,
             )
+            # Issue #214 — preserve the partial-turn spend the cancelled
+            # agent already accumulated on its attacker/evaluator usage
+            # counters. Without this, ``cost_usd`` (which rolls up per-
+            # agent ``tokens_consumed`` at finalise time) silently drops
+            # the cancelled spend while ``budget.spent_usd`` (live meter)
+            # picks it up — producing a 1.16x-1.69x gap depending on how
+            # many agents were cut short. ``_snapshot_tokens`` is safe to
+            # call on a partially-run agent (the usage counters are bound
+            # in ``__init__``).
             report = AgentReport(
                 agent=name,
                 asi_category=agent.asi_category,
@@ -1891,6 +1900,7 @@ class SwarmCommander:
                 duration_seconds=0.0,
                 terminated_by="cancelled",
                 notes="cancelled mid-run by outer wall-budget expiry",
+                tokens_consumed=agent._snapshot_tokens(),
             )
             self._agent_reports.append(report)
             self._emit(
@@ -1911,6 +1921,10 @@ class SwarmCommander:
             raise
         except Exception as exc:
             _LOG.warning("agent %s raised %s: %s", name, type(exc).__name__, exc)
+            # Issue #214 — same partial-turn-spend preservation as the
+            # cancellation branch above. An agent that raised mid-turn N
+            # may have spent real LLM tokens on turns 1..N-1; carry them
+            # into the report so cost_usd matches budget.spent_usd.
             report = AgentReport(
                 agent=name,
                 asi_category=agent.asi_category,
@@ -1919,6 +1933,7 @@ class SwarmCommander:
                 duration_seconds=0.0,
                 terminated_by="error",
                 error=f"{type(exc).__name__}: {exc}",
+                tokens_consumed=agent._snapshot_tokens(),
             )
         self._agent_reports.append(report)
         self._emit(
