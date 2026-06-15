@@ -3894,10 +3894,10 @@ async def _run_scan(
         validate_output_engine_available,
     )
 
-    # Issue #212 — ``output`` is already a list (Typer accumulates repeated
-    # --output flags). Normalise to a list to handle the back-compat case
-    # where a caller passed a single string somehow.
-    requested_formats: list[str] = list(output) if isinstance(output, list) else [output]  # type: ignore[list-item]
+    # Issue #212 — ``output`` is a list because Typer accumulates repeated
+    # --output flags. Materialise a fresh list so we own the value and any
+    # downstream mutation can't leak back into the Typer-controlled default.
+    requested_formats: list[str] = list(output)
     engine_checks: list[EngineCheck] = []
     for fmt in requested_formats:
         check = validate_output_engine_available(fmt)
@@ -4262,12 +4262,12 @@ async def _run_scan_inner(
     agree byte-for-byte.
     """
 
-    # Issue #212 — normalise the (possibly empty) ``output`` list to the
-    # canonical ``requested_formats`` list used by the emit loop. The
-    # outer Typer command guarantees at least ``["json"]`` but the
-    # extracted inner function is robust to either a list or a scalar
-    # so existing test fixtures that built a bare ``str`` keep working.
-    requested_formats: list[str] = list(output) if isinstance(output, list) else [output]  # type: ignore[list-item]
+    # Issue #212 — normalise the ``output`` list to the canonical
+    # ``requested_formats`` list used by the emit loop. The outer Typer
+    # command guarantees at least ``["json"]`` so an empty list is only
+    # reachable via direct internal callers; defend the empty case so we
+    # never silently skip every emitter.
+    requested_formats: list[str] = list(output)
     if not requested_formats:
         requested_formats = ["json"]
 
