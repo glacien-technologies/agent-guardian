@@ -549,16 +549,22 @@
    * Wire the dropdown filter toolbar above the findings table.
    *
    * Four native ``<select>`` controls — Severity / Agent / Probe / ASI
-   * — each carrying ``data-filter-group``. Selecting a non-empty value
-   * in a dropdown filters the table to rows whose ``data-{group}``
-   * attribute matches; the leading empty-value "All …" option clears
-   * that dimension. Dimensions compose with AND — a row must pass every
-   * dropdown that has a non-empty value selected.
+   * — each carrying ``data-filter-group``. The option lists are derived
+   * server-side from the WHOLE scan (not just the current page), so a
+   * value that lives on another page is still selectable here.
    *
-   * Pure client-side: walks the rendered ``<tr>`` rows, reads their
-   * ``data-severity`` / ``data-agent`` / ``data-asi`` / ``data-probe``
-   * attributes, and toggles ``.is-filtered-out``. The Showing-N-of-M
-   * counter is updated on every change and announced via ``aria-live``.
+   * Selecting a value NAVIGATES (server round-trip): the dropdown change
+   * reloads the page with the active filters in the query string
+   * (``?fsev=…&fasi=…``), and the server filters the whole scan then
+   * re-paginates the filtered set. This is what lets a filter chosen on
+   * page 1 reach matching findings on page 2+ — pure client-side row
+   * hiding could only ever touch the rows already in the DOM.
+   *
+   * ``applyFilters`` (the in-DOM row gate) is retained for the
+   * live-append path: while a scan is streaming, a newly appended row
+   * that the active (server-reflected) dropdown excludes is hidden via
+   * ``.is-filtered-out``. On a completed scan the server already filtered
+   * the rendered rows, so the boot-time gate pass is a harmless no-op.
    *
    * Marker symbol: ``ag.dashboard.executive.findings.filters``.
    */
@@ -620,11 +626,51 @@
       // universe of findings across all pages) stays put.
     }
 
-    for (var i = 0; i < selects.length; i++) {
-      selects[i].addEventListener("change", applyFilters);
+    // GROUP → URL query-param name (mirrors routes/scan.py).
+    var GROUP_TO_PARAM = {
+      severity: "fsev",
+      agent: "fagent",
+      probe: "fprobe",
+      asi: "fasi",
+    };
+
+    function navigateWithFilters() {
+      // Server-side filtering: a dropdown change reloads the page with the
+      // active filters in the query string so the server filters the WHOLE
+      // scan and re-paginates. Reset to page 1 (the filtered result has its
+      // own page count); preserve any other existing query params (e.g.
+      // ``theme``). The ``#tab=findings`` fragment keeps the operator on
+      // this tab after the reload.
+      var active = activeByGroup();
+      var existing = window.location.search.replace(/^\?/, "");
+      var kept = [];
+      var parts = existing ? existing.split("&") : [];
+      for (var i = 0; i < parts.length; i++) {
+        if (!parts[i]) { continue; }
+        var name = parts[i].split("=")[0];
+        if (name === "page" || name === "fsev" || name === "fagent" ||
+            name === "fprobe" || name === "fasi") { continue; }
+        kept.push(parts[i]);
+      }
+      var groups = ["severity", "agent", "probe", "asi"];
+      for (var g = 0; g < groups.length; g++) {
+        var val = active[groups[g]];
+        if (val) {
+          kept.push(GROUP_TO_PARAM[groups[g]] + "=" + encodeURIComponent(val));
+        }
+      }
+      var qs = kept.join("&");
+      window.location.href =
+        window.location.pathname + (qs ? "?" + qs : "") + "#tab=findings";
     }
-    // Initial render — render Showing-N-of-M as N == M (every dropdown
-    // is on its "All …" option).
+
+    for (var i = 0; i < selects.length; i++) {
+      selects[i].addEventListener("change", navigateWithFilters);
+    }
+    // Gate any rows the active (server-reflected) dropdowns exclude. On a
+    // completed scan the server already filtered the rendered rows so this
+    // is a no-op; on a running scan it keeps live-appended rows consistent
+    // with the current selection and seeds the Showing-N-of-M counter.
     applyFilters();
 
     if (typeof window !== "undefined") {

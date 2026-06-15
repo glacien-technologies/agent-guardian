@@ -86,16 +86,18 @@
        rendered rows in this page (N defaults to M because every
        dropdown is on its "All …" option at initial render).
     #}
-    {% set _agent_values = [] %}
-    {% set _asi_values = [] %}
-    {% set _probe_values = [] %}
-    {% set _sev_values = [] %}
-    {% for f in findings_page %}
-      {% if f.severity_class and f.severity_class not in _sev_values %}{% set _ = _sev_values.append(f.severity_class) %}{% endif %}
-      {% if f.agent_name and f.agent_name not in _agent_values %}{% set _ = _agent_values.append(f.agent_name) %}{% endif %}
-      {% if f.asi_code and f.asi_code not in _asi_values %}{% set _ = _asi_values.append(f.asi_code) %}{% endif %}
-      {% if f.probe_id and f.probe_id not in _probe_values %}{% set _ = _probe_values.append(f.probe_id) %}{% endif %}
-    {% endfor %}
+    {# QA-053 (cross-page filtering) — the option lists and the active
+       selections come from the SERVER (``findings_filter_values`` /
+       ``findings_filters``), derived from the WHOLE scan rather than this
+       page's rows. So a severity / agent / probe / ASI that only appears on
+       a later page is still listed here, and selecting it navigates
+       (``executive_findings.js``) to a server round-trip that filters the
+       whole scan and re-paginates — reaching matching findings on any page.
+       ``severity`` is already ordered critical→low; the rest are sorted. #}
+    {% set _sev_values = findings_filter_values.severity %}
+    {% set _agent_values = findings_filter_values.agent %}
+    {% set _probe_values = findings_filter_values.probe %}
+    {% set _asi_values = findings_filter_values.asi %}
     {# Tester PDF item 30 — when there are no findings (initial paint
        on a running scan) AND none of the filter-value arrays carry
        anything, the wrapper div still renders and shows up as an
@@ -116,10 +118,8 @@
                   id="exec-findings-filter-severity"
                   data-filter-group="severity">
             <option value="">All severities</option>
-            {% for _sev in ['critical', 'high', 'medium', 'low'] %}
-              {% if _sev in _sev_values %}
-                <option value="{{ _sev }}">{{ _sev | upper }}</option>
-              {% endif %}
+            {% for _sev in _sev_values %}
+              <option value="{{ _sev }}"{% if findings_filters.severity == _sev %} selected{% endif %}>{{ _sev | upper }}</option>
             {% endfor %}
           </select>
         </div>
@@ -131,8 +131,8 @@
                   id="exec-findings-filter-agent"
                   data-filter-group="agent">
             <option value="">All agents</option>
-            {% for _agent in _agent_values | sort %}
-              <option value="{{ _agent }}">{{ _agent }}</option>
+            {% for _agent in _agent_values %}
+              <option value="{{ _agent }}"{% if findings_filters.agent == _agent %} selected{% endif %}>{{ _agent }}</option>
             {% endfor %}
           </select>
         </div>
@@ -144,8 +144,8 @@
                   id="exec-findings-filter-probe"
                   data-filter-group="probe">
             <option value="">All probes</option>
-            {% for _probe in _probe_values | sort %}
-              <option value="{{ _probe }}">{{ _probe }}</option>
+            {% for _probe in _probe_values %}
+              <option value="{{ _probe }}"{% if findings_filters.probe == _probe %} selected{% endif %}>{{ _probe }}</option>
             {% endfor %}
           </select>
         </div>
@@ -157,8 +157,8 @@
                   id="exec-findings-filter-asi"
                   data-filter-group="asi">
             <option value="">All ASI</option>
-            {% for _asi in _asi_values | sort %}
-              <option value="{{ _asi }}">{{ _asi }}</option>
+            {% for _asi in _asi_values %}
+              <option value="{{ _asi }}"{% if findings_filters.asi == _asi %} selected{% endif %}>{{ _asi }}</option>
             {% endfor %}
           </select>
         </div>
@@ -293,6 +293,10 @@
       </table>
     </div>
     {% if pagination.total_pages > 1 %}
+      {# Carry the active dropdown filters in every pager link so paging
+         within a filtered view keeps the filter (the server filters the
+         whole scan, then paginates the filtered set). #}
+      {% set _filter_qs %}{% if findings_filters.severity %}&fsev={{ findings_filters.severity | urlencode }}{% endif %}{% if findings_filters.agent %}&fagent={{ findings_filters.agent | urlencode }}{% endif %}{% if findings_filters.probe %}&fprobe={{ findings_filters.probe | urlencode }}{% endif %}{% if findings_filters.asi %}&fasi={{ findings_filters.asi | urlencode }}{% endif %}{% endset %}
       <nav class="exec-pager" aria-label="Findings pagination">
         <span class="exec-pager__range">
           Showing {{ pagination.start }}&ndash;{{ pagination.end }} of {{ pagination.total }}
@@ -300,7 +304,7 @@
         <div class="exec-pager__buttons">
           {% for p in pagination.pages %}
             <a class="exec-pager__btn{% if p == pagination.current %} exec-pager__btn--active{% endif %}"
-               href="?page={{ p }}#tab=findings">{{ p }}</a>
+               href="?page={{ p }}{{ _filter_qs }}#tab=findings">{{ p }}</a>
           {% endfor %}
         </div>
       </nav>
