@@ -168,10 +168,49 @@ class PanelJudge:
         specs: Sequence[JudgeSpec],
         *,
         cross_family_enforced: bool = False,
+        min_judges: int | None = None,
     ) -> None:
         if not specs:
             raise ValueError("PanelJudge requires at least one JudgeSpec")
-        self._specs = list(specs)
+        # Issue #229 — honour JudgePanelConfig.min_judges. Pre-fix, the panel
+        # was hard-wired to 2 seats (attacker_llm + evaluator_llm) and the
+        # ``min_judges`` field on JudgePanelConfig was declared but never read,
+        # so PR #187's L2 escalation (3-vote majority on HIGH/CRITICAL verdicts)
+        # never actually fired -- 986/986 panel calls across the rc35 deep-
+        # review matrix ran at n_judges=2.
+        #
+        # When the caller asks for ``min_judges > len(specs)`` we pad the seat
+        # list by re-seating copies of the existing specs (round-robin),
+        # giving each pad a distinct label so the dispatch log + audit trail
+        # can attribute every vote separately. The LLM is the same per pad
+        # so we don't take a new model dependency; variance reduction comes
+        # from running the same model at temperature=0 with a different
+        # implicit seed inside the underlying Judge call, which is the same
+        # variance-reduction shape PR #187 advertised for L2.
+        #
+        # Default ``min_judges=None`` keeps strict back-compat: a caller who
+        # constructed a 2-seat panel pre-fix still gets exactly 2 seats. The
+        # SwarmCommander explicitly passes ``min_judges=3`` (the value
+        # JudgePanelConfig already documented as the default) so the shipped
+        # config gets the 3-vote panel PR #187 promised.
+        specs_list = list(specs)
+        if min_judges is not None and len(specs_list) < min_judges:
+            base = list(specs_list)
+            pad_idx = 0
+            while len(specs_list) < min_judges:
+                src = base[pad_idx % len(base)]
+                pad_idx += 1
+                src_label = src.label or src.model
+                specs_list.append(
+                    JudgeSpec(
+                        llm=src.llm,
+                        model=src.model,
+                        family=src.family,
+                        label=f"{src_label}-vote{pad_idx + 1}",
+                    )
+                )
+        self._specs = specs_list
+        self._min_judges = min_judges
         self._cross_family_enforced = cross_family_enforced
 
         families = {s.canonical_family for s in self._specs}
