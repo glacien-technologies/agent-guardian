@@ -245,39 +245,34 @@
    * (programmatic, severity + anchor lookup) AND the data-table link
    * click delegate (DOM event, severity + anchor read from data-*).
    *
-   * Contract: open the Findings tab, set the severity filter to the
-   * clicked severity (when the dropdown exists), then scroll the
-   * matching ``#exec-sev-{severity}`` grouping into view inside the
-   * just-revealed Findings panel.
+   * Contract (QA-053 server-side filtering): NAVIGATE to the Findings
+   * tab with the clicked severity applied as a URL filter
+   * (``?fsev=<severity>#tab=findings``). The server filters the WHOLE
+   * scan and re-paginates, so the drill reaches every finding of that
+   * severity across ALL pages — the old approach set the dropdown value
+   * + dispatched ``change`` client-side, which could only ever touch the
+   * rows already rendered on the current page (a critical bar on Overview
+   * would land on a Findings page that happened to hold no criticals and
+   * show "0"). Any other active filters (agent / probe / ASI) are
+   * preserved; the page index resets to 1 for the fresh filter.
    *
-   * The tab switch is idempotent when already on Findings. The filter
-   * dispatch is unconditional — see tester report #3 history above; an
-   * exact <option> match check would silently no-op when the clicked
-   * severity has no current-page rows. Scroll is deferred via rAF so
-   * the browser computes layout for the freshly-revealed panel before
-   * we scroll (otherwise the call fires pre-paint and lands at 0).
+   * ``anchor`` (``#exec-sev-<severity>``) is retained as the no-JS
+   * ``<a href>`` fallback (screen-readers / JS-off clients still get an
+   * in-page scroll) but is unused on the JS path: a filtered table is
+   * entirely that severity, so there is nothing to scroll past.
    */
   function drillIntoSeverity(severity, anchor) {
-    var findingsTab = document.getElementById("tab-findings");
-    if (findingsTab) { findingsTab.click(); }
-    var sevSelect = document.getElementById("exec-findings-filter-severity");
-    if (sevSelect && severity) {
-      sevSelect.value = severity;
-      sevSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    void anchor; // no-JS <a href> fallback only; see contract above.
+    var params = new URLSearchParams(window.location.search);
+    params.delete("page"); // a fresh filter resets to page 1
+    if (severity) {
+      params.set("fsev", severity);
+    } else {
+      params.delete("fsev");
     }
-    if (!anchor) { return; }
-    var target = anchor.charAt(0) === "#"
-      ? document.getElementById(anchor.slice(1))
-      : document.querySelector(anchor);
-    if (!target) { return; }
-    var prefersReduced = window.matchMedia
-      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    window.requestAnimationFrame(function () {
-      target.scrollIntoView({
-        behavior: prefersReduced ? "auto" : "smooth",
-        block: "start",
-      });
-    });
+    var qs = params.toString();
+    window.location.href =
+      window.location.pathname + (qs ? "?" + qs : "") + "#tab=findings";
   }
 
   /* Data-table link delegate — wire once per page. Real ``<a href>``
