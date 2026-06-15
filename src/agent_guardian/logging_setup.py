@@ -255,6 +255,34 @@ def full_agent_io_enabled() -> bool:
 AGENT_IO_LOG_CAP = 16000
 
 
+# Issue #222 — summary-mode cap. When --log-agent-io-summary (or
+# AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY=1) is set, the agent-io block is
+# truncated to this many chars per side (input + output each) with a
+# trailing "(+N chars)" marker. Empirically 200 is enough to read the
+# shape of the call without burning a 10x run.log on a full-mode scan.
+AGENT_IO_SUMMARY_CAP: int = 200
+
+
+def _agent_io_summary_enabled() -> bool:
+    """``True`` when the operator opted into --log-agent-io-summary."""
+    return os.getenv("AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _maybe_summarize(text: str) -> str:
+    """Truncate ``text`` to :data:`AGENT_IO_SUMMARY_CAP` chars per side
+    when summary mode is on; otherwise return unchanged."""
+    if not _agent_io_summary_enabled():
+        return text
+    if len(text) <= AGENT_IO_SUMMARY_CAP:
+        return text
+    return f"{text[:AGENT_IO_SUMMARY_CAP]}…[+{len(text) - AGENT_IO_SUMMARY_CAP} chars]"
+
+
 def log_agent_io(
     logger: logging.Logger,
     role: str,
@@ -271,17 +299,25 @@ def log_agent_io(
     [judge]`` in ``run.log`` and read the exact prompt, the generated attack /
     raw verdict, and the reasoning. Text is secret-redacted + control-stripped
     via :func:`sanitize_for_log` and capped at :data:`AGENT_IO_LOG_CAP`.
+
+    Issue #222 — when ``--log-agent-io-summary`` is also set (env var
+    ``AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY=1``), each of the input + output
+    sides is further capped at :data:`AGENT_IO_SUMMARY_CAP` (200 chars)
+    with a trailing ``…[+N chars]`` marker so the audit trail keeps the
+    shape of the call without burning a 10x run.log on full-mode scans.
     """
     if not full_agent_io_enabled():
         return
     extra = " ".join(f"{k}={v}" for k, v in fields.items() if v is not None)
+    sanitised_in = sanitize_for_log(input_text, max_len=AGENT_IO_LOG_CAP)
+    sanitised_out = sanitize_for_log(output_text, max_len=AGENT_IO_LOG_CAP)
     logger.debug(
         "agent-io [%s]%s%s\n  --- input ---\n%s\n  --- output ---\n%s",
         role,
         f" model={model}" if model else "",
         f" {extra}" if extra else "",
-        sanitize_for_log(input_text, max_len=AGENT_IO_LOG_CAP),
-        sanitize_for_log(output_text, max_len=AGENT_IO_LOG_CAP),
+        _maybe_summarize(sanitised_in),
+        _maybe_summarize(sanitised_out),
     )
 
 
