@@ -441,6 +441,7 @@ def make_events_writer(
     # on the very first event-less moment of a scan. Open mode is "a" so
     # parallel writes from a paused-and-resumed scan append rather than
     # truncate.
+    is_fresh = not events_path.exists() or events_path.stat().st_size == 0
     try:
         events_path.touch(exist_ok=True)
     except OSError as exc:  # pragma: no cover -- defensive
@@ -450,6 +451,29 @@ def make_events_writer(
             type(exc).__name__,
             exc,
         )
+    # Issue #221 — stamp a {"kind": "_meta", "schema_version": "events-v1"}
+    # sentinel as the first line of a fresh events.jsonl so downstream
+    # parsers can branch on the schema explicitly rather than peek at the
+    # 14-kind taxonomy. Only when creating the file (size 0); reconnecting
+    # to an existing stream skips this so we never double-stamp.
+    if is_fresh:
+        try:
+            from agent_guardian.server.scan_store import EVENTS_JSONL_SCHEMA_VERSION
+
+            header = {
+                "kind": "_meta",
+                "schema_version": EVENTS_JSONL_SCHEMA_VERSION,
+                "scan_id": getattr(getattr(swarm, "config", None), "scan_id", None),
+            }
+            with events_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(header) + "\n")
+        except (OSError, ImportError) as exc:  # pragma: no cover -- defensive
+            _LOG.warning(
+                "events_writer: failed to write schema header for %s (%s: %s)",
+                events_path,
+                type(exc).__name__,
+                exc,
+            )
 
     def _observer(event: SwarmEvent) -> None:
         if prior_observer is not None:

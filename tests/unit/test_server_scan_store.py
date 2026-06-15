@@ -196,9 +196,12 @@ def test_register_wires_observer_and_buffers_events(tmp_path: Path) -> None:
         # On-disk JSONL written too.
         jsonl = store.scan_dir("scan-x") / "events.jsonl"
         assert jsonl.is_file()
-        line = json.loads(jsonl.read_text(encoding="utf-8").splitlines()[0])
-        assert line["kind"] == "agent_start"
-        assert line["agent"] == "tool-abuse-agent"
+        # Issue #221 — events.jsonl starts with a {"kind":"_meta", ...}
+        # schema-version header line; skip it to read the first REAL event.
+        all_lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines()]
+        real_events = [ln for ln in all_lines if ln.get("kind") != "_meta"]
+        assert real_events[0]["kind"] == "agent_start"
+        assert real_events[0]["agent"] == "tool-abuse-agent"
         # `scan_done` should drop the running registration.
         assert store.is_running("scan-x")
         fake.observer(_event("scan_done"))
@@ -320,11 +323,14 @@ def test_scan_done_evicts_buffer_when_no_loop(tmp_path: Path) -> None:
     # No running loop → immediate eviction.
     assert "scan-evict" not in store._events
     # On-disk events.jsonl still has both events for late replay.
+    # Issue #221 — skip the {"kind":"_meta", ...} schema-version header
+    # line so the kinds list asserts on the REAL event sequence only.
     jsonl_lines = (
         (store.scan_dir("scan-evict") / "events.jsonl").read_text(encoding="utf-8").splitlines()
     )
     kinds = [json.loads(line)["kind"] for line in jsonl_lines]
-    assert kinds == ["agent_start", "scan_done"]
+    real_kinds = [k for k in kinds if k != "_meta"]
+    assert real_kinds == ["agent_start", "scan_done"]
 
 
 def test_scan_done_evicts_buffer_after_grace_when_loop_running(tmp_path: Path) -> None:

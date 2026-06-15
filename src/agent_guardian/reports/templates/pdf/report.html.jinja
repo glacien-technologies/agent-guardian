@@ -734,16 +734,25 @@
         <tbody>
           {% for row in asi_rows %}
           {% set sc = row.score | default(0, true) %}
-          <tr class="{{ 'has-find' if row.count else '' }}">
+          {% set is_na = row.is_not_applicable | default(false) %}
+          <tr class="{{ 'has-find' if row.count else '' }}{{ ' is-na' if is_na else '' }}">
             <td class="id">{{ row.id }}</td>
             <td class="desc">{{ row.description }}</td>
             <td class="num">
-              <span class="score-num">{{ "%.1f"|format(sc) }}</span>
-              <span class="scorebar-wrap">
-                <span class="scorebar {{ 'hot' if sc < 40 else ('warm' if sc < 70 else '') }}"><span style="width:{{ sc | round(0) }}%"></span></span>
-              </span>
+              {# Issue #230 — never_launched ASI categories render as N/A
+                 instead of the 0.0 sentinel, mirroring the markdown + SARIF
+                 + JSON emit. The "Not applicable" notice above tells the
+                 reader why these rows are blanked out. #}
+              {% if is_na %}
+                <span class="score-num" style="color:#94a3b8;">N/A</span>
+              {% else %}
+                <span class="score-num">{{ "%.1f"|format(sc) }}</span>
+                <span class="scorebar-wrap">
+                  <span class="scorebar {{ 'hot' if sc < 40 else ('warm' if sc < 70 else '') }}"><span style="width:{{ sc | round(0) }}%"></span></span>
+                </span>
+              {% endif %}
             </td>
-            <td class="cnt">{{ row.count }}</td>
+            <td class="cnt">{% if is_na %}—{% else %}{{ row.count }}{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>

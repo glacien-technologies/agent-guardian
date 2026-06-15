@@ -138,6 +138,11 @@ def _build_asi_rows(findings: list[Finding], scan: Scan) -> list[dict[str, Any]]
     by_asi: dict[AsiCategory, list[Any]] = {cat: [] for cat in AsiCategory}
     for finding in findings:
         by_asi[finding.asi].append(finding)
+    # Issue #230 — never_launched is a sorted list of raw ASI category
+    # strings (e.g. ["ASI04", "ASI07"]). The PDF template needs to render
+    # those rows as "N/A" instead of "0.0" red, mirroring the markdown +
+    # SARIF + JSON emit so the PR #210 multi-emitter contract closes.
+    never_launched_set = set(scan.never_launched or [])
     for category in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
         cat_findings = by_asi[category]
         rows.append(
@@ -147,6 +152,7 @@ def _build_asi_rows(findings: list[Finding], scan: Scan) -> list[dict[str, Any]]
                 "score": scan.asi_scores.get(category, 100.0),
                 "count": len(cat_findings),
                 "findings": cat_findings,
+                "is_not_applicable": category.value in never_launched_set,
             }
         )
     return rows

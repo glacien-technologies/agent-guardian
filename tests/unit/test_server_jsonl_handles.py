@@ -62,8 +62,13 @@ def test_jsonl_writer_flushed_so_concurrent_reader_sees_bytes(tmp_path: Path) ->
     jsonl = tmp_path / "scan-flush" / "events.jsonl"
     text = jsonl.read_text(encoding="utf-8")
     assert text.strip() != ""
-    payload = json.loads(text.splitlines()[0])
-    assert payload["kind"] == "agent_start"
+    # Issue #221 — events.jsonl now writes a {"kind":"_meta",
+    # "schema_version": "events-v1", ...} header as the first line of
+    # every fresh file. Skip it to assert on the first REAL event.
+    lines = [json.loads(line) for line in text.splitlines()]
+    real_events = [ln for ln in lines if ln.get("kind") != "_meta"]
+    assert real_events, "expected at least one non-meta event"
+    assert real_events[0]["kind"] == "agent_start"
 
 
 def test_jsonl_writer_closed_on_scan_done(tmp_path: Path) -> None:

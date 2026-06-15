@@ -59,6 +59,15 @@ class ScanCompleteness(BaseModel):
     turns_used: int = Field(default=0, ge=0)
     turns_planned: int = Field(default=0, ge=0)
     pct: float = Field(default=100.0, ge=0.0, le=100.0)
+    # Issue #218 — per-agent termination breakdown. ``agents_cut_short``
+    # gives the total count but not the cause distribution. Without this,
+    # dashboard / SARIF coverage badges cannot distinguish "scan was
+    # gracefully cancelled at the wall budget" (terminated_by=cancelled)
+    # from "agent errored mid-flight" (terminated_by=error) or "agent
+    # finished cleanly" (terminated_by=success). Keys are
+    # ``TerminationReason`` values (success / cancelled / error / exhausted /
+    # not_tested / early_stop); empty dict on back-compat reads.
+    terminated_by_counts: dict[str, int] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

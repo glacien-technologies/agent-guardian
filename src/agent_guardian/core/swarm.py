@@ -2390,6 +2390,13 @@ class SwarmCommander:
         # Headline = fraction of the planned applicable agents that ran to
         # completion (corpus-exhausted or succeeded), capped at the planned set.
         pct = (min(completed, planned) / planned * 100.0) if planned else 0.0
+        # Issue #218 — surface the per-reason termination breakdown so a
+        # dashboard / SARIF coverage badge can render "12 success / 3 cancelled"
+        # instead of just the "3 cut_short" aggregate.
+        terminated_by_counts: dict[str, int] = {}
+        for r in attack_reports:
+            tb = str(r.terminated_by)
+            terminated_by_counts[tb] = terminated_by_counts.get(tb, 0) + 1
         return ScanCompleteness(
             agents_planned=planned,
             agents_completed=completed,
@@ -2397,6 +2404,7 @@ class SwarmCommander:
             turns_used=turns_used,
             turns_planned=turns_planned,
             pct=round(min(100.0, pct), 1),
+            terminated_by_counts=terminated_by_counts,
         )
 
     # ------------------------------------------------------------------
