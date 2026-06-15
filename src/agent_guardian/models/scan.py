@@ -201,6 +201,16 @@ class Scan(BaseModel):
     # round-trips unchanged.
     recon_truncated: bool = False
     recon_completion_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    # Issue #215 — commander planner outcome. ``"adaptive"`` when the
+    # SwarmCommander LLM produced a per-agent plan; ``"uniform"`` when
+    # the swarm fell back to the uniform brief (commander refused, parse
+    # error, or LLM-call exception); ``None`` when the commander didn't
+    # run at all (recon-only scan, or skipped by the "no operator or
+    # inferred goal" gate -- issue #220 / L5). Without this signal an
+    # operator auditing a non-authoritative scan cannot tell adaptive
+    # from uniform without grep-ing run.log line-by-line. Default
+    # ``None`` keeps back-compat with older Scan JSON on disk.
+    planner_fallback: Literal["adaptive", "uniform"] | None = None
     # v1.1 — coverage grade summarising how thoroughly the swarm exercised
     # the target. ``A`` = every ASI category covered by real evidence;
     # ``F`` = no coverage at all. Persisted onto the Scan so an operator can

@@ -169,6 +169,7 @@ class PanelJudge:
         *,
         cross_family_enforced: bool = False,
         min_judges: int | None = None,
+        seed: int | None = None,
     ) -> None:
         if not specs:
             raise ValueError("PanelJudge requires at least one JudgeSpec")
@@ -212,6 +213,12 @@ class PanelJudge:
         self._specs = specs_list
         self._min_judges = min_judges
         self._cross_family_enforced = cross_family_enforced
+        # Issue #227 — base seed forwarded to every seat's verdict call.
+        # Each seat receives seed + seat_index so reruns at the same
+        # scan seed produce identical per-seat verdicts (full panel
+        # reproducibility), while the per-seat offset avoids 3 identical
+        # samples that would defeat the variance-reduction purpose of L2.
+        self._seed = seed
 
         families = {s.canonical_family for s in self._specs}
         validation_passed = (not cross_family_enforced) or len(families) >= 2
@@ -282,7 +289,9 @@ class PanelJudge:
         # ``KeyboardInterrupt`` and ``SystemExit`` are re-raised so cancellation
         # propagates correctly and the user's Ctrl-C signal is never silently
         # swallowed (one bad seat must not corrupt task lifecycle).
-        async def _call(judge_obj: Any, label: str) -> JudgeVerdict | Exception:
+        async def _call(
+            judge_obj: Any, label: str, seat_seed: int | None
+        ) -> JudgeVerdict | Exception:
             try:
                 result: JudgeVerdict = await judge_obj.verdict(
                     prompt,
@@ -290,6 +299,12 @@ class PanelJudge:
                     conversation=conversation,
                     tool_trace=tool_trace,
                     probe_expectation=probe_expectation,
+                    # Issue #227 — thread the per-seat scan seed. Providers
+                    # that honour ``seed`` (Gemini / OpenAI / Ollama)
+                    # reproduce the verdict on re-runs; others (Anthropic
+                    # / Bedrock) ignore the field, which is the same
+                    # silent-no-op pattern Judge.verdict already documents.
+                    seed=seat_seed,
                 )
                 return result
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
@@ -297,8 +312,19 @@ class PanelJudge:
             except Exception as exc:
                 return exc
 
+        # Build (seat_seed) by offset from the panel seed so reruns at
+        # the same scan seed reproduce per-seat verdicts; ``None`` when
+        # no scan seed was set propagates as None to each seat.
+        def _seat_seed(idx: int) -> int | None:
+            if self._seed is None:
+                return None
+            return self._seed + idx
+
         results = await asyncio.gather(
-            *(_call(judge_obj, spec.label or spec.model) for judge_obj, spec in self._judges)
+            *(
+                _call(judge_obj, spec.label or spec.model, _seat_seed(idx))
+                for idx, (judge_obj, spec) in enumerate(self._judges)
+            )
         )
 
         verdicts: list[JudgeVerdict] = []

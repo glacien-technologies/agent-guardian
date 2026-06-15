@@ -204,6 +204,10 @@ def emit_json(
         # is non-empty.
         "recon_truncated": scan.recon_truncated,
         "recon_completion_pct": scan.recon_completion_pct,
+        # Issue #215 — commander planner outcome ("adaptive" / "uniform" /
+        # None). CI gates + dashboards can branch on adaptive-vs-uniform
+        # without grep-ing run.log.
+        "planner_fallback": scan.planner_fallback,
         "coverage_grade": scan.coverage_grade,
         "created_at": scan.created_at.astimezone().isoformat()
         if scan.created_at.tzinfo

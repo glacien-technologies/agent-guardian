@@ -843,10 +843,17 @@ class SwarmCommander:
             # three separate vote dispatches per verdict instead of two.
             # ``JudgePanelConfig.min_judges`` already documents this as the
             # default (3); pre-fix the field was declared but never read.
+            #
+            # Issue #227 — forward the scan seed so each panel seat runs
+            # with seed + seat_index, reproducing verdict outcomes on
+            # same-seed reruns. Providers that ignore seed (Anthropic /
+            # Bedrock) silently no-op, mirroring Judge.verdict's existing
+            # documented behaviour.
             self._panel_judge = PanelJudge(
                 specs=panel_specs,
                 cross_family_enforced=getattr(config, "judge_cross_family_enforced", False),
                 min_judges=3,
+                seed=getattr(config, "seed", None),
             )
         except Exception as e:
             _LOG.debug(
@@ -3471,6 +3478,10 @@ class SwarmCommander:
                 if self._recon_cap_seconds is not None and self._recon_cap_seconds > 0.0
                 else None
             ),
+            # Issue #215 — surface the commander planner outcome so an
+            # operator auditing a non-authoritative scan can tell adaptive
+            # from uniform without grep-ing run.log line-by-line.
+            planner_fallback=self._planner_fallback,  # type: ignore[arg-type]
             coverage_grade=result.coverage_grade,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
             budget=self._build_budget_report(),
