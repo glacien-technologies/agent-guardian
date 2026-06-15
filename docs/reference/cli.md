@@ -294,6 +294,7 @@ or duplicate spellings).
 | `--debug` | Enable debug-level logging. |
 | `--debug-format` | Debug-log format (`text` / `json`). |
 | `--log-agent-io` | Troubleshooting: write every agent's full LLM I/O (recon, commander, attacker, judge — system prompt + input + raw output) to the scan's `run.log`. Secrets are redacted. Equivalent to `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`. |
+| `--log-agent-io-summary` | Companion to `--log-agent-io`. Truncates each I/O block to 200 chars per side with a `…[+N chars]` marker so the audit trail keeps the shape of the call without burning a 10x `run.log` on full-mode scans (rc35 #03 was 9.6MB; summary mode brings it down ~10x). Equivalent to `AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY=1`. |
 | `--no-serve` | Do not auto-start the local dashboard during the scan. |
 | `--serve-grace-seconds` | How long to keep the local dashboard alive after the scan finishes. |
 | `--open` / `--no-open` | Open the scan-specific dashboard URL in the default browser once the scan completes. Auto-skipped under CI / SSH / non-TTY environments. |
