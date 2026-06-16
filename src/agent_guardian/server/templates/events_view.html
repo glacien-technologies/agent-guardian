@@ -16,6 +16,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <style>
     :root {
+      /* Light-only viewer — lock native controls/scrollbars to light so an
+         OS in dark mode doesn't render dark widgets on this light page. */
+      color-scheme: light;
       --bg:#faf9fb; --panel:#ffffff; --ink:#1c1320; --muted:#6b6470; --border:#e7e2ec;
       --head:#f6f3fa; --accent:#7c3aed;
       --key:#6d28d9; --str:#0f766e; --num:#b45309; --bool:#9333ea; --null:#9ca3af;

@@ -79,33 +79,43 @@
   --exec-tabbar-h: 3rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --exec-bg: #0e0e10;
-    --exec-bg-elev: #17171a;
-    --exec-bg-sunken: #1f1f23;
-    --exec-ink: #f5f5f2;
-    --exec-ink-muted: #a8a8a4;
-    --exec-ink-subtle: #6e6e6a;
-    --exec-border-subtle: #2a2a2e;
-    --exec-border: #3a3a3e;
-    --exec-brand: #a78bfa;
-    --exec-brand-strong: #c4b5fd;
-    --exec-brand-tint: #1e1a2e;
-    --exec-code-bg: #1f1f23;
-    /* Widened critical/high delta so a CRITICAL vertex on the ASI radar
-     * is unambiguously red vs HIGH's amber, not two warm-leaning corals. */
-    --exec-sev-critical: #ef4444;
-    --exec-sev-critical-bg: #2c1414;
-    --exec-sev-high: #f59e0b;
-    --exec-sev-high-bg: #2a1a0d;
-    --exec-sev-medium: #facc15;
-    --exec-sev-medium-bg: #281f0a;
-    --exec-sev-low: #a3e635;
-    --exec-sev-low-bg: #182209;
-    --exec-sev-info: #38bdf8;
-  }
-}
+/* The executive dashboard is a LIGHT-only theme. This page also loads
+ * ``colors_and_type.css``, whose --ink/--bg/--surface tokens and bare
+ * <h1>-<h4> colours are defined for light only (no prefers-color-scheme
+ * switch). When this block was active, an OS in dark mode flipped the
+ * --exec-* tokens to dark while the shared tokens + headings stayed
+ * light — a half-dark page with black-on-black text. The layout now
+ * declares ``color-scheme: light`` and this block is disabled so the
+ * dashboard always renders in its intended cream/light palette. To bring
+ * back a real dark mode, re-enable BOTH this block AND a coordinated dark
+ * palette in colors_and_type.css (and restore the meta to "dark light").
+ *
+ * @media (prefers-color-scheme: dark) {
+ *   :root {
+ *     --exec-bg: #0e0e10;
+ *     --exec-bg-elev: #17171a;
+ *     --exec-bg-sunken: #1f1f23;
+ *     --exec-ink: #f5f5f2;
+ *     --exec-ink-muted: #a8a8a4;
+ *     --exec-ink-subtle: #6e6e6a;
+ *     --exec-border-subtle: #2a2a2e;
+ *     --exec-border: #3a3a3e;
+ *     --exec-brand: #a78bfa;
+ *     --exec-brand-strong: #c4b5fd;
+ *     --exec-brand-tint: #1e1a2e;
+ *     --exec-code-bg: #1f1f23;
+ *     --exec-sev-critical: #ef4444;
+ *     --exec-sev-critical-bg: #2c1414;
+ *     --exec-sev-high: #f59e0b;
+ *     --exec-sev-high-bg: #2a1a0d;
+ *     --exec-sev-medium: #facc15;
+ *     --exec-sev-medium-bg: #281f0a;
+ *     --exec-sev-low: #a3e635;
+ *     --exec-sev-low-bg: #182209;
+ *     --exec-sev-info: #38bdf8;
+ *   }
+ * }
+ */
 
 * { box-sizing: border-box; }
 
@@ -1696,13 +1706,13 @@ body.exec-body {
 .exec-sev-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   padding: 3px 10px;
   border-radius: 999px;
   font-family: var(--exec-font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
   background: var(--exec-bg-sunken);
   color: var(--exec-ink);
 }
