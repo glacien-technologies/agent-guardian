@@ -1593,6 +1593,33 @@ def verify(
     if not path.exists():
         typer.echo(f"path not found: {path}", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
+    # Issue #213 — `agent-guardian scan --bundle X.zip` produces a directory
+    # at X.zip containing `bundle_<id>/manifest.json` (NOT a real zip).
+    # Pre-fix, `verify path/to/bundle.zip` would treat the directory as a
+    # non-.json file and exit 2. Now we recurse: if the user pointed
+    # `verify` at a directory, discover the manifest.json beneath it and
+    # verify that.
+    if path.is_dir():
+        # Prefer the canonical bundle layout (bundle_<id>/manifest.json),
+        # then fall back to any manifest.json anywhere beneath. A missing
+        # manifest is a real error -- surface it cleanly.
+        manifests = sorted(path.glob("*/manifest.json")) or sorted(path.rglob("manifest.json"))
+        if not manifests:
+            typer.echo(
+                f"no manifest.json found beneath {path} -- expected bundle layout is "
+                f"<path>/bundle_<id>/manifest.json (#213).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        if len(manifests) > 1:
+            typer.echo(
+                f"multiple manifest.json under {path} ({len(manifests)} matches) -- "
+                f"point --path at a single bundle directory.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        path = manifests[0]
+        typer.echo(f"verifying bundle manifest: {path}")
     suffix = path.suffix.lower()
     if suffix != ".json":
         typer.echo(
@@ -3304,11 +3331,28 @@ def scan(
         "--max-low",
         help="Exit 1 if the number of LOW findings exceeds this value.",
     ),
-    output: str = typer.Option(
-        "json", "--output", help="Report format: json | sarif | junit | md | gitlab | pdf."
+    output: list[str] = typer.Option(
+        ["json"],
+        "--output",
+        help=(
+            "Report format(s): json | sarif | junit | md | gitlab | pdf. "
+            "Pass --output multiple times to emit multiple formats from a "
+            "single scan (e.g. --output sarif --output pdf --output json). "
+            "Default emits json only."
+        ),
     ),
     output_path: Path | None = typer.Option(
-        None, "--output-path", help="Where to write the report file."
+        None,
+        "--output-path",
+        help=(
+            "Where to write the report file. With a single --output, this is "
+            "the report path. With multiple --output formats, the path is "
+            "used as a STEM: each format writes to "
+            "<stem-without-ext>.<format-ext> (e.g. --output-path out/report "
+            "with --output json --output sarif writes out/report.json + "
+            "out/report.sarif). Omit to write to "
+            "~/.agentguardian/scans/<scan_id>/report.<ext>."
+        ),
     ),
     no_tui: bool = typer.Option(False, "--no-tui", help="Disable the Rich progress panel."),
     config_path: Path | None = typer.Option(
@@ -3461,11 +3505,24 @@ def scan(
         False,
         "--log-agent-io",
         help=(
-            "Troubleshooting: write the FULL per-agent I/O to run.log — the "
+            "Troubleshooting: write the per-agent I/O to run.log — the "
             "attacker's meta-prompt + generated attack, and the judge's full "
             "prompt + raw verdict + reasoning. Grep 'agent-io [attacker]' / "
-            "'agent-io [judge]'. Verbose; equivalent to setting "
-            "AGENT_GUARDIAN_LOG_FULL_PROMPTS=1."
+            "'agent-io [judge]'. By default emits the FULL input + output; "
+            "combine with --log-agent-io-summary to truncate to 200 chars "
+            "(useful on full-mode scans where the full dump bloats run.log "
+            "to >9MB). Equivalent to setting AGENT_GUARDIAN_LOG_FULL_PROMPTS=1."
+        ),
+    ),
+    log_agent_io_summary: bool = typer.Option(
+        False,
+        "--log-agent-io-summary",
+        help=(
+            "When combined with --log-agent-io, truncate the input/output "
+            "blocks to 200 chars per side and append a token count so the "
+            "audit trail is preserved without the 10x run.log bloat. "
+            "Equivalent to setting AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY=1 "
+            "(#222)."
         ),
     ),
     no_serve: bool = typer.Option(
@@ -3553,6 +3610,11 @@ def scan(
     # swarm starts making calls.
     if log_agent_io:
         os.environ["AGENT_GUARDIAN_LOG_FULL_PROMPTS"] = "1"
+    # Issue #222 — --log-agent-io-summary truncates the agent-io blocks to
+    # 200 chars per side. Only meaningful when --log-agent-io is on; the
+    # env var is the gate the logging path actually reads.
+    if log_agent_io_summary:
+        os.environ["AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY"] = "1"
     # Clamp debug level to 0/1/2 — Typer counts unbounded but we only
     # publish two non-zero modes (truncated / full).
     debug_level = max(0, min(2, int(debug)))
@@ -3643,7 +3705,9 @@ async def _run_scan(
     max_high: int | None = None,
     max_medium: int | None = None,
     max_low: int | None = None,
-    output: str,
+    # Issue #212 — accept a list of formats (Typer accumulates repeated
+    # --output flags into a list); plumbed verbatim to _run_scan_inner.
+    output: list[str],
     output_path: Path | None,
     no_tui: bool,
     config_path: Path | None,
@@ -3830,7 +3894,10 @@ async def _run_scan(
         validate_output_engine_available,
     )
 
-    requested_formats: list[str] = [output]
+    # Issue #212 — ``output`` is a list because Typer accumulates repeated
+    # --output flags. Materialise a fresh list so we own the value and any
+    # downstream mutation can't leak back into the Typer-controlled default.
+    requested_formats: list[str] = list(output)
     engine_checks: list[EngineCheck] = []
     for fmt in requested_formats:
         check = validate_output_engine_available(fmt)
@@ -3980,7 +4047,18 @@ async def _run_scan(
             budget_mode=mode,
             wall_seconds_cap=wall_seconds_cap_for_panel,
             usd_cap=budget_usd,
-            requested_outputs=[(output, engine_checks[0], str(output_path or ""))],
+            # Issue #212 — display every requested output format (Typer
+            # now accepts repeated --output flags). One tuple per format
+            # so the plan-panel shows all of them rather than just the
+            # first.
+            requested_outputs=[
+                (
+                    fmt,
+                    engine_checks[i] if i < len(engine_checks) else engine_checks[0],
+                    str(output_path or ""),
+                )
+                for i, fmt in enumerate(requested_formats)
+            ],
             auto_serve_result=auto_serve_result,
             dashboard_url=plan_dashboard_url,
             safety=_resolve_safety_row(
@@ -4145,7 +4223,10 @@ async def _run_scan_inner(
     max_high: int | None = None,
     max_medium: int | None = None,
     max_low: int | None = None,
-    output: str,
+    # Issue #212 — accept a list of formats so the inner runner can emit
+    # multiple reports from one scan. The outer Typer command accepts
+    # repeated --output flags; the list is plumbed verbatim.
+    output: list[str],
     output_path: Path | None,
     no_tui: bool,
     seed: int,
@@ -4180,6 +4261,15 @@ async def _run_scan_inner(
     computed it for the plan panel and we want the two surfaces to
     agree byte-for-byte.
     """
+
+    # Issue #212 — normalise the ``output`` list to the canonical
+    # ``requested_formats`` list used by the emit loop. The outer Typer
+    # command guarantees at least ``["json"]`` so an empty list is only
+    # reachable via direct internal callers; defend the empty case so we
+    # never silently skip every emitter.
+    requested_formats: list[str] = list(output)
+    if not requested_formats:
+        requested_formats = ["json"]
 
     # Stage 1B -- a --contract run replaces the four legacy target modes with a
     # contract-built adapter + RoE controller + OTel observer. The non-contract
@@ -4567,21 +4657,63 @@ async def _run_scan_inner(
         if warning_text is not None:
             typer.echo(warning_text, err=True)
 
-    # 9. Render + persist report. The canonical scan.json is always written via
-    #    the signed/redacted ``write_json`` path so the persisted artifact is
-    #    schema-stamped, signed, and PII-redacted (#1/#2). The user-chosen
-    #    --output report is written separately (may be a different format).
-    if output_path is None:
-        output_path = Path.home() / ".agentguardian" / "scans" / scan_id / f"report.{output}"
-    try:
-        _write_report(scan_result, output, output_path)
-    except typer.BadParameter as exc:
-        typer.echo(f"output format error: {exc}", err=True)
-        return EXIT_CONFIG
-    except Exception as exc:
-        # PDF engines can raise PdfFeatureUnavailable etc. Surface clearly.
-        typer.echo(f"report write error: {type(exc).__name__}: {exc}", err=True)
-        return EXIT_CONFIG
+    # 9. Render + persist report(s). The canonical scan.json is always written
+    #    via the signed/redacted ``write_json`` path so the persisted artifact
+    #    is schema-stamped, signed, and PII-redacted (#1/#2). The user-chosen
+    #    --output report(s) are written separately (may be different formats).
+    #
+    # Issue #212 — multi-format emit. ``requested_formats`` is a list (Typer
+    # accumulates repeated ``--output`` flags). For each format:
+    #   - 1 format + ``--output-path PATH``       -> write to PATH
+    #   - N formats + ``--output-path PATH``      -> use PATH as a STEM,
+    #                                                write <stem>.<ext> per format
+    #   - any count + no --output-path            -> default per-format
+    #                                                ~/.agentguardian/scans/<scan_id>/report.<ext>
+    default_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+
+    def _resolve_per_format_path(fmt: str) -> Path:
+        if output_path is None:
+            return default_dir / f"report.{fmt}"
+        # If the user gave a single --output and a single --output-path, use
+        # the path verbatim. With multiple formats, treat the path as a stem.
+        if len(requested_formats) == 1:
+            return output_path
+        # Multi-format: derive a sibling per format using the path's stem.
+        stem = output_path.with_suffix("") if output_path.suffix else output_path
+        return Path(f"{stem}.{fmt}")
+
+    emitted_paths: list[Path] = []
+    for fmt in requested_formats:
+        per_path = _resolve_per_format_path(fmt)
+        try:
+            _write_report(scan_result, fmt, per_path)
+        except typer.BadParameter as exc:
+            typer.echo(f"output format error ({fmt}): {exc}", err=True)
+            return EXIT_CONFIG
+        except Exception as exc:
+            # PDF engines can raise PdfFeatureUnavailable etc. Surface clearly.
+            typer.echo(
+                f"report write error ({fmt}): {type(exc).__name__}: {exc}",
+                err=True,
+            )
+            return EXIT_CONFIG
+        emitted_paths.append(per_path)
+
+    # Surface the multi-emit outcome on stderr so a CI consumer or operator
+    # confirms every requested format landed. Single-format scans behave as
+    # before (no extra noise) so the back-compat surface stays clean.
+    if len(requested_formats) > 1:
+        typer.echo(
+            f"emitted {len(emitted_paths)} report(s): "
+            + ", ".join(
+                f"{fmt}={p}" for fmt, p in zip(requested_formats, emitted_paths, strict=True)
+            ),
+            err=True,
+        )
+    # Hold ``output_path`` as the first emitted path so the existing
+    # post-write logic that references ``output_path`` (logging, env hooks,
+    # etc.) sees the canonical single-format path.
+    output_path = emitted_paths[0]
 
     # Persist the canonical scan.json (signed + redacted + schema-stamped) for
     # later `report` / `verify` / `publish` calls. The raw, unsigned model dump

@@ -59,6 +59,15 @@ class ScanCompleteness(BaseModel):
     turns_used: int = Field(default=0, ge=0)
     turns_planned: int = Field(default=0, ge=0)
     pct: float = Field(default=100.0, ge=0.0, le=100.0)
+    # Issue #218 — per-agent termination breakdown. ``agents_cut_short``
+    # gives the total count but not the cause distribution. Without this,
+    # dashboard / SARIF coverage badges cannot distinguish "scan was
+    # gracefully cancelled at the wall budget" (terminated_by=cancelled)
+    # from "agent errored mid-flight" (terminated_by=error) or "agent
+    # finished cleanly" (terminated_by=success). Keys are
+    # ``TerminationReason`` values (success / cancelled / error / exhausted /
+    # not_tested / early_stop); empty dict on back-compat reads.
+    terminated_by_counts: dict[str, int] = Field(default_factory=dict)
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -176,6 +185,32 @@ class Scan(BaseModel):
     # raw ASI string values for JSON-round-trip safety; empty for back-compat
     # with older Scan JSON.
     never_launched: list[str] = Field(default_factory=list)
+    # Issue #206 follow-up (rc35 deep-review M2 + L8) — recon-truncation
+    # observability. ``recon_truncated`` is True when the recon phase hit
+    # its wall-budget cap before producing a complete fingerprint, which
+    # is the most common cause of an unexpectedly empty ``baseline_tools``
+    # + a populated ``never_launched``. Without this signal, a CI consumer
+    # reading ``never_launched=[ASI02,ASI04,ASI07,ASI10]`` cannot tell
+    # whether those agent classes are genuinely out of scope on this
+    # target (clean signal) or whether recon ran out of budget before
+    # discovering them (scanner-side budget loss — a re-run with
+    # ``--recon-budget-seconds`` may surface them). ``recon_completion_pct``
+    # is ``measured_duration / cap_seconds`` clamped to [0, 100] so a
+    # dashboard can render a progress meter on the recon phase. Both
+    # default to safe values (``False`` / ``None``) so older Scan JSON
+    # round-trips unchanged.
+    recon_truncated: bool = False
+    recon_completion_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    # Issue #215 — commander planner outcome. ``"adaptive"`` when the
+    # SwarmCommander LLM produced a per-agent plan; ``"uniform"`` when
+    # the swarm fell back to the uniform brief (commander refused, parse
+    # error, or LLM-call exception); ``None`` when the commander didn't
+    # run at all (recon-only scan, or skipped by the "no operator or
+    # inferred goal" gate -- issue #220 / L5). Without this signal an
+    # operator auditing a non-authoritative scan cannot tell adaptive
+    # from uniform without grep-ing run.log line-by-line. Default
+    # ``None`` keeps back-compat with older Scan JSON on disk.
+    planner_fallback: Literal["adaptive", "uniform"] | None = None
     # v1.1 — coverage grade summarising how thoroughly the swarm exercised
     # the target. ``A`` = every ASI category covered by real evidence;
     # ``F`` = no coverage at all. Persisted onto the Scan so an operator can

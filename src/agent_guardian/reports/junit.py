@@ -45,6 +45,17 @@ _SCAN_PROPERTY_KEYS = (
     "cost_usd",
     "tokens_total",
     "duration_seconds",
+    # Issue #230 — never_launched (set by recon as "out of scope for this
+    # target fingerprint", e.g. ASI07 multi-agent probe on a single-agent
+    # target). Stringified joined list so CI consumers parsing JUnit XML
+    # can distinguish "agent classes correctly out of scope" from
+    # "score=0" failures. Mirrors the SARIF + JSON + markdown emit so the
+    # PR #210 multi-emitter contract is now complete.
+    "never_launched",
+    # Issue #206 follow-up (rc35 deep-review M2) — recon-truncation
+    # signal alongside never_launched.
+    "recon_truncated",
+    "recon_completion_pct",
 )
 
 # Non-sensitive per-finding evidence-chain keys surfaced as <testcase> properties

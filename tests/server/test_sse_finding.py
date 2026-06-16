@@ -92,7 +92,9 @@ def test_finding_lands_in_events_jsonl_with_full_payload(tmp_path: Path) -> None
     fake.observer(_finding_event(finding_id="f-2", severity="low"))  # type: ignore[misc]
 
     jsonl = tmp_path / "scan-finding-jsonl" / "events.jsonl"
-    lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    # Issue #221 — skip the {"kind":"_meta", ...} schema-version header.
+    all_lines = [json.loads(ln) for ln in jsonl.read_text(encoding="utf-8").splitlines() if ln]
+    lines = [ln for ln in all_lines if ln.get("kind") != "_meta"]
     assert len(lines) == 2
     assert all(ln["kind"] == "finding" for ln in lines)
     # Per-scan monotonic seq starts at 0 (Phase 2 Step 2.1 contract).

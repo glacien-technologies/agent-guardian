@@ -45,6 +45,21 @@ _RESPONSE_CAP = 320
 _MAX_TURNS_IN_PROMPT = 14
 # One-line summary cap (mirrors ``dashboard_view._SUMMARY_CAP``).
 _SUMMARY_CAP = 240
+# Issue #228 — LLM max_tokens budget. The prior 120-token cap worked on
+# non-thinking models (gpt-4o-mini, claude-haiku w/o extended thinking)
+# but FAILED on Gemini reasoning-class models: Gemini's maxOutputTokens
+# covers BOTH internal "thinking" AND emitted output. Empirically the
+# probe_summary prompt (a finished red-team transcript + verdict) costs
+# ~400-500 thinking tokens; with the old 120 budget, every Gemini call
+# spent the whole budget on thinking and emitted 2-5 truncated output
+# tokens that ``is_usable_summary`` rejected. The first attempted fix
+# (512) was still too tight: thinking ate ~489 and output got cut at
+# 19 tokens with finish=length. 2048 gives Gemini ~500 tokens of
+# thinking + ~1500 tokens of output runway -- comfortably more than
+# the rubric's 20-35-word target (~140 output tokens at the
+# 4-tokens-per-word English-text ratio) and the cost delta on flash is
+# trivial (~$0.00001 per call extra).
+_SUMMARY_MAX_TOKENS = 2048
 
 _SYSTEM = (
     "You are a defensive security analyst. You read a finished red-team "
@@ -137,7 +152,9 @@ async def _summarize_one(exp: dict[str, Any], llm: BaseLLM, model: str) -> str:
                     LLMMessage(role="user", content=build_summary_prompt(exp)),
                 ],
                 model=model,
-                max_tokens=120,
+                # See _SUMMARY_MAX_TOKENS — pre-fix the hardcoded 120
+                # broke probe_summary on every Gemini call (#228).
+                max_tokens=_SUMMARY_MAX_TOKENS,
                 temperature=0.2,
             )
         )

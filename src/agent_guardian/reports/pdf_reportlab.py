@@ -122,15 +122,24 @@ def write_pdf_reportlab(
     c.drawString(72, y - 10, "ASI breakdown")
     c.setFont("Helvetica", 10)
     y -= 28
+    # Issue #230 — categories listed in ``scan.never_launched`` render as
+    # ``N/A`` rather than the ``0.0`` sentinel, mirroring the WeasyPrint
+    # template (templates/pdf/report.html.jinja:737-755) and the markdown
+    # / SARIF / JSON emitters. Without this, the fallback PDF presents a
+    # lane the scanner never exercised as a confirmed-zero result.
+    never_launched_set = set(scan.never_launched or [])
     for category in AsiCategory:  # codeql[py/non-iterable-in-for-loop]
-        score = scan.asi_scores.get(category, 100.0)
-        finding_count = sum(1 for f in scan.findings if f.asi == category)
-        c.drawString(
-            90,
-            y,
-            f"{category.value}  {asi_description(category):<28}  "
-            f"score={score:5.1f}  findings={finding_count}",
-        )
+        is_na = category.value in never_launched_set
+        if is_na:
+            row = f"{category.value}  {asi_description(category):<28}  score=   N/A  findings=  -"
+        else:
+            score = scan.asi_scores.get(category, 100.0)
+            finding_count = sum(1 for f in scan.findings if f.asi == category)
+            row = (
+                f"{category.value}  {asi_description(category):<28}  "
+                f"score={score:5.1f}  findings={finding_count}"
+            )
+        c.drawString(90, y, row)
         y -= 14
 
     # Footer

@@ -2873,6 +2873,10 @@ class AsiAgent(ABC):
             # provenance seed. Resolved separately from probe_id attribution so a
             # generated finding is NOT mislabeled to a probe it didn't fire.
             expected_safe_behavior=self._resolve_expected_safe_behavior(seed, meta),
+            # rc37 HIGH-5 (#251) — mirror the PanelJudge vote shape onto the
+            # finding so report.json carries 3-0 vs 2-1 signal without
+            # re-parsing events.jsonl. ``None`` for single-judge verdicts.
+            panel=verdict.panel,
             created_at=_utcnow(),
         )
 

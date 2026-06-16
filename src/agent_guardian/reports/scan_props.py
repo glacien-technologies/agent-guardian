@@ -70,6 +70,15 @@ def scan_property_bag(scan: Scan) -> dict[str, Any]:
         # these via _tier_weighted_aggregate_excluding; emitting the set
         # closes the gap between the score and the renderer.
         "never_launched": list(scan.never_launched),
+        # Issue #206 follow-up (rc35 deep-review M2) — recon-truncation
+        # signal alongside never_launched so dashboards can render
+        # "scanner-side budget loss" vs "out of scope" distinctly.
+        "recon_truncated": scan.recon_truncated,
+        "recon_completion_pct": scan.recon_completion_pct,
+        # Issue #215 — commander planner outcome (adaptive / uniform /
+        # None) so SARIF + signed bag + dashboard SSE consumers can
+        # branch on adaptive-vs-uniform.
+        "planner_fallback": scan.planner_fallback,
     }
     if scan.budget is not None:
         bag["budget"] = scan.budget.model_dump(mode="json")

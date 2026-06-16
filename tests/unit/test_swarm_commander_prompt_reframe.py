@@ -260,6 +260,60 @@ async def test_phase_decompose_falls_back_when_retry_also_refuses(
     )
 
 
+async def test_phase_decompose_retries_on_empty_provider_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Issue #219 — provider-layer SAFETY normalisation gap.
+
+    When Gemini's safety classifier blocks the response, the provider
+    returns ``finish_reason=SAFETY`` and the Gemini client (see
+    ``llm/gemini.py``) normalises that to ``finish=content_filter`` with
+    an EMPTY text body. The swarm's refusal detection reads the text;
+    an empty / stub response must trigger the same retry-once path as
+    a text-refusal so a real production scan against a safety-aligned
+    provider falls back through to the uniform brief rather than silently
+    aborting on attempt 1.
+
+    The deep-review's verify:23 showed ``finish=content_filter`` did
+    not fire across 3,866 Gemini calls in the rc35 matrix, but PR #204's
+    retry path is the load-bearing fallback the day a provider DOES
+    return SAFETY — this test locks the contract before the day arrives.
+    """
+    # Empty/stub response on attempt 1 — what the Gemini client emits
+    # post-content-filter normalisation. Valid plan on attempt 2.
+    valid_brief = _valid_swarm_brief_json()
+    commander = (
+        StubScript()
+        .respond_to(_COMMANDER_RETRY_CLARIFICATION[:40], valid_brief)
+        .default("")
+        .build()
+    )
+    config = SwarmConfig(scan_id="scan-empty-then-ok", target_goal="evaluate target")
+    swarm = SwarmCommander(
+        config=config,
+        target=_make_target(),
+        attacker_llm=StubLLM(default="ok"),
+        evaluator_llm=StubLLM(default="ok"),
+        commander_llm=commander,
+    )
+    swarm._fingerprint = TargetFingerprint(mode="prompt", ref="test")
+    with caplog.at_level("WARNING"):
+        await swarm._phase_decompose_with_llm()
+    brief = swarm._swarm_brief
+    assert brief is not None
+    # Retry succeeded with the adaptive plan (2 explicit agents) -- the
+    # empty-response handling must NOT silently fall back on a single
+    # empty attempt.
+    assert len(brief.agent_briefs) == 2, (
+        "Empty provider response on attempt 1 must trigger the same retry "
+        "path as a text refusal; got uniform brief instead. PR #204's "
+        "retry contract is incomplete for the provider-layer SAFETY case (#219)."
+    )
+    # Planner fallback records 'adaptive' — the retry succeeded so the
+    # plan is real, not the uniform fallback.
+    assert getattr(swarm, "_planner_fallback", None) == "adaptive"
+
+
 async def test_phase_decompose_no_retry_when_first_call_succeeds() -> None:
     """When the commander first call parses cleanly, no retry should be
     issued — keeps the cost-overhead of the retry path zero on the happy

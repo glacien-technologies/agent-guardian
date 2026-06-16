@@ -121,6 +121,13 @@ SCAN_DONE_BUFFER_GRACE_SECONDS: float = 300.0
 # reopens lazily the next time its scan emits.
 MAX_OPEN_JSONL_HANDLES: int = 256
 
+# Issue #221 — schemaVersion stamped on the first line of each fresh
+# events.jsonl as a {"kind": "_meta", "schema_version": ...} sentinel.
+# Lets downstream parsers branch on the schema explicitly rather than
+# peeking at the kind taxonomy. Bumped when the SwarmEvent payload
+# shape changes incompatibly; additive field-adds keep the same version.
+EVENTS_JSONL_SCHEMA_VERSION: str = "events-v1"
+
 
 # On-disk index of scan metadata, maintained on register/finalize. The
 # /home pagination cold path uses it to render a list of (id, mtime,
@@ -433,7 +440,29 @@ class ScanStore:
                     evicted_id,
                     exc,
                 )
+        # Issue #221 — stamp a schemaVersion sentinel as the first line of a
+        # fresh events.jsonl. Lets downstream parsers branch on the schema
+        # version explicitly rather than peeking at the 14-kind taxonomy and
+        # guessing. Cheap: one extra line per scan, ~100 bytes. Only written
+        # when we're CREATING the file (size 0); reconnecting to an existing
+        # events.jsonl skips this so we never double-stamp.
+        is_fresh = not jsonl_path.exists() or jsonl_path.stat().st_size == 0
         fh = jsonl_path.open("a", encoding="utf-8")
+        if is_fresh:
+            header = {
+                "kind": "_meta",
+                "schema_version": EVENTS_JSONL_SCHEMA_VERSION,
+                "scan_id": scan_id,
+            }
+            try:
+                fh.write(json.dumps(header) + "\n")
+                fh.flush()
+            except OSError as exc:  # pragma: no cover -- defensive
+                _LOG.warning(
+                    "scan_store: failed to write events.jsonl header for %s (%s)",
+                    scan_id,
+                    exc,
+                )
         self._jsonl_files[scan_id] = fh
         return fh
 

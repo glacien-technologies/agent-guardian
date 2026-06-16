@@ -280,7 +280,7 @@ Model specs: `stub`, `openai:gpt-4o`, `anthropic:claude-haiku-4-5`,
 | `--tier T` | auto-detected | Force tier: `T1`, `T2`, `T3`, `T4`. |
 | `--seed N` | `0` | RNG seed for determinism. |
 | `--max-turns N` | `20` (full/smart), `4` (fast) | Per-agent turn cap, applied uniformly to every agent across all strategies. Overrides the mode default. Raise for deeper multi-turn coverage; pair with a larger token / `--budget-usd` budget. |
-| `--goal TEXT` | unset | Operator's natural-language attack goal. When set, the Commander LLM decomposes it into per-agent briefs. |
+| `--goal TEXT` | unset | Operator's natural-language attack goal. When set, the Commander LLM decomposes it into per-agent briefs (adaptive allocation). When unset, the swarm uses a uniform brief — every agent gets the same weight, every scenario at the default budget. See [Commander invocation gate](#commander-invocation-gate) below for when the Commander runs vs falls back to uniform, and [`--goal` cost band](#--goal-cost-band) for the spend delta to budget for. |
 | `--no-owasp-llm` | off (specialists DO run) | Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion, output-handling). |
 | `--pretext` | off | Wrap attacker payloads in a rotating legitimate-operations pretext (auditor / compliance / incident / onboarding). |
 | `--indirect` | off | Deliver attacker payloads embedded in trusted-channel content (retrieved doc / tool output / email / memory / a2a). |
@@ -470,6 +470,68 @@ The two URL lines land in the first two lines of stdout (QA-003) so CI
 jobs can `grep` for them. When stdout is a TTY, the URLs are wrapped in
 an OSC 8 hyperlink escape so Warp / iTerm2 / Terminal.app / VS Code
 render them cmd-clickable.
+
+#### Commander invocation gate
+
+The SwarmCommander LLM (which decomposes a high-level goal into per-agent
+briefs with custom `priority_weight` + `n_scenarios_requested` allocations)
+**only runs when the scan has a goal anchor**. There are three ways to
+supply one:
+
+1. `--goal "..."` on the CLI.
+2. `--operator-profile path/to/profile.yaml` (the profile's `description`
+   becomes the goal).
+3. An inferred goal from recon — the recon agent reads the target's
+   declared intent + tools and writes one when confident.
+
+When none of the three are present, the swarm short-circuits to a **uniform
+brief**: every agent gets the same `priority_weight=0.5` and the default
+`n_scenarios_requested` for its ASI category. This is correct (you can't
+plan adaptively without a goal anchor), but it's a quieter failure than
+operators sometimes expect.
+
+To audit which mode a scan ran in:
+
+- The **report.json** carries `planner_fallback: "adaptive" | "uniform" | null`
+  at the headline level — `null` means the commander wasn't invoked (no goal
+  anchor and no profile), `"uniform"` means it was invoked but refused or
+  errored and the swarm fell back, `"adaptive"` means a successful per-agent
+  plan landed.
+- The **events.jsonl** stream emits a `phase_done` event for `commander-decompose`
+  with `summary.skipped=True` when the gate short-circuits.
+- The **run.log** carries a `phase commander-decompose: skipped (no operator or
+  inferred goal)` INFO line at the gate point.
+
+**Recommended:** pass `--goal` for any scan where you want an adaptive plan,
+or rely on recon's inferred-goal write-through for goal-less invocations.
+
+#### `--goal` cost band
+
+`--goal` triggers a 3.5x median spend surge vs the no-goal baseline on fast
+mode. The Commander allocates many more scenarios per specialist (top-
+aligned agents typically get `n_scenarios_requested=15` instead of the
+default 5-10), roughly doubling the attacker token spend at the same
+`agents_planned` / `attempts_total` headline.
+
+Reference cost bands on the **finbot** testbench (a 5-tool HTTP target,
+seed=42, gemini:gemini-3.5-flash):
+
+| Mode | No `--goal` | With `--goal` | Surge |
+|---|---|---|---|
+| fast (`--budget-usd 0.20 --budget-seconds 300`) | ~\$0.0095, ~21k tokens | ~\$0.0323, ~44k tokens | **~3.5x** |
+| smart (`--budget-usd 0.30 --budget-seconds 600`) | ~\$0.020, ~50k tokens | ~\$0.070, ~110k tokens | **~3.5x** |
+| full (`--budget-usd 0.60 --budget-seconds 1200`) | ~\$0.17, ~700k tokens | ~\$0.30, ~1.2M tokens | **~1.7x** (already wide) |
+
+**Recommended CI configuration:** when wiring `--goal` into a CI gate, set
+`--budget-usd` to **at least 3.5x your no-goal fast-mode default**. A
+canonical fast-mode `--budget-usd 0.02` (no goal) → `--budget-usd 0.07`
+(with goal). Without the bump, the soft-stop fires at 80% and you get a
+budget-truncated scan with `mode_authoritative=false` even though the
+swarm completed cleanly.
+
+The surge is the feature working as designed — the Commander pays for
+diversity-of-scenario per agent, which is what lets `--goal` find
+goal-specific exploits a uniform sweep wouldn't. Budget for it.
 
 ---
 
