@@ -1696,13 +1696,13 @@ body.exec-body {
 .exec-sev-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   padding: 3px 10px;
   border-radius: 999px;
   font-family: var(--exec-font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
   background: var(--exec-bg-sunken);
   color: var(--exec-ink);
 }
