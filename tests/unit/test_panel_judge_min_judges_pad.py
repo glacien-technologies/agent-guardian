@@ -1,25 +1,24 @@
-"""Issue #229 — PanelJudge L2 escalation never fires.
+"""Issue #229 + rc37 HIGH-4 (#250) — heterogeneous-only PanelJudge padding.
 
 PR #187 advertised an L2 escalation that promotes the judge panel to a
-3-seat majority vote on HIGH/CRITICAL severity verdicts. The rc35 deep-
-review found the escalation never fires: 986 of 986 panel calls run at
-``n_judges=2`` because the panel is hard-coded to a 2-seat construction
-and ``JudgePanelConfig.min_judges`` (default 3) is declared but never
-read. The L2 fallback in ``AsiAgent.run()`` is explicitly bypassed when
-a panel is present.
+3-seat majority vote on HIGH/CRITICAL severity verdicts. PR #240 (rc37)
+shipped padding to ``min_judges=3`` by cloning seat[0]; the rc37 deep-
+review found 35/35 sampled panels unanimous because the third seat ran
+the same LLM at the same prompt: correlated draws, zero new variance
+signal, at 3x the panel cost.
 
-The fix: respect ``min_judges``. When ``len(specs) < min_judges``,
-PanelJudge pads its seat list by appending re-seated copies of the
-existing seats with distinct labels (so each pad fires as a separate
-judge call). The default config now constructs a 3-seat panel (the
-2 distinct family seats + a re-vote pad), matching PR #187's intent.
+The current contract (rc38): PanelJudge pads to ``min_judges`` only
+when the existing specs ALREADY span >=2 distinct families. Same-family
+clones are never paid for — when there is no heterogeneous pad
+available the seat list stays at ``len(specs)``.
 
 This test pins:
 
-1. ``PanelJudge(min_judges=N)`` produces ``>= N`` seats.
+1. Cross-family padding works (heterogeneous specs grow to min_judges).
 2. Pad seats are labelled distinctly (so log/audit can tell them
    apart from the originals).
-3. Padding never raises; if too few specs are passed, we pad up.
+3. Padding never raises; if too few specs are passed and no
+   heterogeneous pad is available, the panel stays at ``len(specs)``.
 4. Setting ``min_judges <= len(specs)`` is a no-op (no over-padding).
 """
 
@@ -35,24 +34,29 @@ def _make_spec(family: str, label: str) -> JudgeSpec:
     return JudgeSpec(llm=llm, model=f"{family}:{label}-model", family=family, label=label)
 
 
-def test_panel_pads_to_min_judges_when_specs_undershoot() -> None:
-    """The default config passes 2 specs but min_judges=3. Panel must
-    pad to 3 seats so the L2 escalation actually fires."""
-    specs = [_make_spec("gemini", "attacker-as-judge"), _make_spec("gemini", "evaluator-as-judge")]
+def test_panel_pads_to_min_judges_only_when_heterogeneous_available() -> None:
+    """Heterogeneous specs (gemini + openai) with min_judges=3 grow to 3
+    seats so the L2 escalation actually fires with a cross-family panel.
+
+    Pinned shape: the third seat re-seats one of the originals, so
+    family diversity is preserved across the now-3 seats and dissent on
+    the existing family lines remains a real signal."""
+    specs = [_make_spec("gemini", "attacker-as-judge"), _make_spec("openai", "evaluator-as-judge")]
     panel = PanelJudge(specs=specs, min_judges=3)
 
-    assert len(panel.specs) >= 3, (
-        f"PanelJudge did not pad to min_judges=3; got {len(panel.specs)} seats. "
-        f"PR #187's L2 escalation requires >=3 seats on HIGH/CRITICAL verdicts; "
-        f"otherwise n_judges stays at 2 across every scan (#229)."
+    assert len(panel.specs) == 3
+    families = sorted({s.canonical_family for s in panel.specs})
+    assert set(families) == {"gemini", "openai"}, (
+        f"heterogeneous pad lost family diversity: {families}"
     )
 
 
 def test_panel_pad_seats_have_distinct_labels() -> None:
     """Pad seats must be distinguishable in logs / audit / debug output
     so an operator can tell the 3rd vote was a re-seated pad and not a
-    real new judge family."""
-    specs = [_make_spec("gemini", "attacker-as-judge"), _make_spec("gemini", "evaluator-as-judge")]
+    real new judge family. Requires the heterogeneous-pad path so a
+    third seat actually exists."""
+    specs = [_make_spec("gemini", "attacker-as-judge"), _make_spec("openai", "evaluator-as-judge")]
     panel = PanelJudge(specs=specs, min_judges=3)
 
     labels = [s.label for s in panel.specs]
@@ -84,9 +88,14 @@ def test_panel_min_judges_le_specs_is_noop() -> None:
     assert len(panel.specs) == 3
 
 
-def test_panel_min_judges_one_specs_pads_to_three() -> None:
-    """Edge case: a single-spec panel with min_judges=3 should pad to
-    3 (the L2 single-judge N-vote pattern)."""
+def test_panel_single_spec_does_not_pad_with_same_family_clone() -> None:
+    """rc37 HIGH-4 — a single-spec panel with min_judges=3 must NOT pad
+    by cloning the single spec. Cloning a same-LLM same-prompt seat
+    produces correlated draws (35/35 unanimous in the rc37 matrix) for
+    zero new variance signal. The seat list stays at len(specs)."""
     specs = [_make_spec("gemini", "only-judge")]
     panel = PanelJudge(specs=specs, min_judges=3)
-    assert len(panel.specs) >= 3
+    assert len(panel.specs) == 1, (
+        f"single-spec panel padded to {len(panel.specs)} via same-family clone; "
+        f"rc37 HIGH-4 forbids same-family pads."
+    )

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -100,7 +100,14 @@ class JudgePanelConfig(BaseModel):
 
     judges: list[Any] = Field(default_factory=list)
     cross_family_enforced: bool = False
-    min_judges: int = Field(default=3, ge=1)
+    # rc37 HIGH-4 (#250) — default dropped from 3 → 2. The rc37 deep-review
+    # matrix found that padding a 2-spec same-family panel to 3 produced a
+    # same-LLM same-prompt clone seat (35/35 sampled panels unanimous) at
+    # 3x the panel cost for zero variance-reduction signal. PanelJudge now
+    # pads ONLY when a heterogeneous-family pad is available among the
+    # existing specs; otherwise it keeps the seat list at ``len(specs)``.
+    # Same-family escalation is a no-op the framework will not pay for.
+    min_judges: int = Field(default=2, ge=1)
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
@@ -133,6 +140,28 @@ def _first_substantive_reasoning(reasonings: Sequence[str]) -> str:
             continue
         return text
     return ""
+
+
+def _select_heterogeneous_pad(
+    specs_list: list[JudgeSpec], seen_families: set[str]
+) -> JudgeSpec | None:
+    """Pick a pad seat that preserves cross-family diversity.
+
+    Returns the first spec in ``specs_list`` whose canonical family is
+    already represented in ``seen_families`` AT MOST ONCE — i.e. a
+    spec whose family is one of multiple already on the panel. This
+    keeps the pad cross-family-coherent (the third seat votes from one
+    of the existing families) without re-cloning a unique seat that
+    would collapse a 1+1 cross-family panel into a 2+1 same-family
+    panel.
+
+    Returns ``None`` when the existing specs span only a single family —
+    in that case there is no heterogeneous pad to give and the caller
+    keeps the seat list at ``len(specs)``.
+    """
+    if len(seen_families) < 2:
+        return None
+    return specs_list[0]
 
 
 def _build_judge(spec: JudgeSpec) -> Any:
@@ -170,36 +199,30 @@ class PanelJudge:
         cross_family_enforced: bool = False,
         min_judges: int | None = None,
         seed: int | None = None,
+        event_emitter: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         if not specs:
             raise ValueError("PanelJudge requires at least one JudgeSpec")
-        # Issue #229 — honour JudgePanelConfig.min_judges. Pre-fix, the panel
-        # was hard-wired to 2 seats (attacker_llm + evaluator_llm) and the
-        # ``min_judges`` field on JudgePanelConfig was declared but never read,
-        # so PR #187's L2 escalation (3-vote majority on HIGH/CRITICAL verdicts)
-        # never actually fired -- 986/986 panel calls across the rc35 deep-
-        # review matrix ran at n_judges=2.
-        #
-        # When the caller asks for ``min_judges > len(specs)`` we pad the seat
-        # list by re-seating copies of the existing specs (round-robin),
-        # giving each pad a distinct label so the dispatch log + audit trail
-        # can attribute every vote separately. The LLM is the same per pad
-        # so we don't take a new model dependency; variance reduction comes
-        # from running the same model at temperature=0 with a different
-        # implicit seed inside the underlying Judge call, which is the same
-        # variance-reduction shape PR #187 advertised for L2.
-        #
-        # Default ``min_judges=None`` keeps strict back-compat: a caller who
-        # constructed a 2-seat panel pre-fix still gets exactly 2 seats. The
-        # SwarmCommander explicitly passes ``min_judges=3`` (the value
-        # JudgePanelConfig already documented as the default) so the shipped
-        # config gets the 3-vote panel PR #187 promised.
+        # rc37 HIGH-4 (#250) — heterogeneous-only padding. Pre-fix, the
+        # panel padded a 2-spec same-family panel to ``min_judges`` by
+        # cloning seat[0] under a re-labelled spec. The rc37 deep-review
+        # matrix found 35/35 sampled panels unanimous because the third
+        # seat ran the same LLM at the same prompt: correlated draws,
+        # zero variance-reduction signal, at 3x the cost. The fix: only
+        # pad when there is ALREADY a heterogeneous family available
+        # among the existing specs. The third seat re-seats that
+        # heterogeneous spec so the panel keeps the cross-family
+        # diversity the dissent surface needs. When no heterogeneous
+        # pad is available the seat list stays at ``len(specs)`` —
+        # same-family clones are never paid for.
         specs_list = list(specs)
         if min_judges is not None and len(specs_list) < min_judges:
-            base = list(specs_list)
+            seen_families = {s.canonical_family for s in specs_list}
             pad_idx = 0
             while len(specs_list) < min_judges:
-                src = base[pad_idx % len(base)]
+                src = _select_heterogeneous_pad(specs_list, seen_families)
+                if src is None:
+                    break
                 pad_idx += 1
                 src_label = src.label or src.model
                 specs_list.append(
@@ -207,9 +230,10 @@ class PanelJudge:
                         llm=src.llm,
                         model=src.model,
                         family=src.family,
-                        label=f"{src_label}-vote{pad_idx + 1}",
+                        label=f"{src_label}-vote{len(specs_list) + 1}",
                     )
                 )
+                seen_families.add(src.canonical_family)
         self._specs = specs_list
         self._min_judges = min_judges
         self._cross_family_enforced = cross_family_enforced
@@ -219,6 +243,13 @@ class PanelJudge:
         # reproducibility), while the per-seat offset avoids 3 identical
         # samples that would defeat the variance-reduction purpose of L2.
         self._seed = seed
+        # rc37 HIGH-5 (#251) — observer hook for the structured
+        # ``panel_verdict`` event. Wired by the SwarmCommander to a
+        # SwarmEvent emission so events.jsonl carries the full vote
+        # shape (per-seat verdicts, confidences, agreement fraction)
+        # rather than only "judge panel dispatched: N seats". Optional
+        # so unit tests can construct a panel without a swarm.
+        self._event_emitter = event_emitter
 
         families = {s.canonical_family for s in self._specs}
         validation_passed = (not cross_family_enforced) or len(families) >= 2
@@ -425,6 +456,29 @@ class PanelJudge:
             disagreement,
             final_confidence,
         )
+        # rc37 HIGH-5 (#251) — structured panel-vote payload. Shape locked
+        # so events.jsonl, report.json's per-finding ``panel`` key, and
+        # the SARIF/dashboard consumers all read from the same dict
+        # without branching on the source. agreement_fraction at 1.0 is
+        # a unanimous panel; <1.0 carries dissent (2-1, 1-1, etc.) that
+        # downstream tooling can audit post-hoc.
+        panel_payload: dict[str, Any] = {
+            "seat_verdicts": list(individual_verdicts),
+            "seat_confidences": list(individual_confidences),
+            "agreement_fraction": round(agreement_fraction, 3),
+            "majority": majority,
+            "confidence": round(final_confidence, 3),
+        }
+        if self._event_emitter is not None:
+            try:
+                self._event_emitter(panel_payload)
+            except Exception as exc:  # pragma: no cover -- defensive
+                # An observer that raises must not corrupt the verdict.
+                _LOG.warning(
+                    "panel event_emitter raised %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
         return JudgeVerdict(
             verdict=majority,  # type: ignore[arg-type]
             confidence=final_confidence,
@@ -433,4 +487,5 @@ class PanelJudge:
             evidence=evidence,
             observable_compromise=observable_compromise,
             refused=refused,
+            panel=panel_payload,
         )

@@ -95,6 +95,13 @@ class Finding(BaseModel):
     # as a cross-reference instead of as duplicate findings with conflicting
     # severities. Empty for findings that were never deduplicated against.
     related_asi: list[str] = Field(default_factory=list)
+    # rc37 HIGH-5 (#251) — per-finding mirror of the PanelJudge vote shape
+    # ({seat_verdicts, seat_confidences, agreement_fraction, majority,
+    # confidence}). ``None`` when the finding came through the single-judge
+    # path or when the panel didn't run for this finding. With this field
+    # report.json carries enough panel signal that downstream tooling can
+    # distinguish a 3-0 from a 2-1 outcome without re-parsing events.jsonl.
+    panel: dict[str, Any] | None = None
 
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.

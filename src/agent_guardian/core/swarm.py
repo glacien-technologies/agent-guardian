@@ -351,6 +351,21 @@ EventKind = Literal[
     # final ``elif``/no-op fallthrough).
     "phase_start",
     "phase_done",
+    # rc37 HIGH-5 (#251) — per-PanelJudge-verdict structured event.
+    # Emitted by the PanelJudge via the ``event_emitter`` callback wired
+    # in the SwarmCommander constructor. Carries the full vote shape so
+    # events.jsonl readers can distinguish a 3-0 from a 2-1 panel
+    # outcome without re-walking the DEBUG ``panel verdicts collected``
+    # / ``panel majority`` lines (which the default INFO log filter
+    # drops). Payload contract:
+    #   {
+    #     "seat_verdicts":      list[str],   # per-seat verdict string
+    #     "seat_confidences":   list[float], # per-seat confidence
+    #     "agreement_fraction": float,       # in [0,1] -- 1.0 unanimous
+    #     "majority":           str,         # the elected majority
+    #     "confidence":         float,       # in [0,1] final confidence
+    #   }
+    "panel_verdict",
 ]
 
 
@@ -836,24 +851,31 @@ class SwarmCommander:
                     label="evaluator-as-judge",
                 ),
             ]
-            # Issue #229 — pass min_judges=3 to materialise PR #187's L2
-            # escalation (3-vote majority on HIGH/CRITICAL verdicts). The
-            # 2-spec default panel pads to 3 seats by re-seating one of the
-            # existing LLMs with a distinct label; the dispatch log shows
-            # three separate vote dispatches per verdict instead of two.
-            # ``JudgePanelConfig.min_judges`` already documents this as the
-            # default (3); pre-fix the field was declared but never read.
+            # rc37 HIGH-4 (#250) — ``min_judges=2`` (was 3). The deep-
+            # review matrix found that padding a 2-spec same-family panel
+            # to 3 produced a same-LLM same-prompt clone seat (35/35
+            # sampled panels unanimous, panel cost up 3x fast / ~55% full)
+            # for zero variance-reduction signal. PanelJudge now only
+            # pads to ``min_judges`` when the existing specs already span
+            # >=2 distinct families; same-family clones are not paid for.
             #
             # Issue #227 — forward the scan seed so each panel seat runs
             # with seed + seat_index, reproducing verdict outcomes on
             # same-seed reruns. Providers that ignore seed (Anthropic /
             # Bedrock) silently no-op, mirroring Judge.verdict's existing
             # documented behaviour.
+            #
+            # rc37 HIGH-5 (#251) — event_emitter wires PanelJudge's
+            # per-verdict payload through to a ``panel_verdict`` SwarmEvent
+            # so events.jsonl carries the full vote shape (per-seat
+            # verdicts, confidences, agreement fraction). Without this
+            # downstream tooling could not distinguish a 3-0 from a 2-1.
             self._panel_judge = PanelJudge(
                 specs=panel_specs,
                 cross_family_enforced=getattr(config, "judge_cross_family_enforced", False),
-                min_judges=3,
+                min_judges=2,
                 seed=getattr(config, "seed", None),
+                event_emitter=self._emit_panel_verdict,
             )
         except Exception as e:
             _LOG.debug(
@@ -3670,6 +3692,38 @@ class SwarmCommander:
         except Exception as exc:
             # Observers must not crash the swarm; log and continue.
             _LOG.warning("observer raised %s: %s", type(exc).__name__, exc)
+
+    def _emit_panel_verdict(self, payload: dict[str, Any]) -> None:
+        """rc37 HIGH-5 (#251) — bridge PanelJudge vote-shape to SwarmEvent.
+
+        Wired into the :class:`PanelJudge` at construction time so each
+        per-verdict payload becomes a structured ``panel_verdict``
+        SwarmEvent. The event then flows through the standard observer
+        chain (events.jsonl writer, dashboard SSE fanout, CLI feed) so
+        downstream tooling sees the full vote shape without re-walking
+        DEBUG log lines.
+
+        Also surfaces an INFO log line so a CLI scan with the default
+        log allowlist carries the vote summary in ``run.log`` for
+        forensic replay. The DEBUG ``panel verdicts collected`` /
+        ``panel majority`` lines stay where they are — this is the
+        operator-grade narration the structured event needs to be
+        searchable on.
+        """
+        _LOG.info(
+            "panel verdict: majority=%s agreement=%.2f confidence=%.2f seats=%d",
+            payload.get("majority"),
+            float(payload.get("agreement_fraction") or 0.0),
+            float(payload.get("confidence") or 0.0),
+            len(payload.get("seat_verdicts") or []),
+        )
+        self._emit(
+            SwarmEvent(
+                kind="panel_verdict",
+                timestamp=_utcnow(),
+                payload=dict(payload),
+            )
+        )
 
     # SSE Phase 1, Step 1 — normalise phase_start / phase_done payloads.
     # See ``designs/sse-flow-and-live-ui.md`` "Producer reshape" section.
