@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -128,6 +128,12 @@ class JudgeVerdict(BaseModel):
     evaluator_attack: bool = False
     evidence: str = ""
     followup_probe: str = ""
+    # rc37 HIGH-5 (#251) — PanelJudge attaches the structured vote shape
+    # ({seat_verdicts, seat_confidences, agreement_fraction, majority,
+    # confidence}) so the agent loop can mirror the panel outcome onto
+    # the per-finding payload in report.json. ``None`` for single-judge
+    # path verdicts so single-judge scoring is unaffected.
+    panel: dict[str, Any] | None = None
 
     model_config = ConfigDict(extra="ignore")
 
