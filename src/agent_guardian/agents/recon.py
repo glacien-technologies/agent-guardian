@@ -22,6 +22,7 @@ turn is persisted as a structured reflection for forensic replay.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -598,6 +599,31 @@ class ReconAgent:
         # kept as a separate boolean tell so a tool-shaped reply still flips
         # ``has_tools_observed`` even when extraction yields no usable handle.
         declared_lower = {n.lower() for n in declared_tools_observed}
+        # rc37 deep-review HIGH-1 (re-scopes #206): each ``_extract_tool_names``
+        # call is read-only on the LLM and shares no input with other turns.
+        # Awaiting one per turn turned the post-audit loop into N sequential
+        # LLM round-trips — the recon cold-path. Fan them out so the wall
+        # time scales with the slowest extraction, not their sum. The merge
+        # below walks results in transcript order so declared_tools_observed
+        # ordering is unchanged.
+        extraction_inputs = [
+            reply if reply and not reply.startswith("[target call failed") else None
+            for _q, reply in transcript
+        ]
+        extraction_tasks = [
+            _extract_tool_names(reply, self._llm, self._model) if reply is not None else None
+            for reply in extraction_inputs
+        ]
+        extraction_results: list[list[str]] = list(
+            await asyncio.gather(
+                *(t for t in extraction_tasks if t is not None),
+                return_exceptions=False,
+            )
+        )
+        extracted_per_turn: list[list[str]] = []
+        result_iter = iter(extraction_results)
+        for task in extraction_tasks:
+            extracted_per_turn.append(next(result_iter) if task is not None else [])
         for idx, (question, reply) in enumerate(transcript):
             turn_tool_calls = tool_calls_per_turn[idx] if idx < len(tool_calls_per_turn) else ()
             if turn_tool_calls:
@@ -615,15 +641,14 @@ class ReconAgent:
                     if _looks_like_multi_agent_tool_call(name):
                         is_multi_agent_observed = True
                         multi_agent_observed = True
-            if reply and not reply.startswith("[target call failed"):
-                extracted = await _extract_tool_names(reply, self._llm, self._model)
-                for n in extracted:
-                    nl = n.lower()
-                    if nl not in declared_lower:
-                        declared_tools_observed.append(n)
-                        declared_lower.add(nl)
-                if extracted:
-                    has_tools_observed = True
+            extracted = extracted_per_turn[idx]
+            for n in extracted:
+                nl = n.lower()
+                if nl not in declared_lower:
+                    declared_tools_observed.append(n)
+                    declared_lower.add(nl)
+            if extracted:
+                has_tools_observed = True
             # Tier-3 floor: a tool-shaped reply still flips the boolean even when
             # extraction surfaced no concrete handle (e.g. "I can use my tools").
             if _looks_like_tools(reply):

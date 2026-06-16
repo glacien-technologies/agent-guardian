@@ -873,41 +873,27 @@ async def run_capability_audit(
     result = CapabilityAuditResult()
     coverage = BandCoverage()
 
-    # ---- 1. Purpose seed (turn 1, highest-entropy) + domain inference.
+    # ---- 1+2. Purpose / Tools / Multi-agent seeds — issued concurrently.
+    # rc37 deep-review HIGH-1 (re-scopes #206): the P/T/A seed prompts have
+    # no inter-probe data dependency — the Tools and Multi-agent prompts are
+    # static and never templated on the Purpose reply (only the later deepen
+    # loop's _deviate calls consume ``domain``). Awaiting them one at a time
+    # was burning ~3 sequential target round-trips before any other recon
+    # work could start; fanning them out drops the seed phase to a single
+    # target wait. Per-probe envelope build + coverage mark stays in
+    # canonical band order so transcript indexing is unchanged.
     if _cancelled(cancel_event):
         result.coverage = _coverage_snapshot(coverage)
         return result
     _notify(on_probe, "purpose probe")
-    p_probe = _SEED_PROBES[Band.P]
-    p_reply, p_tools, _ps, p_latency = await _safe_call(target, p_probe)
-    result.transcript.append((p_probe, p_reply))
-    result.tool_calls_per_turn.append(p_tools)
-    p_env = _record_and_envelope(
-        probe_log,
-        target,
-        response_mapping,
-        band=Band.P.value,
-        intent=ProbeIntent.SEED.value,
-        prompt=p_probe,
-        session=None,
-        reply=p_reply,
-        tool_calls=p_tools,
-        latency_ms=p_latency,
-        coverage=coverage,
-    )
-    if coverage.mark(Band.P, _evaluate_band(Band.P, p_env, coverage)):
-        coverage.rounds_since_new_signal = 0
-    coverage.probes_per_band[Band.P] += 1
-    domain = _infer_domain(p_reply)
-
-    # ---- 2. Tools + Multi-agent seeds (domain-templated, behavioural).
-    for band in (Band.T, Band.A):
-        if _cancelled(cancel_event):
-            result.coverage = _coverage_snapshot(coverage)
-            return result
-        _notify(on_probe, "capability probe")
-        probe = _SEED_PROBES[band]
-        reply, tool_calls, _s, latency = await _safe_call(target, probe)
+    _notify(on_probe, "capability probe")
+    seed_bands = (Band.P, Band.T, Band.A)
+    seed_probes_text = [_SEED_PROBES[b] for b in seed_bands]
+    seed_results = await asyncio.gather(*(_safe_call(target, probe) for probe in seed_probes_text))
+    p_reply = seed_results[0][0]
+    for band, probe, (reply, tool_calls, _s, latency) in zip(
+        seed_bands, seed_probes_text, seed_results, strict=True
+    ):
         result.transcript.append((probe, reply))
         result.tool_calls_per_turn.append(tool_calls)
         env = _record_and_envelope(
@@ -926,6 +912,7 @@ async def run_capability_audit(
         if coverage.mark(band, _evaluate_band(band, env, coverage)):
             coverage.rounds_since_new_signal = 0
         coverage.probes_per_band[band] += 1
+    domain = _infer_domain(p_reply)
 
     # ---- 3. Cross-session planted-token memory test (+ memory claim).
     _notify(on_probe, "cross-session memory test")
