@@ -6,6 +6,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400;1,500&display=swap');
 
 :root {
+  /* This design system is light-only — the --dark-* tokens below are an
+   * opt-in slab applied via the .on-dark class, NOT an OS-driven theme.
+   * Declare color-scheme:light so a user whose OS is in dark mode still
+   * gets light-rendered native controls (selects, scrollbars, autofill,
+   * date pickers) instead of dark widgets on the cream page. */
+  color-scheme: light;
+
   /* --- Accent: violet --- */
   --accent:      #8B5CF6;
   --accent-600:  #7C3AED;

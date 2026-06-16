@@ -25,7 +25,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
-  <meta name="color-scheme" content="dark light" />
+  {# The executive dashboard ships a light (cream parchment) theme only.
+     ``colors_and_type.css`` defines its --ink/--bg/--surface tokens for
+     light only, so opting into OS dark mode here produced a half-dark page
+     (exec tokens flipped, shared tokens + headings did not) → black-on-black
+     text. Lock to light; the dark @media block in executive.css is disabled. #}
+  <meta name="color-scheme" content="light" />
   <title>{{ page_title }} · Executive Dashboard · AgentGuardian</title>
   {# Cache-bust by package version so a release ships fresh CSS without
      forcing an end-user hard refresh — a recurring 2026-05-31 footgun
