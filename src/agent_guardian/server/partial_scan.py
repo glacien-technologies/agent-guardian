@@ -49,15 +49,20 @@ if TYPE_CHECKING:
     from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
 
 __all__ = [
+    "INTERRUPT_MARKER_FILENAME",
     "PARTIAL_SCAN_FILENAME",
     "JsonlLogHandler",
     "build_partial_scan",
+    "clear_interrupt_marker",
     "install_jsonl_log_handler",
+    "interrupt_marker_path",
+    "is_interrupted_on_disk",
     "is_terminal_scan_on_disk",
     "make_events_writer",
     "make_partial_writer",
     "partial_scan_path",
     "read_partial_scan",
+    "write_interrupt_marker",
     "write_partial_scan",
 ]
 
@@ -103,6 +108,55 @@ def partial_scan_path(scan_dir: Path) -> Path:
 def is_terminal_scan_on_disk(scan_dir: Path) -> bool:
     """Return ``True`` when a terminal scan file (raw or signed) is on disk."""
     return (scan_dir / "scan.raw.json").is_file() or (scan_dir / "scan.json").is_file()
+
+
+# On-disk marker the CLI drops when a scan ends abnormally (user Ctrl-C, a
+# sandbox violation, an LLM-provider error) before it could finalise a
+# terminal ``scan.json``. The dashboard treats its presence as a definitive
+# "failed" so a cancelled scan reads ``failed`` immediately, rather than
+# lingering as ``live`` until the activity-staleness window expires. A hard
+# kill (SIGKILL / OOM) can't write it -- those still fall back to staleness.
+INTERRUPT_MARKER_FILENAME: str = "scan.interrupted"
+
+
+def interrupt_marker_path(scan_dir: Path) -> Path:
+    """Return the canonical path of the abnormal-termination marker."""
+    return scan_dir / INTERRUPT_MARKER_FILENAME
+
+
+def is_interrupted_on_disk(scan_dir: Path) -> bool:
+    """Return ``True`` when a scan was recorded as abnormally terminated."""
+    return interrupt_marker_path(scan_dir).is_file()
+
+
+def write_interrupt_marker(scan_dir: Path, reason: str) -> None:
+    """Record that a scan ended before finalising (best-effort).
+
+    Stores a short ``reason`` + ISO timestamp so an operator inspecting the
+    scan dir can see why the run never produced a terminal ``scan.json``.
+    Never raises -- a failure to mark is strictly less bad than masking the
+    original interrupt.
+    """
+    target = interrupt_marker_path(scan_dir)
+    try:
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"reason": reason, "at": datetime.now(tz=UTC).isoformat()}
+        target.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:  # pragma: no cover -- best-effort disk write
+        _LOG.warning("partial_scan: interrupt marker write failed for %s (%s)", target, exc)
+
+
+def clear_interrupt_marker(scan_dir: Path) -> None:
+    """Remove a stale abnormal-termination marker (best-effort).
+
+    Called from the success path so a ``scan_id`` reused after a prior failed
+    run doesn't inherit the old marker once a terminal ``scan.json`` lands.
+    """
+    target = interrupt_marker_path(scan_dir)
+    if not target.is_file():
+        return
+    with contextlib.suppress(OSError):
+        target.unlink()
 
 
 def write_partial_scan(scan_dir: Path, scan: Scan) -> None:

@@ -4587,14 +4587,25 @@ async def _run_scan_inner(
         # runs (cursor restore + scrollback flush) before this handler
         # sees the interrupt. Surface a clean operator message through
         # the shared RichHandler-bound logger and translate to the
-        # standard ``130`` exit code.
+        # standard ``130`` exit code. Drop the abnormal-termination marker
+        # so the dashboard reads this scan as ``failed`` immediately (it
+        # never reached the finalise/persist path that writes scan.json).
         _LOG.warning("scan interrupted by user; partial state preserved")
+        from agent_guardian.server.partial_scan import write_interrupt_marker
+
+        write_interrupt_marker(partial_scan_dir, "user-interrupt")
         return EXIT_USER_INTERRUPT
     except SandboxViolation as exc:
         _LOG.error("sandbox violation: %s", exc)
+        from agent_guardian.server.partial_scan import write_interrupt_marker
+
+        write_interrupt_marker(partial_scan_dir, f"sandbox-violation: {exc}")
         return EXIT_SANDBOX
     except LLMError as exc:
         _LOG.error("llm provider error: %s: %s", type(exc).__name__, exc)
+        from agent_guardian.server.partial_scan import write_interrupt_marker
+
+        write_interrupt_marker(partial_scan_dir, f"llm-error: {type(exc).__name__}")
         return EXIT_LLM_PROVIDER
     finally:
         # Close every LLM client + adapter we opened. Deduplicate when two
@@ -4773,13 +4784,17 @@ async def _run_scan_inner(
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
     # surviving a crash on the next scan with the same id (defensive).
-    from agent_guardian.server.partial_scan import partial_scan_path
+    from agent_guardian.server.partial_scan import clear_interrupt_marker, partial_scan_path
 
     _partial = partial_scan_path(scan_dir)
     if _partial.is_file():
         # pragma: no cover -- best-effort
         with contextlib.suppress(OSError):
             _partial.unlink()
+    # Clear any abnormal-termination marker left by a prior run that reused
+    # this scan_id -- the terminal scan.json written above is the
+    # authoritative success signal, so the scan must not read as ``failed``.
+    clear_interrupt_marker(scan_dir)
 
     # 10. Final state + summary.
     state = _read_state()
