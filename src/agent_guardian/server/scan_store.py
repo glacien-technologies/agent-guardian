@@ -58,6 +58,7 @@ from agent_guardian.core.swarm import SwarmCommander, SwarmEvent
 from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.models.scan import Scan
 from agent_guardian.server.partial_scan import (
+    is_interrupted_on_disk,
     is_terminal_scan_on_disk,
     read_partial_scan,
 )
@@ -782,6 +783,31 @@ class ScanStore:
                                 ),
                             )
                         )
+                    elif (child / "events.jsonl").is_file() or (
+                        child / "scan.partial.json"
+                    ).is_file():
+                        # A scan dir with a live event stream but no readable
+                        # Scan yet — a just-started CLI scan in its recon/early
+                        # phase (the partial snapshot isn't written until the
+                        # first ``agent_done``). Surface it so it shows up at
+                        # once; the disk fix-up below derives live-vs-failed
+                        # from activity freshness rather than defaulting to
+                        # "done".
+                        completed_rows.append(
+                            (
+                                mtime,
+                                ScanSummary(
+                                    scan_id=sid,
+                                    aivss=None,
+                                    band=None,
+                                    target_ref=None,
+                                    target_mode=None,
+                                    findings_count=None,
+                                    created_at=None,
+                                    is_running=False,
+                                ),
+                            )
+                        )
         elif self._root.is_dir():
             # Cold path (no index): deserialise every scan.json so we can
             # sort by the canonical ``created_at`` field. This is the legacy
@@ -837,43 +863,78 @@ class ScanStore:
         completed_rows.sort(key=lambda r: -r[0])
         completed_summaries = [s for (_k, s) in completed_rows]
 
-        # Disk-running fix-up: a CLI scan runs in a SEPARATE process from this
-        # dashboard, so it is never in the in-memory ``_running`` registry
-        # above. Reconstruct its state from disk:
-        #   * partial snapshot present, no terminal scan.json, and recently
-        #     written -> still LIVE (badge "live").
-        #   * partial present, no terminal, but STALE (process killed / crashed
-        #     mid-run and never finalised) -> NOT live, so an abandoned scan
-        #     doesn't read as "live" forever.
-        #   * terminal scan.json present -> a real completed scan; left as-is.
-        # Either unfinished case blanks AIVSS/band (no finalised score exists).
-        # A live scan rewrites the partial every few seconds, so a partial that
-        # has gone quiet this long means the process is gone.
+        # Disk-status derivation for DISK-DISCOVERED scans. A CLI scan runs in
+        # a SEPARATE process from this dashboard, so it is never in the
+        # in-memory ``_running`` registry and never gets an ``_index.json`` row
+        # (the index is only maintained by in-process register()/scan_done).
+        # Such scans are discovered by walking the scans root, and the rows
+        # built above default to ``status="completed"`` — which paints a
+        # just-started OR a cancelled CLI scan as "done". Reconstruct the real
+        # status from on-disk signals instead:
+        #
+        #   * terminal scan.json / scan.raw.json present -> the run reached its
+        #     finalise+persist path = a real completed scan; left as-is.
+        #   * interrupt marker present (scan.interrupted) -> the CLI recorded an
+        #     abnormal exit (user Ctrl-C, sandbox/LLM error) -> FAILED now.
+        #   * neither, but recent on-disk activity -> still LIVE. The activity
+        #     signal is the freshest of the partial snapshot (written from
+        #     phase 2 on), events.jsonl (touched at scan start + appended on
+        #     every event/log line, so it tracks the recon/early phase before
+        #     any partial exists), and the scan-dir mtime. This makes a
+        #     just-started scan read "live" immediately instead of "done".
+        #   * neither, and STALE -> the process is gone (killed / crashed and
+        #     never finalised) -> FAILED, so an abandoned scan doesn't read as
+        #     "live" forever.
+        #
+        # Index-derived rows (``seen_completed``) are in-process scans whose
+        # status already came from ``_derive_status`` (which gates on the
+        # is_running flag, score, and completeness); those are authoritative
+        # and must NOT be second-guessed by the disk heuristics below. Rows
+        # whose scan dir no longer exists are also left alone (e.g. an
+        # index-only row after a manual dir removal).
         _stale_after_seconds = 300.0
         now = time.time()
         fixed: list[ScanSummary] = []
         for s in completed_summaries:
             scan_dir = self._root / s.scan_id
-            partial = scan_dir / "scan.partial.json"
-            if not is_terminal_scan_on_disk(scan_dir) and partial.is_file():
+            if s.scan_id in seen_completed or not scan_dir.is_dir():
+                fixed.append(s)
+                continue
+            # A terminal file is the ONLY signal that a run finished its
+            # finalise/persist path (a successful scan) — keep "completed".
+            if is_terminal_scan_on_disk(scan_dir):
+                fixed.append(s)
+                continue
+            # ``status`` must move with ``is_running`` — the Scan history
+            # template branches on ``s.status``, not ``s.is_running``. An
+            # unfinished scan blanks AIVSS/band (no finalised score exists).
+            if is_interrupted_on_disk(scan_dir):
+                fixed.append(
+                    dataclasses.replace(
+                        s, is_running=False, status="failed", aivss=None, band=None
+                    )
+                )
+                continue
+            activity = 0.0
+            for candidate in (
+                scan_dir / "scan.partial.json",
+                scan_dir / "events.jsonl",
+                scan_dir,
+            ):
                 try:
-                    is_live = (now - partial.stat().st_mtime) < _stale_after_seconds
+                    activity = max(activity, candidate.stat().st_mtime)
                 except OSError:  # pragma: no cover -- defensive
-                    is_live = False
-                # ``status`` must move with ``is_running`` — the Scan history
-                # template branches on ``s.status``, not ``s.is_running``, so
-                # leaving status at its dataclass default ``"completed"`` would
-                # paint a live CLI scan as "done" while is_running=True
-                # (tester report #1 + #8). For a stale/orphaned partial scan
-                # we surface "failed" so the operator can clean it up.
-                s = dataclasses.replace(
+                    continue
+            is_live = activity > 0.0 and (now - activity) < _stale_after_seconds
+            fixed.append(
+                dataclasses.replace(
                     s,
                     is_running=is_live,
                     status="running" if is_live else "failed",
                     aivss=None,
                     band=None,
                 )
-            fixed.append(s)
+            )
         completed_summaries = fixed
 
         all_rows = running_summaries + completed_summaries
@@ -950,6 +1011,10 @@ class ScanStore:
         if not scan_dir.is_dir():
             return False
         if is_terminal_scan_on_disk(scan_dir):
+            return False
+        # An abnormally-terminated scan (user Ctrl-C / fatal error) is done,
+        # not running — even though its partial snapshot lingers on disk.
+        if is_interrupted_on_disk(scan_dir):
             return False
         from agent_guardian.server.partial_scan import partial_scan_path
 
