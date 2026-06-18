@@ -1,8 +1,10 @@
 /* AgentGuardian dashboard — hand-authored vanilla CSS (M12).
  *
- * No build step. No CDN. Custom properties drive the dark default theme;
- * a `prefers-color-scheme: light` override swaps the palette for the
- * light variant. WCAG AA contrast on every text/background pair.
+ * No build step. No CDN. Custom properties drive a SINGLE light theme.
+ * The dashboard deliberately does NOT follow the OS/browser dark-mode
+ * preference (decided 2026-06-17) — the light palette is applied
+ * unconditionally so a dark-mode machine still renders light. WCAG AA
+ * contrast on every text/background pair.
  */
 
 /* ---------------------------------------------------------------- *
@@ -10,6 +12,17 @@
  * ---------------------------------------------------------------- */
 
 :root {
+  /* AgentGuardian renders a SINGLE light theme and deliberately does NOT
+   * follow the OS/browser dark-mode preference (decided 2026-06-17). The
+   * light palette below (formerly gated behind
+   * ``@media (prefers-color-scheme: light)``) is now applied
+   * unconditionally, so a machine in dark mode still gets the light
+   * dashboard. ``color-scheme: light`` keeps native controls + scrollbars
+   * light to match. The dark token values that remain in this :root block
+   * are overridden by the unconditional light block just below; they're
+   * kept only so the diff stays small and the palette history is legible. */
+  color-scheme: light;
+
   /* Surfaces */
   --bg: #0b0d10;
   --surface: #14181d;
@@ -72,20 +85,22 @@
   --t-mid: 220ms;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #fafafa;
-    --surface: #ffffff;
-    --surface-2: #f3f4f6;
-    --border: #e5e7eb;
-    --border-strong: #cbd5e1;
-    --text: #1a1a1a;
-    --text-strong: #000000;
-    --muted: #6b7280;
-    --muted-strong: #4b5563;
-    --accent: #0891b2;
-    --accent-glow: rgba(8, 145, 178, 0.15);
-  }
+/* Unconditional light palette — applied for every visitor regardless of
+ * the OS/browser dark-mode setting (was ``@media (prefers-color-scheme:
+ * light)``). This :root comes after the dark defaults above, so it wins
+ * the cascade for every property it sets. */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --border: #e5e7eb;
+  --border-strong: #cbd5e1;
+  --text: #1a1a1a;
+  --text-strong: #000000;
+  --muted: #6b7280;
+  --muted-strong: #4b5563;
+  --accent: #0891b2;
+  --accent-glow: rgba(8, 145, 178, 0.15);
 }
 
 /* ---------------------------------------------------------------- *

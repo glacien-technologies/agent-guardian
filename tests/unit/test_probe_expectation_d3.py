@@ -132,10 +132,13 @@ def test_provenance_id_none_for_raw_string_seeds() -> None:
     assert "provenance_seed_id" not in meta
 
 
-def test_finding_stamps_expected_safe_behavior_via_provenance() -> None:
-    """Issue #82 — a generated-turn finding (no dispatched seed_id, only a
-    provenance_seed_id) still carries the category's expected_safe_behavior,
-    without faking probe attribution."""
+def test_generated_turn_finding_does_not_borrow_category_remediation() -> None:
+    """Issue #137 (supersedes #82) — a generated-turn finding (no dispatched
+    seed_id, only a provenance_seed_id) must NOT borrow the nominal category's
+    expected_safe_behavior. That category-"representative" remediation can
+    describe a different attack class than the finding's actual evidence (e.g.
+    an ASI09 balance-disclosure finding carrying "XSS/canary" advice), telling
+    the user to fix the wrong thing. With no matched probe, the field is None."""
     from agent_guardian.agents.base import AgentBudget
     from agent_guardian.agents.privilege import PrivilegeAgent
 
@@ -159,6 +162,7 @@ def test_finding_stamps_expected_safe_behavior_via_provenance() -> None:
         attempt_count=1,
         strategy_metadata={"provenance_seed_id": "ASI06-MP-001"},  # generated turn, no seed_id
     )
-    assert finding.expected_safe_behavior == "refuse unverified policy"
-    # probe_id is NOT faked to the provenance probe (attribution stays synthetic)
+    # #137: remediation is no longer borrowed from the category-representative seed
+    assert finding.expected_safe_behavior is None
+    # probe_id is still not faked to the provenance probe (attribution stays synthetic)
     assert finding.probe_id != "ASI06-MP-001"
