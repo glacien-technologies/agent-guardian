@@ -113,7 +113,19 @@ def fallback_seeds(
 
 
 TerminationReason = Literal[
-    "success", "exhausted", "refused", "budget", "error", "cancelled", "not_tested"
+    "success",
+    "exhausted",
+    "refused",
+    "budget",
+    "error",
+    "cancelled",
+    "not_tested",
+    # rc38 P0-#4 (#262): recon-specific taxonomy for "every target call returned
+    # a transport / adapter / quota error envelope, so the audit could not
+    # observe real capability evidence". Distinct from ``error`` (which is the
+    # *agent's* own failure to complete) and from ``not_tested`` (which means
+    # nothing was even attempted).
+    "target_error",
 ]
 
 # Judge v2 (M0.5) — verify-on-needs_followup. When the judge returns
