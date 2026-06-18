@@ -649,6 +649,45 @@ def _supports_taskgroup() -> bool:
     return sys.version_info >= (3, 11)
 
 
+def _format_aivss_final_log_line(
+    *,
+    scoring_valid: bool,
+    score: int,
+    band: SeverityBand,
+    penalty: float,
+    sub_scores: dict[str, float],
+    tier: Tier,
+    n_findings: int,
+    duration: float,
+    cost_usd: float,
+    tokens_total: int,
+) -> str:
+    """Issue #261 — render the run.log ``aivss final:`` line, gated on
+    ``scoring_valid``.
+
+    When ``scoring_valid=False`` the line must NOT carry a numeric
+    ``score=N band=GOOD`` payload — the rc38 matrix shipped
+    ``aivss final: score=88 band=GOOD`` while report.json carried
+    ``band=not_evaluated``, two contradictory truths for one scan.
+
+    Returning the line as a string (rather than logging directly) lets
+    unit tests pin the contract without monkeypatching the logger.
+    """
+    if not scoring_valid:
+        return (
+            f"aivss final: not_evaluated (scoring_valid=False) "
+            f"tier={tier.value} findings={n_findings} "
+            f"duration={duration:.1f}s cost_usd={cost_usd:.4f} "
+            f"tokens={tokens_total}"
+        )
+    rounded = {k: round(v, 1) for k, v in sub_scores.items()}
+    return (
+        f"aivss final: score={score} band={band.value} penalty={penalty:.2f} "
+        f"sub_scores={rounded} tier={tier.value} findings={n_findings} "
+        f"duration={duration:.1f}s cost_usd={cost_usd:.4f} tokens={tokens_total}"
+    )
+
+
 class SwarmCommander:
     """Layer-3 orchestrator for the eleven-agent adversarial swarm.
 
@@ -800,6 +839,20 @@ class SwarmCommander:
         # decision (a SMART scan with Fix A contribution >= 1 can be
         # authoritative provided completeness >= 70 %).
         self._fix_a_rescued_count: int = 0
+        # Issue #260 — running tally of panel calls where every seat raised
+        # before producing a JudgeVerdict. Folded into ScanCompleteness at
+        # finalise time so report.json carries a first-class count distinct
+        # from the existing ``terminated_by_counts['error']`` (which counts
+        # agents, not panel calls). ``_consecutive_panel_errors`` drives the
+        # circuit-breaker: ≥10 in a row → fast-fail.
+        self._panel_all_errored_count: int = 0
+        self._consecutive_panel_errors: int = 0
+        # Issue #260 — circuit-breaker threshold on consecutive all-errored
+        # panels. Hit it once → emit a CLI-level WARNING; sustained ≥ this
+        # many in a row → flip ``_stopped_reason`` so the scan ends with a
+        # distinct exit code instead of silently running to "completion".
+        self._PANEL_ERROR_WARN_AT: int = 3
+        self._PANEL_ERROR_CIRCUIT_BREAK_AT: int = 10
         # The launched agent slate, stashed by :meth:`_phase_parallel` so the
         # budget watchdog (and finalise hard-ceiling) can sum live per-agent
         # token spend off the same objects the parallel phase is driving.
@@ -2457,6 +2510,7 @@ class SwarmCommander:
             turns_planned=turns_planned,
             pct=round(min(100.0, pct), 1),
             terminated_by_counts=terminated_by_counts,
+            errors_panel_all_errored=self._panel_all_errored_count,
         )
 
     # ------------------------------------------------------------------
@@ -3575,17 +3629,19 @@ class SwarmCommander:
             },
         )
         _LOG.info(
-            "aivss final: score=%d band=%s penalty=%.2f sub_scores=%s "
-            "tier=%s findings=%d duration=%.1fs cost_usd=%.4f tokens=%d",
-            result.score,
-            result.band.value,
-            result.penalty,
-            {k: round(v, 1) for k, v in sub_scores.items()},
-            tier.value,
-            len(findings),
-            duration,
-            cost_usd,
-            tokens_total,
+            "%s",
+            _format_aivss_final_log_line(
+                scoring_valid=scoring_valid,
+                score=result.score,
+                band=effective_band,
+                penalty=result.penalty,
+                sub_scores=sub_scores,
+                tier=tier,
+                n_findings=len(findings),
+                duration=duration,
+                cost_usd=cost_usd,
+                tokens_total=tokens_total,
+            ),
         )
         # Telemetry -- best-effort, only fires when the user has opted in.
         # No-op for opted-out users; no impact on Scan ever.
@@ -3709,12 +3765,51 @@ class SwarmCommander:
         ``panel majority`` lines stay where they are — this is the
         operator-grade narration the structured event needs to be
         searchable on.
+
+        Issue #260 — when ``majority=='error'`` (every seat raised), this
+        method also increments the all-errored counter and trips a
+        CLI-level WARNING / circuit-break so the scan does not silently
+        run to "completion" through a fully collapsed panel surface.
         """
+        majority = payload.get("majority")
+        if majority == "error":
+            self._panel_all_errored_count += 1
+            self._consecutive_panel_errors += 1
+            _LOG.warning(
+                "panel collapsed: all %d seats errored (consecutive=%d, total=%d)",
+                int(payload.get("error_count") or 0),
+                self._consecutive_panel_errors,
+                self._panel_all_errored_count,
+            )
+            if self._consecutive_panel_errors == self._PANEL_ERROR_WARN_AT:
+                _LOG.warning(
+                    "panel collapsed: %d consecutive all-errored panels — "
+                    "check LLM provider quota / credentials",
+                    self._consecutive_panel_errors,
+                )
+            if (
+                self._consecutive_panel_errors >= self._PANEL_ERROR_CIRCUIT_BREAK_AT
+                and self._stopped_reason == "completed"
+            ):
+                _LOG.error(
+                    "panel circuit-break: %d consecutive all-errored panels — "
+                    "halting scan (stopped_reason='cancelled'; see "
+                    "completeness.errors_panel_all_errored for cause)",
+                    self._consecutive_panel_errors,
+                )
+                # ``stopped_reason='cancelled'`` is the existing literal for
+                # a swarm-initiated halt; the cause (panel collapse) reads
+                # off the ScanCompleteness counter, not the literal — so the
+                # signed-report Literal contract stays stable.
+                self._stopped_reason = "cancelled"
+                self._cancel_event.set()
+        else:
+            self._consecutive_panel_errors = 0
         _LOG.info(
-            "panel verdict: majority=%s agreement=%.2f confidence=%.2f seats=%d",
-            payload.get("majority"),
-            float(payload.get("agreement_fraction") or 0.0),
-            float(payload.get("confidence") or 0.0),
+            "panel verdict: majority=%s agreement=%s confidence=%s seats=%d",
+            majority,
+            payload.get("agreement_fraction"),
+            payload.get("confidence"),
             len(payload.get("seat_verdicts") or []),
         )
         self._emit(

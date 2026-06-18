@@ -132,6 +132,20 @@ def emit_json(
     """
     redact = _resolve_redact(redact_pii)
     coverage = compute_coverage_from_memory(scan, root_dir=memory_root)
+    # Issue #261 — when ``scoring_valid=False`` the numeric AIVSS is NOT
+    # authoritative and the per-ASI scores default to 100.0 for never-tested
+    # boundaries. The rc38 matrix surfaced 35 scans with
+    # ``aivss=88, band=not_evaluated`` simultaneously — two contradictory
+    # truths in one signed report. Suppress the numeric AIVSS and the
+    # per-ASI score dict in the rendered payload so dashboards that read
+    # ``headline.aivss`` without joining ``scoring_valid`` cannot
+    # mis-classify quota-failed scans as healthy 88s. The in-memory Scan
+    # keeps the numeric for forensic trend-tracking (back-compat with the
+    # documented contract); only the rendered payload is nulled.
+    rendered_aivss: int | None = scan.aivss if scan.scoring_valid else None
+    rendered_asi_scores: dict[str, float] = (
+        {cat.value: score for cat, score in scan.asi_scores.items()} if scan.scoring_valid else {}
+    )
     payload: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
         "scan_id": scan.id,
@@ -145,10 +159,10 @@ def emit_json(
             "profile_source": scan.target_profile_source,
         },
         "tier": scan.tier.value,
-        "aivss": scan.aivss,
+        "aivss": rendered_aivss,
         "band": scan.band.value,
         "sub_scores": dict(scan.sub_scores),
-        "asi_scores": {cat.value: score for cat, score in scan.asi_scores.items()},
+        "asi_scores": rendered_asi_scores,
         "findings_summary": scan.findings_summary(),
         # #134 — ``findings_summary`` counts only confirmed (``success=True``)
         # findings; this is the complement so a reader can see how many

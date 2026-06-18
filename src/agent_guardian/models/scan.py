@@ -68,6 +68,13 @@ class ScanCompleteness(BaseModel):
     # ``TerminationReason`` values (success / cancelled / error / exhausted /
     # not_tested / early_stop); empty dict on back-compat reads.
     terminated_by_counts: dict[str, int] = Field(default_factory=dict)
+    # Issue #260 — count of panel calls where EVERY seat raised before
+    # producing a JudgeVerdict (panel collapsed, distinct from a real
+    # unanimous ``needs_followup`` vote). The rc38 matrix shipped 441/441
+    # panels in this state on a quota-exhausted key; pre-fix they were
+    # indistinguishable from healthy unanimous panels in the report.
+    # Default ``0`` keeps older Scan JSON on disk deserialising unchanged.
+    errors_panel_all_errored: int = Field(default=0, ge=0)
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
