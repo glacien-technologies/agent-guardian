@@ -320,11 +320,11 @@ def test_clusterfuzzlite_workflow_uses_pinned_actions() -> None:
     assert "schedule" in triggers
     steps_yaml = yaml.safe_dump(data["jobs"]["fuzz"]["steps"])
     assert (
-        "google/clusterfuzzlite/actions/build_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05"
+        "google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1"
         in steps_yaml
     )
     assert (
-        "google/clusterfuzzlite/actions/run_fuzzers@82652fb49e77bc29c35da1167bb286e93c6bcc05"
+        "google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1"
         in steps_yaml
     )
     assert "github-token: ${{ secrets.GITHUB_TOKEN }}" in steps_yaml
