@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import ssl
 from dataclasses import dataclass, field
 from typing import Any
@@ -54,6 +55,40 @@ _LOG = logging.getLogger(__name__)
 # implement in M9. The build_request / extract_response_text pure functions
 # remain usable for unit tests, but ``HttpAdapter.call()`` refuses to send.
 _AUTH_DEFERRED_SHAPES: frozenset[str] = frozenset({"bedrock", "vertex", "agentcore"})
+
+
+# rc38 P0-#4 (#262) sibling to PR #248 — provider-internal error envelopes
+# embedded in the assistant text get parroted into recon's tool-extraction
+# regex AND the judge's system prompt verbatim. Normalise them to a stable
+# ``[TARGET_UNAVAILABLE: <code>]`` sentinel BEFORE the text crosses out of
+# the transport layer so downstream stages never see the raw envelope.
+# Captures the status code (digits) when present so the diagnostic is
+# preserved.
+_ADAPTER_ERROR_RE = re.compile(
+    r"\[adapter_error:\s*(?P<code>\d{3})?[^\]]*\]",
+    re.IGNORECASE,
+)
+
+
+def _normalize_adapter_error_text(text: str | None) -> str | None:
+    """Replace any ``[adapter_error: ...]`` span with a stable public sentinel.
+
+    The sentinel format is ``[TARGET_UNAVAILABLE: <code>]`` when the original
+    span carried a 3-digit status code, otherwise ``[TARGET_UNAVAILABLE]``.
+    Benign text is returned unchanged. ``None`` passes through.
+
+    This runs at the transport layer so recon's parser, the judge LLM, and
+    every other downstream consumer all see the same stable sentinel instead
+    of raw provider-internal prose.
+    """
+    if not text:
+        return text
+
+    def _sub(m: re.Match[str]) -> str:
+        code = m.group("code")
+        return f"[TARGET_UNAVAILABLE: {code}]" if code else "[TARGET_UNAVAILABLE]"
+
+    return _ADAPTER_ERROR_RE.sub(_sub, text)
 
 
 # Per-shape (response_path, name_path, args_path) triples used by the
@@ -394,6 +429,10 @@ class HttpAdapter(TargetAdapter):
                 f"http: expected JSON object at top level, got {type(data).__name__}"
             )
         text = self._extract_text(data)
+        # rc38 P0-#4 (#262) sibling to PR #248 — strip provider-internal
+        # ``[adapter_error: ...]`` envelopes before the text reaches recon /
+        # the judge LLM context. Normalisation is a no-op for benign replies.
+        text = _normalize_adapter_error_text(text) or ""
         # Capture structured tool_calls into the per-turn snapshot so callers
         # that walk ``adapter._last_response.tool_calls`` see real evidence.
         # Extraction never raises (returns ``()`` on malformed paths).

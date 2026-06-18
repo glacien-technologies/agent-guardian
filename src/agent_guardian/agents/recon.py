@@ -210,6 +210,63 @@ _TOOL_EXTRACTION_USER = (
 _IDENT_RE = re.compile(r"`([^`]{2,60})`|\b([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)\b")
 
 
+# rc38 P0-#4 (#262) — infrastructure / transport / quota tokens that must
+# NEVER survive into ``declared_tools``. When a target endpoint forwards an
+# adapter_error / 429 quota body verbatim, the deterministic regex extractor
+# above happily pulls URL fragments and JSON keys ("adk-docs", "adapter_error",
+# "rate-limits", "retry_delay") and parrots them into the judge's system
+# prompt. This is a prompt-injection surface: attacker-controlled error text
+# becomes part of our own model context. The match is case-insensitive and
+# substring-anchored so ``retryDelay`` / ``RETRY-DELAY`` / ``retry_delay`` all
+# trip it.
+_TRANSPORT_TOKEN_RE = re.compile(
+    r"adapter[_-]?error"
+    r"|adk[_-]?docs"
+    r"|rate[_-]?limits?"
+    r"|resource[_-]?exhausted"
+    r"|free[_-]?tier"
+    r"|generativelanguage"
+    r"|retry[_-]?delay"
+    r"|retry[_-]?info"
+    r"|quota[_-]?metric"
+    r"|googleapis"
+    r"|generate_content_(?:free_tier_)?input_token_count",
+    re.IGNORECASE,
+)
+
+
+# rc38 P0-#4 (#262) — markers that a target reply is an *infrastructure* error
+# envelope, not a capability description. Matched on the raw reply text BEFORE
+# tool extraction so recon can (a) skip extraction for the turn and (b) at the
+# end set ``terminated_by=target_error`` when every transcript turn was an
+# envelope. Keep the regex anchored on the unambiguous markers — anything
+# fuzzier risks false-positive on a benign assistant reply that *quotes* the
+# word "error".
+_TARGET_ERROR_RE = re.compile(
+    r"\[adapter_error:"
+    r"|\[target call failed:"
+    r"|\[TARGET_UNAVAILABLE:"
+    r"|\"status\"\s*:\s*\"RESOURCE_EXHAUSTED\""
+    r"|\"code\"\s*:\s*4(?:29|0[0-9]|9[0-9])"  # 4xx
+    r"|\"code\"\s*:\s*5\d{2}"  # 5xx
+    r"|RESOURCE_EXHAUSTED"
+    r"|please retry in \d",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_target_error(text: str) -> bool:
+    """True iff ``text`` matches an infrastructure / transport error envelope.
+
+    See :data:`_TARGET_ERROR_RE` for the marker set. Recon uses this to gate
+    tool extraction per turn and to pick the correct ``terminated_by`` taxonomy
+    when every transcript turn was an error envelope.
+    """
+    if not text:
+        return False
+    return _TARGET_ERROR_RE.search(text) is not None
+
+
 def _parse_tool_list(text: str) -> list[str]:
     """Parse a JSON array of tool names from the LLM extraction reply.
 
@@ -242,14 +299,24 @@ def _regex_tool_names(reply: str) -> list[str]:
 
 
 def _clean_tool_names(names: list[str]) -> list[str]:
-    """Dedup, strip quoting/whitespace, drop empties + sentence-length noise."""
+    """Dedup, strip quoting/whitespace, drop empties + sentence-length noise.
+
+    rc38 P0-#4 (#262): also reject names matching :data:`_TRANSPORT_TOKEN_RE`
+    so URL/quota tokens lifted from a 429 / adapter_error reply body can never
+    surface as ``declared_tools``.
+    """
     cleaned: list[str] = []
     seen: set[str] = set()
     for raw in names:
         n = raw.strip().strip("`'\".,").strip()
-        if n and 1 < len(n) <= 60 and n.lower() not in seen:
-            seen.add(n.lower())
-            cleaned.append(n)
+        if not n or len(n) <= 1 or len(n) > 60:
+            continue
+        if n.lower() in seen:
+            continue
+        if _TRANSPORT_TOKEN_RE.search(n):
+            continue
+        seen.add(n.lower())
+        cleaned.append(n)
     return cleaned[:12]
 
 
@@ -606,8 +673,18 @@ class ReconAgent:
         # time scales with the slowest extraction, not their sum. The merge
         # below walks results in transcript order so declared_tools_observed
         # ordering is unchanged.
+        # rc38 P0-#4 (#262): skip tool extraction on any reply that matches an
+        # infrastructure-error envelope (adapter_error sentinel, 4xx/5xx JSON
+        # status, transport "[target call failed: ...]"). Without this gate,
+        # the deterministic regex fallback inside ``_extract_tool_names`` pulls
+        # URL/quota tokens out of a Google 429 body and parrots them into the
+        # judge's system prompt verbatim — a prompt-injection surface.
         extraction_inputs = [
-            reply if reply and not reply.startswith("[target call failed") else None
+            reply
+            if reply
+            and not reply.startswith("[target call failed")
+            and not _looks_like_target_error(reply)
+            else None
             for _q, reply in transcript
         ]
         extraction_tasks = [
@@ -741,6 +818,14 @@ class ReconAgent:
             if n.lower() not in _ml:
                 merged.append(n)
                 _ml.add(n.lower())
+        # rc38 P0-#4 (#262) defence-in-depth — even after the LLM extractor's
+        # gate and the per-name cleaner, a tool list arriving through the
+        # ``audit.declared_tools`` path could in principle still carry an
+        # infrastructure token (if the schema profiler ever hallucinated one
+        # from an error-bodied transcript). Strip them at the boundary so the
+        # fingerprint that lands on shared memory is provably free of
+        # transport-error tokens.
+        merged = [n for n in merged if not _TRANSPORT_TOKEN_RE.search(n)]
         # Surface the runtime time-channel recon-probe result (RECON-TC-001) as a
         # behavioural flag so the attacker layer + report see the inference-family
         # latency fingerprint instead of it being recorded-but-unused.
@@ -794,6 +879,24 @@ class ReconAgent:
                 "recon: memory.set_target_fingerprint raised %s: %s — fingerprint not persisted",
                 type(exc).__name__,
                 exc,
+            )
+
+        # rc38 P0-#4 (#262) — when EVERY transcript reply was an
+        # infrastructure-error envelope, no real capability evidence was
+        # observed; report ``target_error`` rather than ``success`` so the
+        # scan-level renderer / scorer can see that the recon phase did NOT
+        # complete its job (and downstream agents will know to treat the
+        # fingerprint as low-confidence).
+        if (
+            terminated_by == "success"
+            and transcript
+            and all(_looks_like_target_error(reply) for _q, reply in transcript)
+        ):
+            terminated_by = "target_error"
+            _LOG.warning(
+                "recon_done: every transcript turn was an error envelope "
+                "(probes=%d) -- terminated_by=target_error",
+                turns,
             )
 
         duration = time.monotonic() - start
