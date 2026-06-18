@@ -662,7 +662,18 @@ def test_scan_end_to_end_writes_json(runner: CliRunner, tmp_path: Path) -> None:
     assert out_path.is_file()
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert "aivss" in payload
-    assert 0 <= payload["aivss"] <= 100
+    # Issue #261 — a stub-evaluator scan ships ``scoring_valid=False``, so
+    # ``aivss`` in the rendered report is suppressed to ``None`` (the
+    # in-memory Scan still carries the numeric for trend-tracking). A real
+    # evaluator path returns an integer in [0,100].
+    if payload.get("scoring_valid"):
+        assert isinstance(payload["aivss"], int)
+        assert 0 <= payload["aivss"] <= 100
+    else:
+        assert payload["aivss"] is None, (
+            f"scoring_valid=False scans must publish aivss=None (issue #261); "
+            f"got {payload['aivss']!r}"
+        )
     # The mode-blind pre-flight estimate is gone; an uncapped run says so.
     assert "cost estimate" not in result.stdout.lower()
     assert "no budget cap" in result.stdout.lower()

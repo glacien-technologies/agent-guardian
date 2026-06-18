@@ -193,7 +193,13 @@ async def test_panel_emits_panel_verdict_event_with_full_vote_shape() -> None:
     call with the full vote shape: seat_verdicts (per-seat string),
     seat_confidences (per-seat float), agreement_fraction (float in [0,1]),
     majority (string), confidence (float). The shape is what downstream
-    tooling needs to distinguish a 3-0 from a 2-1 outcome."""
+    tooling needs to distinguish a 3-0 from a 2-1 outcome.
+
+    Issue #259 — when seats 1 and 2 dissent, the panel now escalates to
+    a 3rd seat at runtime. This test uses unanimous high-confidence
+    verdicts so the L2 escalation does NOT fire and the emitted payload
+    carries exactly the 2 seats it was patched with (the panel-emission
+    contract is independent of the dissent-escalation contract)."""
     specs = [
         _make_spec("gemini", "attacker-as-judge"),
         _make_spec("openai", "evaluator-as-judge"),
@@ -204,12 +210,13 @@ async def test_panel_emits_panel_verdict_event_with_full_vote_shape() -> None:
         seed=42,
         event_emitter=lambda payload: captured.append(payload),
     )
-    # 2-1 majority: two seats vote ``defended``, one votes ``exploited``.
+    # Unanimous high-confidence vote: no L2 escalation fires, so the
+    # emitted payload carries exactly the 2 seats patched in.
     _patch_seats(
         panel,
         [
             _stub_verdict("defended", 0.9),
-            _stub_verdict("exploited", 0.7),
+            _stub_verdict("defended", 0.7),
         ],
     )
     final = await panel.verdict(prompt="probe", target_response="response")
@@ -228,11 +235,8 @@ async def test_panel_emits_panel_verdict_event_with_full_vote_shape() -> None:
     ):
         assert key in payload, f"panel_verdict payload missing key {key!r}: {payload}"
 
-    assert payload["seat_verdicts"] == ["defended", "exploited"]
+    assert payload["seat_verdicts"] == ["defended", "defended"]
     assert payload["seat_confidences"] == [0.9, 0.7]
-    # 1 of 2 agreed with the tie-resolved majority ("needs_followup") → 0.5.
-    # The exact majority for a 1-1 tie resolves to needs_followup per the
-    # existing PanelJudge contract.
     assert payload["majority"] == final.verdict
     assert 0.0 <= payload["agreement_fraction"] <= 1.0
     assert 0.0 <= payload["confidence"] <= 1.0
