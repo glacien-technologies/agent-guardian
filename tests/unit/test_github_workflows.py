@@ -92,7 +92,7 @@ def test_docker_publish_attests_image_provenance() -> None:
     steps_yaml = yaml.safe_dump(job["steps"])
     assert "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8" in steps_yaml
     assert "id: build" in steps_yaml
-    assert "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661" in steps_yaml
+    assert "actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a" in steps_yaml
     assert "subject-digest: ${{ steps.build.outputs.digest }}" in steps_yaml
     assert "push-to-registry: true" in steps_yaml
 
@@ -303,7 +303,7 @@ def test_publish_workflow_attests_release_artifacts() -> None:
     assert perms.get("attestations") == "write", "release artifact attestation needs attestations"
     steps_yaml = yaml.safe_dump(job["steps"])
     assert "sigstore/gh-action-sigstore-python" in steps_yaml
-    assert "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661" in steps_yaml
+    assert "actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a" in steps_yaml
     assert "subject-path" in steps_yaml
     assert "dist/*.whl" in steps_yaml
     assert "dist/*.tar.gz" in steps_yaml
