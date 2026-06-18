@@ -2719,21 +2719,26 @@ class AsiAgent(ABC):
     def _resolve_expected_safe_behavior(
         self, seed: ProbeSeed | None, meta: dict[str, object]
     ) -> str | None:
-        """Resolve a finding's expected_safe_behavior (D3 / #82).
+        """Resolve a finding's expected_safe_behavior (D3 / #82 / #137).
 
-        Prefers the dispatched seed; falls back to the representative provenance
-        seed that generating strategies attach (so lanes that fire no corpus
-        seed — tool-abuse/memory-poison/a2a — still carry the category's expected
-        safe behavior on their findings). Attribution (probe_id/severity) is
-        unaffected — only this descriptive field uses the provenance fallback.
+        Remediation MUST come only from the probe that actually produced this
+        finding — the dispatched seed, or its ``-mutant-`` parent already
+        resolved by :meth:`_build_finding`. Issue #137: the previous
+        category-"representative" provenance fallback (used for lanes that fire
+        no corpus seed — tool-abuse/memory-poison/a2a — and for generated PAIR
+        turns) attached remediation drawn from a DIFFERENT attack class than the
+        finding's evidence (e.g. an ASI09 balance-disclosure finding carrying
+        "XSS/canary escaping" advice), telling the user to fix the wrong thing.
+        We now derive the advice strictly from the matched probe; when no corpus
+        probe produced the finding we return ``None`` (no remediation) rather
+        than borrowing the nominal category's, so the field never contradicts
+        the evidence. Attribution (probe_id/severity) is unaffected.
         """
+        # ``meta`` retained for signature stability (the provenance-seed lookup
+        # it carried is intentionally no longer consulted — see #137).
+        _ = meta
         if seed is not None and seed.expected_safe_behavior:
             return seed.expected_safe_behavior
-        prov_id = meta.get("provenance_seed_id")
-        if prov_id:
-            prov = self._seed_index.get(str(prov_id))
-            if prov is not None:
-                return prov.expected_safe_behavior
         return None
 
     def _build_finding(
