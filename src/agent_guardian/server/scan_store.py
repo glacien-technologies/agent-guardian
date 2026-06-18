@@ -910,9 +910,7 @@ class ScanStore:
             # unfinished scan blanks AIVSS/band (no finalised score exists).
             if is_interrupted_on_disk(scan_dir):
                 fixed.append(
-                    dataclasses.replace(
-                        s, is_running=False, status="failed", aivss=None, band=None
-                    )
+                    dataclasses.replace(s, is_running=False, status="failed", aivss=None, band=None)
                 )
                 continue
             activity = 0.0
