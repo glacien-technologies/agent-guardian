@@ -90,7 +90,7 @@ def test_docker_publish_attests_image_provenance() -> None:
     assert perms.get("id-token") == "write", "image provenance needs OIDC"
     assert perms.get("attestations") == "write", "image provenance needs attestations:write"
     steps_yaml = yaml.safe_dump(job["steps"])
-    assert "docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8" in steps_yaml
+    assert "docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf" in steps_yaml
     assert "id: build" in steps_yaml
     assert "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661" in steps_yaml
     assert "subject-digest: ${{ steps.build.outputs.digest }}" in steps_yaml
