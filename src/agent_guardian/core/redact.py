@@ -421,6 +421,20 @@ _REDACTABLE_FINDING_FIELDS = (
     "evidence",
 )
 
+# rc29 finding-aggregation redesign — every nested Attempt also carries
+# leak-prone strings (the per-turn copies of ``summary``, ``trigger_prompt``,
+# ``trigger_response``, ``evidence_quote``). The legacy v1 compat reader
+# synthesises these per-Attempt copies from the outer Finding fields, so
+# scrubbing the outer fields without scrubbing the Attempt copies would
+# re-expose the same secret one nesting level deeper. Keep these in lock-step
+# with the corresponding Attempt model field names.
+_REDACTABLE_ATTEMPT_FIELDS = (
+    "summary",
+    "trigger_prompt",
+    "trigger_response",
+    "evidence_quote",
+)
+
 
 @runtime_checkable
 class _FindingLike(Protocol):
@@ -467,6 +481,25 @@ def redact_finding(finding: Any, *, enabled: bool) -> Any:
         for field in _REDACTABLE_FINDING_FIELDS:
             if field in model_fields:
                 update[field] = _redact_text(getattr(finding, field, None))
+        # rc29 — scrub nested Attempts so the per-turn copies of the
+        # leak-prone fields don't survive into the report. Each Attempt is
+        # itself a frozen Pydantic model, so we model_copy with the redacted
+        # field set. ``getattr(..., None)`` keeps the path safe for older
+        # Finding instances that don't yet expose ``attempts``.
+        attempts_val = getattr(finding, "attempts", None)
+        if attempts_val:
+            redacted_attempts: list[Any] = []
+            for attempt in attempts_val:
+                if hasattr(attempt, "model_copy"):
+                    a_fields = getattr(type(attempt), "model_fields", {})
+                    a_update: dict[str, Any] = {}
+                    for af in _REDACTABLE_ATTEMPT_FIELDS:
+                        if af in a_fields:
+                            a_update[af] = _redact_text(getattr(attempt, af, None))
+                    redacted_attempts.append(attempt.model_copy(update=a_update))
+                else:
+                    redacted_attempts.append(attempt)
+            update["attempts"] = redacted_attempts
         return finding.model_copy(update=update)
 
     # Mapping / dict-like finding.
@@ -475,6 +508,20 @@ def redact_finding(finding: Any, *, enabled: bool) -> Any:
         for field in _REDACTABLE_FINDING_FIELDS:
             if field in out:
                 out[field] = _redact_text(out[field])
+        # rc29 — same nested-Attempts scrub as the Pydantic branch above.
+        attempts_field = out.get("attempts")
+        if isinstance(attempts_field, list) and attempts_field:
+            cleaned: list[Any] = []
+            for raw_attempt in attempts_field:
+                if isinstance(raw_attempt, dict):
+                    a = dict(raw_attempt)
+                    for af in _REDACTABLE_ATTEMPT_FIELDS:
+                        if af in a:
+                            a[af] = _redact_text(a[af])
+                    cleaned.append(a)
+                else:
+                    cleaned.append(raw_attempt)
+            out["attempts"] = cleaned
         return out
 
     # dataclass instance.

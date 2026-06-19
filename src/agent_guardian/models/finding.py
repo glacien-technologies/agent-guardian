@@ -1,15 +1,29 @@
-"""Finding model — one attack attempt with its judge verdict."""
+"""Finding model — one aggregated vulnerability with nested per-turn Attempts.
+
+Pre-rc29, a :class:`Finding` corresponded to a single per-turn judge verdict
+record. rc29 (this redesign) flips the semantics: a Finding now aggregates
+over the ``(probe_id, asi)`` key, and each per-turn record becomes an
+:class:`~agent_guardian.models.attempt.Attempt` under it.
+
+On-disk payloads written by pre-rc29 scans are tagged ``schema_version =
+"finding-v1"`` by the model-validator below and wrapped in a synthetic
+single-element ``attempts=[<self>]`` list so downstream consumers see a
+consistent shape regardless of when the scan ran. New emits default to
+``schema_version = "finding-v2"``. See ``docs/_design/finding-aggregation-redesign-2026-06.md``
+for the full rationale.
+"""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from agent_guardian.models.asi import AsiCategory
+from agent_guardian.models.attempt import Attempt
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.mitre import MitreTechnique
 from agent_guardian.models.severity import Severity
@@ -33,7 +47,20 @@ def _wilson_lower_bound(successes: int, trials: int) -> float:
 
 
 class Finding(BaseModel):
-    """Single attack-attempt record with its judge verdict (PRD §5)."""
+    """Aggregated vulnerability record keyed by ``(probe_id, asi)`` (rc29).
+
+    Pre-rc29 emitted one Finding per per-turn judge verdict. rc29 aggregates:
+    each per-turn record becomes an :class:`Attempt` under a single Finding
+    for the same ``(probe_id, asi)`` pair. ``Finding.confidence`` is the
+    Wilson lower bound of ``success_count / attempt_count``; ``success`` is
+    ``True`` iff at least one attempt landed.
+
+    Legacy on-disk payloads (no ``schema_version`` field) round-trip through
+    the model-validator at the bottom of this class: they are tagged
+    ``schema_version="finding-v1"`` and wrapped in a synthetic single-element
+    ``attempts=[<self>]`` so downstream consumers (scoring, dashboard, SARIF)
+    see one consistent shape.
+    """
 
     id: str = Field(min_length=1)
     probe_id: str = Field(min_length=1)
@@ -103,9 +130,111 @@ class Finding(BaseModel):
     # distinguish a 3-0 from a 2-1 outcome without re-parsing events.jsonl.
     panel: dict[str, Any] | None = None
 
+    # rc29 aggregation redesign. ``attempts`` is the per-turn breakdown the
+    # operator can drill into in the dashboard. ``success_count`` is the
+    # numerator of the Wilson-bound ``confidence``; ``attempt_count`` is the
+    # denominator. ``schema_version`` distinguishes new aggregated emits
+    # (``"finding-v2"``) from legacy per-turn records loaded from disk
+    # (``"finding-v1"``, set by the model-validator below). See
+    # ``docs/_design/finding-aggregation-redesign-2026-06.md`` §II.A.
+    attempts: list[Attempt] = Field(default_factory=list)
+    success_count: int = Field(default=0, ge=0)
+    schema_version: Literal["finding-v1", "finding-v2"] = "finding-v2"
+
     # ``extra="ignore"`` so old serialized findings (which lack the v2 fields)
     # and forward-serialized ones round-trip without raising.
     model_config = ConfigDict(frozen=True, extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_legacy_reader(cls, data: Any) -> Any:
+        """Tag pre-rc29 dict payloads as ``finding-v1`` and synthesise an Attempt.
+
+        A pre-rc29 on-disk Finding (one record per turn) has no
+        ``schema_version`` field, no ``success_count`` field, and no
+        ``attempts`` list. Downstream consumers under rc29 assume those
+        three things exist. This validator runs at parse time:
+
+        * If the payload is already a :class:`Finding` instance, pass it
+          through untouched (cls(**...) round-trips do not re-trigger v1
+          tagging).
+        * If the payload is a dict that lacks ``schema_version``, mark it
+          ``"finding-v1"``, default ``success_count`` to ``1 if success
+          else 0``, and wrap the single per-turn record into a
+          one-element ``attempts=[<synth>]`` list keyed off the payload's
+          own per-turn fields (id, probe_id, asi, attempt_count as the
+          sequence, verdict_v2, confidence, success, ...). The synthetic
+          Attempt preserves the legacy per-turn id verbatim so the audit
+          trail does not change.
+        * If the payload is a dict that already has ``schema_version``
+          (either v1 or v2), trust it and only fill ``attempts`` /
+          ``success_count`` defaults when absent.
+
+        Direct constructor calls (``Finding(...)``) by the aggregator
+        pass ``schema_version="finding-v2"`` explicitly and bypass the
+        synthetic wrap.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        existing_version = data.get("schema_version")
+        if existing_version is None:
+            # Legacy on-disk payload — tag, fill the new fields from the
+            # per-turn record, and synthesise a single Attempt so the
+            # rest of the framework can read v1 records through the v2
+            # shape.
+            data = dict(data)  # avoid mutating caller's dict
+            data["schema_version"] = "finding-v1"
+            success_flag = bool(data.get("success", False))
+            if "success_count" not in data:
+                data["success_count"] = 1 if success_flag else 0
+            if "attempts" not in data or not data.get("attempts"):
+                asi_val = data.get("asi") or data.get("asi_id")
+                # ``asi`` arrives as either an ``AsiCategory`` enum (with
+                # ``.value``) or a raw string; tolerate both without losing
+                # the legacy id when the field is missing entirely.
+                asi_str = getattr(asi_val, "value", None) or (
+                    str(asi_val) if asi_val is not None else ""
+                )
+                # ``attempt_count`` on a v1 record was the turn number this
+                # specific record landed on; use it verbatim as the synthetic
+                # Attempt's ``sequence`` so the legacy ordering survives.
+                seq_raw = data.get("attempt_count", 1)
+                try:
+                    seq = int(seq_raw)
+                except (TypeError, ValueError):
+                    seq = 1
+                if seq < 1:
+                    seq = 1
+                created_at = data.get("created_at")
+                synth: dict[str, Any] = {
+                    "id": str(data.get("id") or "legacy"),
+                    "probe_id": str(data.get("probe_id") or "legacy"),
+                    "asi": asi_str or "ASI01",
+                    "sequence": seq,
+                    "verdict_v2": str(data.get("verdict_v2") or "exploited"),
+                    "confidence": float(data.get("confidence", 0.0)),
+                    "success": success_flag,
+                    "trigger_prompt": data.get("trigger_prompt"),
+                    "trigger_response": data.get("trigger_response"),
+                    "evidence_types": list(data.get("evidence_types") or []),
+                    "evidence_quote": str(data.get("evidence_quote") or ""),
+                    "created_at": created_at,
+                    "reproduced_n_of_m": data.get("reproduced_n_of_m"),
+                    "pov_reliability": data.get("pov_reliability"),
+                    "summary": str(data.get("summary") or ""),
+                }
+                data["attempts"] = [synth]
+        else:
+            # Already-tagged payload (v1 or v2). Only fill rc29 fields when
+            # absent so a stale on-disk record without ``attempts`` /
+            # ``success_count`` doesn't refuse to parse.
+            if "attempts" not in data or "success_count" not in data:
+                data = dict(data)
+                data.setdefault("attempts", [])
+                if "success_count" not in data:
+                    data["success_count"] = 1 if bool(data.get("success", False)) else 0
+        return data
 
     @property
     def pov_reliability_effective(self) -> float | None:
@@ -141,7 +270,16 @@ class Finding(BaseModel):
         # property bag) read ``asi_id``; the model field is ``asi``. Emit both
         # keys with the same string value so neither consumer breaks while we
         # keep a single field of truth on the model.
+        #
+        # rc29 also exposes ``schema_version`` on the wire so v1 and v2
+        # records are distinguishable on disk without re-deriving the tag
+        # from the absence of fields.
         data = handler(self)
         if "asi" in data and "asi_id" not in data:
             data["asi_id"] = data["asi"]
+        # schema_version is already serialised because it's a real field,
+        # but defensively ensure it survives any future serializer that
+        # might drop unknown defaults.
+        if "schema_version" not in data:
+            data["schema_version"] = self.schema_version
         return data

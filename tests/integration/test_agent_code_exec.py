@@ -37,8 +37,10 @@ async def test_code_exec_finds_findings_and_stops_after_one(
     assert report.asi_category == AsiCategory.ASI05
     # min-turns floor (3, default 2026-06-07): the lane keeps probing past the
     # first exec instead of stopping at turn 1 — one exploit per turn across the
-    # floor, then it stops on success once turns >= min_turns.
-    assert report.findings_count == 3
+    # floor, then it stops on success once turns >= min_turns. Post finding
+    # aggregation (#185), the 3 turns collapse into 2 distinct (probe_id, asi)
+    # Findings.
+    assert report.findings_count == 2
     assert report.turns >= 3
     assert report.terminated_by == "success"
     findings = memory.findings_by_asi(AsiCategory.ASI05)
