@@ -1902,6 +1902,33 @@ class SwarmCommander:
             if isinstance(r, BaseException):
                 _LOG.warning("agent task raised %s: %s", type(r).__name__, r)
 
+    def _completed_work_for(self, agent: AsiAgent) -> tuple[int, int]:
+        """Judged-turn and finding counts an agent already accrued on disk.
+
+        Issue #205 — when the outer wall-budget cancels an in-flight agent
+        the local ``turns`` / ``findings_count`` accumulators inside
+        :meth:`AsiAgent.run` are lost with the cancelled frame. The work
+        itself, however, is durable: the agent writes one reflection per
+        judged turn and one finding record per finding into ``SharedMemory``
+        as it goes (the same source ``coverage.agents`` is built from). We
+        re-derive the counts from there so the synthesised ``cancelled``
+        report reflects the real defended turns instead of a hardcoded 0 —
+        otherwise :meth:`_not_covered_categories` files the lane as
+        not-covered and scoring assigns ``_NOT_COVERED_SCORE = 0.0`` to a
+        category that defended a dozen probes.
+
+        Reads are pure in-memory accessors (no I/O, no lock) — safe to call
+        from the cancellation handler. ``reflections_for`` mirrors the live
+        attempt counter used by :meth:`_attack_attempts_so_far`.
+        """
+        turns = len(self.memory.reflections_for(agent.name)) if agent.name else 0
+        findings = (
+            len(self.memory.findings_by_asi(agent.asi_category))
+            if agent.asi_category is not None
+            else 0
+        )
+        return turns, findings
+
     async def _run_agent_with_observer(self, agent: AsiAgent) -> AgentReport:
         name = agent.name or type(agent).__name__
         self._emit(
@@ -1968,11 +1995,16 @@ class SwarmCommander:
             # many agents were cut short. ``_snapshot_tokens`` is safe to
             # call on a partially-run agent (the usage counters are bound
             # in ``__init__``).
+            # Issue #205 — recover the real judged-turn / finding counts the
+            # agent already persisted before the cancel landed, so a lane that
+            # defended many probes (0 findings) is scored as covered (100.0)
+            # instead of not-covered (0.0).
+            recovered_turns, recovered_findings = self._completed_work_for(agent)
             report = AgentReport(
                 agent=name,
                 asi_category=agent.asi_category,
-                findings_count=0,
-                turns=0,
+                findings_count=recovered_findings,
+                turns=recovered_turns,
                 duration_seconds=0.0,
                 terminated_by="cancelled",
                 notes="cancelled mid-run by outer wall-budget expiry",
