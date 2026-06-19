@@ -267,7 +267,10 @@ async def test_run_scan_preflight_happy_path_emits_four_info_lines(
             budget_usd=0.5,
             budget_seconds=300.0,
         )
-    assert len(outcomes) == 4
+    # 4 narrated stages + the rc38 P0-#5 (#263) gemini quota stage (a silent
+    # skip for the stub provider, but still appended to the outcome list).
+    assert len(outcomes) == 5
+    assert any(o.stage == "model.quota" and o.ok for o in outcomes)
     info_lines = [r for r in caplog.records if r.levelno == logging.INFO]
     stages_seen = {
         "preflight model.invoke",
@@ -277,3 +280,141 @@ async def test_run_scan_preflight_happy_path_emits_four_info_lines(
     }
     found = {stage for stage in stages_seen if any(stage in r.message for r in info_lines)}
     assert found == stages_seen, f"missing stages: {stages_seen - found}"
+
+
+# --------------------------------------------------------------------------- #
+# rc38 P0-#5 (#263) — gemini quota fail-fast pre-flight
+# --------------------------------------------------------------------------- #
+
+
+class _FakeGeminiClient:
+    """Minimal stand-in for ``GeminiClient`` used by the quota pre-flight tests.
+
+    ``preflight`` either raises the supplied exception or returns cleanly;
+    ``aclose`` records that the client was closed so we can assert the probe
+    never leaks an httpx client.
+    """
+
+    def __init__(self, raise_exc: Exception | None = None) -> None:
+        self._raise_exc = raise_exc
+        self.preflight_called = False
+        self.closed = False
+
+    async def preflight(self, model: str = "gemini-2.5-flash") -> None:
+        self.preflight_called = True
+        if self._raise_exc is not None:
+            raise self._raise_exc
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_preflight_gemini_quota_skips_non_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-Gemini providers never build a client or run the quota probe."""
+    built: list[str] = []
+
+    def _fake_build_llm(spec: str, role: str) -> object:
+        built.append(spec)
+        return _FakeGeminiClient()
+
+    monkeypatch.setattr("agent_guardian.llm.registry.build_llm", _fake_build_llm)
+
+    outcome = await pf.preflight_gemini_quota("openai:gpt-4o")
+    assert outcome.ok is True
+    assert outcome.detail == "skipped"
+    assert built == [], "non-gemini providers must not construct a client"
+
+
+@pytest.mark.asyncio
+async def test_preflight_gemini_quota_healthy_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy Gemini pre-flight completion returns ok and closes the client."""
+    client = _FakeGeminiClient(raise_exc=None)
+    monkeypatch.setattr("agent_guardian.llm.registry.build_llm", lambda spec, role: client)
+
+    outcome = await pf.preflight_gemini_quota("gemini:gemini-2.5-flash")
+    assert outcome.ok is True
+    assert client.preflight_called is True
+    assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_preflight_gemini_quota_429_fails_fast(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 429 on the cheap completion marks the quota stage not-ok with a WARNING."""
+    from agent_guardian.llm.errors import LLMRateLimitError
+
+    client = _FakeGeminiClient(raise_exc=LLMRateLimitError("gemini: rate limited"))
+    monkeypatch.setattr("agent_guardian.llm.registry.build_llm", lambda spec, role: client)
+
+    with caplog.at_level(logging.WARNING, logger="agent_guardian.preflight"):
+        outcome = await pf.preflight_gemini_quota("gemini:gemini-2.5-flash")
+    assert outcome.ok is False
+    assert "quota_exhausted" in outcome.detail
+    assert client.closed is True, "client must be closed even on a 429"
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("quota exhausted" in r.message for r in warnings)
+
+
+@pytest.mark.asyncio
+async def test_run_scan_preflight_raises_on_gemini_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A quota-exhausted Gemini key fails the whole pre-flight fast (no recon).
+
+    ``run_scan_preflight`` must raise :class:`PreflightQuotaError` BEFORE the
+    target.ping / contract / budget stages run, so the scan never starts.
+    """
+    from agent_guardian.llm.errors import LLMRateLimitError
+
+    client = _FakeGeminiClient(raise_exc=LLMRateLimitError("gemini: rate limited"))
+    monkeypatch.setattr("agent_guardian.llm.registry.build_llm", lambda spec, role: client)
+    # Guard: the ping stage must NOT run once quota fails fast.
+    ping_calls: list[str | None] = []
+
+    async def _fake_ping(endpoint: str | None) -> pf.PreflightOutcome:
+        ping_calls.append(endpoint)
+        return pf.PreflightOutcome(stage="target.ping", ok=True)
+
+    monkeypatch.setattr(pf, "preflight_target_ping", _fake_ping)
+
+    with pytest.raises(pf.PreflightQuotaError) as excinfo:
+        await pf.run_scan_preflight(
+            model_spec="gemini:gemini-2.5-flash",
+            endpoint="https://finbot.acme-test.dev/chat",
+            contract_path=None,
+            budget_usd=0.5,
+            budget_seconds=300.0,
+        )
+    assert excinfo.value.spec == "gemini:gemini-2.5-flash"
+    assert ping_calls == [], "recon-side stages must not run after a quota fail-fast"
+
+
+@pytest.mark.asyncio
+async def test_run_scan_preflight_healthy_gemini_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy Gemini key runs all stages and returns the full outcome list."""
+    client = _FakeGeminiClient(raise_exc=None)
+    monkeypatch.setattr("agent_guardian.llm.registry.build_llm", lambda spec, role: client)
+    from agent_guardian.llm.validation import clear_cache
+
+    clear_cache()
+    monkeypatch.setenv("AGENT_GUARDIAN_SKIP_MODEL_PROBE", "1")
+
+    outcomes = await pf.run_scan_preflight(
+        model_spec="gemini:gemini-2.5-flash",
+        endpoint=None,
+        contract_path=None,
+        budget_usd=0.5,
+        budget_seconds=300.0,
+    )
+    quota = [o for o in outcomes if o.stage == "model.quota"]
+    assert quota and quota[0].ok is True
+    assert client.preflight_called is True

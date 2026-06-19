@@ -83,6 +83,7 @@ from agent_guardian.core.supervisor import Supervisor
 from agent_guardian.core.tiering import detect_tier
 from agent_guardian.cost import lookup_price
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.llm.retry import RetryTally, retry_tally_scope
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.logging_setup import log_agent_io
 from agent_guardian.models.asi import AsiCategory
@@ -859,6 +860,10 @@ class SwarmCommander:
         # token spend off the same objects the parallel phase is driving.
         self._active_agents: list[AsiAgent] = []
         self._has_run = False
+        # rc38 P0-#5 (#263) — scan-scoped retry tally, bound for real in
+        # :meth:`run`. Defaults to an empty tally so finalise paths reached
+        # directly in tests don't trip on a missing attribute.
+        self._retry_tally: RetryTally = RetryTally()
         # Spec §6 -- populated by :meth:`_phase_decompose_with_llm` between
         # recon and agent instantiation. ``None`` when no target_goal was
         # supplied or the Commander LLM declined / failed.
@@ -975,21 +980,30 @@ class SwarmCommander:
         self._start_time = time.monotonic()
         self._last_finding_seen_at = self._start_time
 
-        # Apply an overall wall-clock cap around the whole run. QA-027:
-        # ``overall_wall_seconds is None`` means "no cap"; route past
-        # ``asyncio.wait_for`` entirely rather than passing ``timeout=None``
-        # so we side-step the legacy 0 → instant-fire footgun and keep the
-        # no-cap path observable in stack traces (no spurious wait_for frame).
-        if self.config.overall_wall_seconds is None:
-            return await self._run_inner()
-        try:
-            return await asyncio.wait_for(
-                self._run_inner(),
-                timeout=self.config.overall_wall_seconds,
-            )
-        except TimeoutError:
-            _LOG.warning("swarm overall wall budget exhausted (scan_id=%s)", self.config.scan_id)
-            return await self._phase_finalise()
+        # rc38 P0-#5 (#263) — bind a scan-scoped retry tally for the whole run
+        # so ``with_backoff`` can count LLM calls / retry-exhaustions and the
+        # finalise phase can emit ONE aggregate ">5% of LLM calls exhausted
+        # retries" WARNING. ``retry_tally_scope`` restores the previous binding
+        # on exit so concurrent scans / tests never leak counts.
+        with retry_tally_scope() as tally:
+            self._retry_tally = tally
+            # Apply an overall wall-clock cap around the whole run. QA-027:
+            # ``overall_wall_seconds is None`` means "no cap"; route past
+            # ``asyncio.wait_for`` entirely rather than passing ``timeout=None``
+            # so we side-step the legacy 0 → instant-fire footgun and keep the
+            # no-cap path observable in stack traces (no spurious wait_for frame).
+            if self.config.overall_wall_seconds is None:
+                return await self._run_inner()
+            try:
+                return await asyncio.wait_for(
+                    self._run_inner(),
+                    timeout=self.config.overall_wall_seconds,
+                )
+            except TimeoutError:
+                _LOG.warning(
+                    "swarm overall wall budget exhausted (scan_id=%s)", self.config.scan_id
+                )
+                return await self._phase_finalise()
 
     # ------------------------------------------------------------------
     # Internal orchestration
@@ -3762,10 +3776,44 @@ class SwarmCommander:
                 tokens_total=tokens_total,
             ),
         )
+        # rc38 P0-#5 (#263) — one aggregate WARNING when retry exhaustion was
+        # widespread, so an operator sees "the scan limped through a quota
+        # cascade" rather than scrolling for individual per-call lines.
+        self._maybe_warn_retry_exhaustion()
         # Telemetry -- best-effort, only fires when the user has opted in.
         # No-op for opted-out users; no impact on Scan ever.
         self._maybe_emit_telemetry(scan, duration)
         return scan
+
+    # rc38 P0-#5 (#263) — emit the aggregate warning above this fraction of
+    # retry-exhausted LLM calls. 5% mirrors the issue's "retries exhausted on
+    # >5% of calls" acceptance criterion.
+    _RETRY_EXHAUSTION_WARN_RATIO = 0.05
+
+    def _maybe_warn_retry_exhaustion(self) -> None:
+        """Emit ONE CLI WARNING when retry-exhausted/total LLM calls > 5%.
+
+        The per-call WARNING already fires inside ``with_backoff``; this is the
+        scan-wide aggregate signal so a quota / 5xx cascade is visible at a
+        glance instead of buried in N individual lines. Silent when no calls
+        ran or the ratio is at/under the threshold.
+        """
+        tally = self._retry_tally
+        if tally.total <= 0:
+            return
+        ratio = tally.exhausted_ratio
+        if ratio <= self._RETRY_EXHAUSTION_WARN_RATIO:
+            return
+        _LOG.warning(
+            "LLM retries exhausted on %d/%d calls (%.1f%%, threshold %.0f%%) "
+            "during scan_id=%s — provider was rate-limiting or erroring; results "
+            "may be degraded. Check provider quota/billing and consider re-running.",
+            tally.exhausted,
+            tally.total,
+            ratio * 100.0,
+            self._RETRY_EXHAUSTION_WARN_RATIO * 100.0,
+            self.config.scan_id,
+        )
 
     def _maybe_emit_telemetry(self, scan: Scan, duration: float) -> None:
         """Fire a ScanCompletedEvent unless the user has OPTED_OUT.

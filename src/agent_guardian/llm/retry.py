@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 import random
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import dataclass
 from typing import TypeVar
 
 from agent_guardian.llm.errors import (
@@ -31,13 +33,84 @@ __all__ = [
     "AGENT_LOOP_MAX_RETRIES",
     "AGENT_LOOP_MAX_SECONDS",
     "DEFAULT_LLM_RETRY_CAP",
+    "RetryTally",
     "compute_delay",
+    "current_retry_tally",
+    "retry_tally_scope",
     "with_backoff",
 ]
 
 _LOG = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+# rc38 P0-#5 (#263) — aggregate retry-exhaustion signal. Per-call the retry
+# layer already logs one WARNING when a call's retries are exhausted, but the
+# operator has no SCAN-WIDE signal: was it one unlucky 429, or did 30% of all
+# LLM calls give up? The tally below counts (a) every ``with_backoff`` call and
+# (b) the subset whose retries were exhausted, so the swarm can emit ONE
+# CLI-level WARNING at finalise when the exhausted ratio crosses a threshold.
+#
+# It is held in a ``ContextVar`` (not a module global) so concurrent scans /
+# unit tests never bleed counts into each other: each scan enters
+# ``retry_tally_scope()`` which installs a fresh tally for the duration of the
+# scan and restores the previous binding on exit.
+
+
+@dataclass
+class RetryTally:
+    """Scan-scoped counter of LLM calls and retry-exhausted calls.
+
+    ``total`` is incremented once per :func:`with_backoff` invocation (i.e.
+    per logical LLM call, regardless of how many retries it made). ``exhausted``
+    is incremented when a call burned through every retry and still failed.
+    """
+
+    total: int = 0
+    exhausted: int = 0
+
+    def record_call(self) -> None:
+        self.total += 1
+
+    def record_exhausted(self) -> None:
+        self.exhausted += 1
+
+    @property
+    def exhausted_ratio(self) -> float:
+        """Fraction of calls whose retries were exhausted (0.0 when no calls)."""
+        if self.total <= 0:
+            return 0.0
+        return self.exhausted / self.total
+
+
+# When no scope is active the tally is ``None`` and ``with_backoff`` simply
+# skips counting — the per-call WARNING is unaffected, only the aggregate is.
+_RETRY_TALLY: contextvars.ContextVar[RetryTally | None] = contextvars.ContextVar(
+    "agent_guardian_retry_tally", default=None
+)
+
+
+def current_retry_tally() -> RetryTally | None:
+    """Return the tally bound to the current scope, or ``None`` outside a scope."""
+    return _RETRY_TALLY.get()
+
+
+@contextlib.contextmanager
+def retry_tally_scope(tally: RetryTally | None = None) -> Iterator[RetryTally]:
+    """Bind a fresh :class:`RetryTally` for the duration of the ``with`` block.
+
+    Restores the previous binding on exit so nested / sequential scans (and
+    unit tests) never leak counts. Pass an explicit ``tally`` to share an
+    instance the caller already holds; otherwise a fresh one is created.
+    """
+    active = tally if tally is not None else RetryTally()
+    token = _RETRY_TALLY.set(active)
+    try:
+        yield active
+    finally:
+        _RETRY_TALLY.reset(token)
+
 
 _DEFAULT_RETRY_ON: tuple[type[Exception], ...] = (
     LLMRateLimitError,
@@ -203,6 +276,11 @@ async def with_backoff(
         scan_start_monotonic=scan_start_monotonic,
         budget_seconds=budget_seconds,
     )
+    # rc38 P0-#5 (#263) — count this logical LLM call once toward the
+    # scan-wide retry tally (no-op outside a ``retry_tally_scope``).
+    tally = _RETRY_TALLY.get()
+    if tally is not None:
+        tally.record_call()
     last_exc: Exception | None = None
     for attempt in range(max_retries + 1):
         # Wall-budget pre-attempt check. We do this BEFORE the cancel-event
@@ -247,6 +325,11 @@ async def with_backoff(
                     type(exc).__name__,
                     exc,
                 )
+                # rc38 P0-#5 (#263) — feed the scan-wide tally so the swarm
+                # can emit one aggregate ">N% of calls exhausted retries"
+                # WARNING at finalise.
+                if tally is not None:
+                    tally.record_exhausted()
                 break
             retry_after = getattr(exc, "retry_after", None)
             if isinstance(retry_after, int | float) and retry_after >= 0:

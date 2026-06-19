@@ -320,3 +320,73 @@ async def test_with_backoff_cancel_event_unset_runs_normally() -> None:
     assert result == "ok"
     assert calls == 2
     assert len(sleeps) == 1
+
+
+# --------------------------------------------------------------------------- #
+# rc38 P0-#5 (#263) — scan-scoped retry tally
+# --------------------------------------------------------------------------- #
+
+
+async def test_retry_tally_counts_calls_and_exhaustions() -> None:
+    """Within a scope, ``with_backoff`` counts every call and the subset whose
+    retries were exhausted."""
+    from agent_guardian.llm.retry import retry_tally_scope
+
+    async def ok() -> str:
+        return "ok"
+
+    async def always_fail() -> str:
+        raise LLMTransientError("boom")
+
+    async def fake_sleep(_s: float) -> None:
+        return None
+
+    with retry_tally_scope() as tally:
+        await with_backoff(ok, sleep=fake_sleep, rng=random.Random(0))
+        await with_backoff(ok, sleep=fake_sleep, rng=random.Random(0))
+        with pytest.raises(LLMTransientError):
+            await with_backoff(always_fail, max_retries=1, sleep=fake_sleep, rng=random.Random(0))
+    assert tally.total == 3
+    assert tally.exhausted == 1
+    assert tally.exhausted_ratio == pytest.approx(1 / 3)
+
+
+async def test_retry_tally_does_not_leak_across_scopes() -> None:
+    """A fresh scope starts at zero; the previous binding is restored on exit."""
+    from agent_guardian.llm.retry import (
+        current_retry_tally,
+        retry_tally_scope,
+    )
+
+    async def ok() -> str:
+        return "ok"
+
+    assert current_retry_tally() is None
+    with retry_tally_scope() as first:
+        await with_backoff(ok)
+        assert first.total == 1
+    # Outside any scope the tally is None again (no leak).
+    assert current_retry_tally() is None
+    with retry_tally_scope() as second:
+        assert second.total == 0
+        await with_backoff(ok)
+        assert second.total == 1
+
+
+async def test_with_backoff_outside_scope_is_noop_for_tally() -> None:
+    """``with_backoff`` outside a scope must not raise — counting is skipped."""
+    from agent_guardian.llm.retry import current_retry_tally
+
+    async def ok() -> str:
+        return "ok"
+
+    assert current_retry_tally() is None
+    result = await with_backoff(ok)
+    assert result == "ok"
+
+
+def test_retry_tally_ratio_zero_when_empty() -> None:
+    """An empty tally reports a 0.0 ratio (no div-by-zero)."""
+    from agent_guardian.llm.retry import RetryTally
+
+    assert RetryTally().exhausted_ratio == 0.0

@@ -26,6 +26,7 @@ line per stage in operator-friendly shape.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from dataclasses import dataclass
@@ -33,14 +34,35 @@ from typing import Final
 
 __all__ = [
     "PreflightOutcome",
+    "PreflightQuotaError",
     "preflight_budget_parse",
     "preflight_contract_schema",
+    "preflight_gemini_quota",
     "preflight_model_invoke",
     "preflight_target_ping",
     "run_scan_preflight",
 ]
 
 _LOG = logging.getLogger("agent_guardian.preflight")
+
+
+class PreflightQuotaError(RuntimeError):
+    """Raised by :func:`run_scan_preflight` when the active provider's quota is
+    already exhausted (a 429 on a cheap pre-flight completion).
+
+    rc38 P0-#5 (#263): the CLI catches this and fails fast with
+    ``EXIT_LLM_PROVIDER`` BEFORE recon, so a doomed scan never spends the
+    recon / seat-prep budget only to 429 in flight.
+    """
+
+    def __init__(self, spec: str, detail: str = "") -> None:
+        self.spec = spec
+        self.detail = detail
+        super().__init__(
+            f"provider quota exhausted for {spec}"
+            + (f" ({detail})" if detail else "")
+            + " — check billing/quota"
+        )
 
 
 # Env-var hint per provider, keyed by ``split_spec`` provider prefix.
@@ -323,6 +345,75 @@ def preflight_budget_parse(
     return PreflightOutcome(stage="budget.parse", ok=True, detail=f"usd={usd_repr} sec={sec_repr}")
 
 
+async def preflight_gemini_quota(spec: str) -> PreflightOutcome:
+    """rc38 P0-#5 (#263) — Gemini quota fail-fast probe.
+
+    The generic :func:`preflight_model_invoke` stage only probes the *models*
+    listing endpoint (``check_model_exists``); a key whose listing succeeds can
+    still be hard-429'd on ``generateContent``. This stage sends ONE cheap
+    completion via :meth:`GeminiClient.preflight` so a quota-exhausted key is
+    caught BEFORE recon commits the scan budget.
+
+    Only runs for the ``gemini`` provider; every other provider (and stub) is a
+    no-op skip so non-Gemini scans are unaffected. ``ok=False`` is returned ONLY
+    on a confirmed quota miss (429); every other failure mode (auth / network /
+    format) is left to surface on the first real completion, matching the
+    fail-soft contract of the other stages.
+    """
+    from agent_guardian.llm.validation import split_spec
+
+    provider, model = split_spec(spec)
+    if provider != "gemini":
+        # Silent skip for non-Gemini providers — no extra narration line so the
+        # PREFLIGHT block stays clean for the common case.
+        return PreflightOutcome(stage="model.quota", ok=True, detail="skipped")
+
+    from agent_guardian.llm.errors import LLMRateLimitError
+
+    try:
+        from agent_guardian.llm.registry import build_llm
+
+        client = build_llm(spec, role="preflight")
+    except Exception as exc:  # pragma: no cover — construction failure surfaces later
+        _LOG.debug(
+            "preflight model.quota: %s client construction failed (%s) — "
+            "letting the real call surface it",
+            spec,
+            exc,
+        )
+        return PreflightOutcome(stage="model.quota", ok=True, detail="skipped")
+
+    try:
+        try:
+            # ``preflight`` is a GeminiClient-only cheap-completion probe. Look it
+            # up defensively (mirrors the ``aclose`` lookup below) so the typed
+            # ``BaseLLM`` return of ``build_llm`` doesn't force a hard dependency on
+            # the concrete class; a client without it degrades to a silent skip.
+            probe = getattr(client, "preflight", None)
+            if probe is None:
+                return PreflightOutcome(stage="model.quota", ok=True, detail="skipped")
+            await probe(model or "gemini-2.5-flash")
+        finally:
+            close = getattr(client, "aclose", None)
+            if close is not None:
+                with contextlib.suppress(Exception):
+                    await close()
+    except LLMRateLimitError as exc:
+        _LOG.warning(
+            "preflight model.quota: %s quota exhausted (429) — failing fast before recon; "
+            "check the provider's billing/quota dashboard",
+            spec,
+        )
+        return PreflightOutcome(
+            stage="model.quota",
+            ok=False,
+            detail=f"quota_exhausted: {exc}",
+            remediation="Gemini quota exhausted — check billing/quota and retry later",
+        )
+    _LOG.info("preflight model.quota: %s ok (cheap completion accepted)", spec)
+    return PreflightOutcome(stage="model.quota", ok=True, detail="ok")
+
+
 async def run_scan_preflight(
     *,
     model_spec: str,
@@ -331,15 +422,26 @@ async def run_scan_preflight(
     budget_usd: float | None,
     budget_seconds: float | None,
 ) -> list[PreflightOutcome]:
-    """Run all four stages in order. Always returns the full outcome list.
+    """Run the readiness stages in order. Always returns the full outcome list.
 
-    Failure of any individual stage does NOT raise — the caller can inspect
-    the outcomes list if they want to act on a specific failure. Today the
-    scan command does not act on these; it logs and continues so the
+    Failure of most individual stages does NOT raise — the caller can inspect
+    the outcomes list if they want to act on a specific failure, so the
     operator can scan against a known-unreachable target for testing.
+
+    rc38 P0-#5 (#263) — the Gemini quota stage is the ONE exception: a
+    confirmed quota miss (429 on a cheap pre-flight completion) raises
+    :class:`PreflightQuotaError` so the scan fails fast BEFORE recon rather
+    than spending the recon budget on a doomed run. Non-Gemini providers and
+    stub mode never reach the raising path.
     """
     outcomes: list[PreflightOutcome] = []
     outcomes.append(preflight_model_invoke(model_spec))
+    # Gemini quota fail-fast — runs (and can raise) only for the gemini
+    # provider; a no-op skip for every other provider and stub mode.
+    quota = await preflight_gemini_quota(model_spec)
+    outcomes.append(quota)
+    if not quota.ok:
+        raise PreflightQuotaError(model_spec, quota.detail)
     outcomes.append(await preflight_target_ping(endpoint))
     outcomes.append(preflight_contract_schema(contract_path))
     outcomes.append(preflight_budget_parse(budget_usd, budget_seconds))
