@@ -38,12 +38,21 @@ class UsageCounter:
 
     ``calls`` is the number of completion round-trips successfully observed.
     A call that raised before returning a response is not counted.
+
+    ``unseeded_llm_calls`` (#231 point 5) is the number of completion calls
+    dispatched with ``request.seed is None``. It is a self-diagnosing signal:
+    when a scan was launched with ``--seed`` but some path forgot to thread the
+    seed onto its :class:`LLMRequest`, this counter is non-zero. It is recorded
+    unconditionally at dispatch; the report only surfaces it under ``coverage``
+    when the scan itself was seeded (an unseeded scan trivially has every call
+    unseeded, which is not a defect).
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     calls: int = 0
+    unseeded_llm_calls: int = 0
 
     def add_response(self, response: LLMResponse) -> None:
         """Fold one :class:`LLMResponse`'s usage into the counter."""
@@ -53,12 +62,22 @@ class UsageCounter:
         self.total_tokens += int(usage.total_tokens)
         self.calls += 1
 
+    def note_request(self, request: LLMRequest) -> None:
+        """Record dispatch-side signals for ``request`` (#231 point 5).
+
+        Counts the call as unseeded when it carries no seed so a seeded scan
+        can self-diagnose a seed-threading miss.
+        """
+        if request.seed is None:
+            self.unseeded_llm_calls += 1
+
     def merge(self, other: UsageCounter) -> None:
         """Fold another counter's totals into this one. Useful for aggregation."""
         self.prompt_tokens += other.prompt_tokens
         self.completion_tokens += other.completion_tokens
         self.total_tokens += other.total_tokens
         self.calls += other.calls
+        self.unseeded_llm_calls += other.unseeded_llm_calls
 
     def snapshot(self) -> dict[str, int]:
         """Return a plain-dict snapshot for serialisation into reports."""
@@ -67,6 +86,7 @@ class UsageCounter:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
             "calls": self.calls,
+            "unseeded_llm_calls": self.unseeded_llm_calls,
         }
 
 
@@ -94,6 +114,10 @@ class UsageTrackingLLM(BaseLLM):
         self.provider = inner.provider
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        # Record the dispatch-side seed signal (#231 point 5) before the call
+        # so an unseeded request is counted even if the provider raises.
+        async with self._lock:
+            self.counter.note_request(request)
         response = await self._inner.complete(request)
         async with self._lock:
             self.counter.add_response(response)

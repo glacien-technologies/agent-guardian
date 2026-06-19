@@ -1165,8 +1165,18 @@ class AsiAgent(ABC):
         if n <= 1:
             return await self.evaluator_llm.complete(request)
 
+        # Determinism remediation (#231 point 3) — the N consensus seats
+        # previously fired the SAME ``request`` object, so every seat carried
+        # the identical seed. Against a deterministic provider that collapses
+        # the N samples into one verdict (defeating variance reduction), and
+        # under provider jitter the asyncio.gather completion order made the
+        # bucket tally order-dependent. Give each seat a DISTINCT, DETERMINISTIC
+        # seed (``base_seed + i``) so the tally is independent of gather order.
+        # When the scan is unseeded (``seed is None``) we leave every seat
+        # unseeded — we never invent a seed the scan didn't ask for.
+        requests = self._consensus_requests(request, n)
         results: list[Any] = await _asyncio.gather(
-            *(self.evaluator_llm.complete(request) for _ in range(n)),
+            *(self.evaluator_llm.complete(req) for req in requests),
             return_exceptions=True,
         )
         successes: list[LLMResponse] = []
@@ -1221,6 +1231,28 @@ class AsiAgent(ABC):
             len(successes),
         )
         return winners[0]
+
+    @staticmethod
+    def _consensus_requests(request: LLMRequest, n: int) -> list[LLMRequest]:
+        """Build ``n`` per-seat requests with distinct, deterministic seeds.
+
+        Determinism remediation (#231 point 3). The seat at index ``i`` gets
+        ``base_seed + i`` so the N seats sample distinct points instead of
+        re-rolling the identical seed, and the verdict tally is independent of
+        :func:`asyncio.gather` completion order.
+
+        ``request`` is a frozen pydantic model, so each seat is a
+        :meth:`~pydantic.BaseModel.model_copy` with the offset seed rather than
+        an in-place mutation. When ``request.seed`` is ``None`` (the scan was
+        not run with ``--seed``) every seat stays unseeded — we do not invent a
+        seed the operator did not ask for.
+        """
+        base_seed = request.seed
+        if base_seed is None:
+            # Unseeded scan: hand back the original request for every seat so
+            # the seed stays None and provider behaviour is unchanged.
+            return [request for _ in range(n)]
+        return [request.model_copy(update={"seed": base_seed + i}) for i in range(n)]
 
     def _consensus_n(self, probe_seed: ProbeSeed | None) -> int:
         """Pick the consensus N for the current verdict call.

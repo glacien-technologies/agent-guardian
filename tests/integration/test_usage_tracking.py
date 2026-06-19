@@ -78,6 +78,7 @@ def test_counter_snapshot_returns_plain_dict() -> None:
         "completion_tokens": 7,
         "total_tokens": 12,
         "calls": 1,
+        "unseeded_llm_calls": 0,
     }
 
 

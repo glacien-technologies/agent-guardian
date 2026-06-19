@@ -416,6 +416,7 @@ def test_emit_json_includes_coverage_block_empty_when_no_memory(tmp_path: Path) 
         "skipped_agents": [],
         "strategies_used": {},
         "strategies_flattened": {},
+        "unseeded_llm_calls": 0,
     }
 
 
