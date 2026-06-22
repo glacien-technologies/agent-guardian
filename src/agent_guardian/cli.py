@@ -3813,7 +3813,7 @@ async def _run_scan(
     #     target for testing, and the scan will fail at its natural failure
     #     point regardless.
     if not no_preflight:
-        from agent_guardian.preflight import run_scan_preflight
+        from agent_guardian.preflight import PreflightQuotaError, run_scan_preflight
 
         try:
             await run_scan_preflight(
@@ -3823,6 +3823,15 @@ async def _run_scan(
                 budget_usd=budget_usd,
                 budget_seconds=budget_seconds,
             )
+        except PreflightQuotaError as exc:
+            # rc38 P0-#5 (#263) — quota is already exhausted; fail fast BEFORE
+            # recon rather than spending the scan budget on a doomed run.
+            typer.echo(
+                f"preflight: provider quota exhausted for {exc.spec} — "
+                "check your billing/quota and retry later.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_LLM_PROVIDER) from exc
         except Exception as exc:  # pragma: no cover — defensive
             _LOG.warning(
                 "preflight phase raised %s: %s — continuing",
