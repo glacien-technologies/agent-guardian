@@ -66,7 +66,7 @@ def _is_noop_attacker_prompt(prompt: object) -> bool:
     return isinstance(prompt, str) and prompt.lstrip().startswith(_STUB_ATTACKER_MARKER)
 
 
-def _empty_coverage() -> dict[str, Any]:
+def _empty_coverage(unseeded_llm_calls: int = 0) -> dict[str, Any]:
     return {
         "attempts_total": 0,
         "asi_categories": [],
@@ -81,6 +81,11 @@ def _empty_coverage() -> dict[str, Any]:
         "skipped_agents": [],
         "strategies_used": {},
         "strategies_flattened": {},
+        # #231 point 5 — LLM calls dispatched with seed=None during a seeded
+        # scan (a self-diagnosing signal that seed-threading missed a path).
+        # Always present and defaults to 0; populated from the dispatch-layer
+        # usage counter via ``unseeded_llm_calls`` when the scan was seeded.
+        "unseeded_llm_calls": int(unseeded_llm_calls),
     }
 
 
@@ -89,6 +94,7 @@ def compute_coverage_from_memory(
     *,
     memory_path: Path | None = None,
     root_dir: Path | None = None,
+    unseeded_llm_calls: int = 0,
 ) -> dict[str, Any]:
     """Replay the scan's memory.jsonl and roll-up coverage statistics.
 
@@ -106,6 +112,13 @@ def compute_coverage_from_memory(
     root_dir:
         Optional ``~/.agentguardian/scans``-style root used to derive
         ``memory_path`` from ``scan.id``.
+    unseeded_llm_calls:
+        #231 point 5 — the count of LLM calls dispatched with ``seed=None``
+        during a *seeded* scan (a self-diagnosing seed-threading-miss signal).
+        Sourced from the dispatch-layer usage counter and threaded in here so
+        the value rides inside the ``coverage`` block. Defaults to 0 (the
+        correct value for unseeded scans and hand-built ``Scan`` test fixtures,
+        where every call is trivially unseeded and not a defect).
 
     Returns
     -------
@@ -119,7 +132,7 @@ def compute_coverage_from_memory(
         memory_path = default_memory_path(scan.id, root_dir)
     path = memory_path
     if not path.exists():
-        return _empty_coverage()
+        return _empty_coverage(unseeded_llm_calls)
 
     asi: set[str] = set()
     mitre: set[str] = set()
@@ -152,7 +165,7 @@ def compute_coverage_from_memory(
             path,
             exc,
         )
-        return _empty_coverage()
+        return _empty_coverage(unseeded_llm_calls)
 
     malformed_lines = 0
     for line_no, raw in enumerate(text.splitlines(), start=1):
@@ -308,4 +321,7 @@ def compute_coverage_from_memory(
         "skipped_agents": sorted_skipped,
         "strategies_used": dict(sorted(strategies_used.items())),
         "strategies_flattened": dict(sorted(strategies_flattened.items())),
+        # #231 point 5 — dispatch-layer seed-threading-miss signal (0 unless a
+        # seeded scan dispatched seed=None calls).
+        "unseeded_llm_calls": int(unseeded_llm_calls),
     }
