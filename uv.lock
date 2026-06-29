@@ -76,7 +76,7 @@ full = [
     { name = "weasyprint" },
 ]
 gcp = [
-    { name = "google-auth" },
+    { name = "google-auth", extra = ["requests"] },
 ]
 grpc = [
     { name = "grpcio" },
@@ -102,7 +102,7 @@ requires-dist = [
     { name = "exceptiongroup", marker = "python_full_version < '3.11'", specifier = ">=1.2" },
     { name = "faiss-cpu", marker = "extra == 'full'", specifier = ">=1.9" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "google-auth", marker = "extra == 'gcp'", specifier = ">=2.0" },
+    { name = "google-auth", extras = ["requests"], marker = "extra == 'gcp'", specifier = ">=2.0" },
     { name = "grpcio", marker = "extra == 'grpc'", specifier = ">=1.60" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.115" },

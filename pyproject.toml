@@ -119,7 +119,13 @@ aws = [
 # remediation when it is absent, so users who never scan a GCP target don't
 # pay the install cost.
 gcp = [
-  "google-auth>=2.0",
+  # ``[requests]`` pulls in the ``requests`` package that
+  # ``google.auth.transport.requests`` (used by the Vertex client to refresh the
+  # ADC bearer token) imports at module load. Without it ``vertex.py``'s import
+  # guard trips and reports the misleading "google-auth is not installed" even
+  # though google-auth itself is present — Vertex then fails out-of-the-box for
+  # anyone installing ``agent-guardian[gcp]``.
+  "google-auth[requests]>=2.0",
 ]
 # ``azure`` carries azure-identity for the OPTIONAL Microsoft Entra ID
 # (keyless) auth path on the Azure OpenAI provider. It is used ONLY to mint /
