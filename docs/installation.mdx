@@ -251,7 +251,7 @@ working directory is loaded automatically at CLI startup (handled in
 ## Troubleshooting
 
 <AccordionGroup>
-  <Accordion title="`--output pdf` fails with PdfFeatureUnavailable" icon="file-warning">
+  <Accordion title="`--output pdf` fails with PdfFeatureUnavailable" icon="triangle-alert">
     Older builds (pre-1.0) shipped no PDF engine in the base install. As of
     v1.0.0 ReportLab is bundled by default, so `--output pdf` works out of
     the box. If you're on an older build, install one of the engines:
@@ -265,7 +265,7 @@ working directory is loaded automatically at CLI startup (handled in
     Background: [QA-010](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md).
   </Accordion>
 
-  <Accordion title="`--model gemini:foo-bar` exits with `unknown model id`" icon="alert-triangle">
+  <Accordion title="`--model gemini:foo-bar` exits with `unknown model id`" icon="triangle-alert">
     AgentGuardian validates the model id at scan preflight and fails fast
     in ~3 seconds instead of burning the full LLM budget on a typo. The
     error message lists the closest candidate from the live AI Studio /
