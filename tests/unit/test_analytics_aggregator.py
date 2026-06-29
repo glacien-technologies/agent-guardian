@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agent_guardian.server.analytics import Aggregator, EventStore
 from agent_guardian.telemetry.events import EventEnvelope, ScanCompletedEvent
 
-_NOW = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
+# Anchor to real "now" (minus a day) rather than a hardcoded calendar date.
+# The analytics store rejects any envelope whose ``client_sent_at`` is >30 days
+# in the past (clock-skew guard, store.py ``_passes_clock_skew``). A fixed date
+# silently ages out of that window as wall-clock advances, which made every test
+# in this module fail once 30 days had elapsed. A day in the past is safely
+# inside both the 30-day-past and 5-minute-future bounds.
+_NOW = datetime.now(UTC) - timedelta(days=1)
 
 
 def _make_event(install_id_suffix: int, aivss: int, **overrides: object) -> EventEnvelope:
