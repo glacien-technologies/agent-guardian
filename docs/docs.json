@@ -34,7 +34,7 @@
         ]
       },
       {
-        "group": "Try AgentGuardian",
+        "group": "Scan Your Agent",
         "icon": "play",
         "pages": [
           "try/scan-rest-api",
@@ -43,6 +43,10 @@
           "try/scan-crewai",
           "try/scan-mcp-server",
           "try/scan-rag-app",
+          "try/scan-gemini-agent",
+          "try/scan-bedrock-agent",
+          "try/scan-ollama",
+          "try/scan-fastapi-chatbot",
           "try/scan-with-docker"
         ]
       },
@@ -80,7 +84,8 @@
           "reports/evidence-timeline",
           "reports/json-export",
           "reports/markdown-export",
-          "reports/sarif-export"
+          "reports/sarif-export",
+          "reports/owasp-mapping"
         ]
       },
       {
@@ -105,9 +110,11 @@
         "icon": "compass",
         "pages": [
           "concepts/how-agentguardian-works",
+          "architecture/system-overview",
           "concepts/adversarial-swarm",
           "concepts/target-adapters",
           "concepts/evaluators",
+          "concepts/evidence-packs",
           "concepts/research-foundation",
           "concepts/open-vs-enterprise",
           "concepts/agent-guardian-vs"

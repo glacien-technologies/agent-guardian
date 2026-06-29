@@ -1,5 +1,12 @@
 # Reference / design bundle — not part of the published doc tree.
 _design/
 
+# Internal engineering research / planning notes — kept in the repo for
+# history but never part of the user-facing doc tree.
+research/
+
+# Draft blog video script — internal scaffold, not a published page.
+blog/_video-script.md
+
 # Phase-2/3 placeholder slots still in scaffold state.
 # (Remove these lines as each page lands in BuildP2/P3.)
