@@ -7,6 +7,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [1.1.0] — Unreleased
 
+### Changed
+
+- **Anonymous usage telemetry is now ON by default (opt-out).** A fresh install emits a one-time `InstallEvent` and a per-scan `ScanCompletedEvent` without any consent prompt — there is no interactive prompt and no CI/non-interactive carve-out (a pipeline scan is real usage we count). This reverses the prior opt-in policy. **Disable any time** with `AGENT_GUARDIAN_TELEMETRY=0` (also `off`/`false`/`no`) or `agent-guardian telemetry disable`; `essential` downgrades to counts-only. Everything sent is **anonymous metadata** — anonymous `install_id`/`scan_id`, AIVSS/band/tier, durations, counts, OS/arch/Python, and (new) the **driver model as a `provider:model` id** (e.g. `gemini:gemini-2.5-flash`) with all `+qualifiers` stripped upstream so identifying values like `base_url`/`project`/`endpoint`/`region` never leave the machine. We never send prompts, model output, finding text, target URLs, file paths, or API keys. The `model` field is validated against a pattern that bars whitespace and URL/query characters as a second line of defence.
+
 ### Added
 
 - **Active detection-evasion generation (M3 §5.3) — reverses the earlier coverage-only stance.** `DetectionEvasionAgent` now does both coverage measurement *and* active evasion: new `strategies/evasion.py::EvasionGenerator` takes a request the customer's monitor flagged and rewrites it (rotating techniques — encoding rotation, CoT-length attenuation, multi-turn slow-roll, synonym paraphrase, sleeper-trigger) so it preserves the attack's effect but bypasses that specific monitor, re-checks the detector + (optional) intent judge, and emits a stealth AIVSS modifier (−2…+3). **This is a deliberate reversal of the earlier "we do NOT produce evasion-tuned payloads" caveat** — scoped strictly to authorized detection-coverage testing of the operator's OWN declared monitoring stack under the scan RoE (demonstrating "your monitoring missed this"); it never disables or interferes with the target's guardrails. 7 tests in `test_evasion.py`.

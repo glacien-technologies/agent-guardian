@@ -1,27 +1,26 @@
-"""First-scan telemetry consent prompt + tier-upgrade flow.
+"""First-run telemetry enable + tier flow.
 
-Policy (v1.0+, post launch-readiness audit): telemetry is **off by
-default**. The first interactive scan on a fresh install asks the user
-whether to share anonymous operational counts. Until they answer yes,
-no event leaves the machine. The legacy "on by default + one-line
-notice" flow has been retired -- positive consent is now required.
+Policy (default-on / opt-out): telemetry is **on by default**. On a
+fresh install the EXTENDED tier is enabled silently and a one-time
+:class:`InstallEvent` is emitted -- there is no consent prompt. The only
+way to turn telemetry off is an explicit opt-out
+(``AGENT_GUARDIAN_TELEMETRY=0`` or ``agent-guardian telemetry disable``).
+Everything sent is anonymous metadata -- never prompts, model output,
+finding text, target URLs, file paths, or API keys (see
+:mod:`agent_guardian.telemetry.events`).
 
 Resolution order in :func:`maybe_prompt_consent`:
 
 1. State is already decided (anything other than ``NOT_PROMPTED``):
    noop.
 2. The environment variable ``AGENT_GUARDIAN_TELEMETRY`` is set: its
-   value is treated as the user's answer (``off`` / ``0`` / ``false`` /
-   ``no`` -> ``OPTED_OUT``; ``essential`` / ``on`` / ``1`` / ``true`` /
-   ``yes`` -> ``ESSENTIAL``; ``extended`` -> ``EXTENDED``). A short
-   one-line note prints to stderr so the user can see what was applied.
-3. The run is non-interactive (no TTY on stdin, or one of the standard
-   CI environment variables is set): persist ``OPTED_OUT`` (the safe
-   default in CI -- nobody can answer a prompt) and print a one-line
-   stderr notice explaining how to enable it later.
-4. Otherwise: ask via :func:`typer.confirm` with ``default=False``.
-   ``yes`` -> ``ESSENTIAL`` plus a one-time :class:`InstallEvent`; any
-   other answer -> ``OPTED_OUT``.
+   value is applied (``off`` / ``0`` / ``false`` / ``no`` ->
+   ``OPTED_OUT``; ``essential`` -> ``ESSENTIAL``; ``extended`` / ``on`` /
+   ``1`` / ``true`` / ``yes`` -> ``EXTENDED``). A short one-line note
+   prints to stderr so the user can see what was applied.
+3. Otherwise (fresh install, no env override, interactive OR CI):
+   enable ``EXTENDED`` silently and emit the one-time
+   :class:`InstallEvent`.
 """
 
 from __future__ import annotations
@@ -32,8 +31,6 @@ import platform
 import sys
 from datetime import UTC, datetime
 from typing import Literal, cast
-
-import typer
 
 from agent_guardian._version import __version__
 from agent_guardian.telemetry.consent import (
@@ -57,10 +54,12 @@ _LOG = logging.getLogger(__name__)
 
 
 # Environment-variable answer set. Lowercased for case-insensitive match.
+# Default (unset) is EXTENDED, so the generic "on" truthy values map to
+# EXTENDED too -- ``essential`` is the explicit downgrade to counts-only.
 _ENV_VAR = "AGENT_GUARDIAN_TELEMETRY"
 _ENV_OFF: frozenset[str] = frozenset({"off", "0", "false", "no"})
-_ENV_ESSENTIAL: frozenset[str] = frozenset({"essential", "on", "1", "true", "yes"})
-_ENV_EXTENDED: frozenset[str] = frozenset({"extended"})
+_ENV_ESSENTIAL: frozenset[str] = frozenset({"essential"})
+_ENV_EXTENDED: frozenset[str] = frozenset({"extended", "on", "1", "true", "yes"})
 
 # Standard CI markers -- enough of a signal that the run is unattended
 # that we should not block on a confirm prompt. Keep this list small
@@ -100,10 +99,10 @@ back-compat."""
 PROMPT_TEXT = """
 AgentGuardian -- what telemetry collects
 ═══════════════════════════════════════════════
-Default state: OFF. Telemetry only fires after positive consent
-(via the first-scan prompt or `agent-guardian telemetry essential`).
+Default state: ON (anonymous). Disable any time with
+`AGENT_GUARDIAN_TELEMETRY=0` or `agent-guardian telemetry disable`.
 
-What gets sent on the ESSENTIAL tier (after positive consent):
+What gets sent on the ESSENTIAL tier:
 
   • install_id      anonymous UUID4 generated locally
   • scan_id         anonymous random per-scan ID
@@ -116,11 +115,13 @@ What gets sent on the ESSENTIAL tier (after positive consent):
   • findings_total + severity counts (the "threats captured" numbers)
   • agent_version   to attribute crashes to a specific release
 
-What gets sent ONLY on the EXTENDED tier (opt-in via
-`agent-guardian telemetry extended`):
+What gets sent on the EXTENDED tier (the default; downgrade to
+counts-only with `agent-guardian telemetry essential`):
 
   • adapter         which agent framework (langgraph / adk / crewai / …)
   • target_mode     prompt / code / http / framework
+  • model           the driver LLM as a provider:model id
+                    (e.g. gemini:gemini-2.5-flash) — qualifiers stripped
   • python_version  e.g. "3.11"
   • os_family       Linux / Darwin / Windows
   • arch            x86_64 / arm64
@@ -221,25 +222,16 @@ def maybe_prompt_consent(*, force: bool = False) -> ConsentState:
             _emit_install_event()
         return env_state
 
-    if _is_non_interactive():
-        set_consent(ConsentState.OPTED_OUT)
-        print(
-            "AgentGuardian telemetry: off (no interactive terminal). "
-            "Enable later with `agent-guardian telemetry essential`.",
-            file=sys.stderr,
-        )
-        return ConsentState.OPTED_OUT
-
-    try:
-        accepted = typer.confirm(CONSENT_PROMPT_QUESTION, default=False)
-    except (typer.Abort, EOFError, KeyboardInterrupt):
-        accepted = False
-    if accepted:
-        set_consent(ConsentState.ESSENTIAL)
-        _emit_install_event()
-        return ConsentState.ESSENTIAL
-    set_consent(ConsentState.OPTED_OUT)
-    return ConsentState.OPTED_OUT
+    # Default-on (opt-out): no env decision on file and no prior choice, so
+    # enable the EXTENDED tier silently and emit the one-time InstallEvent.
+    # There is no consent prompt and no CI carve-out -- the only way to turn
+    # telemetry off is an explicit opt-out (``AGENT_GUARDIAN_TELEMETRY=0``,
+    # handled by the env branch above, or ``agent-guardian telemetry
+    # disable``). This holds in CI / non-interactive runs too: a pipeline
+    # scan is real usage we count unless the operator opts out.
+    set_consent(ConsentState.EXTENDED)
+    _emit_install_event()
+    return ConsentState.EXTENDED
 
 
 def _emit_install_event() -> None:

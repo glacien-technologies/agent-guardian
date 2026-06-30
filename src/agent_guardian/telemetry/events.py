@@ -143,6 +143,16 @@ class ScanCompletedEvent(_Base):
     python_version: str | None = Field(default=None, pattern=r"^3\.\d{1,2}$")
     os_family: Literal["Linux", "Darwin", "Windows"] | None = None
     arch: Literal["x86_64", "arm64", "aarch64", "i686"] | None = None
+    # -- EXTENDED -- which LLM drove the scan, as a ``provider:model`` id
+    # (e.g. ``gemini:gemini-2.5-flash``, ``bedrock:us.anthropic.claude-...``).
+    # This is the attacker/driver model spec with all ``+qualifiers``
+    # STRIPPED upstream (the emitter normalises via ``parse_model_spec``),
+    # so identifying qualifiers like ``+base_url=`` / ``+project=`` /
+    # ``+endpoint=`` / ``+region=`` never reach the wire. The pattern bars
+    # whitespace and URL query chars as a second line of defence. Answers
+    # "which models/providers do people scan with" at provider+model
+    # granularity without fingerprinting the user.
+    model: str | None = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9._:/-]+$")
 
 
 class InstallEvent(_Base):

@@ -1,16 +1,15 @@
-"""Tests for the telemetry consent prompt + first-scan flow.
+"""Tests for the telemetry first-run enable flow.
 
-These tests enforce the launch-readiness audit BLOCKER: telemetry must
-be **off by default** on a fresh install. The prompt should only
-transition NOT_PROMPTED → ESSENTIAL when the user (or env var) gives
-positive consent; every other path persists OPTED_OUT and emits zero
-network traffic.
+Default-on / opt-out policy: telemetry is **on by default** on a fresh
+install. :func:`maybe_prompt_consent` transitions ``NOT_PROMPTED`` ->
+``EXTENDED`` silently and emits one :class:`InstallEvent`, unless an
+explicit opt-out is in force (``AGENT_GUARDIAN_TELEMETRY=0`` / ``off`` /
+``false`` / ``no``). There is no consent prompt and no CI carve-out.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -19,45 +18,23 @@ from agent_guardian.telemetry.consent import (
     get_consent,
     set_consent,
 )
-from agent_guardian.telemetry.prompt import (
-    CONSENT_PROMPT_QUESTION,
-    maybe_prompt_consent,
-)
+from agent_guardian.telemetry.prompt import maybe_prompt_consent
 
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fresh ~/.agentguardian sandbox + scrubbed telemetry env vars."""
+    """Fresh ~/.agentguardian sandbox + scrubbed telemetry env var."""
     monkeypatch.setenv("AGENT_GUARDIAN_HOME", str(tmp_path))
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY", raising=False)
-    # Scrub CI markers so the non-interactive path is exercised only
-    # when a test explicitly opts in.
-    for var in (
-        "CI",
-        "CONTINUOUS_INTEGRATION",
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "BUILDKITE",
-        "CIRCLECI",
-        "TRAVIS",
-        "JENKINS_HOME",
-        "TF_BUILD",
-    ):
-        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
-def _no_install_event(monkeypatch: pytest.MonkeyPatch) -> list[None]:
-    """Capture calls to _emit_install_event so tests can assert on them
-    without actually hitting the telemetry client."""
+def _install_events(monkeypatch: pytest.MonkeyPatch) -> list[None]:
+    """Capture _emit_install_event calls without hitting the client."""
     calls: list[None] = []
-
-    def fake_emit() -> None:
-        calls.append(None)
-
     monkeypatch.setattr(
         "agent_guardian.telemetry.prompt._emit_install_event",
-        fake_emit,
+        lambda: calls.append(None),
     )
     return calls
 
@@ -67,17 +44,8 @@ def _no_install_event(monkeypatch: pytest.MonkeyPatch) -> list[None]:
 # ---------------------------------------------------------------------------
 
 
-def test_noop_when_state_is_not_not_prompted(
-    monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
-) -> None:
-    """If a decision is already on file, the prompt is a noop."""
-
-    def boom(*_a: Any, **_kw: Any) -> bool:
-        raise AssertionError("typer.confirm must not be called when state is decided")
-
-    monkeypatch.setattr("typer.confirm", boom)
-
+def test_noop_when_state_is_decided(_install_events: list[None]) -> None:
+    """A decision already on file makes the call a noop (no re-enable, no event)."""
     for state in (
         ConsentState.ESSENTIAL,
         ConsentState.EXTENDED,
@@ -87,8 +55,7 @@ def test_noop_when_state_is_not_not_prompted(
     ):
         set_consent(state)
         assert maybe_prompt_consent() is state
-        # No InstallEvent should fire when we're in noop mode.
-        assert _no_install_event == []
+        assert _install_events == []
 
 
 # ---------------------------------------------------------------------------
@@ -101,224 +68,97 @@ def test_env_off_values_persist_opted_out(
     value: str,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    _no_install_event: list[None],
+    _install_events: list[None],
 ) -> None:
-    """The opt-out env values short-circuit before any prompt fires."""
-
-    def boom(*_a: Any, **_kw: Any) -> bool:
-        raise AssertionError("env-var opt-out must not invoke typer.confirm")
-
-    monkeypatch.setattr("typer.confirm", boom)
+    """The opt-out env values persist OPTED_OUT and emit nothing."""
     monkeypatch.setenv("AGENT_GUARDIAN_TELEMETRY", value)
     assert maybe_prompt_consent() is ConsentState.OPTED_OUT
     assert get_consent() is ConsentState.OPTED_OUT
-    err = capsys.readouterr().err
-    assert "telemetry" in err.lower()
-    assert _no_install_event == []  # OPTED_OUT never sends an InstallEvent
+    assert "telemetry" in capsys.readouterr().err.lower()
+    assert _install_events == []  # OPTED_OUT never sends an InstallEvent
 
 
 @pytest.mark.parametrize(
     "value, expected",
     [
         ("essential", ConsentState.ESSENTIAL),
-        ("on", ConsentState.ESSENTIAL),
-        ("1", ConsentState.ESSENTIAL),
-        ("true", ConsentState.ESSENTIAL),
-        ("yes", ConsentState.ESSENTIAL),
-        ("YES", ConsentState.ESSENTIAL),
         ("extended", ConsentState.EXTENDED),
         ("EXTENDED", ConsentState.EXTENDED),
+        # Default tier is EXTENDED, so the generic truthy values map there too.
+        ("on", ConsentState.EXTENDED),
+        ("1", ConsentState.EXTENDED),
+        ("true", ConsentState.EXTENDED),
+        ("yes", ConsentState.EXTENDED),
+        ("YES", ConsentState.EXTENDED),
     ],
 )
-def test_env_on_values_persist_positive_tier(
+def test_env_on_values_persist_tier(
     value: str,
     expected: ConsentState,
     monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
+    _install_events: list[None],
 ) -> None:
-    """The opt-in env values persist the requested tier and emit InstallEvent."""
-
-    def boom(*_a: Any, **_kw: Any) -> bool:
-        raise AssertionError("env-var opt-in must not invoke typer.confirm")
-
-    monkeypatch.setattr("typer.confirm", boom)
+    """Explicit env tiers persist the requested tier and emit one InstallEvent."""
     monkeypatch.setenv("AGENT_GUARDIAN_TELEMETRY", value)
     assert maybe_prompt_consent() is expected
     assert get_consent() is expected
-    assert _no_install_event == [None]
+    assert _install_events == [None]
 
 
-def test_env_unknown_value_falls_through_to_prompt(
+def test_env_unknown_value_falls_through_to_default_on(
     monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
+    _install_events: list[None],
 ) -> None:
-    """An unrecognised env value is not silently honoured -- the prompt fires."""
+    """An unrecognised env value is ignored; the default-on path enables EXTENDED."""
     monkeypatch.setenv("AGENT_GUARDIAN_TELEMETRY", "maybe-later")
-    # Pretend we're interactive so the prompt path is reachable.
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: False,
-    )
-
-    answered: list[Any] = []
-
-    def fake_confirm(prompt: str, *, default: bool = False) -> bool:
-        answered.append((prompt, default))
-        return False
-
-    monkeypatch.setattr("typer.confirm", fake_confirm)
-    assert maybe_prompt_consent() is ConsentState.OPTED_OUT
-    assert answered == [(CONSENT_PROMPT_QUESTION, False)]
+    assert maybe_prompt_consent() is ConsentState.EXTENDED
+    assert get_consent() is ConsentState.EXTENDED
+    assert _install_events == [None]
 
 
 # ---------------------------------------------------------------------------
-# Non-interactive / CI runs default to OPTED_OUT
+# Default-on: a fresh install enables silently (no prompt, no CI carve-out)
 # ---------------------------------------------------------------------------
 
 
-def test_non_interactive_persists_opted_out(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    _no_install_event: list[None],
-) -> None:
-    """A non-TTY run never blocks on a prompt -- it persists OPTED_OUT."""
-
-    def boom(*_a: Any, **_kw: Any) -> bool:
-        raise AssertionError("non-interactive run must not call typer.confirm")
-
-    monkeypatch.setattr("typer.confirm", boom)
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: True,
-    )
-    assert maybe_prompt_consent() is ConsentState.OPTED_OUT
-    err = capsys.readouterr().err
-    assert "off" in err.lower()
-    assert _no_install_event == []
+def test_fresh_install_enables_extended_and_emits(_install_events: list[None]) -> None:
+    """No consent file + no env override -> EXTENDED + exactly one InstallEvent."""
+    assert get_consent() is ConsentState.NOT_PROMPTED
+    assert maybe_prompt_consent() is ConsentState.EXTENDED
+    assert get_consent() is ConsentState.EXTENDED
+    assert _install_events == [None]
 
 
-@pytest.mark.parametrize(
-    "var",
-    [
-        "CI",
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "BUILDKITE",
-        "CIRCLECI",
-        "TRAVIS",
-        "JENKINS_HOME",
-        "TF_BUILD",
-    ],
-)
-def test_ci_env_markers_force_non_interactive(
+@pytest.mark.parametrize("var", ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_HOME"])
+def test_default_on_applies_in_ci(
     var: str,
     monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
+    _install_events: list[None],
 ) -> None:
-    """Standard CI env vars route to the non-interactive OPTED_OUT path."""
-
-    def boom(*_a: Any, **_kw: Any) -> bool:
-        raise AssertionError(f"{var} should force non-interactive path")
-
-    monkeypatch.setattr("typer.confirm", boom)
+    """Default-on has no CI/non-interactive carve-out -- a pipeline scan still counts."""
     monkeypatch.setenv(var, "1")
-    assert maybe_prompt_consent() is ConsentState.OPTED_OUT
-    assert _no_install_event == []
+    assert maybe_prompt_consent() is ConsentState.EXTENDED
+    assert get_consent() is ConsentState.EXTENDED
+    assert _install_events == [None]
 
 
-# ---------------------------------------------------------------------------
-# Interactive prompt: yes/no flows
-# ---------------------------------------------------------------------------
-
-
-def test_interactive_yes_persists_essential_and_emits_install(
-    monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
-) -> None:
-    """A positive answer to the prompt persists ESSENTIAL and fires InstallEvent."""
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: False,
-    )
-
-    answered: list[tuple[str, bool]] = []
-
-    def fake_confirm(prompt: str, *, default: bool = False) -> bool:
-        answered.append((prompt, default))
-        return True
-
-    monkeypatch.setattr("typer.confirm", fake_confirm)
-    assert maybe_prompt_consent() is ConsentState.ESSENTIAL
-    assert get_consent() is ConsentState.ESSENTIAL
-    # Default MUST be False -- the user has to actively say yes.
-    assert answered == [(CONSENT_PROMPT_QUESTION, False)]
-    assert _no_install_event == [None]
-
-
-def test_interactive_no_persists_opted_out(
-    monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
-) -> None:
-    """A negative answer persists OPTED_OUT and emits nothing."""
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: False,
-    )
-    monkeypatch.setattr("typer.confirm", lambda *_a, **_kw: False)
-    assert maybe_prompt_consent() is ConsentState.OPTED_OUT
-    assert get_consent() is ConsentState.OPTED_OUT
-    assert _no_install_event == []
-
-
-def test_interactive_abort_treated_as_no(
-    monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
-) -> None:
-    """A KeyboardInterrupt / EOFError / typer.Abort defaults to OPTED_OUT.
-
-    Pressing Ctrl-C at the prompt must NOT silently opt the user in.
-    """
-    import typer
-
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: False,
-    )
-
-    def aborting(*_a: Any, **_kw: Any) -> bool:
-        raise typer.Abort()
-
-    monkeypatch.setattr("typer.confirm", aborting)
-    assert maybe_prompt_consent() is ConsentState.OPTED_OUT
-    assert get_consent() is ConsentState.OPTED_OUT
-    assert _no_install_event == []
-
-
-def test_force_reprompts_after_reset(
-    monkeypatch: pytest.MonkeyPatch,
-    _no_install_event: list[None],
-) -> None:
-    """force=True lets `telemetry reset` re-ask even if a decision exists."""
+def test_force_re_enables_after_reset(_install_events: list[None]) -> None:
+    """force=True (used by `telemetry reset`) re-enables from a decided state."""
     set_consent(ConsentState.OPTED_OUT)
-    monkeypatch.setattr(
-        "agent_guardian.telemetry.prompt._is_non_interactive",
-        lambda: False,
-    )
-    monkeypatch.setattr("typer.confirm", lambda *_a, **_kw: True)
-    assert maybe_prompt_consent(force=True) is ConsentState.ESSENTIAL
-    assert get_consent() is ConsentState.ESSENTIAL
-    assert _no_install_event == [None]
+    assert maybe_prompt_consent(force=True) is ConsentState.EXTENDED
+    assert get_consent() is ConsentState.EXTENDED
+    assert _install_events == [None]
 
 
 # ---------------------------------------------------------------------------
-# Default-OFF integration -- the headline BLOCKER assertion
+# Default-ON integration -- the headline assertion
 # ---------------------------------------------------------------------------
 
 
-def test_fresh_install_is_off_until_prompt_runs() -> None:
-    """Before anything runs, a fresh install reports off."""
+def test_fresh_install_is_on_by_default() -> None:
+    """Before anything runs, a fresh install reports on (extended tier)."""
     from agent_guardian.telemetry.consent import consent_level, is_opted_in
 
     assert get_consent() is ConsentState.NOT_PROMPTED
-    assert is_opted_in() is False
-    assert consent_level() == "off"
+    assert is_opted_in() is True
+    assert consent_level() == "extended"

@@ -3851,6 +3851,21 @@ class SwarmCommander:
             successes_count = max(0, attempts_count - findings_total)
             now = datetime.now(UTC)
             extended_on = is_extended()
+            # EXTENDED: which LLM drove the scan, normalised to a bare
+            # ``provider:model`` id so any identifying ``+qualifier`` (base_url,
+            # project, endpoint, region) is stripped before it can leave the
+            # machine. Best-effort -- never let model capture break the scan.
+            model_telem: str | None = None
+            if extended_on:
+                try:
+                    from agent_guardian.llm.registry import parse_model_spec
+
+                    _spec = parse_model_spec(self.config.attacker_model)
+                    model_telem = (
+                        f"{_spec.provider}:{_spec.model}" if _spec.model else _spec.provider
+                    )
+                except Exception:  # pragma: no cover -- defensive
+                    model_telem = None
             event = ScanCompletedEvent(
                 install_id=get_install_id(),
                 scan_id=scan.id[:64],
@@ -3887,6 +3902,7 @@ class SwarmCommander:
                 ),
                 os_family=_os_family_telem(platform.system()) if extended_on else None,
                 arch=_arch_telem(platform.machine()) if extended_on else None,
+                model=model_telem,
             )
             emit(event)
         except Exception as exc:
