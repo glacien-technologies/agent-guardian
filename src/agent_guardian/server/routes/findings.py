@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,7 +12,9 @@ from agent_guardian.core.redact import redact_finding
 from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.server.auth import require_dashboard_auth
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["router"]
 
@@ -47,6 +50,18 @@ async def findings_view(request: Request, scan_id: str, asi: str | None = None) 
     # re-emit captured PII/secrets to a browser surface. Scrub each finding's
     # summary/transcript_ref before the template renders it.
     findings = [redact_finding(f, enabled=True) for f in findings]
+
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(
+                get_install_id(),
+                "findings_viewed",
+                {
+                    "total_findings": len(findings),
+                    "has_asi_filter": asi_filter is not None,
+                },
+            )
 
     return templates.TemplateResponse(
         request,

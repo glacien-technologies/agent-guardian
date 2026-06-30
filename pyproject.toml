@@ -86,6 +86,7 @@ dependencies = [
   # already prefers WeasyPrint → ReportLab; promoting ReportLab into base
   # only guarantees the fallback is always present.
   "reportlab>=4.2",
+  "posthog>=5.4.0",
 ]
 
 [project.optional-dependencies]

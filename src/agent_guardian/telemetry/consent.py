@@ -11,18 +11,27 @@ JSON document::
 
 The default state when the file does not exist is ``NOT_PROMPTED``.
 
-Policy (v1.0+, post launch-readiness audit):
-    Telemetry is **OFF by default**. ``NOT_PROMPTED`` means no decision
-    has been recorded yet, and the read paths treat that as off --
-    :func:`is_opted_in` returns ``False`` and :func:`consent_level`
-    returns ``"off"``. The first interactive scan asks the user via
-    :func:`agent_guardian.telemetry.prompt.maybe_prompt_consent`, which
-    persists either ``ESSENTIAL`` (on a positive yes) or ``OPTED_OUT``
-    (on no / non-interactive run / env-var opt-out). Telemetry only
-    fires once a user has positively consented.
+Policy (default-on / opt-out):
+    Telemetry is **ON by default**. ``NOT_PROMPTED`` (a fresh install)
+    is treated as the EXTENDED tier by the read paths --
+    :func:`is_opted_in` returns ``True`` and :func:`consent_level`
+    returns ``"extended"`` -- so anonymous install + scan-completed
+    events flow without any opt-in step. Only an explicit opt-out turns
+    it off:
 
-Once decided, the state is sticky -- the prompt never re-fires unless
-the user explicitly runs ``agent-guardian telemetry reset``.
+      * set ``AGENT_GUARDIAN_TELEMETRY=0`` (also ``off`` / ``false`` /
+        ``no``), or
+      * run ``agent-guardian telemetry disable``.
+
+    Either persists ``OPTED_OUT``, after which nothing is ever sent. The
+    legacy ``DEFERRED`` state is also treated as off. Everything sent is
+    anonymous metadata only -- never prompts, model output, finding text,
+    target URLs, file paths, or API keys (see
+    :mod:`agent_guardian.telemetry.events`).
+
+Once opted out, the state is sticky -- re-enable with
+``agent-guardian telemetry essential`` / ``extended`` or
+``agent-guardian telemetry reset``.
 """
 
 from __future__ import annotations
@@ -172,14 +181,27 @@ def is_opted_in(consent_dir: Path | None = None) -> bool:
     legacy ``DEFERRED`` all return ``False``.
     """
     state = get_consent(consent_dir)
-    return state in (ConsentState.ESSENTIAL, ConsentState.EXTENDED, ConsentState.OPTED_IN)
+    # Default-on policy (opt-out): a fresh install (NOT_PROMPTED) is ON.
+    # Only an explicit OPTED_OUT (env var AGENT_GUARDIAN_TELEMETRY=0 or the
+    # `telemetry disable` command) -- and the legacy DEFERRED state -- turn
+    # it off.
+    return state in (
+        ConsentState.NOT_PROMPTED,
+        ConsentState.ESSENTIAL,
+        ConsentState.EXTENDED,
+        ConsentState.OPTED_IN,
+    )
 
 
 def is_extended(consent_dir: Path | None = None) -> bool:
     """True iff the EXTENDED tier is active -- environment fingerprint
-    (adapter, Python version, OS, arch) may be included in events."""
+    (adapter, model, Python version, OS, arch) may be included in events.
+
+    Default-on policy: NOT_PROMPTED defaults to the EXTENDED tier so the
+    compatibility matrix (adapter/model/OS) is populated out of the box.
+    A user who downgrades to ESSENTIAL keeps counts-only."""
     state = get_consent(consent_dir)
-    return state in (ConsentState.EXTENDED, ConsentState.OPTED_IN)
+    return state in (ConsentState.NOT_PROMPTED, ConsentState.EXTENDED, ConsentState.OPTED_IN)
 
 
 def consent_level(consent_dir: Path | None = None) -> str:
@@ -191,11 +213,12 @@ def consent_level(consent_dir: Path | None = None) -> str:
     telemetry should fire. Legacy ``DEFERRED`` likewise maps to off.
     """
     state = get_consent(consent_dir)
-    if state in (ConsentState.EXTENDED, ConsentState.OPTED_IN):
+    if state in (ConsentState.NOT_PROMPTED, ConsentState.EXTENDED, ConsentState.OPTED_IN):
+        # Default-on: a fresh install reports the EXTENDED tier.
         return "extended"
     if state is ConsentState.ESSENTIAL:
         return "essential"
-    # NOT_PROMPTED / OPTED_OUT / DEFERRED -- no positive consent on file.
+    # OPTED_OUT / legacy DEFERRED -- telemetry explicitly disabled.
     return "off"
 
 

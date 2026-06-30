@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from agent_guardian.server.auth import require_dashboard_auth
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["DEFAULT_PAGE_SIZE", "MAX_PAGE_SIZE", "router"]
 
@@ -55,6 +58,16 @@ async def home(
     if page > 1 and offset >= total:
         raise HTTPException(status_code=404, detail="page out of range")
     total_pages = max(1, (total + page_size - 1) // page_size)
+
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(
+                get_install_id(),
+                "dashboard_viewed",
+                {"total_scans": total, "page": page},
+            )
+
     return templates.TemplateResponse(
         request,
         "home.html",

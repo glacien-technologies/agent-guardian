@@ -33,18 +33,19 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_consent_default_is_off() -> None:
-    """v1.0+ launch policy: fresh install is OFF until positive consent.
+def test_consent_default_is_on() -> None:
+    """Default-on policy: a fresh install is ON until an explicit opt-out.
 
-    NOT_PROMPTED is the underlying state and every read path treats it
-    as off -- is_opted_in returns False, consent_level returns 'off',
-    and the consent prompt will run on the next interactive scan.
+    NOT_PROMPTED is the underlying state and the read paths treat it as the
+    EXTENDED tier -- is_opted_in returns True, is_extended returns True,
+    consent_level returns 'extended'. No decision has been recorded yet, so
+    has_been_notified is still False.
     """
     assert get_consent() is ConsentState.NOT_PROMPTED
-    assert is_opted_in() is False  # OFF by default -- positive consent required
-    assert is_extended() is False
-    assert consent_level() == "off"
-    assert has_been_notified() is False  # prompt has not run yet
+    assert is_opted_in() is True  # ON by default -- opt out to disable
+    assert is_extended() is True
+    assert consent_level() == "extended"
+    assert has_been_notified() is False  # no explicit decision recorded yet
 
 
 def test_consent_transitions_persist_across_reads() -> None:
@@ -60,34 +61,40 @@ def test_consent_transitions_persist_across_reads() -> None:
         assert get_consent() is state
 
 
-def test_is_opted_in_requires_positive_tier() -> None:
-    """is_opted_in is True only for the three positive-consent tiers.
+def test_is_opted_in_off_only_for_explicit_opt_out() -> None:
+    """is_opted_in is True by default; only an explicit opt-out turns it off.
 
-    Per the launch-readiness audit, NOT_PROMPTED, OPTED_OUT and legacy
-    DEFERRED all return False -- the user has not positively consented.
+    Default-on policy: NOT_PROMPTED (fresh install) is ON. Only OPTED_OUT
+    and the legacy DEFERRED state return False.
     """
     for off_state in (
-        ConsentState.NOT_PROMPTED,
         ConsentState.OPTED_OUT,
         ConsentState.DEFERRED,
     ):
         set_consent(off_state)
         assert is_opted_in() is False, f"{off_state} must be off"
-    for on_state in (ConsentState.ESSENTIAL, ConsentState.EXTENDED, ConsentState.OPTED_IN):
+    for on_state in (
+        ConsentState.NOT_PROMPTED,
+        ConsentState.ESSENTIAL,
+        ConsentState.EXTENDED,
+        ConsentState.OPTED_IN,
+    ):
         set_consent(on_state)
         assert is_opted_in() is True, f"{on_state} must be on"
 
 
-def test_extended_only_true_for_extended_tier() -> None:
-    """is_extended must be True only when the user explicitly upgraded."""
+def test_extended_true_by_default_and_for_extended_tier() -> None:
+    """is_extended is True by default (NOT_PROMPTED) and for the EXTENDED tier;
+    a downgrade to ESSENTIAL, or any opt-out, turns it off."""
     for not_extended_state in (
-        ConsentState.NOT_PROMPTED,
         ConsentState.ESSENTIAL,
         ConsentState.OPTED_OUT,
         ConsentState.DEFERRED,
     ):
         set_consent(not_extended_state)
         assert is_extended() is False, f"{not_extended_state} should not be extended"
+    set_consent(ConsentState.NOT_PROMPTED)
+    assert is_extended() is True, "fresh install defaults to extended"
     set_consent(ConsentState.EXTENDED)
     assert is_extended() is True
     # Legacy OPTED_IN from rc1 also maps to extended (back-compat).
@@ -98,11 +105,11 @@ def test_extended_only_true_for_extended_tier() -> None:
 def test_consent_level_returns_three_tiers() -> None:
     """consent_level returns one of: off / essential / extended.
 
-    Per the launch-readiness audit NOT_PROMPTED maps to 'off' so a
-    fresh install with no recorded decision never sends telemetry.
+    Default-on policy: NOT_PROMPTED (a fresh install) maps to 'extended'
+    so anonymous telemetry flows out of the box. Only an explicit opt-out
+    (OPTED_OUT) or the legacy DEFERRED state maps to 'off'.
     """
     for off_state in (
-        ConsentState.NOT_PROMPTED,
         ConsentState.OPTED_OUT,
         ConsentState.DEFERRED,
     ):
@@ -110,7 +117,11 @@ def test_consent_level_returns_three_tiers() -> None:
         assert consent_level() == "off", f"{off_state} should map to off"
     set_consent(ConsentState.ESSENTIAL)
     assert consent_level() == "essential"
-    for extended_state in (ConsentState.EXTENDED, ConsentState.OPTED_IN):
+    for extended_state in (
+        ConsentState.NOT_PROMPTED,
+        ConsentState.EXTENDED,
+        ConsentState.OPTED_IN,
+    ):
         set_consent(extended_state)
         assert consent_level() == "extended"
 

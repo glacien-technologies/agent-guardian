@@ -3833,7 +3833,7 @@ class SwarmCommander:
 
             from agent_guardian.telemetry.client import emit
             from agent_guardian.telemetry.consent import is_extended, is_opted_in
-            from agent_guardian.telemetry.events import ScanCompletedEvent
+            from agent_guardian.telemetry.events import ScanCompletedEvent, TerminationKind
             from agent_guardian.telemetry.install_id import get_install_id
 
             if not is_opted_in():
@@ -3850,7 +3850,39 @@ class SwarmCommander:
             # path where the relationship inverts.
             successes_count = max(0, attempts_count - findings_total)
             now = datetime.now(UTC)
+            # Derive the scan-level outcome from the per-agent termination
+            # breakdown so telemetry shows *what issues* users hit -- a
+            # mid-flight error, retry/quota exhaustion, or a budget
+            # cancellation -- instead of a blanket "success". Worst-wins
+            # precedence; early_stop / not_tested / success are all healthy.
+            _term_counts = (
+                scan.completeness.terminated_by_counts if scan.completeness is not None else {}
+            ) or {}
+            terminated_by_telem: TerminationKind
+            if _term_counts.get("error", 0) > 0:
+                terminated_by_telem = "error"
+            elif _term_counts.get("exhausted", 0) > 0:
+                terminated_by_telem = "exhausted"
+            elif _term_counts.get("cancelled", 0) > 0:
+                terminated_by_telem = "cancelled"
+            else:
+                terminated_by_telem = "success"
             extended_on = is_extended()
+            # EXTENDED: which LLM drove the scan, normalised to a bare
+            # ``provider:model`` id so any identifying ``+qualifier`` (base_url,
+            # project, endpoint, region) is stripped before it can leave the
+            # machine. Best-effort -- never let model capture break the scan.
+            model_telem: str | None = None
+            if extended_on:
+                try:
+                    from agent_guardian.llm.registry import parse_model_spec
+
+                    _spec = parse_model_spec(self.config.attacker_model)
+                    model_telem = (
+                        f"{_spec.provider}:{_spec.model}" if _spec.model else _spec.provider
+                    )
+                except Exception:  # pragma: no cover -- defensive
+                    model_telem = None
             event = ScanCompletedEvent(
                 install_id=get_install_id(),
                 scan_id=scan.id[:64],
@@ -3867,7 +3899,7 @@ class SwarmCommander:
                 # break-out; not identifying.
                 mode=scan.mode,
                 duration_seconds=max(0.0, duration),
-                terminated_by="success",
+                terminated_by=terminated_by_telem,
                 agents_count=agents_count,
                 attempts_count=attempts_count,
                 successes_count=successes_count,
@@ -3887,6 +3919,7 @@ class SwarmCommander:
                 ),
                 os_family=_os_family_telem(platform.system()) if extended_on else None,
                 arch=_arch_telem(platform.machine()) if extended_on else None,
+                model=model_telem,
             )
             emit(event)
         except Exception as exc:

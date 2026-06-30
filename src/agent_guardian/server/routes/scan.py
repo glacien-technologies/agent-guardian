@@ -21,6 +21,7 @@ Routes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -47,7 +48,9 @@ from agent_guardian.server.dashboard_view import (
     live_snapshot,
 )
 from agent_guardian.server.partial_scan import is_terminal_scan_on_disk
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["router"]
 
@@ -182,6 +185,15 @@ async def scan_view(request: Request, scan_id: str) -> HTMLResponse:
     # QA-041: only the Executive theme ships. ``?theme=<anything>`` is
     # silently ignored so any stale bookmark still resolves to a usable
     # dashboard page rather than 404-ing.
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(
+                get_install_id(),
+                "scan_viewed",
+                {"is_running": is_running},
+            )
+
     payload = ctx.to_dict()
     return templates.TemplateResponse(
         request,

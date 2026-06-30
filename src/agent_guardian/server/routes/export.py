@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import zipfile
 
@@ -9,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
 from agent_guardian.server.auth import require_dashboard_auth
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_scan_store
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["router"]
 
@@ -71,6 +74,11 @@ async def export_bundle(request: Request, scan_id: str) -> Response:
             if p.is_file():
                 zf.write(p, arcname=f"raw/{name}")
 
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(get_install_id(), "export_bundle_downloaded")
+
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
@@ -88,6 +96,11 @@ async def export_download(request: Request, scan_id: str, fmt: str) -> FileRespo
     path = paths.get(fmt)
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail=f"report not available: {fmt}")
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(get_install_id(), "export_downloaded", {"format": fmt})
+
     return FileResponse(
         path=path,
         media_type=_FORMAT_MEDIATYPES[fmt],

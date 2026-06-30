@@ -3630,6 +3630,24 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG) from None
 
+    # Telemetry transparency notice -- one line at scan start, to stderr so it
+    # never pollutes piped JSON. Printed when telemetry is actually active
+    # (opted in, not env-disabled); silent for opted-out users. We collect only
+    # anonymous metadata -- never URLs, prompts, code, findings, or keys.
+    try:
+        from agent_guardian.telemetry.client import _env_opted_out
+        from agent_guardian.telemetry.consent import is_opted_in
+
+        if is_opted_in() and not _env_opted_out():
+            typer.echo(
+                "[telemetry] Anonymous usage data is on (counts, scores, model, OS "
+                "-- no URLs, prompts, code, or keys). Disable: "
+                "AGENT_GUARDIAN_TELEMETRY=0  |  what's sent: agent-guardian telemetry show",
+                err=True,
+            )
+    except Exception as exc:  # pragma: no cover -- a notice must never break a scan
+        _LOG.debug("telemetry: start-of-scan notice skipped (%s) -- scan unaffected", exc)
+
     try:
         exit_code = asyncio.run(
             _run_scan(

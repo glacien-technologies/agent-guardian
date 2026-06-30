@@ -1,10 +1,9 @@
 """Tests for the telemetry HTTP client.
 
-Locks the launch-readiness audit BLOCKER -- a clean install never
-posts to the collector. The module-level :func:`emit` must short-
-circuit before httpx is imported when (a) the user has not given
-positive consent or (b) ``AGENT_GUARDIAN_TELEMETRY`` is set to an
-opt-out value.
+Default-on / opt-out policy: a clean install posts to the collector. The
+module-level :func:`emit` only short-circuits before httpx is imported
+when the user has explicitly opted out -- either ``AGENT_GUARDIAN_TELEMETRY``
+is set to an opt-out value, or consent state is ``OPTED_OUT``.
 """
 
 from __future__ import annotations
@@ -34,10 +33,20 @@ from agent_guardian.telemetry.local import LocalEventBuffer
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Per-test sandbox with scrubbed env vars."""
+    """Per-test sandbox with scrubbed env vars + a test PostHog project key.
+
+    A key must be configured for the client to post; tests that exercise the
+    'no key -> no-op' path delete it explicitly.
+    """
     monkeypatch.setenv("AGENT_GUARDIAN_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENT_GUARDIAN_TELEMETRY_KEY", "phc_test_key")
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY", raising=False)
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_URL", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_HOST", raising=False)
+    # Scrub the conventional PostHog fallbacks so an ambient .env / shell
+    # value can't leak into the 'no key configured' test.
+    monkeypatch.delenv("POSTHOG_PROJECT_TOKEN", raising=False)
+    monkeypatch.delenv("POSTHOG_HOST", raising=False)
 
 
 def _scan_event() -> ScanCompletedEvent:
@@ -74,20 +83,17 @@ def _envelope() -> EventEnvelope:
 # ---------------------------------------------------------------------------
 
 
-def test_emit_no_post_on_clean_home(tmp_path: Path) -> None:
-    """A fresh install (NOT_PROMPTED) emits zero network requests.
+def test_emit_posts_on_clean_home(tmp_path: Path) -> None:
+    """A fresh install (NOT_PROMPTED) is ON by default and posts.
 
-    This is the headline BLOCKER assertion -- if this test ever flips,
-    we've regressed back to default-on telemetry.
+    This is the headline default-on assertion -- with no consent file and
+    no env opt-out, emit() reaches the collector. (Inverts the old opt-in
+    BLOCKER: default-on is now the intended behavior.)
     """
     with respx.mock(assert_all_called=False) as mock:
         route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
         emit(_scan_event())
-        assert route.call_count == 0
-        # Buffer must also be untouched -- the fast path returns before
-        # any SQLite write.
-        buffer = LocalEventBuffer()
-        assert buffer.queue_depth() == 0
+        assert route.call_count == 1
 
 
 def test_emit_no_post_when_env_says_off(
@@ -118,14 +124,13 @@ def test_emit_honours_all_env_off_aliases(
         assert route.call_count == 0
 
 
-def test_emit_no_post_when_non_tty(
+def test_emit_posts_when_non_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-TTY run with no consent and no env-var still posts nothing.
+    """A non-TTY / CI run with no env opt-out still posts.
 
-    The defence in depth: even if a CI script accidentally calls
-    emit() directly without running the consent prompt first, the
-    is_opted_in check stops the network from being touched.
+    Default-on has no CI/non-interactive carve-out -- a pipeline scan is
+    real usage we count unless the operator sets AGENT_GUARDIAN_TELEMETRY=0.
     """
 
     class NonTtyStdin:
@@ -136,7 +141,7 @@ def test_emit_no_post_when_non_tty(
     with respx.mock(assert_all_called=False) as mock:
         route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
         emit(_scan_event())
-        assert route.call_count == 0
+        assert route.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -167,13 +172,44 @@ def test_emit_posts_for_each_event_type_on_extended() -> None:
         assert route.call_count == 1
 
 
+def test_post_uses_posthog_capture_shape() -> None:
+    """The wire payload is PostHog's capture shape, not the raw envelope:
+    install_id -> distinct_id, event_type -> event, the rest -> properties."""
+    import json as _json
+
+    set_consent(ConsentState.EXTENDED)
+    with respx.mock() as mock:
+        route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
+        emit(_scan_event())
+        assert route.call_count == 1
+        body = _json.loads(route.calls.last.request.content)
+        assert body["api_key"] == "phc_test_key"
+        assert body["event"] == "scan_completed"
+        assert body["distinct_id"] == "11111111-2222-4333-8444-555555555555"
+        # install_id / event_type are lifted out, not duplicated in properties.
+        assert "install_id" not in body["properties"]
+        assert "event_type" not in body["properties"]
+        assert body["properties"]["aivss"] == 72
+        assert "timestamp" in body
+
+
+def test_emit_no_post_when_no_project_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no PostHog project key configured the client is a graceful no-op."""
+    monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_KEY", raising=False)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
+        emit(_scan_event())
+        assert route.call_count == 0
+
+
 # ---------------------------------------------------------------------------
 # TelemetryClient behaviour
 # ---------------------------------------------------------------------------
 
 
-def test_client_emit_skips_when_not_opted_in(tmp_path: Path) -> None:
-    """TelemetryClient.emit is also a noop when consent is missing."""
+def test_client_emit_skips_when_opted_out(tmp_path: Path) -> None:
+    """TelemetryClient.emit is a noop once the user has opted out."""
+    set_consent(ConsentState.OPTED_OUT)
     buffer = LocalEventBuffer(db_path=tmp_path / "tc.db")
     tc = TelemetryClient(buffer=buffer)
     with respx.mock(assert_all_called=False) as mock:

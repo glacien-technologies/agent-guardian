@@ -89,6 +89,32 @@ def test_invalid_tier_rejected() -> None:
         _valid_scan_event(tier="T5")  # type: ignore[arg-type]
 
 
+def test_model_field_accepts_provider_model_ids() -> None:
+    """The extended ``model`` field accepts normalised provider:model ids,
+    including Bedrock's colon-bearing inference-profile ids."""
+    for spec in (
+        "gemini:gemini-2.5-flash",
+        "openai:gpt-4o-mini",
+        "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "openrouter:anthropic/claude-3.5-sonnet",
+        "ollama",
+    ):
+        assert _valid_scan_event(model=spec).model == spec
+    assert _valid_scan_event().model is None  # optional, defaults to None
+
+
+def test_model_field_rejects_identifying_strings() -> None:
+    """Anonymity guard: the pattern bars whitespace and URL/query chars, so a
+    leaked ``base_url`` / ``endpoint`` qualifier can never ride out as a model."""
+    for bad in (
+        "vllm:m+base_url=http://internal-host:8000",  # '+' and '=' barred
+        "model with spaces",
+        "openai:gpt-4o?key=sk-secret",  # '?' and '=' barred
+    ):
+        with pytest.raises(ValidationError):
+            _valid_scan_event(model=bad)
+
+
 def test_envelope_discriminator_routes_correctly() -> None:
     """EventEnvelope's discriminated union must route to the right model."""
     env = EventEnvelope(client_sent_at=_NOW, event=_valid_scan_event())
