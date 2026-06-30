@@ -42,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from agent_guardian._version import __version__
+from agent_guardian.server.posthog_client import build_posthog_client
 from agent_guardian.server.routes.health import MetricsRegistry
 from agent_guardian.server.scan_store import ScanStore
 
@@ -78,13 +79,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     them all on shutdown so a SIGTERM-driven exit doesn't leave half-flushed
     buffers behind for a watchdog that immediately re-reads the file.
     """
+    # Startup: initialise PostHog dashboard analytics client.
+    app.state.posthog = build_posthog_client()
+
     yield
+
     store = getattr(app.state, "scan_store", None)
     if isinstance(store, ScanStore):
         try:
             store.close_all()
         except Exception:  # pragma: no cover — shutdown best-effort
             _LOG.exception("scan_store.close_all() raised during shutdown")
+
+    # Shutdown: flush any buffered PostHog events.
+    ph = getattr(app.state, "posthog", None)
+    if ph is not None:
+        try:
+            ph.shutdown()
+        except Exception:  # pragma: no cover — shutdown best-effort
+            _LOG.debug("posthog shutdown raised (ignored)")
 
 
 def create_app(*, scan_store: ScanStore | None = None) -> FastAPI:

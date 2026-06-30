@@ -25,6 +25,7 @@ separate ingestion service, but the route handler is the same code.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import secrets
@@ -36,8 +37,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from agent_guardian.logging_setup import sanitize_for_log
 from agent_guardian.server.analytics import Aggregator, EventStore
 from agent_guardian.server.auth import require_dashboard_auth
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_templates
 from agent_guardian.telemetry.events import EventEnvelope
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["router"]
 
@@ -96,6 +99,16 @@ async def analytics_view(request: Request, window: str = "30d") -> HTMLResponse:
     py_os = agg.python_os_matrix(window_days=window_days)
     recent = agg.recent_scans(limit=5)
     templates = get_templates(request)
+
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(
+                get_install_id(),
+                "analytics_viewed",
+                {"window": window, "total_scans": hero.total_scans},
+            )
+
     return templates.TemplateResponse(
         request,
         "analytics.html",

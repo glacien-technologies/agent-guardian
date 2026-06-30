@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from agent_guardian.server.auth import require_dashboard_auth
+from agent_guardian.server.posthog_client import get_posthog
 from agent_guardian.server.routes._deps import get_scan_store, get_templates
+from agent_guardian.telemetry.install_id import get_install_id
 
 __all__ = ["router"]
 
@@ -34,6 +37,16 @@ async def aivss_view(request: Request, scan_id: str) -> HTMLResponse:
         "hallucination_resistance",
     ]
     ordered = [(name, sub_scores.get(name, 0.0)) for name in sub_score_order]
+
+    ph = get_posthog(request.app)
+    if ph is not None:
+        with contextlib.suppress(Exception):
+            ph.capture(
+                get_install_id(),
+                "aivss_viewed",
+                {"has_scores": scan is not None},
+            )
+
     return templates.TemplateResponse(
         request,
         "aivss.html",
