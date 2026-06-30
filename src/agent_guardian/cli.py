@@ -3645,8 +3645,8 @@ def scan(
                 "AGENT_GUARDIAN_TELEMETRY=0  |  what's sent: agent-guardian telemetry show",
                 err=True,
             )
-    except Exception:  # pragma: no cover -- a notice must never break a scan
-        pass
+    except Exception as exc:  # pragma: no cover -- a notice must never break a scan
+        _LOG.debug("telemetry: start-of-scan notice skipped (%s) -- scan unaffected", exc)
 
     try:
         exit_code = asyncio.run(

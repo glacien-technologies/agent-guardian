@@ -61,8 +61,8 @@ def build_posthog_client() -> Any | None:
         if not is_opted_in():
             _LOG.debug("posthog dashboard client: skipped (user opted out)")
             return None
-    except Exception:
-        pass
+    except Exception as exc:
+        _LOG.debug("posthog dashboard client: consent check unavailable (%s) -- proceeding", exc)
 
     token = os.environ.get("POSTHOG_PROJECT_TOKEN", "").strip()
     if not token:
@@ -74,7 +74,7 @@ def build_posthog_client() -> Any | None:
     try:
         from posthog import Posthog
 
-        client = Posthog(
+        client = Posthog(  # type: ignore[no-untyped-call, unused-ignore]  # untyped third-party SDK
             api_key=token,
             host=host,
             # MUST stay False: exception autocapture ships stack traces --
