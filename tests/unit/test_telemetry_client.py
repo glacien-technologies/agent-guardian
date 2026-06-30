@@ -43,6 +43,10 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY", raising=False)
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_URL", raising=False)
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_HOST", raising=False)
+    # Scrub the conventional PostHog fallbacks so an ambient .env / shell
+    # value can't leak into the 'no key configured' test.
+    monkeypatch.delenv("POSTHOG_PROJECT_TOKEN", raising=False)
+    monkeypatch.delenv("POSTHOG_HOST", raising=False)
 
 
 def _scan_event() -> ScanCompletedEvent:

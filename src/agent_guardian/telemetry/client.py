@@ -78,13 +78,27 @@ def _resolve_collector_url() -> str:
     override = os.environ.get("AGENT_GUARDIAN_TELEMETRY_URL")
     if override:
         return override
-    host = os.environ.get("AGENT_GUARDIAN_TELEMETRY_HOST", DEFAULT_POSTHOG_HOST).rstrip("/")
+    # Prefer the namespaced var; fall back to PostHog's conventional name.
+    host = (
+        os.environ.get("AGENT_GUARDIAN_TELEMETRY_HOST")
+        or os.environ.get("POSTHOG_HOST")
+        or DEFAULT_POSTHOG_HOST
+    ).rstrip("/")
     return f"{host}/capture/"
 
 
 def _resolve_project_key() -> str:
-    """PostHog project API key from env override, else the baked default."""
-    return os.environ.get("AGENT_GUARDIAN_TELEMETRY_KEY", _DEFAULT_POSTHOG_KEY).strip()
+    """PostHog project API key.
+
+    Resolution order (mirrors ``config.env_api_key``): the namespaced
+    ``AGENT_GUARDIAN_TELEMETRY_KEY``, then PostHog's conventional
+    ``POSTHOG_PROJECT_TOKEN``, then the baked-in release default.
+    """
+    return (
+        os.environ.get("AGENT_GUARDIAN_TELEMETRY_KEY")
+        or os.environ.get("POSTHOG_PROJECT_TOKEN")
+        or _DEFAULT_POSTHOG_KEY
+    ).strip()
 
 
 def _to_posthog_payload(env: EventEnvelope, project_key: str) -> dict[str, object]:
