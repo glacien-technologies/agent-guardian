@@ -108,7 +108,8 @@ What gets sent on the ESSENTIAL tier:
   • scan_id         anonymous random per-scan ID
   • aivss, band, tier        the security score + its bucket
   • duration_seconds         how long the scan took
-  • terminated_by   success / error / crash (drives crash-free rate)
+  • terminated_by   how the scan ended -- success / error / cancelled /
+                    exhausted (so we can see what issues users hit)
   • agents_count    number of swarm agents that ran
   • attempts_count  total per-turn judged events across all agents
   • successes_count attempts where the target defended (target_pass)

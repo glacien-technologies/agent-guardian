@@ -42,7 +42,11 @@ current version and (per Standard §9.4 dual-write window) the previous
 version for 30 days after a bump."""
 
 
-TerminationKind = Literal["success", "error", "crash"]
+# How the scan ended overall -- derived from the per-agent termination
+# breakdown so the collector can see *what issues* users hit (quota
+# exhaustion, mid-flight errors, budget cancellation) rather than only a
+# blanket "success". ``crash`` is retained for back-compat with older clients.
+TerminationKind = Literal["success", "error", "crash", "cancelled", "exhausted"]
 """Three terminal scan states for crash-rate aggregation.
 
 - ``success`` -- scan finalised cleanly, AIVSS computed.
