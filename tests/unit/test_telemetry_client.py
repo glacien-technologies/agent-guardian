@@ -47,6 +47,10 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # value can't leak into the 'no key configured' test.
     monkeypatch.delenv("POSTHOG_PROJECT_TOKEN", raising=False)
     monkeypatch.delenv("POSTHOG_HOST", raising=False)
+    # Neutralise the baked-in release key so tests resolve the key purely from
+    # env (the AGENT_GUARDIAN_TELEMETRY_KEY set above), and the 'no key' test
+    # genuinely sees no key when it deletes that env var.
+    monkeypatch.setattr(client_module, "_DEFAULT_POSTHOG_KEY", "")
 
 
 def _scan_event() -> ScanCompletedEvent:

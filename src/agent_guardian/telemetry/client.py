@@ -45,19 +45,18 @@ __all__ = ["DEFAULT_COLLECTOR_URL", "DEFAULT_POSTHOG_HOST", "TelemetryClient", "
 
 _LOG = logging.getLogger(__name__)
 
-# PostHog Cloud, EU region (data stays in the EU). Overridable for
-# self-host / testing via AGENT_GUARDIAN_TELEMETRY_HOST or a full-URL
-# AGENT_GUARDIAN_TELEMETRY_URL override.
-DEFAULT_POSTHOG_HOST = "https://eu.i.posthog.com"
+# PostHog Cloud, US region (matches the project the baked key below belongs
+# to). Overridable for self-host / testing via AGENT_GUARDIAN_TELEMETRY_HOST /
+# POSTHOG_HOST, or a full-URL AGENT_GUARDIAN_TELEMETRY_URL override.
+DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
 DEFAULT_COLLECTOR_URL = f"{DEFAULT_POSTHOG_HOST}/capture/"
 
-# The PostHog *project API key* (``phc_...``) is a PUBLIC, write-only
-# ingest key -- safe to ship in the package; that is how PostHog client
-# keys are designed. Baked in at release; overridable via
-# ``AGENT_GUARDIAN_TELEMETRY_KEY`` for testing / self-host. While empty the
-# client is a graceful no-op (nothing is sent), so the package can ship
-# before the key is provisioned.
-_DEFAULT_POSTHOG_KEY = ""  # TODO(release): set the real PostHog EU project key
+# The PostHog *project API key* (``phc_...``) is a PUBLIC, write-only ingest
+# key -- safe to ship in the package; that is how PostHog client keys are
+# designed (it can only capture events, never read). Overridable via
+# ``AGENT_GUARDIAN_TELEMETRY_KEY`` / ``POSTHOG_PROJECT_TOKEN`` for testing /
+# self-host. The host above MUST match this key's region (US).
+_DEFAULT_POSTHOG_KEY = "phc_B4BV3zLEhZGsme3YYhAnAhJqhtWAE4cHci8GzipqAxYL"  # gitleaks:allow -- public PostHog ingest key
 
 # Env-var opt-out values. Kept in sync with prompt._ENV_OFF -- duplicated
 # here so the emit() fast-path does not need to import the prompt
