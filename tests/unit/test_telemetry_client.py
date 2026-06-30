@@ -33,10 +33,16 @@ from agent_guardian.telemetry.local import LocalEventBuffer
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Per-test sandbox with scrubbed env vars."""
+    """Per-test sandbox with scrubbed env vars + a test PostHog project key.
+
+    A key must be configured for the client to post; tests that exercise the
+    'no key -> no-op' path delete it explicitly.
+    """
     monkeypatch.setenv("AGENT_GUARDIAN_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENT_GUARDIAN_TELEMETRY_KEY", "phc_test_key")
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY", raising=False)
     monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_URL", raising=False)
+    monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_HOST", raising=False)
 
 
 def _scan_event() -> ScanCompletedEvent:
@@ -160,6 +166,36 @@ def test_emit_posts_for_each_event_type_on_extended() -> None:
             )
         )
         assert route.call_count == 1
+
+
+def test_post_uses_posthog_capture_shape() -> None:
+    """The wire payload is PostHog's capture shape, not the raw envelope:
+    install_id -> distinct_id, event_type -> event, the rest -> properties."""
+    import json as _json
+
+    set_consent(ConsentState.EXTENDED)
+    with respx.mock() as mock:
+        route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
+        emit(_scan_event())
+        assert route.call_count == 1
+        body = _json.loads(route.calls.last.request.content)
+        assert body["api_key"] == "phc_test_key"
+        assert body["event"] == "scan_completed"
+        assert body["distinct_id"] == "11111111-2222-4333-8444-555555555555"
+        # install_id / event_type are lifted out, not duplicated in properties.
+        assert "install_id" not in body["properties"]
+        assert "event_type" not in body["properties"]
+        assert body["properties"]["aivss"] == 72
+        assert "timestamp" in body
+
+
+def test_emit_no_post_when_no_project_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no PostHog project key configured the client is a graceful no-op."""
+    monkeypatch.delenv("AGENT_GUARDIAN_TELEMETRY_KEY", raising=False)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(DEFAULT_COLLECTOR_URL).mock(return_value=Response(200))
+        emit(_scan_event())
+        assert route.call_count == 0
 
 
 # ---------------------------------------------------------------------------

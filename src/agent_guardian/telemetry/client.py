@@ -1,27 +1,29 @@
-"""Collector HTTP client.
+"""Telemetry HTTP client (PostHog Cloud capture).
 
-Posts telemetry envelopes to ``telemetry.agentguardian.io/v1/events``
-(configurable via ``AGENT_GUARDIAN_TELEMETRY_URL``). Failures are
+Posts each anonymous event to PostHog's ``/capture/`` endpoint
+(default EU host ``https://eu.i.posthog.com``). The typed event models
+are translated to PostHog's capture shape at POST time: ``install_id``
+becomes the ``distinct_id``, ``event_type`` becomes the event name, and
+the remaining anonymous fields become ``properties``. Failures are
 swallowed and the envelope is left in the local buffer for retry.
 
-The client never blocks the user's scan. Every call is fire-and-forget
-async with a short timeout -- if the collector is unreachable, the
-event is buffered and we move on. The user's CLI exit code is never
-affected by collector state.
+The client never blocks the user's scan -- every call is fire-and-forget
+with a short timeout; if PostHog is unreachable the event is buffered
+and we move on. The CLI exit code is never affected.
 
-Per the v1.0+ launch-audit policy, telemetry is **off by default**.
-The module-level :func:`emit` short-circuits on three conditions
-*before* importing :mod:`httpx` or touching the local buffer:
+Telemetry is **on by default** (opt-out). The module-level :func:`emit`
+short-circuits *before* importing :mod:`httpx` or touching the buffer
+when:
 
-* the user has set ``AGENT_GUARDIAN_TELEMETRY`` to an opt-out value
+* ``AGENT_GUARDIAN_TELEMETRY`` is set to an opt-out value
   (``off`` / ``0`` / ``false`` / ``no``);
-* the consent state on disk is anything but a positive tier
-  (``ESSENTIAL`` / ``EXTENDED`` / legacy ``OPTED_IN``);
+* the consent state on disk is ``OPTED_OUT`` (or legacy ``DEFERRED``);
+* no PostHog project key is configured (the client is a graceful no-op
+  until a key is baked in / provided via ``AGENT_GUARDIAN_TELEMETRY_KEY``);
 * the supplied object is not a known telemetry event model.
 
-A user who has not consented therefore pays zero cost (no httpx
-import, no SQLite write, no DNS lookup, no network call) -- which is
-also what the audit asserts in test_no_post_on_clean_home.
+A user who has opted out pays zero cost -- no httpx import, no SQLite
+write, no DNS lookup, no network call.
 """
 
 from __future__ import annotations
@@ -39,11 +41,23 @@ from agent_guardian.telemetry.local import LocalEventBuffer
 if TYPE_CHECKING:
     import httpx
 
-__all__ = ["DEFAULT_COLLECTOR_URL", "TelemetryClient", "emit"]
+__all__ = ["DEFAULT_COLLECTOR_URL", "DEFAULT_POSTHOG_HOST", "TelemetryClient", "emit"]
 
 _LOG = logging.getLogger(__name__)
 
-DEFAULT_COLLECTOR_URL = "https://telemetry.agentguardian.io/v1/events"
+# PostHog Cloud, EU region (data stays in the EU). Overridable for
+# self-host / testing via AGENT_GUARDIAN_TELEMETRY_HOST or a full-URL
+# AGENT_GUARDIAN_TELEMETRY_URL override.
+DEFAULT_POSTHOG_HOST = "https://eu.i.posthog.com"
+DEFAULT_COLLECTOR_URL = f"{DEFAULT_POSTHOG_HOST}/capture/"
+
+# The PostHog *project API key* (``phc_...``) is a PUBLIC, write-only
+# ingest key -- safe to ship in the package; that is how PostHog client
+# keys are designed. Baked in at release; overridable via
+# ``AGENT_GUARDIAN_TELEMETRY_KEY`` for testing / self-host. While empty the
+# client is a graceful no-op (nothing is sent), so the package can ship
+# before the key is provisioned.
+_DEFAULT_POSTHOG_KEY = ""  # TODO(release): set the real PostHog EU project key
 
 # Env-var opt-out values. Kept in sync with prompt._ENV_OFF -- duplicated
 # here so the emit() fast-path does not need to import the prompt
@@ -61,7 +75,36 @@ def _env_opted_out() -> bool:
 
 
 def _resolve_collector_url() -> str:
-    return os.environ.get("AGENT_GUARDIAN_TELEMETRY_URL", DEFAULT_COLLECTOR_URL)
+    override = os.environ.get("AGENT_GUARDIAN_TELEMETRY_URL")
+    if override:
+        return override
+    host = os.environ.get("AGENT_GUARDIAN_TELEMETRY_HOST", DEFAULT_POSTHOG_HOST).rstrip("/")
+    return f"{host}/capture/"
+
+
+def _resolve_project_key() -> str:
+    """PostHog project API key from env override, else the baked default."""
+    return os.environ.get("AGENT_GUARDIAN_TELEMETRY_KEY", _DEFAULT_POSTHOG_KEY).strip()
+
+
+def _to_posthog_payload(env: EventEnvelope, project_key: str) -> dict[str, object]:
+    """Translate a typed :class:`EventEnvelope` into PostHog's capture shape.
+
+    ``install_id`` -> ``distinct_id`` (the stable anonymous identity),
+    ``event_type`` -> the PostHog event name, everything else -> properties.
+    No PII is introduced -- the event models are already anonymous and the
+    ``model`` field is qualifier-stripped upstream.
+    """
+    props = env.event.model_dump(mode="json", exclude_none=True)
+    distinct_id = props.pop("install_id", "anonymous")
+    event_name = props.pop("event_type", "scan_completed")
+    return {
+        "api_key": project_key,
+        "event": event_name,
+        "distinct_id": distinct_id,
+        "properties": props,
+        "timestamp": env.client_sent_at.isoformat(),
+    }
 
 
 class TelemetryClient:
@@ -84,6 +127,7 @@ class TelemetryClient:
         self._timeout = timeout_seconds
         self._buffer = buffer if buffer is not None else LocalEventBuffer()
         self._consent_dir = consent_dir
+        self._project_key = _resolve_project_key()
 
     def emit(self, envelope: EventEnvelope) -> None:
         """Best-effort post. If the network fails, the event is buffered.
@@ -93,9 +137,14 @@ class TelemetryClient:
         """
         if _env_opted_out() or not is_opted_in(self._consent_dir):
             _LOG.debug(
-                "telemetry: skipping emit, user not opted in (event_type=%s)",
+                "telemetry: skipping emit, user opted out (event_type=%s)",
                 envelope.event.event_type,
             )
+            return
+        if not self._project_key:
+            # No PostHog key configured -- graceful no-op (don't even buffer,
+            # there's nowhere to flush to). Activates once a key is provided.
+            _LOG.debug("telemetry: skipping emit, no project key configured")
             return
         try:
             row_id = self._buffer.enqueue(envelope)
@@ -148,7 +197,7 @@ class TelemetryClient:
     def _post_one(self, client: httpx.Client, row_id: int, env: EventEnvelope) -> bool:
         import httpx
 
-        payload = env.model_dump(mode="json")
+        payload = _to_posthog_payload(env, self._project_key)
         try:
             resp = client.post(self._url, json=payload)
         except httpx.RequestError as exc:
@@ -172,11 +221,11 @@ class TelemetryClient:
 def emit(event: object) -> None:
     """Module-level convenience: wrap an event in an envelope and emit.
 
-    Accepts any of the concrete event classes. No-op if the user has
-    not positively consented, and a strict no-op if the env-var
-    opt-out is set -- in that case we return *before* importing
-    :mod:`httpx`, touching the local SQLite buffer, or doing any
-    other side-effecting work.
+    Accepts any of the concrete event classes. Telemetry is on by default;
+    this is a strict no-op -- returning *before* importing :mod:`httpx`,
+    touching the local SQLite buffer, or any other side-effecting work --
+    when the env-var opt-out is set, the user has opted out, or no PostHog
+    project key is configured.
     """
     # Fast path: env-var opt-out takes precedence over everything --
     # not even the type-check below runs, so a user who exports
@@ -185,7 +234,10 @@ def emit(event: object) -> None:
         _LOG.debug("telemetry: emit skipped (%s opt-out)", _ENV_VAR)
         return
     if not is_opted_in():
-        _LOG.debug("telemetry: emit skipped (no positive consent on file)")
+        _LOG.debug("telemetry: emit skipped (user opted out)")
+        return
+    if not _resolve_project_key():
+        _LOG.debug("telemetry: emit skipped (no project key configured)")
         return
 
     from agent_guardian.telemetry.events import (
