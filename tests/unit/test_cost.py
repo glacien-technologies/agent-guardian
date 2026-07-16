@@ -91,8 +91,15 @@ def test_lookup_gemini_31_pro_preview_uses_table_price() -> None:
 def test_lookup_gemini_35_flash_table_price() -> None:
     row = lookup_price("gemini:gemini-3.5-flash")
     assert row.provider == "gemini"
-    assert row.input_per_1m == pytest.approx(0.300)
-    assert row.output_per_1m == pytest.approx(2.500)
+    assert row.input_per_1m == pytest.approx(1.500)
+    assert row.output_per_1m == pytest.approx(9.000)
+
+
+def test_lookup_vertex_gemini_35_flash_table_price() -> None:
+    row = lookup_price("vertex:gemini-3.5-flash")
+    assert row.provider == "vertex"
+    assert row.input_per_1m == pytest.approx(1.500)
+    assert row.output_per_1m == pytest.approx(9.000)
 
 
 def test_lookup_gemini_31_flash_lite_table_price() -> None:

@@ -24,7 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_guardian.cost import lookup_price
+from agent_guardian.cost import token_cost_usd
 
 __all__ = [
     "DEFAULT_SLICE_ALLOCATIONS",
@@ -43,10 +43,7 @@ _LOG = logging.getLogger(__name__)
 
 def tokens_to_usd(model_spec: str, input_tokens: int, output_tokens: int) -> float:
     """Convert token counts to USD via the shared price table."""
-    row = lookup_price(model_spec)
-    return (input_tokens / 1_000_000) * row.input_per_1m + (
-        output_tokens / 1_000_000
-    ) * row.output_per_1m
+    return token_cost_usd(model_spec, input_tokens, output_tokens)
 
 
 # Default per-agent allocations (PRD §14.2). Sum = 2,000,000.
@@ -239,6 +236,7 @@ class BudgetLedger:
         self._per_agent_reserved: dict[str, float] = {}
         self._open: dict[str, BudgetReceipt] = {}
         self._entries: list[LedgerEntry] = []
+        self._admission_closed = False
         self._jsonl_path = jsonl_path
         self._start = time.monotonic()
 
@@ -254,6 +252,8 @@ class BudgetLedger:
 
     def remaining(self, agent_id: str) -> tuple[float, int]:
         """(usd, tokens) the agent may still reserve — min of envelope + share."""
+        if self._admission_closed:
+            return 0.0, 0
         agent_cap = self._env.usd_cap * self._env.share_for(agent_id)
         agent_used = self._per_agent_usd.get(agent_id, 0.0) + self._per_agent_reserved.get(
             agent_id, 0.0
@@ -271,6 +271,8 @@ class BudgetLedger:
         return self.committed_plus_reserved_usd / self._env.usd_cap
 
     def is_exhausted(self) -> bool:
+        if self._admission_closed:
+            return True
         if self.committed_plus_reserved_usd >= self._env.usd_cap:
             return True
         if self._spent_tokens + self._reserved_tokens >= self._env.token_cap:
@@ -333,6 +335,12 @@ class BudgetLedger:
         self._per_agent_usd[receipt.agent_id] = (
             self._per_agent_usd.get(receipt.agent_id, 0.0) + actual_usd
         )
+        # A provider receipt above its conservative reservation means the
+        # admission estimate is no longer trustworthy. Preserve the observed
+        # value for the audit trail, but fail closed for every future call so
+        # the drift cannot reopen nominal headroom and compound overspend.
+        if actual_usd > receipt.est_usd + 1e-12 or toks > receipt.tokens:
+            self._admission_closed = True
         self._record(
             LedgerEntry(
                 time.monotonic(), receipt.agent_id, "commit", toks, actual_usd, receipt.receipt_id

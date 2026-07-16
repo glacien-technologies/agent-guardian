@@ -86,7 +86,7 @@ from agent_guardian.core.scoring import (
 )
 from agent_guardian.core.supervisor import Supervisor
 from agent_guardian.core.tiering import detect_tier
-from agent_guardian.cost import lookup_price
+from agent_guardian.cost import token_cost_usd
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
 from agent_guardian.llm.budget_admission import with_budget_admission
 from agent_guardian.llm.retry import RetryTally, retry_tally_scope
@@ -820,6 +820,25 @@ class SwarmCommander:
         )
         if isinstance(finalise_evaluator_llm, UsageTrackingLLM):
             self._finalise_usage = finalise_evaluator_llm.counter
+        # Panel seats are paid LLM paths too. Give raw/admission-wrapped
+        # clients dedicated counters, while reusing a caller-supplied tracking
+        # counter so aliases remain visible and can be identity-deduplicated.
+        self._panel_attacker_usage = UsageCounter()
+        self._panel_evaluator_usage = UsageCounter()
+        self._panel_attacker_llm: BaseLLM = (
+            self.attacker_llm
+            if isinstance(self.attacker_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(self.attacker_llm, counter=self._panel_attacker_usage)
+        )
+        self._panel_evaluator_llm: BaseLLM = (
+            self.evaluator_llm
+            if isinstance(self.evaluator_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(self.evaluator_llm, counter=self._panel_evaluator_usage)
+        )
+        if isinstance(self.attacker_llm, UsageTrackingLLM):
+            self._panel_attacker_usage = self.attacker_llm.counter
+        if isinstance(self.evaluator_llm, UsageTrackingLLM):
+            self._panel_evaluator_usage = self.evaluator_llm.counter
         # Commander LLM defaults to the attacker LLM today -- the M9
         # checkpoint logic will use it once LLM-driven re-tasking lands.
         raw_commander = commander_llm if commander_llm is not None else attacker_llm
@@ -867,6 +886,7 @@ class SwarmCommander:
         self._recon_cap_seconds: float | None = None
         self._cancel_event = asyncio.Event()
         self._agent_reports: list[AgentReport] = []
+        self._recon_usage: UsageCounter | None = None
         # Fix A — number of ASI categories rescued from undertested by the
         # refusal-as-coverage gate during the most recent
         # ``_undertested_categories`` call. Used by the SMART-mode authoritative
@@ -930,13 +950,13 @@ class SwarmCommander:
 
             panel_specs = [
                 JudgeSpec(
-                    llm=self.attacker_llm,
+                    llm=self._panel_attacker_llm,
                     model=config.attacker_model,
                     family=_family_of(config.attacker_model),
                     label="attacker-as-judge",
                 ),
                 JudgeSpec(
-                    llm=self.evaluator_llm,
+                    llm=self._panel_evaluator_llm,
                     model=config.evaluator_model,
                     family=_family_of(config.evaluator_model),
                     label="evaluator-as-judge",
@@ -1149,6 +1169,7 @@ class SwarmCommander:
             on_reflection=self._make_reflection_sink("recon-agent"),
             on_probe=_on_recon_probe,
         )
+        self._recon_usage = recon._usage
         # Track the cap so the Scan headline can carry the truncation signal.
         self._recon_cap_seconds = effective_recon_cap
         recon_report: AgentReport | None = None
@@ -2172,38 +2193,83 @@ class SwarmCommander:
             _LOG.debug("checkpoint loop: cancelled by parent task")
             return
 
-    def _live_cost_usd(self) -> float:
-        """Live USD spend so far: priced commander usage plus every launched
-        agent's attacker/evaluator token counters.
+    def _usage_rollup(self, *, include_report_fallback: bool) -> tuple[int, float]:
+        """Return identity-deduplicated tokens and USD across every paid path.
 
-        Read off the same counter objects the running agents mutate, so it
-        reflects spend mid-scan -- this is what the budget watchdog and the
-        finalise hard-ceiling check against the configured ``usd_cap``.
+        A caller may deliberately supply one :class:`UsageTrackingLLM` to
+        multiple roles. Agents, panel seats, recon, commander, and finalise then
+        all expose the *same* mutable counter. Grouping by counter identity is
+        therefore essential: summing role references overstates both live and
+        final spend. If an aliased counter is associated with different model
+        specs, price it once at the most conservative of those rates.
+
+        Completed reports that have no live counter object (primarily old
+        fixtures and defensive error reports) remain a serialization fallback.
         """
-        total = tokens_to_usd(
-            self.config.commander_model,
-            self._commander_usage.prompt_tokens,
-            self._commander_usage.completion_tokens,
-        )
-        # Finalise-phase spend (PoV-gate replays + critic rubric) over the
-        # evaluator. Zero until finalise begins.
-        total += tokens_to_usd(
-            self.config.evaluator_model,
-            self._finalise_usage.prompt_tokens,
-            self._finalise_usage.completion_tokens,
-        )
+        sources: list[tuple[UsageCounter, str]] = []
+        counter_backed_agents: set[str] = set()
         for agent in self._active_agents:
-            total += tokens_to_usd(
-                self.config.attacker_model,
-                agent._attacker_usage.prompt_tokens,
-                agent._attacker_usage.completion_tokens,
+            attacker_usage = getattr(agent, "_attacker_usage", None)
+            evaluator_usage = getattr(agent, "_evaluator_usage", None)
+            if isinstance(attacker_usage, UsageCounter):
+                sources.append((attacker_usage, self.config.attacker_model))
+            if isinstance(evaluator_usage, UsageCounter):
+                sources.append((evaluator_usage, self.config.evaluator_model))
+            name = getattr(agent, "name", None)
+            if isinstance(name, str):
+                counter_backed_agents.add(name)
+        if self._recon_usage is not None:
+            sources.append((self._recon_usage, self.config.attacker_model))
+            counter_backed_agents.add("recon-agent")
+        sources.extend(
+            [
+                (self._panel_attacker_usage, self.config.attacker_model),
+                (self._panel_evaluator_usage, self.config.evaluator_model),
+                (self._finalise_usage, self.config.evaluator_model),
+                (self._commander_usage, self.config.commander_model),
+            ]
+        )
+
+        grouped: dict[int, tuple[UsageCounter, set[str]]] = {}
+        for counter, model in sources:
+            key = id(counter)
+            if key not in grouped:
+                grouped[key] = (counter, {model})
+            else:
+                grouped[key][1].add(model)
+
+        tokens_total = 0
+        cost_usd = 0.0
+        for counter, models in grouped.values():
+            tokens_total += (
+                counter.total_tokens
+                if counter.total_tokens > 0
+                else counter.prompt_tokens + counter.completion_tokens
             )
-            total += tokens_to_usd(
-                self.config.evaluator_model,
-                agent._evaluator_usage.prompt_tokens,
-                agent._evaluator_usage.completion_tokens,
+            cost_usd += max(
+                tokens_to_usd(model, counter.prompt_tokens, counter.completion_tokens)
+                for model in models
             )
-        return total
+
+        if include_report_fallback:
+            for report in self._agent_reports:
+                if report.agent in counter_backed_agents:
+                    continue
+                tok = report.tokens_consumed or {}
+                attacker_in = int(tok.get("attacker_input", 0))
+                attacker_out = int(tok.get("attacker_output", 0))
+                evaluator_in = int(tok.get("evaluator_input", 0))
+                evaluator_out = int(tok.get("evaluator_output", 0))
+                tokens_total += int(tok.get("attacker_total", attacker_in + attacker_out)) + int(
+                    tok.get("evaluator_total", evaluator_in + evaluator_out)
+                )
+                cost_usd += tokens_to_usd(self.config.attacker_model, attacker_in, attacker_out)
+                cost_usd += tokens_to_usd(self.config.evaluator_model, evaluator_in, evaluator_out)
+        return tokens_total, cost_usd
+
+    def _live_cost_usd(self) -> float:
+        """Return identity-deduplicated live spend across every paid path."""
+        return self._usage_rollup(include_report_fallback=False)[1]
 
     def _attack_attempts_so_far(self) -> int:
         """Live count of attack turns executed by the launched agent slate.
@@ -2442,6 +2508,12 @@ class SwarmCommander:
                         seed=self.rng_seed,
                     )
                 )
+            except BudgetExhausted:
+                # Admission refusal is control flow, not an evaluator verdict.
+                # Let the PoV loop preserve this and every remaining finding
+                # ungated instead of silently turning the current finding into
+                # a false negative.
+                raise
             except Exception as exc:  # pragma: no cover — defensive; gate must not crash
                 _LOG.debug("pov-gate judge: evaluator call failed (%s) -- counting as no", exc)
                 return False
@@ -2485,6 +2557,10 @@ class SwarmCommander:
                         seed=self.rng_seed,
                     )
                 )
+            except BudgetExhausted:
+                # As above, exhaustion terminates paid finalisation while
+                # retaining unprocessed evidence; it is not a neutral rubric.
+                raise
             except Exception as exc:  # pragma: no cover — defensive
                 _LOG.debug("critic rubric: evaluator call failed (%s) -- neutral score", exc)
                 return neutral
@@ -3286,14 +3362,31 @@ class SwarmCommander:
                 indicator=SuccessIndicator(IndicatorKind.SEMANTIC, finding.summary),
                 trigger=[finding.trigger_prompt],
             )
-            if critic is not None:
-                verdict = await critic.critique(
-                    finding_summary=finding.summary,
-                    script=script,
-                    target=self.target,
-                    n=self.config.pov_runs,
-                    judge=judge,
+            try:
+                if critic is not None:
+                    verdict = await critic.critique(
+                        finding_summary=finding.summary,
+                        script=script,
+                        target=self.target,
+                        n=self.config.pov_runs,
+                        judge=judge,
+                    )
+                else:
+                    result = await runner.run(
+                        script, self.target, n=self.config.pov_runs, judge=judge
+                    )
+            except BudgetExhausted:
+                self._finalise_truncated = True
+                remaining = findings[idx:]
+                _LOG.info(
+                    "pov-gate: budget admission refused during finding %s -- "
+                    "keeping %d current/remaining finding(s) ungated",
+                    finding.id,
+                    len(remaining),
                 )
+                kept.extend(remaining)
+                break
+            if critic is not None:
                 if verdict.accept:
                     kept.append(
                         finding.model_copy(
@@ -3308,7 +3401,6 @@ class SwarmCommander:
                         "critic: dropping finding %s (%s)", finding.id, verdict.rejection_reason
                     )
                 continue
-            result = await runner.run(script, self.target, n=self.config.pov_runs, judge=judge)
             if result.passed:
                 kept.append(
                     finding.model_copy(
@@ -3610,43 +3702,13 @@ class SwarmCommander:
         # asi_scores key is AsiCategory enum -- Scan accepts it directly.
         asi_scores = dict(result.asi_scores)
 
-        # Aggregate real per-role token spend across every agent report (the
-        # 10 ASI agents + recon-agent) plus the commander's own usage. Then
-        # apply per-model rates from :func:`lookup_price` to derive USD cost.
-        # IMPORTANT #3 (PRD §8.1).
-        attacker_in, attacker_out = 0, 0
-        evaluator_in, evaluator_out = 0, 0
-        for report in self._agent_reports:
-            tok = report.tokens_consumed or {}
-            attacker_in += int(tok.get("attacker_input", 0))
-            attacker_out += int(tok.get("attacker_output", 0))
-            evaluator_in += int(tok.get("evaluator_input", 0))
-            evaluator_out += int(tok.get("evaluator_output", 0))
-        # #41 — fold the PoV-gate / critic-rubric evaluator spend into the
-        # reported totals. The finalise-phase paid work runs through
-        # ``self._finalise_evaluator_llm`` (wrapped in
-        # :class:`UsageTrackingLLM`); previously its tokens went into
-        # ``self._finalise_usage`` and never flowed into ``tokens_total`` /
-        # ``cost_usd``, so the reported scan cost under-reported finalise
-        # spend by exactly the PoV-gate cost.
-        evaluator_in += self._finalise_usage.prompt_tokens
-        evaluator_out += self._finalise_usage.completion_tokens
-        commander_in = self._commander_usage.prompt_tokens
-        commander_out = self._commander_usage.completion_tokens
-        tokens_total = (
-            attacker_in + attacker_out + evaluator_in + evaluator_out + commander_in + commander_out
-        )
-        cost_usd = _compute_cost_usd(
-            attacker_model=self.config.attacker_model,
-            evaluator_model=self.config.evaluator_model,
-            commander_model=self.config.commander_model,
-            attacker_in=attacker_in,
-            attacker_out=attacker_out,
-            evaluator_in=evaluator_in,
-            evaluator_out=evaluator_out,
-            commander_in=commander_in,
-            commander_out=commander_out,
-        )
+        # Roll up every tracked paid path (agents, recon, panel, finalise,
+        # commander) using counter identity as the unit of accounting. This
+        # prevents one caller-supplied tracking wrapper from being multiplied
+        # by the number of roles/agents that reference it. Reports remain a
+        # fallback only when no live counter exists for that agent.
+        tokens_total, unrounded_cost_usd = self._usage_rollup(include_report_fallback=True)
+        cost_usd = round(unrounded_cost_usd, 4)
 
         duration = time.monotonic() - self._start_time
         # #44 / HIGH #4 — only FULL-mode scans whose completeness is at or
@@ -4281,10 +4343,7 @@ def _cost_for(model: str, input_tokens: int, output_tokens: int) -> float:
     """
     if input_tokens <= 0 and output_tokens <= 0:
         return 0.0
-    row = lookup_price(model)
-    return (input_tokens / 1_000_000.0) * row.input_per_1m + (
-        output_tokens / 1_000_000.0
-    ) * row.output_per_1m
+    return token_cost_usd(model, input_tokens, output_tokens)
 
 
 def _compute_cost_usd(

@@ -15,6 +15,7 @@ from agent_guardian.core.budget import (
     BudgetLedger,
     tokens_to_usd,
 )
+from agent_guardian.cost import PriceRow
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse
 from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
 from agent_guardian.llm.stub import StubLLM
@@ -178,3 +179,44 @@ async def test_admission_does_not_double_count_pretracked_usage() -> None:
     await llm.complete(_request())
 
     assert counter.calls == 1
+
+
+def test_gemini_25_pro_long_context_uses_high_price_tier() -> None:
+    actual = tokens_to_usd("gemini:gemini-2.5-pro", 200_001, 1_000_000)
+    expected = (200_001 / 1_000_000) * 2.50 + 15.00
+    assert actual == pytest.approx(expected)
+
+
+@pytest.mark.asyncio
+async def test_gemini_admission_floor_rejects_stale_low_table_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_guardian.cost as cost
+
+    monkeypatch.setattr(
+        cost,
+        "PRICE_TABLE",
+        (PriceRow("gemini", "gemini-3.5-flash", 0.30, 2.50),),
+    )
+    ledger = BudgetLedger(_envelope(usd=0.005))
+    llm = BudgetAdmissionLLM(StubLLM(default="ok"), ledger=ledger, agent_id="attacker")
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="gemini:gemini-3.5-flash",
+        max_tokens=1_000,
+    )
+
+    with pytest.raises(BudgetExhausted):
+        await llm.complete(request)
+
+
+def test_upward_settlement_drift_closes_future_admission() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    receipt = ledger.reserve("attacker", tokens=100, est_usd=0.50)
+
+    ledger.commit(receipt, actual_usd=0.60, actual_tokens=100)
+
+    assert ledger.spent_usd == pytest.approx(0.60)
+    assert ledger.is_exhausted() is True
+    with pytest.raises(BudgetExhausted):
+        ledger.reserve("attacker", tokens=1, est_usd=0.01)

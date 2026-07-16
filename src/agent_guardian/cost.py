@@ -6,12 +6,13 @@ agents. Each consumes some slice of the 2M-token budget defined by
 per-provider price table and a deterministic estimator so the CLI can
 print a pre-flight USD figure before any tokens are spent.
 
-The price table is **frozen as of 2026-05-27** and reflects the public
+The price table is **frozen as of 2026-07-16** and reflects the public
 list prices for each provider's tier, expressed as **USD per one
 million tokens**. Unknown models fall back to a documented default rate
 that errs on the high side so the operator does not under-estimate.
-Gemini list prices should be re-verified at https://ai.google.dev/pricing
-before any decision relies on them.
+Gemini Standard list prices were verified against
+https://ai.google.dev/gemini-api/docs/pricing and should be re-verified
+before any future decision relies on them.
 
 The estimator splits the 2M-token budget across three roles:
 
@@ -34,10 +35,11 @@ __all__ = [
     "PriceRow",
     "estimate_scan_cost",
     "lookup_price",
+    "token_cost_usd",
 ]
 
 # Date the price table was last verified against provider public pricing.
-PRICE_TABLE_AS_OF = "2026-05-27"
+PRICE_TABLE_AS_OF = "2026-07-16"
 
 # Fallback rate used when an unknown model is requested. Documented in
 # ``lookup_price`` — kept deliberately above the typical mid-tier rate so
@@ -107,11 +109,12 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     # default so estimates err on the conservative side).
     PriceRow("bedrock", "*", 3.00, 15.00),
     # Google Gemini — AI Studio "Standard" tier list prices, USD per
-    # one million tokens. Verified 2026-05-27 against
-    # https://ai.google.dev/pricing — re-check before relying on these
-    # numbers; the Gemini SKU lineup moves quickly.
+    # one million tokens. Verified 2026-07-16 against the official Standard
+    # pricing table at https://ai.google.dev/gemini-api/docs/pricing.
+    # Output rates include thinking tokens. Re-check before relying on these
+    # numbers; this dated table is not a future-price guarantee.
     PriceRow("gemini", "gemini-3.1-pro-preview", 1.250, 10.000),
-    PriceRow("gemini", "gemini-3.5-flash", 0.300, 2.500),
+    PriceRow("gemini", "gemini-3.5-flash", 1.500, 9.000),
     PriceRow("gemini", "gemini-3.1-flash-lite", 0.075, 0.300),
     PriceRow("gemini", "gemini-2.5-pro", 1.250, 10.000),
     PriceRow("gemini", "gemini-2.5-flash", 0.300, 2.500),
@@ -124,7 +127,7 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("vertex", "gemini-2.0-flash", 0.15, 0.60),
     PriceRow("vertex", "gemini-2.0-flash-lite", 0.075, 0.30),
     PriceRow("vertex", "gemini-3.1-pro-preview", 1.250, 10.000),
-    PriceRow("vertex", "gemini-3.5-flash", 0.300, 2.500),
+    PriceRow("vertex", "gemini-3.5-flash", 1.500, 9.000),
     # Azure OpenAI — the model_id is the user-chosen DEPLOYMENT name, so we
     # cannot map it to a SKU. Use a single wildcard priced at the OpenAI
     # gpt-4o list rate (the common default) so the pre-flight estimate is
@@ -213,6 +216,26 @@ def lookup_price(model_spec: str) -> PriceRow:
 
     # Last resort — return a row with the fallback default rate.
     return PriceRow("unknown", spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
+
+
+def token_cost_usd(model_spec: str, input_tokens: int, output_tokens: int) -> float:
+    """Price observed tokens, including Gemini's prompt-length tier.
+
+    Gemini 2.5 Pro Standard charges the higher rate for the entire request
+    when its input exceeds 200k tokens: $2.50/M input and $15/M output,
+    including thinking tokens. Other rows use their table rates.
+    """
+    row = lookup_price(model_spec)
+    input_rate = row.input_per_1m
+    output_rate = row.output_per_1m
+    if (
+        row.provider in {"gemini", "vertex"}
+        and row.model == "gemini-2.5-pro"
+        and input_tokens > 200_000
+    ):
+        input_rate = max(input_rate, 2.50)
+        output_rate = max(output_rate, 15.00)
+    return (input_tokens / 1_000_000.0) * input_rate + (output_tokens / 1_000_000.0) * output_rate
 
 
 def estimate_scan_cost(

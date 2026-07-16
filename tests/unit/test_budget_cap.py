@@ -14,11 +14,14 @@ from datetime import UTC, datetime
 import pytest
 
 from agent_guardian.adapters.prompt import PromptAdapter
+from agent_guardian.agents.base import AgentReport
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
 from agent_guardian.core.budget import BudgetExhausted, tokens_to_usd
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.budget_admission import admission_reservation_usd
 from agent_guardian.llm.stub import StubLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -113,7 +116,7 @@ async def test_concurrent_paid_calls_reserve_before_provider_dispatch() -> None:
         model=_FLASH,
         max_tokens=1_000,
     )
-    per_call_ceiling = tokens_to_usd(_FLASH, 1_000, 1_000)
+    per_call_ceiling = admission_reservation_usd(_FLASH, 1_068, 1_000)
     cap = per_call_ceiling * 2.2
     inner = _BlockingPaidLLM()
     target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
@@ -157,7 +160,7 @@ async def test_all_paid_swarm_roles_share_one_admission_ledger() -> None:
         model=_FLASH,
         max_tokens=1_000,
     )
-    cap = tokens_to_usd(_FLASH, 1_000, 1_000) * 1.2
+    cap = admission_reservation_usd(_FLASH, 1_068, 1_000) * 1.2
     attacker = _BlockingPaidLLM()
     evaluator = _BlockingPaidLLM()
     commander = _BlockingPaidLLM()
@@ -290,6 +293,79 @@ async def test_finalise_not_truncated_under_cap() -> None:
     _commander_spend(swarm, 0.01)
     await swarm._apply_pov_gate([_finding("f1")])
     assert swarm._finalise_truncated is False
+
+
+@pytest.mark.asyncio
+async def test_finalise_admission_refusal_keeps_current_and_remaining_findings() -> None:
+    swarm = _swarm(usd_cap=1e-9)
+    findings = [_finding("f1"), _finding("f2")]
+
+    result = await swarm._apply_pov_gate(findings)
+
+    assert result == findings
+    assert swarm._finalise_truncated is True
+    assert swarm._stopped_reason == "budget"
+
+
+@pytest.mark.asyncio
+async def test_panel_usage_reaches_live_and_final_scan_cost() -> None:
+    swarm = _swarm()
+    assert swarm._panel_judge is not None
+
+    await swarm._panel_judge.verdict("attack", "target response")
+    live_cost = swarm._live_cost_usd()
+
+    assert live_cost > 0.0
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total > 0
+    assert scan.cost_usd == pytest.approx(round(live_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_shared_pretracked_counter_is_aggregated_once_in_live_and_scan() -> None:
+    counter = UsageCounter(
+        prompt_tokens=1_000,
+        completion_tokens=2_000,
+        total_tokens=3_000,
+        calls=1,
+    )
+    shared = UsageTrackingLLM(StubLLM(default="ok"), counter=counter)
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="counter-alias",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=100.0,
+        ),
+        target=target,
+        attacker_llm=shared,
+        evaluator_llm=shared,
+        commander_llm=shared,
+    )
+    agents = [_agent(swarm), _agent(swarm)]
+    swarm._active_agents = agents
+    swarm._agent_reports = [
+        AgentReport(
+            agent=agent.name,
+            asi_category=agent.asi_category,
+            findings_count=0,
+            turns=1,
+            duration_seconds=0.1,
+            terminated_by="exhausted",
+            tokens_consumed=agent._snapshot_tokens(),
+        )
+        for agent in agents
+    ]
+    expected_cost = tokens_to_usd(_FLASH, 1_000, 2_000)
+
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total == 3_000
+    assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
 
 
 # ----------------------------------------------------------------- report blocks
