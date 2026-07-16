@@ -4658,7 +4658,7 @@ async def _run_scan_inner(
         # the same model spec is reused) so we don't double-close. Returning
         # exceptions instead of raising keeps a noisy aclose from masking the
         # original scan error.
-        seen: set[int] = set()
+        seen: set[int] = set(adapter.owned_llm_ids) if isinstance(adapter, PromptAdapter) else set()
         closeables: list[Any] = [adapter]
         for client in (attacker_llm, evaluator_llm, commander_llm, target_llm):
             # PromptAdapter owns its target LLM and closes the original

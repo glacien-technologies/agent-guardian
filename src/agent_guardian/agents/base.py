@@ -49,6 +49,7 @@ from pydantic import ValidationError
 
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
 from agent_guardian.adapters.response_envelope import envelope_from_target
+from agent_guardian.core.budget import BudgetExhausted
 from agent_guardian.core.memory import SharedMemory
 from agent_guardian.core.roe import EgressRefused
 from agent_guardian.core.run_aggregator import aggregate_run_verdicts
@@ -2021,6 +2022,15 @@ class AsiAgent(ABC):
 
             try:
                 target_response = await target.call(result.text, session=session_id)
+            except BudgetExhausted as exc:
+                terminated_by = "budget"
+                _LOG.info(
+                    "agent %s turn %d: target budget admission refused (%s) — terminating",
+                    agent_name,
+                    turns + 1,
+                    exc,
+                )
+                break
             except EgressRefused as exc:
                 # #4 — the egress gate dropped this turn before it reached the
                 # target (the prompt named an external sink the contract

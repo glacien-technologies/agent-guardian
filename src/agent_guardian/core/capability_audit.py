@@ -23,10 +23,12 @@ query budget** across six coverage bands (Purpose / Tools / Memory / Multi-agent
    coverage + novelty-exhaustion STOP rules.
 
 The transcript is structured downstream by
-:func:`agent_guardian.core.profiler.profile_from_audit`. This module never
-raises — recon must not abort on an audit hiccup. Refusals are kept in the
-transcript (a refusal to *act* is evidence of capability-behind-a-guardrail),
-and a clean refusal IS the confirmed state for Guardrails / Sensitive-actions.
+:func:`agent_guardian.core.profiler.profile_from_audit`. Ordinary target errors
+remain transcript evidence so recon does not abort on an audit hiccup; budget
+admission refusal is scan control flow and propagates to the recon phase.
+Refusals are kept in the transcript (a refusal to *act* is evidence of
+capability-behind-a-guardrail), and a clean refusal IS the confirmed state for
+Guardrails / Sensitive-actions.
 
 Sensitive-action coverage is NARRATION ONLY — the audit never fires a
 destructive call; it asks the target to *describe* what it would do.
@@ -50,6 +52,7 @@ from agent_guardian.adapters.response_envelope import (
     has_planted_token,
     tool_names_from_envelope,
 )
+from agent_guardian.core.budget import BudgetExhausted
 from agent_guardian.llm.base import LLMMessage, LLMRequest
 
 if TYPE_CHECKING:
@@ -1073,6 +1076,11 @@ async def _safe_call(
     t0 = time.perf_counter()
     try:
         reply = await target.call(prompt, session=sess)
+    except BudgetExhausted:
+        # Admission refusal is scan control flow. Recon must let the phase
+        # translate it into budget truncation instead of fabricating a target
+        # error response and continuing to issue probes.
+        raise
     except Exception as exc:  # pragma: no cover -- defensive; audit must not abort recon
         _LOG.debug("capability audit: target.call raised %s -- recorded as error reply", exc)
         latency_ms = (time.perf_counter() - t0) * 1000

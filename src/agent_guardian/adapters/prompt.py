@@ -13,10 +13,28 @@ from collections.abc import Callable
 from agent_guardian.adapters.base import ProfileEvidence, TargetAdapter, TargetFingerprint
 from agent_guardian.core.budget import BudgetExhausted, BudgetLedger
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
-from agent_guardian.llm.budget_admission import with_budget_admission
+from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 __all__ = ["PromptAdapter"]
+
+
+def _uninstrumented_transport(llm: BaseLLM) -> BaseLLM:
+    """Peel only AgentGuardian's non-owning instrumentation decorators."""
+    transport = llm
+    while isinstance(transport, (UsageTrackingLLM, BudgetAdmissionLLM)):
+        transport = transport._inner
+    return transport
+
+
+def _resolved_pricing_model_spec(llm: BaseLLM, model: str) -> str:
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="")],
+        model=model,
+        max_tokens=1,
+    )
+    delegate = getattr(llm, "pricing_model_spec", None)
+    return delegate(request) if callable(delegate) else request.model
 
 
 class PromptAdapter(TargetAdapter):
@@ -43,13 +61,15 @@ class PromptAdapter(TargetAdapter):
     ) -> None:
         super().__init__()
         self._prompt = prompt
-        # Instrumentation decorators do not own their inner client. Keep the
-        # exact client accepted at construction as the adapter-owned resource
-        # so replacing ``_llm`` never loses the provider lifecycle.
-        self._owned_llm = llm
-        self._llm = llm
+        # Built-in accounting decorators are non-owning scan state. Retain a
+        # stable transport beneath them so every scan can build a fresh wrapper
+        # chain and the adapter can close the actual provider it owns.
+        self._transport_llm = _uninstrumented_transport(llm)
+        self._owned_llm = self._transport_llm
+        self._llm = self._transport_llm
         self._closed = False
         self._model = model
+        self._pricing_model_spec = _resolved_pricing_model_spec(self._transport_llm, model)
         self._sessions: dict[str, list[LLMMessage]] = {}
         self._fingerprint = TargetFingerprint(
             mode="prompt",
@@ -66,6 +86,16 @@ class PromptAdapter(TargetAdapter):
         # and rules. Read it directly instead of interrogating the model.
         return ProfileEvidence(box="white", text=self._prompt)
 
+    @property
+    def pricing_model_spec(self) -> str:
+        """Resolved provider/model/location identity used for target pricing."""
+        return self._pricing_model_spec
+
+    @property
+    def owned_llm_ids(self) -> frozenset[int]:
+        """Object identities the adapter closes during :meth:`aclose`."""
+        return frozenset((id(self._owned_llm),))
+
     def instrument_paid_llm(
         self,
         *,
@@ -73,7 +103,8 @@ class PromptAdapter(TargetAdapter):
         on_exhausted: Callable[[BudgetExhausted], None] | None = None,
     ) -> UsageCounter:
         """Attach scan-scoped admission and usage accounting to the target."""
-        instrumented = self._llm
+        counter = UsageCounter()
+        instrumented = self._transport_llm
         if ledger is not None:
             instrumented = with_budget_admission(
                 instrumented,
@@ -81,12 +112,8 @@ class PromptAdapter(TargetAdapter):
                 agent_id="target",
                 on_exhausted=on_exhausted,
             )
-        if isinstance(instrumented, UsageTrackingLLM):
-            counter = instrumented.counter
-        else:
-            counter = UsageCounter()
-            instrumented = UsageTrackingLLM(instrumented, counter=counter)
-        self._llm = instrumented
+        self._llm = UsageTrackingLLM(instrumented, counter=counter)
+        self._sessions.clear()
         return counter
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:

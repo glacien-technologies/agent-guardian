@@ -805,7 +805,9 @@ class SwarmCommander:
         # call through this adapter. Instrument only that LLM-backed target;
         # code, HTTP, framework, and contract adapters remain untouched.
         self._target_usage: UsageCounter | None = None
+        self._target_pricing_model = self.config.attacker_model
         if isinstance(target, PromptAdapter):
+            self._target_pricing_model = target.pricing_model_spec
             self._target_usage = target.instrument_paid_llm(
                 ledger=self._budget_ledger,
                 on_exhausted=lambda exc: self._on_budget_admission_exhausted("target", exc),
@@ -1204,6 +1206,11 @@ class SwarmCommander:
                 effective_recon_cap,
                 cap_source_label,
             )
+            self._recon_truncated = True
+        except BudgetExhausted as exc:
+            _LOG.info("recon stopped by budget admission refusal: %s", exc)
+            self._stopped_reason = "budget"
+            self._cancel_event.set()
             self._recon_truncated = True
         except Exception as exc:  # pragma: no cover -- defensive
             _LOG.warning(
@@ -2233,7 +2240,7 @@ class SwarmCommander:
             sources.append((self._recon_usage, self.config.attacker_model))
             counter_backed_agents.add("recon-agent")
         if self._target_usage is not None:
-            sources.append((self._target_usage, self.config.attacker_model))
+            sources.append((self._target_usage, self._target_pricing_model))
         sources.extend(
             [
                 (self._panel_attacker_usage, self.config.attacker_model),
