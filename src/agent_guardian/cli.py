@@ -4463,6 +4463,7 @@ async def _run_scan_inner(
     # CLI feed renderer / TUI so those wrap our observer (and the partial
     # writer always runs, regardless of which optional UI was attached).
     from agent_guardian.server.partial_scan import (
+        detach_jsonl_log_handler,
         install_jsonl_log_handler,
         make_events_writer,
         make_partial_writer,
@@ -4483,9 +4484,9 @@ async def _run_scan_inner(
     # same events.jsonl as ``kind="log"`` records so the Executive Logs
     # tab renders a real CLI-style running log instead of just structured
     # SwarmEvents. Idempotent: a second call for the same scan_dir is a
-    # no-op. Stays attached to the root logger until process exit — the
-    # CLI is a one-scan-per-process tool, so cleanup isn't required.
-    install_jsonl_log_handler(partial_scan_dir)
+    # no-op. Retain the exact handler so successful finalization can jointly
+    # seal events.jsonl and run.log immediately before forensic hashing.
+    jsonl_log_handler = install_jsonl_log_handler(partial_scan_dir)
 
     # QA-072 (2026-06-04) — route the FULL raw log trace to a per-scan run.log
     # and keep the terminal quiet by default. ``AGENT_GUARDIAN_LOG_LEVEL`` now
@@ -4837,21 +4838,6 @@ async def _run_scan_inner(
         typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
     (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
-    # D2 (issue #76) — seal the forensic record: write a signed manifest of the
-    # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
-    # probe/*.json so any post-hoc edit to the evidence trail is detectable
-    # (OWASP immutable-logging bar). Best-effort: never fail a scan on this.
-    _LOG.info("forensic seal: run.log complete")
-    if run_log_handler is not None:
-        detach_run_log_file(run_log_handler)
-        run_log_handler = None
-    try:
-        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
-
-        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
-        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
@@ -4975,6 +4961,7 @@ async def _run_scan_inner(
         threshold is not None
         for threshold in (fail_under, max_critical, max_high, max_medium, max_low)
     )
+    exit_code = EXIT_OK
     if gate_requested:
         from agent_guardian.core.gate import evaluate_gate
 
@@ -4989,8 +4976,25 @@ async def _run_scan_inner(
         if not gate.passed:
             for reason in gate.reasons:
                 typer.echo(f"gate FAILED: {reason}", err=True)
-            return EXIT_FAIL_UNDER
-    return EXIT_OK
+            exit_code = EXIT_FAIL_UNDER
+
+    # D2 (issue #76) — the seal marker is the final logger record. Keep both
+    # forensic log sinks live through summaries and gate evaluation, then
+    # detach their exact handlers before hashing. From this point to return,
+    # only non-logger terminal output is allowed.
+    _LOG.info("forensic seal: run.log and events.jsonl complete")
+    if run_log_handler is not None:
+        detach_run_log_file(run_log_handler)
+        run_log_handler = None
+    detach_jsonl_log_handler(jsonl_log_handler)
+    try:
+        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
+
+        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
+        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
+    return exit_code
 
 
 # ---------------------------------------------------------------------------

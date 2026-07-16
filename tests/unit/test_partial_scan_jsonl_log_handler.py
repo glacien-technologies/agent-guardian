@@ -7,12 +7,14 @@ CLI-style running log in the Executive Logs tab. See
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 from pathlib import Path
 
 from agent_guardian.server.partial_scan import (
     JsonlLogHandler,
+    detach_jsonl_log_handler,
     install_jsonl_log_handler,
 )
 
@@ -205,3 +207,22 @@ def test_install_jsonl_log_handler_adds_separate_handler_for_different_scan_dir(
     finally:
         root.removeHandler(h_a)
         root.removeHandler(h_b)
+
+
+def test_detach_jsonl_log_handler_is_specific_and_idempotent(tmp_path: Path) -> None:
+    root = logging.getLogger()
+    console_handler = logging.StreamHandler(io.StringIO())
+    unrelated_handler = logging.NullHandler()
+    root.addHandler(console_handler)
+    root.addHandler(unrelated_handler)
+    handler = install_jsonl_log_handler(tmp_path)
+    try:
+        detach_jsonl_log_handler(handler)
+        detach_jsonl_log_handler(handler)
+        assert handler not in root.handlers
+        assert console_handler in root.handlers
+        assert unrelated_handler in root.handlers
+    finally:
+        for existing in (handler, console_handler, unrelated_handler):
+            if existing in root.handlers:
+                root.removeHandler(existing)

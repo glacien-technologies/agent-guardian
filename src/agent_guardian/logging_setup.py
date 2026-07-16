@@ -851,9 +851,9 @@ def attach_run_log_file(
 
     The handler carries the same plain formatter as the non-TTY console path
     (timestamp + level + logger + trace id) and the same secret-redacting
-    filter, so API keys never land in the file. Returns the handler so the
-    caller can detach it (the CLI is one-scan-per-process, so it usually does
-    not bother).
+    filter, so API keys never land in the file. Returns the exact handler so
+    the caller can retain it through final summaries, then detach it during
+    the joint run/event forensic seal before hashing.
     """
     resolved = _resolve_level(level)
     root = logging.getLogger()

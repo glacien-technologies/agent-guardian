@@ -13,6 +13,10 @@ from agent_guardian.reports.forensic_manifest import (
     build_forensic_manifest,
     write_forensic_manifest,
 )
+from agent_guardian.server.partial_scan import (
+    detach_jsonl_log_handler,
+    install_jsonl_log_handler,
+)
 
 
 def _seed_scan_dir(tmp_path: Path) -> Path:
@@ -59,18 +63,30 @@ def test_manifest_detects_tampering(tmp_path: Path) -> None:
     assert m1["files"]["run.log"]["sha256"] != m2["files"]["run.log"]["sha256"]
 
 
-def test_detached_run_log_digest_stays_valid_after_later_logs(tmp_path: Path) -> None:
+def test_jointly_detached_log_digests_stay_valid_after_later_logs(tmp_path: Path) -> None:
     d = _seed_scan_dir(tmp_path)
     logging_setup.configure_logging(level="DEBUG", force=True)
-    handler = logging_setup.attach_run_log_file(d / "run.log")
+    run_log_handler = logging_setup.attach_run_log_file(d / "run.log")
+    event_log_handler = install_jsonl_log_handler(d)
     log = logging.getLogger("agent_guardian.test.forensic_seal")
-    log.info("forensic seal: run.log complete")
-    logging_setup.detach_run_log_file(handler)
-    manifest_path = write_forensic_manifest(d, "cli-x", "2026-06-07T00:00:00Z")
-    log.info("terminal-only-after-manifest")
+    try:
+        log.info("late completion and gate evaluation")
+        log.info("forensic seal: run.log and events.jsonl complete")
+        logging_setup.detach_run_log_file(run_log_handler)
+        detach_jsonl_log_handler(event_log_handler)
+        manifest_path = write_forensic_manifest(d, "cli-x", "2026-06-07T00:00:00Z")
+        log.info("terminal-only-after-manifest")
+    finally:
+        logging_setup.detach_run_log_file(run_log_handler)
+        detach_jsonl_log_handler(event_log_handler)
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for relative, record in manifest["files"].items():
         actual = hashlib.sha256((d / relative).read_bytes()).hexdigest()
         assert record["sha256"] == actual
-    assert "terminal-only-after-manifest" not in (d / "run.log").read_text(encoding="utf-8")
+    run_log = (d / "run.log").read_text(encoding="utf-8")
+    events_log = (d / "events.jsonl").read_text(encoding="utf-8")
+    for log_text in (run_log, events_log):
+        assert "late completion and gate evaluation" in log_text
+        assert "forensic seal: run.log and events.jsonl complete" in log_text
+        assert "terminal-only-after-manifest" not in log_text
