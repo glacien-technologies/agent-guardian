@@ -96,11 +96,11 @@ def test_lookup_gemini_35_flash_table_price() -> None:
     assert row.output_per_1m == pytest.approx(9.000)
 
 
-def test_lookup_vertex_gemini_35_flash_table_price() -> None:
+def test_lookup_vertex_gemini_35_flash_defaults_to_non_global_price() -> None:
     row = lookup_price("vertex:gemini-3.5-flash")
     assert row.provider == "vertex"
-    assert row.input_per_1m == pytest.approx(1.500)
-    assert row.output_per_1m == pytest.approx(9.000)
+    assert row.input_per_1m == pytest.approx(1.650)
+    assert row.output_per_1m == pytest.approx(9.900)
 
 
 def test_lookup_gemini_31_flash_lite_table_price() -> None:
@@ -116,7 +116,7 @@ def test_lookup_gemini_31_flash_lite_table_price() -> None:
         ("gemini:gemini-3.1-pro-preview+region=global", 2.00, 12.00),
         ("vertex:gemini-3.1-pro-preview+project=p+location=global", 2.00, 12.00),
         ("gemini:gemini-3.1-flash-lite+api_version=v1beta", 0.25, 1.50),
-        ("vertex:gemini-3.1-flash-lite+project=p", 0.25, 1.50),
+        ("vertex:gemini-3.1-flash-lite+project=p+location=global", 0.25, 1.50),
         ("gemini:gemini-2.5-flash-lite+api_version=v1beta", 0.10, 0.40),
         ("vertex:gemini-2.5-flash-lite+project=p", 0.10, 0.40),
     ],

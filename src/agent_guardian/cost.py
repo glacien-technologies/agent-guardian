@@ -51,6 +51,13 @@ PRICE_TABLE_AS_OF = "2026-07-16"
 _FALLBACK_INPUT_PER_1M = 3.00
 _FALLBACK_OUTPUT_PER_1M = 15.00
 
+# Standard Vertex rates for regional (non-global) endpoints, effective
+# 2026-07-01. The base PRICE_TABLE rows retain the corresponding global rates.
+_VERTEX_NON_GLOBAL_STANDARD_RATES: dict[str, tuple[float, float]] = {
+    "gemini-3.5-flash": (1.65, 9.90),
+    "gemini-3.1-flash-lite": (0.275, 1.65),
+}
+
 
 @dataclass(frozen=True)
 class PriceRow:
@@ -119,8 +126,10 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("gemini", "gemini-2.5-pro", 1.250, 10.000),
     PriceRow("gemini", "gemini-2.5-flash", 0.300, 2.500),
     PriceRow("gemini", "gemini-2.5-flash-lite", 0.100, 0.400),
-    # Vertex AI — Gemini family list prices (parity with the AI Studio
-    # surface; pricing is the same per-token on the Vertex SKU).
+    # Vertex AI global Standard list prices. Gemini 3.5 Flash and 3.1
+    # Flash-Lite regional endpoints carry a 10% surcharge from 2026-07-01;
+    # ``lookup_price`` applies it from the location qualifier (omitted means
+    # the registry's non-global us-central1 default).
     PriceRow("vertex", "gemini-2.5-pro", 1.25, 10.00),
     PriceRow("vertex", "gemini-2.5-flash", 0.30, 2.50),
     PriceRow("vertex", "gemini-2.5-flash-lite", 0.100, 0.400),
@@ -160,7 +169,7 @@ def lookup_price(model_spec: str) -> PriceRow:
     (``"openai:gpt-4o"``, ``"stub"``, ``"ollama:llama3.1"``). The
     resolution order is:
 
-    1. Exact ``provider:model`` match.
+    1. Exact ``provider:model`` match (with Vertex location adjustment).
     2. Bare provider name (``"stub"``, ``"ollama"``) → wildcard row.
     3. Bare model name → unique row whose ``model`` matches.
     4. Heuristic prefix match (``gpt-*`` → OpenAI, ``claude-*`` →
@@ -171,15 +180,21 @@ def lookup_price(model_spec: str) -> PriceRow:
         return PriceRow("unknown", model_spec, _FALLBACK_INPUT_PER_1M, _FALLBACK_OUTPUT_PER_1M)
 
     if ":" in model_spec:
-        provider, _, model = model_spec.partition(":")
+        provider, _, model_and_qualifiers = model_spec.partition(":")
         provider = provider.lower()
-        # Strip any ``+qualifier=value`` tail before table lookup (e.g.
-        # ``vertex:gemini-2.5-flash+project=p`` → ``gemini-2.5-flash``).
-        # Backward-compatible: existing model ids contain no ``+``.
-        model = model.split("+", 1)[0]
+        model, _, qualifier_tail = model_and_qualifiers.partition("+")
+        qualifiers: dict[str, str] = {}
+        for chunk in qualifier_tail.split("+"):
+            key, separator, value = chunk.partition("=")
+            if separator:
+                qualifiers[key.strip()] = value.strip()
         # Exact match.
         for row in PRICE_TABLE:
             if row.provider == provider and row.model == model:
+                if provider == "vertex" and qualifiers.get("location") != "global":
+                    regional_rates = _VERTEX_NON_GLOBAL_STANDARD_RATES.get(model)
+                    if regional_rates is not None:
+                        return PriceRow(provider, model, *regional_rates)
                 return row
         # Wildcard for the provider.
         for row in PRICE_TABLE:

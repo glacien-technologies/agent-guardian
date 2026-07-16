@@ -99,6 +99,28 @@ async def test_wrapper_accumulates_tiered_cost_at_each_request_boundary() -> Non
     assert wrapped.counter.priced_cost_usd != pytest.approx(token_cost_usd(model, 201_000, 20_100))
 
 
+@pytest.mark.asyncio
+async def test_wrapper_prices_vertex_location_from_each_request_model() -> None:
+    global_model = "vertex:gemini-3.5-flash+project=p+location=global"
+    default_model = "vertex:gemini-3.5-flash+project=p"
+    global_wrapped = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    )
+    default_wrapped = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    )
+
+    await global_wrapped.complete(
+        LLMRequest(messages=[LLMMessage(role="user", content="x")], model=global_model)
+    )
+    await default_wrapped.complete(
+        LLMRequest(messages=[LLMMessage(role="user", content="x")], model=default_model)
+    )
+
+    assert global_wrapped.counter.priced_cost_usd == pytest.approx(10.50)
+    assert default_wrapped.counter.priced_cost_usd == pytest.approx(11.55)
+
+
 def test_counter_merge_sums_fields() -> None:
     a = UsageCounter(
         prompt_tokens=10,
