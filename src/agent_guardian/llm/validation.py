@@ -565,7 +565,22 @@ def _probe_vertex(
     timeout_s: float,
     factory: type[httpx.Client] | None,
 ) -> ModelValidationResult:
-    outcome = _probe_vertex_anonymous_existence(model, timeout_s=timeout_s, factory=factory)
+    outcome = _probe_vertex_anonymous_existence(
+        model,
+        timeout_s=timeout_s,
+        factory=factory,
+    )
+    if outcome.status == "auth_failed":
+        return ModelValidationResult(
+            valid=True,
+            status="unsupported",
+            provider="vertex",
+            model=model,
+            message=(
+                "Vertex anonymous publisher catalog requires authentication; "
+                "deferring model validation to authenticated invocation."
+            ),
+        )
     return _finalise("vertex", model, outcome)
 
 
