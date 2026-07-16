@@ -740,6 +740,22 @@ def test_vertex_anonymous_catalog_auth_response_defers_to_invocation(status_code
     assert "authenticated invocation" in result.message
 
 
+def test_vertex_api_key_invalid_400_remains_auth_failed() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": {"details": [{"reason": "API_KEY_INVALID"}]}},
+        )
+
+    result = check_model_exists(
+        "vertex:gemini-2.5-flash",
+        client_factory=_client_factory_from(handler),
+    )
+
+    assert result.valid is False
+    assert result.status == "auth_failed"
+
+
 def test_vertex_anonymous_catalog_404_remains_not_found() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"error": {"message": "missing"}})

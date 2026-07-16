@@ -570,7 +570,7 @@ def _probe_vertex(
         timeout_s=timeout_s,
         factory=factory,
     )
-    if outcome.status == "auth_failed":
+    if outcome.status == "auth_failed" and outcome.detail in {"HTTP 401", "HTTP 403"}:
         return ModelValidationResult(
             valid=True,
             status="unsupported",
