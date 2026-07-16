@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agent_guardian.core.budget import tokens_to_usd
 from agent_guardian.llm.base import LLMMessage, LLMRequest
 from agent_guardian.server.probe_export import build_probe_exports
 
@@ -33,6 +34,8 @@ __all__ = [
     "build_summary_prompt",
     "generate_probe_summaries",
     "is_usable_summary",
+    "summary_reservation_usd",
+    "write_empty_probe_summaries",
     "write_probe_summaries",
 ]
 
@@ -143,6 +146,15 @@ def build_summary_prompt(exp: dict[str, Any]) -> str:
     )
 
 
+def summary_reservation_usd(scan_dir: Path, model_spec: str) -> float:
+    """Conservatively price all graded summaries planned for ``scan_dir``."""
+    exports = build_probe_exports(scan_dir)
+    targets = [exp for exp in exports.values() if exp.get("verdict")]
+    input_ceiling = sum(len(_SYSTEM) + len(build_summary_prompt(exp)) for exp in targets)
+    output_ceiling = len(targets) * _SUMMARY_MAX_TOKENS
+    return tokens_to_usd(model_spec, input_ceiling, output_ceiling)
+
+
 async def _summarize_one(exp: dict[str, Any], llm: BaseLLM, model: str) -> str:
     try:
         resp = await llm.complete(
@@ -209,6 +221,11 @@ def _persist_summaries(scan_dir: Path, summaries: dict[str, str]) -> Path:
     except OSError as exc:  # pragma: no cover — disk-level failure
         _LOG.debug("probe_summary: write failed (%s)", exc)
     return out_path
+
+
+def write_empty_probe_summaries(scan_dir: Path) -> Path:
+    """Persist the empty summary document used by skipped/best-effort runs."""
+    return _persist_summaries(scan_dir, {})
 
 
 async def awrite_probe_summaries(scan_dir: Path, llm: BaseLLM, *, model: str) -> Path:

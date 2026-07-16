@@ -4695,7 +4695,75 @@ async def _run_scan_inner(
         if warning_text is not None:
             typer.echo(warning_text, err=True)
 
-    # 9. Render + persist report(s). The canonical scan.json is always written
+    # 9. Export probes, reserve/account for optional summaries, then render and
+    #    persist report(s). Probe exports must exist first because the summary
+    #    reservation prices the exact set of graded exports. Summary work is
+    #    best-effort, but any successful provider usage is folded into the
+    #    frozen Scan before a user report or canonical/raw JSON is written.
+    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from agent_guardian.server.probe_export import write_probe_exports
+
+        write_probe_exports(scan_dir)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
+
+    summary_counter = None
+    summary_inner = None
+    try:
+        from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+        from agent_guardian.reports.postscan import (
+            can_run_probe_summaries,
+            fold_postscan_usage,
+        )
+        from agent_guardian.server.probe_summary import (
+            awrite_probe_summaries,
+            summary_reservation_usd,
+            write_empty_probe_summaries,
+        )
+
+        reservation = summary_reservation_usd(scan_dir, eff_evaluator)
+        if not can_run_probe_summaries(budget_usd, scan_result.cost_usd, reservation):
+            write_empty_probe_summaries(scan_dir)
+            _LOG.info(
+                "probe summaries skipped: reservation $%.6f exceeds remaining budget $%.6f",
+                reservation,
+                max(0.0, (budget_usd or 0.0) - scan_result.cost_usd),
+            )
+        else:
+            summary_counter = UsageCounter()
+            summary_inner = build_llm(eff_evaluator, role="evaluator")
+            summary_llm = UsageTrackingLLM(summary_inner, counter=summary_counter)
+            await awrite_probe_summaries(
+                scan_dir,
+                summary_llm,
+                model=_normalise_model_name(eff_evaluator),
+            )
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
+        with contextlib.suppress(Exception):
+            from agent_guardian.server.probe_summary import write_empty_probe_summaries
+
+            write_empty_probe_summaries(scan_dir)
+    finally:
+        if summary_inner is not None:
+            with contextlib.suppress(Exception):
+                await summary_inner.aclose()
+        if summary_counter is not None:
+            try:
+                scan_result = fold_postscan_usage(
+                    scan_result,
+                    summary_counter,
+                    eff_evaluator,
+                )
+            except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+                typer.echo(
+                    f"note: AI probe summary usage accounting skipped: {type(exc).__name__}: {exc}",
+                    err=True,
+                )
+
+    # The canonical scan.json is always written
     #    via the signed/redacted ``write_json`` path so the persisted artifact
     #    is schema-stamped, signed, and PII-redacted (#1/#2). The user-chosen
     #    --output report(s) are written separately (may be different formats).
@@ -4707,7 +4775,7 @@ async def _run_scan_inner(
     #                                                write <stem>.<ext> per format
     #   - any count + no --output-path            -> default per-format
     #                                                ~/.agentguardian/scans/<scan_id>/report.<ext>
-    default_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    default_dir = scan_dir
 
     def _resolve_per_format_path(fmt: str) -> Path:
         if output_path is None:
@@ -4758,44 +4826,12 @@ async def _run_scan_inner(
     # is kept alongside as scan.raw.json for debugging only.
     from agent_guardian.reports.json_report import write_json
 
-    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
-    scan_dir.mkdir(parents=True, exist_ok=True)
     try:
         write_json(scan_result, scan_dir / "scan.json")
     except Exception as exc:
         typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
     (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
-    # Persist the authoritative, untruncated per-probe JSON export under
-    # ``<scan_dir>/probe/`` (one file per probe + index.json). Unlike the
-    # dashboard's previewed log lines, this is the complete record — verbatim
-    # prompts, full target responses, full judge reasoning, worst-case verdict.
-    # Best-effort: an export failure never fails the scan.
-    try:
-        from agent_guardian.server.probe_export import write_probe_exports
-
-        write_probe_exports(scan_dir)
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
-    # AI-write the per-agent Probes-table SUMMARY (one LLM call per agent, run
-    # concurrently) from each agent's full turns + verdict, persisted to
-    # ``probe/summaries.json``. The run-scope evaluator clients are already
-    # closed above, so build a fresh one from the same model spec. Best-effort:
-    # never fail (or noticeably slow) a scan on summary generation.
-    try:
-        from agent_guardian.server.probe_summary import awrite_probe_summaries
-
-        _summary_model = _normalise_model_name(eff_evaluator)
-        _summary_llm = build_llm(eff_evaluator, role="evaluator")
-        try:
-            # We are inside ``async def _run_scan_inner`` — await directly
-            # (asyncio.run() would raise "cannot be called from a running loop").
-            await awrite_probe_summaries(scan_dir, _summary_llm, model=_summary_model)
-        finally:
-            with contextlib.suppress(Exception):
-                await _summary_llm.aclose()
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
     # D2 (issue #76) — seal the forensic record: write a signed manifest of the
     # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
     # probe/*.json so any post-hoc edit to the evidence trail is detectable

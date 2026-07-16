@@ -13,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agent_guardian import __version__
+from agent_guardian import cli as cli_module
 from agent_guardian.cli import (
     EXIT_CONFIG,
     EXIT_FAIL_UNDER,
@@ -1013,6 +1014,53 @@ def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path
     assert (scan_dir / "scan.raw.json").is_file()
     raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
     assert raw["id"] == scan_id  # raw uses the Scan model field name
+    selected = json.loads(out_path.read_text(encoding="utf-8"))
+    assert canonical["tokens_total"] == raw["tokens_total"] == selected["tokens_total"]
+    assert canonical["cost_usd"] == raw["cost_usd"] == selected["cost_usd"]
+
+
+def test_scan_skips_probe_summaries_when_reservation_exceeds_budget(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.server import probe_summary
+
+    monkeypatch.setattr(probe_summary, "summary_reservation_usd", lambda *_args: 1.0)
+    build_roles: list[str] = []
+    original_build_llm = cli_module.build_llm
+
+    def tracking_build_llm(model_spec: str, role: str):  # type: ignore[no-untyped-def]
+        build_roles.append(role)
+        return original_build_llm(model_spec, role)
+
+    monkeypatch.setattr(cli_module, "build_llm", tracking_build_llm)
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--budget-usd",
+            "0.000001",
+            "--output-path",
+            str(tmp_path / "report.json"),
+        ],
+    )
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert build_roles.count("evaluator") == 1
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    summaries_path = tmp_path / ".agentguardian" / "scans" / scan_id / "probe" / "summaries.json"
+    assert json.loads(summaries_path.read_text(encoding="utf-8")) == {"summaries": {}}
 
 
 def test_report_pdf_requires_output_path(runner: CliRunner, tmp_path: Path) -> None:

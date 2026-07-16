@@ -103,6 +103,15 @@ def test_write_and_load_round_trip(tmp_path: Path) -> None:
     assert loaded.get("identity-leak-agent") == "Target disclosed cross-tenant data."
 
 
+def test_write_empty_probe_summaries_persists_empty_document(tmp_path: Path) -> None:
+    from agent_guardian.server.probe_summary import write_empty_probe_summaries
+
+    out = write_empty_probe_summaries(tmp_path)
+
+    assert out == tmp_path / "probe" / "summaries.json"
+    assert json.loads(out.read_text(encoding="utf-8")) == {"summaries": {}}
+
+
 def test_probe_groups_sorted_by_asi_recon_first(tmp_path: Path) -> None:
     from agent_guardian.server.dashboard_view import _assemble_probe_groups
 
