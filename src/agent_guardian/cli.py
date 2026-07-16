@@ -4494,10 +4494,15 @@ async def _run_scan_inner(
     # feed unless the operator explicitly raised verbosity via the global
     # ``-v`` / ``--log-level``. The full per-call model trace is always one
     # ``cat ~/.agentguardian/scans/<id>/run.log`` away.
-    from agent_guardian.logging_setup import attach_run_log_file, set_terminal_log_level
+    from agent_guardian.logging_setup import (
+        attach_run_log_file,
+        detach_run_log_file,
+        set_terminal_log_level,
+    )
 
+    run_log_handler: logging.Handler | None = None
     try:
-        attach_run_log_file(
+        run_log_handler = attach_run_log_file(
             partial_scan_dir / "run.log",
             level=os.environ.get("AGENT_GUARDIAN_LOG_LEVEL") or "DEBUG",
         )
@@ -4836,6 +4841,10 @@ async def _run_scan_inner(
     # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
     # probe/*.json so any post-hoc edit to the evidence trail is detectable
     # (OWASP immutable-logging bar). Best-effort: never fail a scan on this.
+    _LOG.info("forensic seal: run.log complete")
+    if run_log_handler is not None:
+        detach_run_log_file(run_log_handler)
+        run_log_handler = None
     try:
         from agent_guardian.reports.forensic_manifest import write_forensic_manifest
 

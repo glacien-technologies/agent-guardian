@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
+from agent_guardian import logging_setup
 from agent_guardian.reports.forensic_manifest import (
     FORENSIC_MANIFEST_SCHEMA,
     build_forensic_manifest,
@@ -55,3 +57,20 @@ def test_manifest_detects_tampering(tmp_path: Path) -> None:
     (d / "run.log").write_text("turn 1 ... [REDACTED THE EXPLOIT]\n", encoding="utf-8")
     m2 = build_forensic_manifest(d, "cli-x", "2026-06-07T00:00:00Z")
     assert m1["files"]["run.log"]["sha256"] != m2["files"]["run.log"]["sha256"]
+
+
+def test_detached_run_log_digest_stays_valid_after_later_logs(tmp_path: Path) -> None:
+    d = _seed_scan_dir(tmp_path)
+    logging_setup.configure_logging(level="DEBUG", force=True)
+    handler = logging_setup.attach_run_log_file(d / "run.log")
+    log = logging.getLogger("agent_guardian.test.forensic_seal")
+    log.info("forensic seal: run.log complete")
+    logging_setup.detach_run_log_file(handler)
+    manifest_path = write_forensic_manifest(d, "cli-x", "2026-06-07T00:00:00Z")
+    log.info("terminal-only-after-manifest")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for relative, record in manifest["files"].items():
+        actual = hashlib.sha256((d / relative).read_bytes()).hexdigest()
+        assert record["sha256"] == actual
+    assert "terminal-only-after-manifest" not in (d / "run.log").read_text(encoding="utf-8")

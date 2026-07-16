@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -372,6 +373,31 @@ def test_attach_run_log_file_captures_debug_while_terminal_quiet(tmp_path) -> No
         assert "debug-only-line" not in term
     finally:
         logging.getLogger().removeHandler(handler)
+
+
+def test_detach_run_log_file_seals_file(tmp_path: Path) -> None:
+    stream = io.StringIO()
+    logging_setup.configure_logging(level="DEBUG", stream=stream, force=True)
+    root = logging.getLogger()
+    terminal_handler = root.handlers[0]
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log)
+    event_handler = logging.NullHandler()
+    root.addHandler(event_handler)
+    log = logging.getLogger("agent_guardian.test.seal")
+    try:
+        log.info("before-seal")
+        logging_setup.detach_run_log_file(handler)
+        logging_setup.detach_run_log_file(handler)
+        log.info("after-seal")
+        assert handler not in root.handlers
+        assert terminal_handler in root.handlers
+        assert event_handler in root.handlers
+        assert "after-seal" in stream.getvalue()
+        assert "before-seal" in run_log.read_text(encoding="utf-8")
+        assert "after-seal" not in run_log.read_text(encoding="utf-8")
+    finally:
+        root.removeHandler(event_handler)
 
 
 def test_set_terminal_log_level_skips_file_and_jsonl_handlers(tmp_path) -> None:

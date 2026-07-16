@@ -33,6 +33,7 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -879,6 +880,21 @@ def attach_run_log_file(
     if root.level == logging.NOTSET or root.level > resolved:
         root.setLevel(resolved)
     return handler
+
+
+def detach_run_log_file(handler: logging.Handler) -> None:
+    """Flush, detach, and close one run-log handler without touching other sinks.
+
+    The operation is idempotent so callers can safely seal the same handler
+    during best-effort finalization more than once.
+    """
+    root = logging.getLogger()
+    with contextlib.suppress(Exception):
+        handler.flush()
+    if handler in root.handlers:
+        root.removeHandler(handler)
+    with contextlib.suppress(Exception):
+        handler.close()
 
 
 def set_terminal_log_level(level: str | int) -> None:
