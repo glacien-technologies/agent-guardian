@@ -70,7 +70,12 @@ from agent_guardian.agents.recon import ReconAgent
 from agent_guardian.agents.supply_chain import SupplyChainAgent
 from agent_guardian.agents.tool_abuse import ToolAbuseAgent
 from agent_guardian.agents.trust_exploit import TrustExploitAgent
-from agent_guardian.core.budget import tokens_to_usd
+from agent_guardian.core.budget import (
+    BudgetEnvelope,
+    BudgetExhausted,
+    BudgetLedger,
+    tokens_to_usd,
+)
 from agent_guardian.core.coverage import compute_coverage_from_memory
 from agent_guardian.core.heuristic_judge import DESTRUCTIVE_TOOL_PREFIXES
 from agent_guardian.core.memory import SharedMemory
@@ -83,6 +88,7 @@ from agent_guardian.core.supervisor import Supervisor
 from agent_guardian.core.tiering import detect_tier
 from agent_guardian.cost import lookup_price
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.llm.budget_admission import with_budget_admission
 from agent_guardian.llm.retry import RetryTally, retry_tally_scope
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.logging_setup import log_agent_io
@@ -770,38 +776,64 @@ class SwarmCommander:
         # agents detect and reuse it instead of double-counting (PRD §8.1
         # -- IMPORTANT #3).
         self._commander_usage = UsageCounter()
+        self._budget_ledger: BudgetLedger | None = None
+        if config.usd_cap is not None:
+            self._budget_ledger = BudgetLedger(
+                BudgetEnvelope(
+                    usd_cap=config.usd_cap,
+                    token_cap=config.total_tokens,
+                    wallclock_cap_s=(
+                        config.overall_wall_seconds
+                        if config.overall_wall_seconds is not None
+                        else math.inf
+                    ),
+                )
+            )
+
+        def admitted(llm: BaseLLM, role: str) -> BaseLLM:
+            if self._budget_ledger is None:
+                return llm
+            return with_budget_admission(
+                llm,
+                ledger=self._budget_ledger,
+                agent_id=role,
+                on_exhausted=lambda exc: self._on_budget_admission_exhausted(role, exc),
+            )
+
         # Per-agent wrappers around attacker / evaluator land in
         # :class:`AsiAgent.__init__` so each agent gets its own counter for
         # the :attr:`AgentReport.tokens_consumed` breakdown. We pass the raw
         # clients through unchanged here.
-        self.attacker_llm: BaseLLM = attacker_llm
-        self.evaluator_llm: BaseLLM = evaluator_llm
+        self.attacker_llm: BaseLLM = admitted(attacker_llm, "attacker")
+        self.evaluator_llm: BaseLLM = admitted(evaluator_llm, "evaluator")
         # Finalise-phase paid work (PoV-gate replays + critic rubric) runs over
         # the evaluator via this dedicated tracked wrapper so its spend is (a)
         # counted in the live budget meter -- the finalise hard-ceiling depends
         # on it -- and (b) folded into the reported ``cost_usd``. Without it the
         # judge/rubric calls went through the raw client and were invisible.
         self._finalise_usage = UsageCounter()
+        finalise_evaluator_llm = admitted(evaluator_llm, "finalise")
         self._finalise_evaluator_llm: BaseLLM = (
-            evaluator_llm
-            if isinstance(evaluator_llm, UsageTrackingLLM)
-            else UsageTrackingLLM(evaluator_llm, counter=self._finalise_usage)
+            finalise_evaluator_llm
+            if isinstance(finalise_evaluator_llm, UsageTrackingLLM)
+            else UsageTrackingLLM(finalise_evaluator_llm, counter=self._finalise_usage)
         )
-        if isinstance(evaluator_llm, UsageTrackingLLM):
-            self._finalise_usage = evaluator_llm.counter
+        if isinstance(finalise_evaluator_llm, UsageTrackingLLM):
+            self._finalise_usage = finalise_evaluator_llm.counter
         # Commander LLM defaults to the attacker LLM today -- the M9
         # checkpoint logic will use it once LLM-driven re-tasking lands.
         raw_commander = commander_llm if commander_llm is not None else attacker_llm
+        admitted_commander = admitted(raw_commander, "commander")
         self.commander_llm: BaseLLM = (
-            raw_commander
-            if isinstance(raw_commander, UsageTrackingLLM)
-            else UsageTrackingLLM(raw_commander, counter=self._commander_usage)
+            admitted_commander
+            if isinstance(admitted_commander, UsageTrackingLLM)
+            else UsageTrackingLLM(admitted_commander, counter=self._commander_usage)
         )
-        if isinstance(raw_commander, UsageTrackingLLM):
+        if isinstance(admitted_commander, UsageTrackingLLM):
             # If a wrapped client was supplied, mirror onto our counter so we
             # still observe activity. The wrapper's counter is the source of
             # truth; ``_commander_usage`` becomes a view.
-            self._commander_usage = raw_commander.counter
+            self._commander_usage = admitted_commander.counter
         self.memory = memory if memory is not None else SharedMemory(config.scan_id)
         self.observer = observer
         self.rng_seed = rng_seed
@@ -898,13 +930,13 @@ class SwarmCommander:
 
             panel_specs = [
                 JudgeSpec(
-                    llm=attacker_llm,
+                    llm=self.attacker_llm,
                     model=config.attacker_model,
                     family=_family_of(config.attacker_model),
                     label="attacker-as-judge",
                 ),
                 JudgeSpec(
-                    llm=evaluator_llm,
+                    llm=self.evaluator_llm,
                     model=config.evaluator_model,
                     family=_family_of(config.evaluator_model),
                     label="evaluator-as-judge",
@@ -2197,6 +2229,18 @@ class SwarmCommander:
         if cap is None or cap <= 0:
             return False
         return self._live_cost_usd() >= self.config.budget_soft_stop_fraction * cap
+
+    def _on_budget_admission_exhausted(
+        self,
+        role: str,
+        exc: BudgetExhausted,
+    ) -> None:
+        """Translate a rejected paid call into scan budget-stop semantics."""
+        _LOG.info("budget admission refused role=%s: %s", role, exc)
+        self._stopped_reason = "budget"
+        self._cancel_event.set()
+        if role == "finalise":
+            self._finalise_truncated = True
 
     def _checkpoint(self) -> CheckpointDecision:
         provisional = self._compute_provisional_aivss()

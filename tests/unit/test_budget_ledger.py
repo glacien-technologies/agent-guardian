@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from pathlib import Path
@@ -14,6 +15,10 @@ from agent_guardian.core.budget import (
     BudgetLedger,
     tokens_to_usd,
 )
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse
+from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
+from agent_guardian.llm.stub import StubLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 
 def _envelope(
@@ -107,3 +112,69 @@ def test_property_spend_never_exceeds_cap() -> None:
             # reservation gate is on the estimate. We model honest estimates.
             led.commit(r, actual_usd=amt)
         assert led.spent_usd <= cap + 1e-9
+
+
+class _FailingLLM(BaseLLM):
+    provider = "gemini"
+
+    def __init__(self, *, wait: bool = False) -> None:
+        super().__init__(owns_client=False)
+        self.started = asyncio.Event()
+        self._wait = wait
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.started.set()
+        if self._wait:
+            await asyncio.Event().wait()
+        raise RuntimeError("provider failed")
+
+
+def _request() -> LLMRequest:
+    return LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="gemini-2.5-flash",
+        max_tokens=32,
+    )
+
+
+@pytest.mark.asyncio
+async def test_admission_receipt_is_conservatively_settled_on_exception() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    llm = BudgetAdmissionLLM(_FailingLLM(), ledger=ledger, agent_id="evaluator")
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await llm.complete(_request())
+
+    assert [entry.kind for entry in ledger.entries()] == ["reserve", "commit"]
+    assert ledger.committed_plus_reserved_usd == pytest.approx(ledger.spent_usd)
+
+
+@pytest.mark.asyncio
+async def test_admission_receipt_is_conservatively_settled_on_cancellation() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    inner = _FailingLLM(wait=True)
+    llm = BudgetAdmissionLLM(inner, ledger=ledger, agent_id="attacker")
+    task = asyncio.create_task(llm.complete(_request()))
+    await inner.started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert [entry.kind for entry in ledger.entries()] == ["reserve", "commit"]
+    assert ledger.committed_plus_reserved_usd == pytest.approx(ledger.spent_usd)
+
+
+@pytest.mark.asyncio
+async def test_admission_does_not_double_count_pretracked_usage() -> None:
+    counter = UsageCounter()
+    tracked = UsageTrackingLLM(StubLLM(default="ok"), counter=counter)
+    llm = with_budget_admission(
+        tracked,
+        ledger=BudgetLedger(_envelope(usd=1.0)),
+        agent_id="commander",
+    )
+
+    await llm.complete(_request())
+
+    assert counter.calls == 1

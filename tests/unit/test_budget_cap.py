@@ -15,9 +15,9 @@ import pytest
 
 from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
-from agent_guardian.core.budget import tokens_to_usd
+from agent_guardian.core.budget import BudgetExhausted, tokens_to_usd
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
-from agent_guardian.llm.base import LLMRequest, LLMResponse
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.stub import StubLLM
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
@@ -77,6 +77,126 @@ def _agent(swarm: SwarmCommander) -> GoalHijackAgent:
         attacker_model=_FLASH,
         evaluator_model=_FLASH,
     )
+
+
+class _BlockingPaidLLM(BaseLLM):
+    """Provider double that holds admitted calls open during admission."""
+
+    provider = "gemini"
+
+    def __init__(self) -> None:
+        super().__init__(owns_client=False)
+        self.calls = 0
+        self.release = asyncio.Event()
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.calls += 1
+        await self.release.wait()
+        input_tokens = sum(len(message.content) for message in request.messages)
+        usage = LLMUsage(
+            prompt_tokens=input_tokens,
+            completion_tokens=request.max_tokens,
+            total_tokens=input_tokens + request.max_tokens,
+        )
+        return LLMResponse(
+            text="ok",
+            model=request.model,
+            provider=self.provider,
+            usage=usage,
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_paid_calls_reserve_before_provider_dispatch() -> None:
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="x" * 1_000)],
+        model=_FLASH,
+        max_tokens=1_000,
+    )
+    per_call_ceiling = tokens_to_usd(_FLASH, 1_000, 1_000)
+    cap = per_call_ceiling * 2.2
+    inner = _BlockingPaidLLM()
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="concurrent-admission",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=cap,
+        ),
+        target=target,
+        attacker_llm=inner,
+        evaluator_llm=StubLLM(default="ok"),
+    )
+
+    tasks = [asyncio.create_task(swarm.attacker_llm.complete(request)) for _ in range(3)]
+    for _ in range(100):
+        if inner.calls == 3 or any(task.done() for task in tasks):
+            break
+        await asyncio.sleep(0)
+
+    assert inner.calls == 2
+    assert swarm._stopped_reason == "budget"
+    assert swarm._budget_ledger is not None
+    assert swarm._budget_ledger.committed_plus_reserved_usd <= cap
+    assert (
+        sum(entry.usd for entry in swarm._budget_ledger.entries() if entry.kind == "reserve") <= cap
+    )
+
+    inner.release.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert sum(isinstance(result, BudgetExhausted) for result in results) == 1
+    assert inner.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_all_paid_swarm_roles_share_one_admission_ledger() -> None:
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="x" * 1_000)],
+        model=_FLASH,
+        max_tokens=1_000,
+    )
+    cap = tokens_to_usd(_FLASH, 1_000, 1_000) * 1.2
+    attacker = _BlockingPaidLLM()
+    evaluator = _BlockingPaidLLM()
+    commander = _BlockingPaidLLM()
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="shared-admission",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=cap,
+        ),
+        target=target,
+        attacker_llm=attacker,
+        evaluator_llm=evaluator,
+        commander_llm=commander,
+    )
+
+    tasks = [
+        asyncio.create_task(swarm.attacker_llm.complete(request)),
+        asyncio.create_task(swarm.evaluator_llm.complete(request)),
+        asyncio.create_task(swarm.commander_llm.complete(request)),
+        asyncio.create_task(swarm._finalise_evaluator_llm.complete(request)),
+    ]
+    for _ in range(100):
+        if (
+            sum(inner.calls for inner in (attacker, evaluator, commander)) == 1
+            and sum(task.done() for task in tasks) == 3
+        ):
+            break
+        await asyncio.sleep(0)
+
+    assert sum(inner.calls for inner in (attacker, evaluator, commander)) == 1
+    assert swarm._stopped_reason == "budget"
+    assert swarm._finalise_truncated is True
+    for inner in (attacker, evaluator, commander):
+        inner.release.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert sum(isinstance(result, BudgetExhausted) for result in results) == 3
 
 
 def test_live_cost_usd_sums_priced_commander_and_agent_counters() -> None:
