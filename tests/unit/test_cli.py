@@ -493,6 +493,66 @@ def test_verify_pubkey_file_accepts_lowercase_base32(runner: CliRunner, tmp_path
     assert "trust anchor: PINNED" in result.stdout
 
 
+def test_verify_pubkey_file_accepts_mixed_case_base32(runner: CliRunner, tmp_path: Path) -> None:
+    """Mixed-case base32 is normalized only at the key-file boundary."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    mixed_case = "".join(
+        char.lower() if index % 2 else char for index, char in enumerate(canonical)
+    )
+    pubkey_file = tmp_path / "ed25519-mixed-case.pub"
+    pubkey_file.write_text(mixed_case, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_literal_pubkey_remains_case_sensitive(runner: CliRunner, tmp_path: Path) -> None:
+    """The file-only compatibility rule must not expand literal pin parsing."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    lowercase_pin = payload["signatures"]["ed25519"]["public_key_b32"].lower()
+
+    result = runner.invoke(app, ["verify", str(path), "--pubkey", lowercase_pin])
+
+    assert result.exit_code == EXIT_FAIL_UNDER
+    assert "Ed25519:      FAIL" in result.stdout
+    assert "trust anchor: UNANCHORED" in result.stdout
+
+
+def test_verify_embedded_pubkey_remains_case_sensitive(runner: CliRunner, tmp_path: Path) -> None:
+    """Reports with a noncanonical lowercase embedded key remain invalid."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    payload["signatures"]["ed25519"]["public_key_b32"] = canonical.lower()
+    path = tmp_path / "report-lowercase-embedded-key.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(path), "--pubkey", canonical])
+
+    assert result.exit_code == EXIT_FAIL_UNDER
+    assert "Ed25519:      FAIL" in result.stdout
+    assert "trust anchor: UNANCHORED" in result.stdout
+
+
 def test_verify_pubkey_file_accepts_exact_base32_padding_and_outer_whitespace(
     runner: CliRunner, tmp_path: Path
 ) -> None:

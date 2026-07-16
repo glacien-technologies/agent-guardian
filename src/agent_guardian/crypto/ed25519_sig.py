@@ -77,7 +77,7 @@ def _b32_no_padding(raw: bytes) -> str:
 def _b32_decode_no_padding(value: str) -> bytes:
     # Re-pad to a multiple of 8 before decoding.
     pad = (-len(value)) % 8
-    return base64.b32decode(value + ("=" * pad), casefold=True)
+    return base64.b32decode(value + ("=" * pad))
 
 
 def load_ed25519_public_key(path: Path) -> str:
@@ -114,7 +114,7 @@ def load_ed25519_public_key(path: Path) -> str:
         unpadded = encoded
 
     try:
-        decoded = _b32_decode_no_padding(unpadded)
+        decoded = _b32_decode_no_padding(unpadded.upper())
     except (ValueError, TypeError, base64.binascii.Error):  # type: ignore[attr-defined]
         raise ValueError("invalid Ed25519 public key encoding") from None
     if len(decoded) != _RAW_PUBLIC_KEY_BYTES:
