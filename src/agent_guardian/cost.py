@@ -181,7 +181,7 @@ def lookup_price(model_spec: str) -> PriceRow:
 
     if ":" in model_spec:
         provider, _, model_and_qualifiers = model_spec.partition(":")
-        provider = provider.lower()
+        provider = provider.strip().lower()
         model, _, qualifier_tail = model_and_qualifiers.partition("+")
         qualifiers: dict[str, str] = {}
         for chunk in qualifier_tail.split("+"):

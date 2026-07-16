@@ -187,6 +187,15 @@ class VertexClient(BaseLLM):
             return "aiplatform.googleapis.com"
         return VERTEX_HOST_TEMPLATE.format(region=self.location)
 
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Include the resolved endpoint location in Vertex cost identity."""
+        model = request.model.strip()
+        provider, separator, provider_model = model.partition(":")
+        if separator and provider.strip().lower() == self.provider:
+            model = provider_model
+        model = model.partition("+")[0].strip()
+        return f"vertex:{model}+location={self.location}"
+
     def _resolve_credentials(self) -> Any:
         """Resolve ADC (blocking — reads key files / hits the metadata server).
 

@@ -67,16 +67,21 @@ class BudgetAdmissionLLM(BaseLLM):
         self._on_exhausted = on_exhausted
         self.provider = inner.provider
 
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Delegate request-scoped pricing identity through the decorator."""
+        return self._inner.pricing_model_spec(request)
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         input_ceiling = _input_token_ceiling(request)
         output_ceiling = request.max_tokens
+        pricing_model_spec = self.pricing_model_spec(request)
         receipt: BudgetReceipt
         try:
             receipt = self._ledger.reserve(
                 self._agent_id,
                 tokens=input_ceiling + output_ceiling,
                 est_usd=admission_reservation_usd(
-                    request.model,
+                    pricing_model_spec,
                     input_ceiling,
                     output_ceiling,
                 ),
@@ -102,7 +107,7 @@ class BudgetAdmissionLLM(BaseLLM):
         self._ledger.commit(
             receipt,
             actual_usd=tokens_to_usd(
-                request.model,
+                pricing_model_spec,
                 response.usage.prompt_tokens,
                 response.usage.completion_tokens,
             ),

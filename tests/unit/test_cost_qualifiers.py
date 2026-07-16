@@ -98,6 +98,13 @@ def test_gemini_developer_api_ignores_vertex_location_qualifier() -> None:
     assert row.output_per_1m == pytest.approx(9.00)
 
 
+def test_provider_whitespace_is_normalised_before_vertex_lookup() -> None:
+    row = lookup_price(" VERTEX :gemini-3.5-flash+location=global")
+    assert row.provider == "vertex"
+    assert row.input_per_1m == pytest.approx(1.50)
+    assert row.output_per_1m == pytest.approx(9.00)
+
+
 def test_azure_wildcard_row() -> None:
     row = lookup_price("azure:my-gpt4o-deployment")
     assert row.provider == "azure"

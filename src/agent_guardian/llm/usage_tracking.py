@@ -143,6 +143,10 @@ class UsageTrackingLLM(BaseLLM):
         # Mirror the inner provider so downstream code doesn't need to peek.
         self.provider = inner.provider
 
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Delegate request-scoped pricing identity through the decorator."""
+        return self._inner.pricing_model_spec(request)
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         # Record the dispatch-side seed signal (#231 point 5) before the call
         # so an unseeded request is counted even if the provider raises.
@@ -150,7 +154,7 @@ class UsageTrackingLLM(BaseLLM):
             self.counter.note_request(request)
         response = await self._inner.complete(request)
         async with self._lock:
-            self.counter.add_response(response, model_spec=request.model)
+            self.counter.add_response(response, model_spec=self.pricing_model_spec(request))
         return response
 
     async def aclose(self) -> None:

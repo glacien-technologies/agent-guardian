@@ -149,6 +149,15 @@ class BaseLLM(ABC):
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Issue a completion. Subclasses implement the provider call."""
 
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Return the request-scoped identity used for cost accounting.
+
+        Dispatch and pricing usually share the same model string. Providers
+        whose price also depends on client configuration can override this
+        without mutating the provider-facing request.
+        """
+        return request.model
+
     async def aclose(self) -> None:
         """Release the underlying HTTP client, if we own it."""
         if self._owns_client and self._client is not None:
