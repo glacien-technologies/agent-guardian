@@ -121,8 +121,17 @@ def map_vertex_response(model: str, data: dict[str, Any]) -> LLMResponse:
         _LOG.warning("vertex: malformed response (%s): %s", type(exc).__name__, exc)
         raise LLMResponseFormatError(f"vertex: malformed response: {exc}") from exc
     prompt_tokens = int(usage.get("promptTokenCount", 0))
-    completion_tokens = int(usage.get("candidatesTokenCount", 0))
-    total_tokens = int(usage.get("totalTokenCount", prompt_tokens + completion_tokens))
+    candidate_tokens = int(usage.get("candidatesTokenCount", 0))
+    thought_tokens = int(usage.get("thoughtsTokenCount", 0))
+    total_tokens = int(
+        usage.get("totalTokenCount", prompt_tokens + candidate_tokens + thought_tokens)
+    )
+    completion_tokens = max(
+        candidate_tokens,
+        candidate_tokens + thought_tokens,
+        max(0, total_tokens - prompt_tokens),
+    )
+    total_tokens = max(total_tokens, prompt_tokens + completion_tokens)
     return LLMResponse(
         text=text,
         model=model,
