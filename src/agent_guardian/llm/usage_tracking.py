@@ -145,7 +145,8 @@ class UsageTrackingLLM(BaseLLM):
 
     def pricing_model_spec(self, request: LLMRequest) -> str:
         """Delegate request-scoped pricing identity through the decorator."""
-        return self._inner.pricing_model_spec(request)
+        delegate = getattr(self._inner, "pricing_model_spec", None)
+        return delegate(request) if callable(delegate) else request.model
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         # Record the dispatch-side seed signal (#231 point 5) before the call

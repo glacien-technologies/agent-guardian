@@ -4661,6 +4661,10 @@ async def _run_scan_inner(
         seen: set[int] = set()
         closeables: list[Any] = [adapter]
         for client in (attacker_llm, evaluator_llm, commander_llm, target_llm):
+            # PromptAdapter owns its target LLM and closes the original
+            # provider beneath any scan-time instrumentation decorators.
+            if client is target_llm and isinstance(adapter, PromptAdapter):
+                continue
             if id(client) not in seen:
                 seen.add(id(client))
                 closeables.append(client)

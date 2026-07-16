@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from agent_guardian.core.budget import (
@@ -15,6 +16,8 @@ from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse
 from agent_guardian.llm.usage_tracking import UsageTrackingLLM
 
 __all__ = ["BudgetAdmissionLLM", "admission_reservation_usd", "with_budget_admission"]
+
+_LOG = logging.getLogger(__name__)
 
 # Fail-closed Standard-rate floor for Gemini admission, verified 2026-07-16
 # against Google's primary Gemini API and Vertex pricing pages. It is the
@@ -69,7 +72,8 @@ class BudgetAdmissionLLM(BaseLLM):
 
     def pricing_model_spec(self, request: LLMRequest) -> str:
         """Delegate request-scoped pricing identity through the decorator."""
-        return self._inner.pricing_model_spec(request)
+        delegate = getattr(self._inner, "pricing_model_spec", None)
+        return delegate(request) if callable(delegate) else request.model
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         input_ceiling = _input_token_ceiling(request)
@@ -129,6 +133,8 @@ def with_budget_admission(
 ) -> BaseLLM:
     """Wrap ``inner`` without nesting two usage-accounting decorators."""
     if isinstance(inner, UsageTrackingLLM):
+        if isinstance(inner._inner, BudgetAdmissionLLM) and inner._inner._ledger is ledger:
+            return inner
         admitted = BudgetAdmissionLLM(
             inner._inner,
             ledger=ledger,
@@ -136,6 +142,8 @@ def with_budget_admission(
             on_exhausted=on_exhausted,
         )
         return UsageTrackingLLM(admitted, counter=inner.counter)
+    if isinstance(inner, BudgetAdmissionLLM) and inner._ledger is ledger:
+        return inner
     return BudgetAdmissionLLM(
         inner,
         ledger=ledger,

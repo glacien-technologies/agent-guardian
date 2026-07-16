@@ -58,6 +58,7 @@ from pydantic import ValidationError
 
 from agent_guardian._version import __version__
 from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.agents.a2a import A2AAgent
 from agent_guardian.agents.base import AgentBudget, AgentReport, AsiAgent
 from agent_guardian.agents.cascade import CascadeAgent
@@ -798,6 +799,16 @@ class SwarmCommander:
                 ledger=self._budget_ledger,
                 agent_id=role,
                 on_exhausted=lambda exc: self._on_budget_admission_exhausted(role, exc),
+            )
+
+        # Prompt mode is itself a paid LLM path: recon and every attack turn
+        # call through this adapter. Instrument only that LLM-backed target;
+        # code, HTTP, framework, and contract adapters remain untouched.
+        self._target_usage: UsageCounter | None = None
+        if isinstance(target, PromptAdapter):
+            self._target_usage = target.instrument_paid_llm(
+                ledger=self._budget_ledger,
+                on_exhausted=lambda exc: self._on_budget_admission_exhausted("target", exc),
             )
 
         # Per-agent wrappers around attacker / evaluator land in
@@ -2221,6 +2232,8 @@ class SwarmCommander:
         if self._recon_usage is not None:
             sources.append((self._recon_usage, self.config.attacker_model))
             counter_backed_agents.add("recon-agent")
+        if self._target_usage is not None:
+            sources.append((self._target_usage, self.config.attacker_model))
         sources.extend(
             [
                 (self._panel_attacker_usage, self.config.attacker_model),

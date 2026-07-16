@@ -16,7 +16,7 @@ from agent_guardian.core.budget import (
     tokens_to_usd,
 )
 from agent_guardian.cost import PriceRow
-from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
 from agent_guardian.llm.stub import StubLLM
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
@@ -179,6 +179,37 @@ async def test_admission_does_not_double_count_pretracked_usage() -> None:
     await llm.complete(_request())
 
     assert counter.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_budget_admission_falls_back_to_request_model_for_legacy_inner() -> None:
+    """Complete-compatible duck types predate ``pricing_model_spec``."""
+
+    class _LegacyInner:
+        provider = "stub"
+
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            return LLMResponse(
+                text="ok",
+                model=request.model,
+                provider="stub",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="stub",
+        max_tokens=32,
+    )
+    llm = BudgetAdmissionLLM(  # type: ignore[arg-type]
+        _LegacyInner(),
+        ledger=BudgetLedger(_envelope(usd=1.0)),
+        agent_id="target",
+    )
+
+    response = await llm.complete(request)
+
+    assert response.text == "ok"
 
 
 def test_gemini_25_pro_long_context_uses_high_price_tier() -> None:

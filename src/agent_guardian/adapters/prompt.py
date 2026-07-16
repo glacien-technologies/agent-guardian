@@ -8,8 +8,13 @@ production) and auto-tiers to T4 — no tools, no memory, no PII.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agent_guardian.adapters.base import ProfileEvidence, TargetAdapter, TargetFingerprint
+from agent_guardian.core.budget import BudgetExhausted, BudgetLedger
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest
+from agent_guardian.llm.budget_admission import with_budget_admission
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 __all__ = ["PromptAdapter"]
 
@@ -38,7 +43,12 @@ class PromptAdapter(TargetAdapter):
     ) -> None:
         super().__init__()
         self._prompt = prompt
+        # Instrumentation decorators do not own their inner client. Keep the
+        # exact client accepted at construction as the adapter-owned resource
+        # so replacing ``_llm`` never loses the provider lifecycle.
+        self._owned_llm = llm
         self._llm = llm
+        self._closed = False
         self._model = model
         self._sessions: dict[str, list[LLMMessage]] = {}
         self._fingerprint = TargetFingerprint(
@@ -55,6 +65,29 @@ class PromptAdapter(TargetAdapter):
         # White-box: the system prompt is the spec — declares persona, tools,
         # and rules. Read it directly instead of interrogating the model.
         return ProfileEvidence(box="white", text=self._prompt)
+
+    def instrument_paid_llm(
+        self,
+        *,
+        ledger: BudgetLedger | None,
+        on_exhausted: Callable[[BudgetExhausted], None] | None = None,
+    ) -> UsageCounter:
+        """Attach scan-scoped admission and usage accounting to the target."""
+        instrumented = self._llm
+        if ledger is not None:
+            instrumented = with_budget_admission(
+                instrumented,
+                ledger=ledger,
+                agent_id="target",
+                on_exhausted=on_exhausted,
+            )
+        if isinstance(instrumented, UsageTrackingLLM):
+            counter = instrumented.counter
+        else:
+            counter = UsageCounter()
+            instrumented = UsageTrackingLLM(instrumented, counter=counter)
+        self._llm = instrumented
+        return counter
 
     async def call(self, prompt: str, *, session: str | None = None) -> str:
         key = session or "_default"
@@ -74,4 +107,7 @@ class PromptAdapter(TargetAdapter):
         return resp.text
 
     async def aclose(self) -> None:
-        await self._llm.aclose()
+        if self._closed:
+            return
+        self._closed = True
+        await self._owned_llm.aclose()
