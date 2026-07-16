@@ -4982,6 +4982,8 @@ async def _run_scan_inner(
     # forensic log sinks live through summaries and gate evaluation, then
     # detach their exact handlers before hashing. From this point to return,
     # only non-logger terminal output is allowed.
+    if jsonl_log_handler.level > logging.INFO:
+        jsonl_log_handler.setLevel(logging.INFO)
     _LOG.info("forensic seal: run.log and events.jsonl complete")
     if run_log_handler is not None:
         detach_run_log_file(run_log_handler)

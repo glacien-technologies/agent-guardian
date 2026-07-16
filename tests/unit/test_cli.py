@@ -6,6 +6,7 @@ no real LLMs (``--model stub`` everywhere).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -1119,6 +1120,45 @@ def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path
     selected = json.loads(out_path.read_text(encoding="utf-8"))
     assert canonical["tokens_total"] == raw["tokens_total"] == selected["tokens_total"]
     assert canonical["cost_usd"] == raw["cost_usd"] == selected["cost_usd"]
+
+
+def test_scan_quiet_joint_seal_is_hashed_without_terminal_noise(
+    runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    out_path = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        [
+            "--quiet",
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    marker = "forensic seal: run.log and events.jsonl complete"
+    manifest = json.loads((scan_dir / "forensic_manifest.json").read_text(encoding="utf-8"))
+
+    for relative in ("run.log", "events.jsonl"):
+        artifact = scan_dir / relative
+        assert marker in artifact.read_text(encoding="utf-8")
+        assert (
+            manifest["files"][relative]["sha256"]
+            == hashlib.sha256(artifact.read_bytes()).hexdigest()
+        )
+    assert marker not in result.output
 
 
 def test_scan_folds_successful_paid_summary_usage_into_every_json_report(

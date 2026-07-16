@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 from pathlib import Path
@@ -65,17 +66,25 @@ def test_manifest_detects_tampering(tmp_path: Path) -> None:
 
 def test_jointly_detached_log_digests_stay_valid_after_later_logs(tmp_path: Path) -> None:
     d = _seed_scan_dir(tmp_path)
-    logging_setup.configure_logging(level="DEBUG", force=True)
-    run_log_handler = logging_setup.attach_run_log_file(d / "run.log")
+    console = io.StringIO()
+    logging_setup.configure_logging(level="WARNING", stream=console, force=True)
     event_log_handler = install_jsonl_log_handler(d)
+    run_log_handler = logging_setup.attach_run_log_file(d / "run.log")
+    root = logging.getLogger()
+    console_handler = next(handler for handler in root.handlers if handler is not event_log_handler)
+    assert event_log_handler.level == logging.WARNING
+    assert console_handler.level == logging.WARNING
+    assert run_log_handler.level == logging.DEBUG
     log = logging.getLogger("agent_guardian.test.forensic_seal")
     try:
-        log.info("late completion and gate evaluation")
+        log.warning("late completion and gate evaluation")
+        if event_log_handler.level > logging.INFO:
+            event_log_handler.setLevel(logging.INFO)
         log.info("forensic seal: run.log and events.jsonl complete")
         logging_setup.detach_run_log_file(run_log_handler)
         detach_jsonl_log_handler(event_log_handler)
         manifest_path = write_forensic_manifest(d, "cli-x", "2026-06-07T00:00:00Z")
-        log.info("terminal-only-after-manifest")
+        log.warning("terminal-only-after-manifest")
     finally:
         logging_setup.detach_run_log_file(run_log_handler)
         detach_jsonl_log_handler(event_log_handler)
@@ -90,3 +99,7 @@ def test_jointly_detached_log_digests_stay_valid_after_later_logs(tmp_path: Path
         assert "late completion and gate evaluation" in log_text
         assert "forensic seal: run.log and events.jsonl complete" in log_text
         assert "terminal-only-after-manifest" not in log_text
+    assert console_handler.level == logging.WARNING
+    assert "forensic seal: run.log and events.jsonl complete" not in console.getvalue()
+    assert "late completion and gate evaluation" in console.getvalue()
+    assert "terminal-only-after-manifest" in console.getvalue()
