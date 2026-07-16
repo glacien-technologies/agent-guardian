@@ -141,10 +141,11 @@ usage actually returned before failure.
 
 ### 6. Stable forensic sealing
 
-`attach_run_log_file` will return the exact file handler it installs. The CLI
-will write and flush a final seal marker, remove and close that handler, and
-only then build the forensic manifest. Later terminal or event messages cannot
-append to the sealed file.
+`run.log` and `events.jsonl` remain active through the final gate output so the
+complete operator-visible decision is captured in both evidence streams. The
+CLI then flushes and jointly seals/detaches the run-log handler and event writer
+before building the forensic manifest. Later terminal or event messages cannot
+append to either sealed file.
 
 The detach helper will be idempotent and handler-specific so it cannot remove
 unrelated logging handlers. The manifest continues hashing `run.log`,
