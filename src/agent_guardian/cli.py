@@ -1570,7 +1570,10 @@ def verify(
     pubkey_file: Path | None = typer.Option(
         None,
         "--pubkey-file",
-        help="Read the pinned Ed25519 public key (base32) from this file instead of --pubkey.",
+        help=(
+            "Read the pinned Ed25519 public key (raw 32-byte or base32 text) "
+            "from this file instead of --pubkey."
+        ),
     ),
     secret: str | None = typer.Option(
         None,
@@ -1635,7 +1638,16 @@ def verify(
         if not pubkey_file.is_file():
             typer.echo(f"pubkey file not found: {pubkey_file}", err=True)
             raise typer.Exit(code=EXIT_CONFIG)
-        expected_pubkey = pubkey_file.read_text(encoding="utf-8").strip()
+        from agent_guardian.crypto.ed25519_sig import load_ed25519_public_key
+
+        try:
+            expected_pubkey = load_ed25519_public_key(pubkey_file)
+        except (OSError, ValueError):
+            typer.echo(
+                "invalid Ed25519 public key file: expected a 32-byte raw key or a UTF-8 base32 key",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from None
     # Resolve the HMAC secret (explicit flag > env). verify_signatures itself
     # falls back to AGENT_GUARDIAN_SIGNING_SECRET, but resolving here lets us
     # tell the operator clearly whether *any* anchor was supplied.

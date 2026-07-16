@@ -39,6 +39,7 @@ __all__ = [
     "ED25519_ALGORITHM",
     "Ed25519Keypair",
     "Ed25519SignatureBlock",
+    "load_ed25519_public_key",
     "load_or_create_keypair",
     "sign_ed25519",
     "verify_ed25519",
@@ -74,6 +75,34 @@ def _b32_decode_no_padding(value: str) -> bytes:
     # Re-pad to a multiple of 8 before decoding.
     pad = (-len(value)) % 8
     return base64.b32decode(value + ("=" * pad))
+
+
+def load_ed25519_public_key(path: Path) -> str:
+    """Load a raw or UTF-8 base32 Ed25519 public-key file as base32.
+
+    AgentGuardian persists ``ed25519.pub`` in the 32-byte raw Ed25519 format,
+    while older operator-managed trust-anchor files may contain the report's
+    base32 representation. Invalid content raises ``ValueError`` without
+    including key material in the exception message.
+    """
+    content = path.read_bytes()
+    if len(content) == 32:
+        return _b32_no_padding(content)
+
+    try:
+        encoded = content.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        raise ValueError("invalid Ed25519 public key encoding") from None
+    if not encoded:
+        raise ValueError("invalid Ed25519 public key encoding")
+
+    try:
+        decoded = _b32_decode_no_padding(encoded)
+    except (ValueError, TypeError, base64.binascii.Error):  # type: ignore[attr-defined]
+        raise ValueError("invalid Ed25519 public key encoding") from None
+    if len(decoded) != 32:
+        raise ValueError("invalid Ed25519 public key length")
+    return _b32_no_padding(decoded)
 
 
 def load_or_create_keypair(*, keys_dir: Path | None = None) -> Ed25519Keypair:

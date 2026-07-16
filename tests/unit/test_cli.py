@@ -419,6 +419,89 @@ def test_verify_pinned_pubkey_anchors_genuine_report_without_hmac_secret(
     assert "HMAC-SHA256:  NO-SECRET" in result.stdout
 
 
+def test_verify_pubkey_file_accepts_signer_generated_raw_key(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """The signer-produced ``ed25519.pub`` is the canonical CLI file input."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    keys_dir = tmp_path / "keys"
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path, keys_dir=keys_dir)
+
+    pubkey_file = keys_dir / "ed25519.pub"
+    assert len(pubkey_file.read_bytes()) == 32
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_preserves_base32_text_support(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Existing UTF-8 base32 key files remain valid trust anchors."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    keys_dir = tmp_path / "keys"
+    payload = emit_json(make_scan(), keys_dir=keys_dir)
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    pubkey_file = tmp_path / "ed25519-base32.pub"
+    pubkey_file.write_text(
+        payload["signatures"]["ed25519"]["public_key_b32"] + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "malformed_key",
+    [
+        b"sensitive-binary-key-material\xff",
+        b"sensitive-text-key-material-not-base32",
+    ],
+)
+def test_verify_pubkey_file_rejects_malformed_keys_cleanly(
+    runner: CliRunner, tmp_path: Path, malformed_key: bytes
+) -> None:
+    """Malformed binary or text keys fail without traceback or key disclosure."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path, keys_dir=tmp_path / "keys")
+    pubkey_file = tmp_path / "malformed.pub"
+    pubkey_file.write_bytes(malformed_key)
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+    output = result.stdout + (result.stderr or "")
+
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid Ed25519 public key file" in output
+    assert "UnicodeDecodeError" not in output
+    assert "Traceback" not in output
+    assert "sensitive-" not in output
+    assert not isinstance(result.exception, UnicodeDecodeError)
+
+
 def test_verify_succeeds_with_real_hmac_secret(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
