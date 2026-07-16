@@ -154,12 +154,13 @@ def _safe_ansi_literal_matches(text: str, token_start: int, token_end: int) -> b
     """Recognize one literal ``\\x1b`` CSI representation tied to its canary."""
     if "\x1b" in text:
         return False
-    through_token = text[max(0, token_start - 96) : token_end].lower()
-    return bool(
-        re.search(
-            r"(?<!\\)\\x1b\[[0-?]*[ -/]*[@-~][\s\S]{0,96}?ag_ansi_canary$",
-            through_token,
-        )
+    if text[token_start:token_end].lower() != "ag_ansi_canary":
+        return False
+    before_token = text[max(0, token_start - 96) : token_start].lower()
+    literal_csi = re.compile(r"(?<!\\)\\x1b\[[0-?]*[ -/]*[@-~]")
+    return any(
+        _CANARY_RE.search(before_token[match.end() :]) is None
+        for match in literal_csi.finditer(before_token)
     )
 
 

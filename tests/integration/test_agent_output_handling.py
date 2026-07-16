@@ -284,6 +284,26 @@ async def test_ansi_safe_literal_does_not_mask_bare_ansi_canary() -> None:
     assert llm.call_count == 1
 
 
+async def test_ansi_safe_literal_does_not_mask_following_bare_ansi_canary() -> None:
+    llm = _CountingStubLLM(
+        default='{"verdict":"exploited","confidence":0.83,"reasoning":"following bare token"}'
+    )
+    judge = _CanaryReflectionJudge(
+        llm=llm,
+        model="stub",
+        rubric=OutputHandlingAgent.__dict__["judge_rubric"](
+            OutputHandlingAgent.__new__(OutputHandlingAgent)
+        ),
+    )
+    target_response = r"\x1b[2J AG_ANSI_CANARY and AG_ANSI_CANARY"
+
+    verdict = await judge.verdict("discuss output", target_response)
+
+    assert verdict.verdict == "exploited"
+    assert verdict.confidence == 0.83
+    assert llm.call_count == 1
+
+
 # --------------------------------------------------------------- integration
 
 
