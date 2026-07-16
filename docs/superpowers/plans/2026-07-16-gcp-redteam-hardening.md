@@ -962,7 +962,7 @@ Expected: clean worktree, DCO-signed focused commits, no whitespace errors, and 
 - Malformed files must return a clean user-facing validation error, never `UnicodeDecodeError`.
 - Never log or print key bytes.
 
-- [ ] **Step 1: Add a failing raw-key CLI round-trip test**
-- [ ] **Step 2: Implement format detection and clean validation errors**
-- [ ] **Step 3: Verify focused signing/CLI tests and static checks**
-- [ ] **Step 4: Commit with DCO using `fix(verify): accept raw Ed25519 public keys`**
+- [x] **Step 1: Add a failing raw-key CLI round-trip test**
+- [x] **Step 2: Implement format detection and clean validation errors**
+- [x] **Step 3: Verify focused signing/CLI tests and static checks**
+- [x] **Step 4: Commit with DCO using `fix(verify): accept raw Ed25519 public keys`**

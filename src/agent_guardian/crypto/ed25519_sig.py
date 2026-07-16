@@ -235,7 +235,8 @@ def verify_ed25519(
         return False
     # Trust anchor: pin the embedded key against the expected one (constant-time
     # on the raw key bytes, after normalising the expected key through the same
-    # decode so base32 padding / casing differences don't matter).
+    # decode so base32 padding differences do not matter. Literal and embedded
+    # key casing remains intentionally canonical/case-sensitive.
     if expected_pubkey_b32 is not None:
         try:
             expected_raw = _b32_decode_no_padding(expected_pubkey_b32)
