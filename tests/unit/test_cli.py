@@ -469,6 +469,93 @@ def test_verify_pubkey_file_preserves_base32_text_support(
     assert "trust anchor: PINNED" in result.stdout
 
 
+def test_verify_pubkey_file_accepts_lowercase_base32(runner: CliRunner, tmp_path: Path) -> None:
+    """Base32 text is case-insensitive and normalized before verification."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    pubkey_file = tmp_path / "ed25519-lowercase.pub"
+    pubkey_file.write_text(
+        payload["signatures"]["ed25519"]["public_key_b32"].lower(),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_accepts_exact_base32_padding_and_outer_whitespace(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """A 32-byte key's canonical padded form has exactly four padding bytes."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    pubkey_file = tmp_path / "ed25519-padded.pub"
+    pubkey_file.write_text(f" \t{canonical}====\r\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_rejects_noncanonical_base32_text(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Text keys must have canonical symbols and either zero or four pads."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    alternate_last = alphabet[alphabet.index(canonical[-1]) + 1]
+    malformed = {
+        "partial padding": canonical + "=",
+        "excess padding": canonical + "=====",
+        "misplaced padding": canonical[:24] + "=" + canonical[24:] + "===",
+        "internal whitespace": canonical[:24] + " \n" + canonical[24:],
+        "trailing junk": canonical + "!",
+        "non-zero unused bits": canonical[:-1] + alternate_last,
+    }
+    pubkey_file = tmp_path / "malformed-base32.pub"
+
+    for label, candidate in malformed.items():
+        pubkey_file.write_text(candidate, encoding="utf-8")
+        result = runner.invoke(
+            app,
+            ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+        )
+        output = result.stdout + (result.stderr or "")
+
+        assert result.exit_code == EXIT_CONFIG, label
+        assert "invalid Ed25519 public key file" in output, label
+        assert "UnicodeDecodeError" not in output, label
+        assert "Traceback" not in output, label
+        assert candidate not in output, label
+        assert not isinstance(result.exception, UnicodeDecodeError), label
+
+
 @pytest.mark.parametrize(
     "malformed_key",
     [

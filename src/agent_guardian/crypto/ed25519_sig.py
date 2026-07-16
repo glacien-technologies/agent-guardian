@@ -49,6 +49,9 @@ ED25519_ALGORITHM = "Ed25519"
 DEFAULT_KEYS_DIR = Path.home() / ".agentguardian" / "keys"
 _PRIV_FILENAME = "ed25519.priv"
 _PUB_FILENAME = "ed25519.pub"
+_RAW_PUBLIC_KEY_BYTES = 32
+_PUBLIC_KEY_B32_CHARS = 52
+_PUBLIC_KEY_B32_PADDING = "===="
 
 
 class Ed25519SignatureBlock(TypedDict):
@@ -74,7 +77,7 @@ def _b32_no_padding(raw: bytes) -> str:
 def _b32_decode_no_padding(value: str) -> bytes:
     # Re-pad to a multiple of 8 before decoding.
     pad = (-len(value)) % 8
-    return base64.b32decode(value + ("=" * pad))
+    return base64.b32decode(value + ("=" * pad), casefold=True)
 
 
 def load_ed25519_public_key(path: Path) -> str:
@@ -86,7 +89,7 @@ def load_ed25519_public_key(path: Path) -> str:
     including key material in the exception message.
     """
     content = path.read_bytes()
-    if len(content) == 32:
+    if len(content) == _RAW_PUBLIC_KEY_BYTES:
         return _b32_no_padding(content)
 
     try:
@@ -96,13 +99,30 @@ def load_ed25519_public_key(path: Path) -> str:
     if not encoded:
         raise ValueError("invalid Ed25519 public key encoding")
 
+    if "=" in encoded:
+        padded_length = _PUBLIC_KEY_B32_CHARS + len(_PUBLIC_KEY_B32_PADDING)
+        if (
+            len(encoded) != padded_length
+            or not encoded.endswith(_PUBLIC_KEY_B32_PADDING)
+            or "=" in encoded[: -len(_PUBLIC_KEY_B32_PADDING)]
+        ):
+            raise ValueError("invalid Ed25519 public key padding")
+        unpadded = encoded[: -len(_PUBLIC_KEY_B32_PADDING)]
+    else:
+        if len(encoded) != _PUBLIC_KEY_B32_CHARS:
+            raise ValueError("invalid Ed25519 public key length")
+        unpadded = encoded
+
     try:
-        decoded = _b32_decode_no_padding(encoded)
+        decoded = _b32_decode_no_padding(unpadded)
     except (ValueError, TypeError, base64.binascii.Error):  # type: ignore[attr-defined]
         raise ValueError("invalid Ed25519 public key encoding") from None
-    if len(decoded) != 32:
+    if len(decoded) != _RAW_PUBLIC_KEY_BYTES:
         raise ValueError("invalid Ed25519 public key length")
-    return _b32_no_padding(decoded)
+    canonical = _b32_no_padding(decoded)
+    if unpadded.upper() != canonical:
+        raise ValueError("non-canonical Ed25519 public key encoding")
+    return canonical
 
 
 def load_or_create_keypair(*, keys_dir: Path | None = None) -> Ed25519Keypair:
