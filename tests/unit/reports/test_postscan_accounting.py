@@ -39,6 +39,64 @@ def test_fold_postscan_usage_updates_scan_and_budget() -> None:
     assert updated.budget.pct_of_cap == pytest.approx((0.010 + expected_extra) / 0.02)
 
 
+def test_fold_postscan_usage_uses_separate_scan_and_budget_cost_baselines() -> None:
+    scan = make_scan().model_copy(
+        update={
+            "cost_usd": 0.010,
+            "budget": BudgetReport(cap_usd=0.05, spent_usd=0.020, pct_of_cap=0.4),
+        }
+    )
+    counter = UsageCounter(prompt_tokens=1_000, completion_tokens=2_000, total_tokens=3_000)
+
+    updated = fold_postscan_usage(scan, counter, "vertex:gemini-2.5-flash")
+
+    expected_extra = tokens_to_usd("vertex:gemini-2.5-flash", 1_000, 2_000)
+    assert updated.cost_usd == pytest.approx(0.010 + expected_extra)
+    assert updated.budget is not None
+    assert updated.budget.spent_usd == pytest.approx(0.020 + expected_extra)
+    assert updated.budget.pct_of_cap == pytest.approx((0.020 + expected_extra) / 0.05)
+
+
+def test_fold_postscan_usage_keeps_uncapped_budget_percentage_unset() -> None:
+    scan = make_scan().model_copy(
+        update={"budget": BudgetReport(cap_usd=None, spent_usd=0.04, pct_of_cap=None)}
+    )
+
+    updated = fold_postscan_usage(scan, UsageCounter(total_tokens=5), "stub")
+
+    assert updated.budget is not None
+    assert updated.budget.pct_of_cap is None
+
+
+def test_fold_postscan_usage_keeps_zero_cap_budget_percentage_unset() -> None:
+    scan = make_scan().model_copy(
+        update={"budget": BudgetReport(cap_usd=0.0, spent_usd=0.04, pct_of_cap=None)}
+    )
+
+    updated = fold_postscan_usage(scan, UsageCounter(total_tokens=5), "stub")
+
+    assert updated.budget is not None
+    assert updated.budget.pct_of_cap is None
+
+
+def test_fold_postscan_usage_does_not_mutate_original_scan_or_budget() -> None:
+    budget = BudgetReport(cap_usd=0.05, spent_usd=0.02, pct_of_cap=0.4)
+    scan = make_scan().model_copy(update={"cost_usd": 0.01, "budget": budget})
+    original_scan = scan.model_dump(mode="json")
+    original_budget = budget.model_dump(mode="json")
+
+    updated = fold_postscan_usage(
+        scan,
+        UsageCounter(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+        "vertex:gemini-2.5-flash",
+    )
+
+    assert updated is not scan
+    assert updated.budget is not budget
+    assert scan.model_dump(mode="json") == original_scan
+    assert budget.model_dump(mode="json") == original_budget
+
+
 def test_summary_reservation_prices_every_graded_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

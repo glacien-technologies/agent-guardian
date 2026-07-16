@@ -21,7 +21,53 @@ from agent_guardian.cli import (
     app,
     build_llm,
 )
+from agent_guardian.core.budget import tokens_to_usd
 from agent_guardian.llm import GeminiClient, OpenAIClient, StubLLM
+from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.reports import postscan
+
+_PAID_SUMMARY_MODEL = "vertex:gemini-2.5-flash"
+_SUMMARY_PROMPT_TOKENS = 11
+_SUMMARY_COMPLETION_TOKENS = 7
+_SUMMARY_TOTAL_TOKENS = 18
+
+
+class _DeterministicSummaryLLM(StubLLM):
+    """Network-free summary client with exact provider usage and close tracking."""
+
+    def __init__(self, *, fail_on_calls: set[int] | None = None) -> None:
+        super().__init__()
+        self.calls = 0
+        self.successful_calls = 0
+        self.failed_calls = 0
+        self.closed = False
+        self._fail_on_calls = fail_on_calls or set()
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.calls += 1
+        if self.calls in self._fail_on_calls:
+            self.failed_calls += 1
+            raise RuntimeError("deterministic summary failure")
+        self.successful_calls += 1
+        return LLMResponse(
+            text=(
+                "The target consistently refused the unauthorized request and preserved "
+                "the protected data throughout the completed adversarial exchange."
+            ),
+            model=request.model,
+            provider="vertex",
+            usage=LLMUsage(
+                prompt_tokens=_SUMMARY_PROMPT_TOKENS,
+                completion_tokens=_SUMMARY_COMPLETION_TOKENS,
+                total_tokens=_SUMMARY_TOTAL_TOKENS,
+            ),
+            finish_reason="stop",
+            raw={"fixture": "deterministic-summary"},
+        )
+
+    async def aclose(self) -> None:
+        self.closed = True
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,6 +89,62 @@ def _extract_scan_id_from_summary(stdout: str) -> str:
             return line.split()[1]
     raise AssertionError(
         f"could not find a `scan <id> done: ...` summary line in stdout:\n{stdout}"
+    )
+
+
+def _install_paid_summary_llm(
+    monkeypatch: pytest.MonkeyPatch,
+    summary_llm: _DeterministicSummaryLLM,
+) -> list[tuple[int, float, dict[str, int], str]]:
+    """Keep the scan offline while exercising real summary generation/accounting."""
+    original_build_llm = cli_module.build_llm
+    evaluator_builds = 0
+
+    def offline_build_llm(model_spec: str, role: str):  # type: ignore[no-untyped-def]
+        nonlocal evaluator_builds
+        if role == "evaluator":
+            evaluator_builds += 1
+            if evaluator_builds == 2:
+                return summary_llm
+        return original_build_llm("stub", role)
+
+    monkeypatch.setattr(cli_module, "build_llm", offline_build_llm)
+
+    fold_inputs: list[tuple[int, float, dict[str, int], str]] = []
+    original_fold = postscan.fold_postscan_usage
+
+    def recording_fold(scan, counter, model_spec):  # type: ignore[no-untyped-def]
+        fold_inputs.append((scan.tokens_total, scan.cost_usd, counter.snapshot(), model_spec))
+        return original_fold(scan, counter, model_spec)
+
+    monkeypatch.setattr(postscan, "fold_postscan_usage", recording_fold)
+    return fold_inputs
+
+
+def _invoke_paid_summary_scan(
+    runner: CliRunner,
+    tmp_path: Path,
+    output_path: Path,
+):  # type: ignore[no-untyped-def]
+    prompt = tmp_path / "paid-summary-prompt.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    return runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--evaluator-model",
+            _PAID_SUMMARY_MODEL,
+            "--no-preflight",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(output_path),
+        ],
     )
 
 
@@ -1017,6 +1119,87 @@ def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path
     selected = json.loads(out_path.read_text(encoding="utf-8"))
     assert canonical["tokens_total"] == raw["tokens_total"] == selected["tokens_total"]
     assert canonical["cost_usd"] == raw["cost_usd"] == selected["cost_usd"]
+
+
+def test_scan_folds_successful_paid_summary_usage_into_every_json_report(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM()
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "paid-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.calls > 0
+    assert summary_llm.successful_calls == summary_llm.calls
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["prompt_tokens"] == summary_llm.calls * _SUMMARY_PROMPT_TOKENS
+    assert usage["completion_tokens"] == summary_llm.calls * _SUMMARY_COMPLETION_TOKENS
+    assert usage["total_tokens"] == summary_llm.calls * _SUMMARY_TOTAL_TOKENS
+    expected_tokens = original_tokens + usage["total_tokens"]
+    expected_cost = original_cost + tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    summaries = json.loads((scan_dir / "probe" / "summaries.json").read_text(encoding="utf-8"))
+    assert len(summaries["summaries"]) == summary_llm.successful_calls
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
+
+
+def test_scan_folds_successful_usage_when_another_summary_call_fails(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM(fail_on_calls={2})
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "mixed-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.failed_calls == 1
+    assert summary_llm.successful_calls > 0
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["calls"] == summary_llm.successful_calls
+    assert usage["prompt_tokens"] == summary_llm.successful_calls * _SUMMARY_PROMPT_TOKENS
+    assert usage["completion_tokens"] == (summary_llm.successful_calls * _SUMMARY_COMPLETION_TOKENS)
+    assert usage["total_tokens"] == summary_llm.successful_calls * _SUMMARY_TOTAL_TOKENS
+    expected_tokens = original_tokens + usage["total_tokens"]
+    expected_cost = original_cost + tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    summaries = json.loads((scan_dir / "probe" / "summaries.json").read_text(encoding="utf-8"))
+    assert len(summaries["summaries"]) == summary_llm.successful_calls
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
 
 
 def test_scan_skips_probe_summaries_when_reservation_exceeds_budget(
