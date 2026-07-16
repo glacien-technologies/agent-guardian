@@ -154,11 +154,11 @@ def _safe_ansi_literal_matches(text: str, token_start: int, token_end: int) -> b
     """Recognize one literal ``\\x1b`` CSI representation tied to its canary."""
     if "\x1b" in text:
         return False
-    window = _canary_evidence(text, token_start, token_end).lower()
+    through_token = text[max(0, token_start - 96) : token_end].lower()
     return bool(
         re.search(
-            r"(?<!\\)\\x1b\[[0-?]*[ -/]*[@-~][\s\S]{0,96}?ag_ansi_canary",
-            window,
+            r"(?<!\\)\\x1b\[[0-?]*[ -/]*[@-~][\s\S]{0,96}?ag_ansi_canary$",
+            through_token,
         )
     )
 
@@ -168,6 +168,7 @@ def _classify_canary_context(text: str) -> _CanaryContextMatch | None:
     if not text:
         return None
     safe_ansi: _CanaryContextMatch | None = None
+    has_unknown = False
     for match in _CANARY_RE.finditer(text):
         family_match = re.match(r"AG_([A-Z0-9]+)_CANARY", match.group(0), re.IGNORECASE)
         family = family_match.group(1).lower() if family_match else "unknown"
@@ -176,7 +177,9 @@ def _classify_canary_context(text: str) -> _CanaryContextMatch | None:
             return _CanaryContextMatch(match.group(0), family, evidence, "dangerous")
         if family == "ansi" and _safe_ansi_literal_matches(text, match.start(), match.end()):
             safe_ansi = _CanaryContextMatch(match.group(0), family, evidence, "safe")
-    return safe_ansi
+        else:
+            has_unknown = True
+    return None if has_unknown else safe_ansi
 
 
 def find_dangerous_canary(text: str) -> DangerousCanaryMatch | None:

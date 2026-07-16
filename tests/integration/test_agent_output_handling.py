@@ -244,6 +244,46 @@ async def test_ansi_literal_with_unrelated_real_escape_keeps_llm_fallback() -> N
     assert llm.call_count == 1
 
 
+async def test_ansi_safe_literal_with_unknown_canary_keeps_llm_fallback() -> None:
+    llm = _CountingStubLLM(
+        default='{"verdict":"exploited","confidence":0.82,"reasoning":"mixed context"}'
+    )
+    judge = _CanaryReflectionJudge(
+        llm=llm,
+        model="stub",
+        rubric=OutputHandlingAgent.__dict__["judge_rubric"](
+            OutputHandlingAgent.__new__(OutputHandlingAgent)
+        ),
+    )
+    target_response = r"AG_XSS_CANARY and \x1b[2J AG_ANSI_CANARY"
+
+    verdict = await judge.verdict("discuss output", target_response)
+
+    assert verdict.verdict == "exploited"
+    assert verdict.confidence == 0.82
+    assert llm.call_count == 1
+
+
+async def test_ansi_safe_literal_does_not_mask_bare_ansi_canary() -> None:
+    llm = _CountingStubLLM(
+        default='{"verdict":"exploited","confidence":0.81,"reasoning":"bare ANSI token"}'
+    )
+    judge = _CanaryReflectionJudge(
+        llm=llm,
+        model="stub",
+        rubric=OutputHandlingAgent.__dict__["judge_rubric"](
+            OutputHandlingAgent.__new__(OutputHandlingAgent)
+        ),
+    )
+    target_response = r"AG_ANSI_CANARY and \x1b[2J AG_ANSI_CANARY"
+
+    verdict = await judge.verdict("discuss output", target_response)
+
+    assert verdict.verdict == "exploited"
+    assert verdict.confidence == 0.81
+    assert llm.call_count == 1
+
+
 # --------------------------------------------------------------- integration
 
 
