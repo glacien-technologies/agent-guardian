@@ -12,10 +12,9 @@ future edit cannot silently regress.
 
 from __future__ import annotations
 
-from agent_guardian.agents.output_handling_agent import (
-    OutputHandlingAgent,
-    reflects_canary,
-)
+import re
+
+from agent_guardian.agents.output_handling_agent import OutputHandlingAgent
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.probes.loader import (
     load_probes_for_asi,
@@ -73,10 +72,11 @@ def test_reflected_script_injection_seeds_carry_canary_tokens() -> None:
     ]
     assert seeds, "expected ASI09-OH-003 seeds in the corpus"
     for seed in seeds:
-        match = reflects_canary(seed.text)
+        match = re.search(r"AG_[A-Z0-9]+_CANARY", seed.text, re.IGNORECASE)
         assert match is not None, f"ASI09-OH-003 seed has no canary: text[:120]={seed.text[:120]!r}"
-        assert match.upper().startswith(("AG_XSS_CANARY", "AG_IMGERR_CANARY")), (
-            f"ASI09-OH-003 seed canary expected XSS/IMGERR vector, got {match!r}"
+        token = match.group(0)
+        assert token.upper().startswith(("AG_XSS_CANARY", "AG_IMGERR_CANARY")), (
+            f"ASI09-OH-003 seed canary expected XSS/IMGERR vector, got {token!r}"
         )
 
 
