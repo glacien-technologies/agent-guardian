@@ -14,6 +14,7 @@ from agent_guardian.cost import (
     PriceRow,
     estimate_scan_cost,
     lookup_price,
+    token_cost_usd,
 )
 
 # ---------------------------------------------------------------------------
@@ -84,8 +85,8 @@ def test_lookup_gemini_31_pro_preview_uses_table_price() -> None:
     """The flagship 3.1 Pro Preview SKU resolves via the AI Studio rows."""
     row = lookup_price("gemini:gemini-3.1-pro-preview")
     assert row.provider == "gemini"
-    assert row.input_per_1m == pytest.approx(1.250)
-    assert row.output_per_1m == pytest.approx(10.000)
+    assert row.input_per_1m == pytest.approx(2.000)
+    assert row.output_per_1m == pytest.approx(12.000)
 
 
 def test_lookup_gemini_35_flash_table_price() -> None:
@@ -105,8 +106,36 @@ def test_lookup_vertex_gemini_35_flash_table_price() -> None:
 def test_lookup_gemini_31_flash_lite_table_price() -> None:
     row = lookup_price("gemini:gemini-3.1-flash-lite")
     assert row.provider == "gemini"
-    assert row.input_per_1m == pytest.approx(0.075)
-    assert row.output_per_1m == pytest.approx(0.300)
+    assert row.input_per_1m == pytest.approx(0.250)
+    assert row.output_per_1m == pytest.approx(1.500)
+
+
+@pytest.mark.parametrize(
+    ("model_spec", "input_rate", "output_rate"),
+    [
+        ("gemini:gemini-3.1-pro-preview+region=global", 2.00, 12.00),
+        ("vertex:gemini-3.1-pro-preview+project=p+location=global", 2.00, 12.00),
+        ("gemini:gemini-3.1-flash-lite+api_version=v1beta", 0.25, 1.50),
+        ("vertex:gemini-3.1-flash-lite+project=p", 0.25, 1.50),
+        ("gemini:gemini-2.5-flash-lite+api_version=v1beta", 0.10, 0.40),
+        ("vertex:gemini-2.5-flash-lite+project=p", 0.10, 0.40),
+    ],
+)
+def test_google_standard_rows_resolve_qualified_specs(
+    model_spec: str,
+    input_rate: float,
+    output_rate: float,
+) -> None:
+    row = lookup_price(model_spec)
+    assert row.input_per_1m == pytest.approx(input_rate)
+    assert row.output_per_1m == pytest.approx(output_rate)
+
+
+@pytest.mark.parametrize("provider", ["gemini", "vertex"])
+def test_gemini_31_pro_long_context_uses_high_price_tier(provider: str) -> None:
+    actual = token_cost_usd(f"{provider}:gemini-3.1-pro-preview", 200_001, 1_000_000)
+    expected = (200_001 / 1_000_000) * 4.00 + 18.00
+    assert actual == pytest.approx(expected)
 
 
 def test_lookup_gemini_heuristic_routes_to_gemini_provider() -> None:
@@ -281,3 +310,16 @@ def test_estimate_is_deterministic() -> None:
         evaluator_model="claude-haiku-4-5",
     )
     assert a == b
+
+
+def test_estimate_applies_long_context_tier_per_role_slice() -> None:
+    cost = estimate_scan_cost(
+        commander_model="gemini:gemini-3.1-pro-preview",
+        attacker_model="gemini:gemini-3.1-pro-preview",
+        evaluator_model="gemini:gemini-3.1-pro-preview",
+        total_tokens=1_000_000,
+    )
+
+    # Commander 75k and evaluator 175k remain in the short tier; only the
+    # attacker's 750k slice has >200k input under the estimator's 50/50 split.
+    assert cost == pytest.approx(10.0)

@@ -17,9 +17,10 @@ Concurrency: the counter uses :class:`asyncio.Lock` so simultaneous
 :meth:`complete` calls from a TaskGroup don't lose counts on read-modify-
 write of the running totals.
 
-Cost note: tokens times the per-model rate is computed elsewhere (see
-:mod:`agent_guardian.cost`). This module records the raw counts only —
-keeping the pricing concern out of the LLM transport layer.
+Tiered pricing is request-scoped, so the wrapper also accumulates each
+response's cost while the request model and response usage are still paired.
+Aggregate token counters alone cannot distinguish one long-context request
+from many short requests whose cumulative input crosses the same threshold.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from agent_guardian.cost import token_cost_usd
 from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse
 
 __all__ = ["UsageCounter", "UsageTrackingLLM"]
@@ -53,14 +55,29 @@ class UsageCounter:
     total_tokens: int = 0
     calls: int = 0
     unseeded_llm_calls: int = 0
+    # ``None`` marks a legacy/manually populated counter whose request
+    # boundaries are unknown. Swarm accounting then falls back to pricing the
+    # aggregate tokens. A tracked counter starts exact on its first response.
+    priced_cost_usd: float | None = None
 
-    def add_response(self, response: LLMResponse) -> None:
+    def add_response(self, response: LLMResponse, *, model_spec: str | None = None) -> None:
         """Fold one :class:`LLMResponse`'s usage into the counter."""
         usage = response.usage
+        had_unpriced_usage = self.priced_cost_usd is None and any(
+            (self.prompt_tokens, self.completion_tokens, self.total_tokens, self.calls)
+        )
         self.prompt_tokens += int(usage.prompt_tokens)
         self.completion_tokens += int(usage.completion_tokens)
         self.total_tokens += int(usage.total_tokens)
         self.calls += 1
+        if model_spec is None or had_unpriced_usage:
+            self.priced_cost_usd = None
+        else:
+            self.priced_cost_usd = (self.priced_cost_usd or 0.0) + token_cost_usd(
+                model_spec,
+                int(usage.prompt_tokens),
+                int(usage.completion_tokens),
+            )
 
     def note_request(self, request: LLMRequest) -> None:
         """Record dispatch-side signals for ``request`` (#231 point 5).
@@ -73,11 +90,24 @@ class UsageCounter:
 
     def merge(self, other: UsageCounter) -> None:
         """Fold another counter's totals into this one. Useful for aggregation."""
+        self_has_unpriced_usage = self.priced_cost_usd is None and any(
+            (self.prompt_tokens, self.completion_tokens, self.total_tokens, self.calls)
+        )
+        other_has_unpriced_usage = other.priced_cost_usd is None and any(
+            (other.prompt_tokens, other.completion_tokens, other.total_tokens, other.calls)
+        )
+        if self_has_unpriced_usage or other_has_unpriced_usage:
+            merged_cost: float | None = None
+        elif self.priced_cost_usd is not None or other.priced_cost_usd is not None:
+            merged_cost = (self.priced_cost_usd or 0.0) + (other.priced_cost_usd or 0.0)
+        else:
+            merged_cost = None
         self.prompt_tokens += other.prompt_tokens
         self.completion_tokens += other.completion_tokens
         self.total_tokens += other.total_tokens
         self.calls += other.calls
         self.unseeded_llm_calls += other.unseeded_llm_calls
+        self.priced_cost_usd = merged_cost
 
     def snapshot(self) -> dict[str, int]:
         """Return a plain-dict snapshot for serialisation into reports."""
@@ -120,7 +150,7 @@ class UsageTrackingLLM(BaseLLM):
             self.counter.note_request(request)
         response = await self._inner.complete(request)
         async with self._lock:
-            self.counter.add_response(response)
+            self.counter.add_response(response, model_spec=request.model)
         return response
 
     async def aclose(self) -> None:

@@ -25,6 +25,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.gemini import GeminiClient
+from agent_guardian.llm.usage_tracking import UsageTrackingLLM
 
 _HAPPY_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
@@ -112,12 +113,14 @@ async def test_budget_settlement_prices_gemini_thinking_tokens() -> None:
     )
     respx.post(url).mock(return_value=Response(200, json=body))
     inner = GeminiClient(api_key="k", rate_limiter=None)
+    tracked = UsageTrackingLLM(inner)
     ledger = BudgetLedger(BudgetEnvelope(usd_cap=1.0, token_cap=10_000, wallclock_cap_s=60.0))
-    llm = BudgetAdmissionLLM(inner, ledger=ledger, agent_id="evaluator")
+    llm = BudgetAdmissionLLM(tracked, ledger=ledger, agent_id="evaluator")
 
     await llm.complete(_req(model=model))
 
     assert ledger.spent_usd == pytest.approx(tokens_to_usd(model, 10, 20))
+    assert tracked.counter.priced_cost_usd == pytest.approx(tokens_to_usd(model, 10, 20))
     await inner.aclose()
 
 

@@ -2246,10 +2246,17 @@ class SwarmCommander:
                 if counter.total_tokens > 0
                 else counter.prompt_tokens + counter.completion_tokens
             )
-            cost_usd += max(
-                tokens_to_usd(model, counter.prompt_tokens, counter.completion_tokens)
-                for model in models
-            )
+            if counter.priced_cost_usd is not None:
+                # Exact sum captured while every response was still paired
+                # with its request model and per-request prompt-length tier.
+                cost_usd += counter.priced_cost_usd
+            else:
+                # Legacy/manually populated counters lack request boundaries.
+                # Retain the conservative aggregate-token fallback.
+                cost_usd += max(
+                    tokens_to_usd(model, counter.prompt_tokens, counter.completion_tokens)
+                    for model in models
+                )
 
         if include_report_fallback:
             for report in self._agent_reports:

@@ -113,21 +113,22 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     # pricing table at https://ai.google.dev/gemini-api/docs/pricing.
     # Output rates include thinking tokens. Re-check before relying on these
     # numbers; this dated table is not a future-price guarantee.
-    PriceRow("gemini", "gemini-3.1-pro-preview", 1.250, 10.000),
+    PriceRow("gemini", "gemini-3.1-pro-preview", 2.000, 12.000),
     PriceRow("gemini", "gemini-3.5-flash", 1.500, 9.000),
-    PriceRow("gemini", "gemini-3.1-flash-lite", 0.075, 0.300),
+    PriceRow("gemini", "gemini-3.1-flash-lite", 0.250, 1.500),
     PriceRow("gemini", "gemini-2.5-pro", 1.250, 10.000),
     PriceRow("gemini", "gemini-2.5-flash", 0.300, 2.500),
-    PriceRow("gemini", "gemini-2.5-flash-lite", 0.075, 0.300),
+    PriceRow("gemini", "gemini-2.5-flash-lite", 0.100, 0.400),
     # Vertex AI — Gemini family list prices (parity with the AI Studio
     # surface; pricing is the same per-token on the Vertex SKU).
     PriceRow("vertex", "gemini-2.5-pro", 1.25, 10.00),
     PriceRow("vertex", "gemini-2.5-flash", 0.30, 2.50),
-    PriceRow("vertex", "gemini-2.5-flash-lite", 0.075, 0.300),
+    PriceRow("vertex", "gemini-2.5-flash-lite", 0.100, 0.400),
     PriceRow("vertex", "gemini-2.0-flash", 0.15, 0.60),
     PriceRow("vertex", "gemini-2.0-flash-lite", 0.075, 0.30),
-    PriceRow("vertex", "gemini-3.1-pro-preview", 1.250, 10.000),
+    PriceRow("vertex", "gemini-3.1-pro-preview", 2.000, 12.000),
     PriceRow("vertex", "gemini-3.5-flash", 1.500, 9.000),
+    PriceRow("vertex", "gemini-3.1-flash-lite", 0.250, 1.500),
     # Azure OpenAI — the model_id is the user-chosen DEPLOYMENT name, so we
     # cannot map it to a SKU. Use a single wildcard priced at the OpenAI
     # gpt-4o list rate (the common default) so the pre-flight estimate is
@@ -219,22 +220,18 @@ def lookup_price(model_spec: str) -> PriceRow:
 
 
 def token_cost_usd(model_spec: str, input_tokens: int, output_tokens: int) -> float:
-    """Price observed tokens, including Gemini's prompt-length tier.
-
-    Gemini 2.5 Pro Standard charges the higher rate for the entire request
-    when its input exceeds 200k tokens: $2.50/M input and $15/M output,
-    including thinking tokens. Other rows use their table rates.
-    """
+    """Price one request's observed tokens, including prompt-length tiers."""
     row = lookup_price(model_spec)
     input_rate = row.input_per_1m
     output_rate = row.output_per_1m
-    if (
-        row.provider in {"gemini", "vertex"}
-        and row.model == "gemini-2.5-pro"
-        and input_tokens > 200_000
-    ):
-        input_rate = max(input_rate, 2.50)
-        output_rate = max(output_rate, 15.00)
+    google_long_context_rates = {
+        "gemini-2.5-pro": (2.50, 15.00),
+        "gemini-3.1-pro-preview": (4.00, 18.00),
+    }
+    if row.provider in {"gemini", "vertex"} and input_tokens > 200_000:
+        long_rates = google_long_context_rates.get(row.model)
+        if long_rates is not None:
+            input_rate, output_rate = long_rates
     return (input_tokens / 1_000_000.0) * input_rate + (output_tokens / 1_000_000.0) * output_rate
 
 
@@ -278,14 +275,11 @@ def estimate_scan_cost(
     def _cost(model: str, tokens: int) -> float:
         if tokens <= 0:
             return 0.0
-        row = lookup_price(model)
         # 50/50 input/output split. Rates are USD per 1M tokens (see the
         # ``PriceRow`` docstring) — divide by 1_000_000 to convert.
         input_tokens = tokens // 2
         output_tokens = tokens - input_tokens
-        return (input_tokens / 1_000_000.0) * row.input_per_1m + (
-            output_tokens / 1_000_000.0
-        ) * row.output_per_1m
+        return token_cost_usd(model, input_tokens, output_tokens)
 
     total = (
         _cost(commander_model, commander_tokens)

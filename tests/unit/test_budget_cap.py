@@ -18,6 +18,7 @@ from agent_guardian.agents.base import AgentReport
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
 from agent_guardian.core.budget import BudgetExhausted, tokens_to_usd
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
+from agent_guardian.cost import token_cost_usd
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.budget_admission import admission_reservation_usd
 from agent_guardian.llm.stub import StubLLM
@@ -106,6 +107,29 @@ class _BlockingPaidLLM(BaseLLM):
             model=request.model,
             provider=self.provider,
             usage=usage,
+        )
+
+
+class _FixedUsageLLM(BaseLLM):
+    """Provider double with deterministic response usage per request."""
+
+    provider = "gemini"
+
+    def __init__(self, *, prompt_tokens: int, completion_tokens: int) -> None:
+        super().__init__(owns_client=False)
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        return LLMResponse(
+            text='{"verdict":"pass","confidence":0.9,"reasoning":"ok"}',
+            model=request.model,
+            provider=self.provider,
+            usage=LLMUsage(
+                prompt_tokens=self.prompt_tokens,
+                completion_tokens=self.completion_tokens,
+                total_tokens=self.prompt_tokens + self.completion_tokens,
+            ),
         )
 
 
@@ -366,6 +390,72 @@ async def test_shared_pretracked_counter_is_aggregated_once_in_live_and_scan() -
     scan = await swarm._phase_finalise()
     assert scan.tokens_total == 3_000
     assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_shared_pretracked_counter_preserves_per_request_tiers_in_swarm_rollup() -> None:
+    model = "gemini:gemini-3.1-pro-preview"
+    shared = UsageTrackingLLM(_FixedUsageLLM(prompt_tokens=1_000, completion_tokens=100))
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="per-request-tier",
+            attacker_model=model,
+            evaluator_model=model,
+            commander_model=model,
+        ),
+        target=target,
+        attacker_llm=shared,
+        evaluator_llm=shared,
+        commander_llm=shared,
+    )
+    request = LLMRequest(messages=[LLMMessage(role="user", content="x")], model=model)
+
+    for _ in range(201):
+        await shared.complete(request)
+
+    expected_cost = 201 * token_cost_usd(model, 1_000, 100)
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total == 201 * 1_100
+    assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_distinct_panel_and_recon_counters_keep_exact_request_costs() -> None:
+    model = "gemini:gemini-3.1-pro-preview"
+    attacker = _FixedUsageLLM(prompt_tokens=1_000, completion_tokens=100)
+    evaluator = _FixedUsageLLM(prompt_tokens=2_000, completion_tokens=200)
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="panel-recon-cost",
+            attacker_model=model,
+            evaluator_model=model,
+            commander_model=model,
+        ),
+        target=target,
+        attacker_llm=attacker,
+        evaluator_llm=evaluator,
+    )
+    assert swarm._panel_judge is not None
+    await swarm._panel_judge.verdict("attack", "target response")
+
+    recon_counter = UsageCounter()
+    recon = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=500, completion_tokens=50),
+        counter=recon_counter,
+    )
+    await recon.complete(LLMRequest(messages=[LLMMessage(role="user", content="x")], model=model))
+    swarm._recon_usage = recon_counter
+
+    expected_cost = (
+        token_cost_usd(model, 1_000, 100)
+        + token_cost_usd(model, 2_000, 200)
+        + token_cost_usd(model, 500, 50)
+    )
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
 
 
 # ----------------------------------------------------------------- report blocks
