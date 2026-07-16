@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import pytest
@@ -62,6 +63,53 @@ def test_parse_verdict_embedded_in_preamble() -> None:
     assert v is not None
     # legacy "pass" -> "defended"
     assert v.verdict == "defended"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '```json\n{"verdict":"defended","confidence":0.9}\n```',
+        'Result follows: {"verdict":"defended","confidence":0.9,"reasoning":"brace } in string"}',
+    ],
+)
+def test_parse_verdict_accepts_one_wrapped_json_object(text: str) -> None:
+    parsed = _parse_verdict_payload(text)
+    assert parsed is not None
+    assert parsed.verdict == "defended"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"verdict":"defended"} {"verdict":"exploited"}',
+        '[{"verdict":"defended"}]',
+        '```json\n{"verdict":"defended"\n```',
+    ],
+)
+def test_parse_verdict_rejects_ambiguous_or_truncated_json(text: str) -> None:
+    assert _parse_verdict_payload(text) is None
+
+
+def test_parse_verdict_wrapped_success_does_not_log_json_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    text = '```json\n{"verdict":"defended","confidence":0.9}\n```'
+
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.agents.base"):
+        parsed = _parse_verdict_payload(text)
+
+    assert parsed is not None
+    assert "json parse failed" not in caplog.text
+
+
+def test_parse_verdict_rejection_logs_single_object_diagnostic(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.DEBUG, logger="agent_guardian.agents.base"):
+        parsed = _parse_verdict_payload("not json at all")
+
+    assert parsed is None
+    assert "no single JSON object found" in caplog.text
 
 
 def test_parse_verdict_invalid_verdict_returns_none() -> None:

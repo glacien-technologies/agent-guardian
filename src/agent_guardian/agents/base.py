@@ -586,15 +586,54 @@ def _clean_followup_probe(raw: str) -> str:
     return s
 
 
+def _extract_single_json_object(text: str) -> dict[str, Any] | None:
+    """Extract exactly one complete JSON object from possibly wrapped text."""
+    stripped = text.strip()
+    direct = _try_json(stripped, log_failure=False)
+    if isinstance(direct, dict):
+        return direct
+    if direct is not None:
+        _LOG.debug("judge: no single JSON object found in text[:60]=%r", stripped[:60])
+        return None
+
+    objects: list[dict[str, Any]] = []
+    depth = 0
+    start: int | None = None
+    in_string = False
+    escaped = False
+    for index, char in enumerate(stripped):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidate = _try_json(stripped[start : index + 1], log_failure=False)
+                if isinstance(candidate, dict):
+                    objects.append(candidate)
+                start = None
+
+    if depth == 0 and len(objects) == 1:
+        return objects[0]
+    _LOG.debug("judge: no single JSON object found in text[:60]=%r", stripped[:60])
+    return None
+
+
 def _parse_verdict_payload(text: str) -> JudgeVerdict | None:
     """Try to extract a :class:`JudgeVerdict` from the evaluator's reply."""
-    stripped = text.strip()
-    payload = _try_json(stripped)
+    payload = _extract_single_json_object(text)
     if payload is None:
-        match = re.search(r"\{.*\}", stripped, re.DOTALL)
-        if match:
-            payload = _try_json(match.group(0))
-    if not isinstance(payload, dict):
         return None
     raw_verdict = str(payload.get("verdict", "")).strip().lower()
     # Accept the six v2 verdicts AND the legacy three; normalize onto the v2
@@ -643,11 +682,12 @@ def _parse_verdict_payload(text: str) -> JudgeVerdict | None:
         return None
 
 
-def _try_json(text: str) -> Any:
+def _try_json(text: str, *, log_failure: bool = True) -> Any:
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError) as exc:
-        _LOG.debug("json parse failed (%s) on text[:60]=%r", exc, text[:60])
+        if log_failure:
+            _LOG.debug("json parse failed (%s) on text[:60]=%r", exc, text[:60])
         return None
 
 
