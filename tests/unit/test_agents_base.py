@@ -70,6 +70,7 @@ def test_parse_verdict_embedded_in_preamble() -> None:
     [
         '```json\n{"verdict":"defended","confidence":0.9}\n```',
         'Result follows: {"verdict":"defended","confidence":0.9,"reasoning":"brace } in string"}',
+        'Result follows: {"verdict":"defended","reasoning":"escaped quote \\" then braces { } in string"}',
     ],
 )
 def test_parse_verdict_accepts_one_wrapped_json_object(text: str) -> None:
@@ -84,6 +85,8 @@ def test_parse_verdict_accepts_one_wrapped_json_object(text: str) -> None:
         '{"verdict":"defended"} {"verdict":"exploited"}',
         '[{"verdict":"defended"}]',
         '```json\n{"verdict":"defended"\n```',
+        '} {"verdict":"defended"}',
+        '{"verdict":"defended"} }',
     ],
 )
 def test_parse_verdict_rejects_ambiguous_or_truncated_json(text: str) -> None:

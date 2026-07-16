@@ -601,6 +601,7 @@ def _extract_single_json_object(text: str) -> dict[str, Any] | None:
     start: int | None = None
     in_string = False
     escaped = False
+    unbalanced = False
     for index, char in enumerate(stripped):
         if in_string:
             if escaped:
@@ -616,15 +617,18 @@ def _extract_single_json_object(text: str) -> dict[str, Any] | None:
             if depth == 0:
                 start = index
             depth += 1
-        elif char == "}" and depth:
-            depth -= 1
-            if depth == 0 and start is not None:
-                candidate = _try_json(stripped[start : index + 1], log_failure=False)
-                if isinstance(candidate, dict):
-                    objects.append(candidate)
-                start = None
+        elif char == "}":
+            if depth == 0:
+                unbalanced = True
+            else:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    candidate = _try_json(stripped[start : index + 1], log_failure=False)
+                    if isinstance(candidate, dict):
+                        objects.append(candidate)
+                    start = None
 
-    if depth == 0 and len(objects) == 1:
+    if not unbalanced and depth == 0 and len(objects) == 1:
         return objects[0]
     _LOG.debug("judge: no single JSON object found in text[:60]=%r", stripped[:60])
     return None
