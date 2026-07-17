@@ -2294,9 +2294,16 @@ class SwarmCommander:
                 cost_usd += tokens_to_usd(self.config.evaluator_model, evaluator_in, evaluator_out)
         return tokens_total, cost_usd
 
+    def _ledger_spend_floor(self) -> float:
+        return self._budget_ledger.spent_usd if self._budget_ledger is not None else 0.0
+
+    def _conservative_cost_usd(self, observed_cost_usd: float) -> float:
+        return max(observed_cost_usd, self._ledger_spend_floor())
+
     def _live_cost_usd(self) -> float:
-        """Return identity-deduplicated live spend across every paid path."""
-        return self._usage_rollup(include_report_fallback=False)[1]
+        """Return live observed spend with a floor for unknown dispatched calls."""
+        observed = self._usage_rollup(include_report_fallback=False)[1]
+        return self._conservative_cost_usd(observed)
 
     def _attack_attempts_so_far(self) -> int:
         """Live count of attack turns executed by the launched agent slate.
@@ -2605,14 +2612,14 @@ class SwarmCommander:
 
         return score
 
-    def _build_budget_report(self) -> BudgetReport:
+    def _build_budget_report(self, *, spent_usd: float | None = None) -> BudgetReport:
         """Snapshot the USD budget outcome for the report.
 
         Always emitted -- even uncapped, so the report shows actual spend.
         ``cap_usd``/``pct_of_cap`` are ``None`` when no cap was set.
         """
         cap = self.config.usd_cap
-        spent = self._live_cost_usd()
+        spent = self._live_cost_usd() if spent_usd is None else spent_usd
         pct = (spent / cap) if (cap is not None and cap > 0) else None
         return BudgetReport(
             cap_usd=cap,
@@ -3734,8 +3741,9 @@ class SwarmCommander:
         # prevents one caller-supplied tracking wrapper from being multiplied
         # by the number of roles/agents that reference it. Reports remain a
         # fallback only when no live counter exists for that agent.
-        tokens_total, unrounded_cost_usd = self._usage_rollup(include_report_fallback=True)
-        cost_usd = round(unrounded_cost_usd, 4)
+        tokens_total, unrounded_observed_cost = self._usage_rollup(include_report_fallback=True)
+        rounded_observed_cost = round(unrounded_observed_cost, 4)
+        cost_usd = self._conservative_cost_usd(rounded_observed_cost)
 
         duration = time.monotonic() - self._start_time
         # #44 / HIGH #4 — only FULL-mode scans whose completeness is at or
@@ -3841,7 +3849,7 @@ class SwarmCommander:
             planner_fallback=self._planner_fallback,  # type: ignore[arg-type]
             coverage_grade=result.coverage_grade,
             stopped_reason=self._stopped_reason,  # type: ignore[arg-type]
-            budget=self._build_budget_report(),
+            budget=self._build_budget_report(spent_usd=cost_usd),
             completeness=completeness_snapshot,
             # #1 — model provenance + non-authoritative-scan flags, folded into
             # the (signed) report so a stub run is filterable and --fail-under

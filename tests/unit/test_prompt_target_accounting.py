@@ -162,7 +162,7 @@ async def test_prompt_target_responses_reach_live_budget_and_final_scan() -> Non
     assert scan.tokens_total == expected_tokens
     assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
     assert scan.budget is not None
-    assert scan.budget.spent_usd == pytest.approx(expected_cost)
+    assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
 
 
 @pytest.mark.asyncio
@@ -195,9 +195,9 @@ async def test_rejected_prompt_target_call_stops_budget_without_dispatch_or_usag
     scan = await swarm._phase_finalise()
     assert scan.stopped_reason == "budget"
     assert scan.tokens_total == 300
-    assert scan.cost_usd == pytest.approx(round(observed_cost, 4))
+    assert scan.cost_usd == pytest.approx(observed_cost)
     assert scan.budget is not None
-    assert scan.budget.spent_usd == pytest.approx(observed_cost)
+    assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
 
 
 @pytest.mark.asyncio

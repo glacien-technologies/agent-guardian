@@ -251,6 +251,29 @@ def test_live_cost_usd_is_zero_with_no_spend() -> None:
     assert swarm._live_cost_usd() == pytest.approx(0.0)
 
 
+@pytest.mark.asyncio
+async def test_cancelled_request_reservation_reaches_live_and_final_cost_without_tokens() -> None:
+    swarm = _swarm(usd_cap=1.0)
+    assert swarm._budget_ledger is not None
+    receipt = swarm._budget_ledger.reserve("target", tokens=1_111, est_usd=0.0154321)
+    swarm._budget_ledger.commit(
+        receipt,
+        actual_usd=receipt.est_usd,
+        actual_tokens=receipt.tokens,
+    )
+
+    assert swarm._usage_rollup(include_report_fallback=False) == pytest.approx((0, 0.0))
+    assert swarm._live_cost_usd() == pytest.approx(0.0154321)
+
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+
+    assert scan.tokens_total == 0
+    assert scan.cost_usd == pytest.approx(0.0154321)
+    assert scan.budget is not None
+    assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
+
+
 # --------------------------------------------------------------------- watchdog
 
 

@@ -16,12 +16,14 @@ def fold_postscan_usage(scan: Scan, counter: UsageCounter, model_spec: str) -> S
         counter.prompt_tokens,
         counter.completion_tokens,
     )
-    cost_usd = scan.cost_usd + extra_cost
     budget = scan.budget
+    base_cost = scan.cost_usd
     if budget is not None:
-        spent_usd = max(scan.cost_usd, budget.spent_usd) + extra_cost
-        pct_of_cap = spent_usd / budget.cap_usd if budget.cap_usd else None
-        budget = budget.model_copy(update={"spent_usd": spent_usd, "pct_of_cap": pct_of_cap})
+        base_cost = max(base_cost, budget.spent_usd)
+    cost_usd = base_cost + extra_cost
+    if budget is not None:
+        pct_of_cap = cost_usd / budget.cap_usd if budget.cap_usd else None
+        budget = budget.model_copy(update={"spent_usd": cost_usd, "pct_of_cap": pct_of_cap})
     return scan.model_copy(
         update={
             "cost_usd": cost_usd,

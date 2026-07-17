@@ -39,7 +39,7 @@ def test_fold_postscan_usage_updates_scan_and_budget() -> None:
     assert updated.budget.pct_of_cap == pytest.approx((0.010 + expected_extra) / 0.02)
 
 
-def test_fold_postscan_usage_uses_separate_scan_and_budget_cost_baselines() -> None:
+def test_fold_postscan_usage_reconciles_to_conservative_baseline() -> None:
     scan = make_scan().model_copy(
         update={
             "cost_usd": 0.010,
@@ -51,10 +51,12 @@ def test_fold_postscan_usage_uses_separate_scan_and_budget_cost_baselines() -> N
     updated = fold_postscan_usage(scan, counter, "vertex:gemini-2.5-flash")
 
     expected_extra = tokens_to_usd("vertex:gemini-2.5-flash", 1_000, 2_000)
-    assert updated.cost_usd == pytest.approx(0.010 + expected_extra)
+    base = 0.020
+    expected = base + expected_extra
+    assert updated.cost_usd == pytest.approx(expected)
     assert updated.budget is not None
-    assert updated.budget.spent_usd == pytest.approx(0.020 + expected_extra)
-    assert updated.budget.pct_of_cap == pytest.approx((0.020 + expected_extra) / 0.05)
+    assert updated.budget.spent_usd == pytest.approx(expected)
+    assert updated.budget.pct_of_cap == pytest.approx(expected / 0.05)
 
 
 def test_fold_postscan_usage_keeps_uncapped_budget_percentage_unset() -> None:
