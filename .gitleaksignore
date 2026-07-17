@@ -9,6 +9,8 @@
 # Categories:
 #   * tests/unit/test_redact*.py / test_logging_redaction.py / test_logging_setup.py
 #     — synthetic credentials used to assert the redactor masks them.
+#   * docs/superpowers/plans/2026-07-17-aws-bedrock-release-hardening.md
+#     — the same synthetic AWS fixture documented in the TDD plan.
 #   * tests/unit/test_heuristic_judge.py, test_obs_otel.py, test_report_json.py
 #     — synthetic JWTs / GitHub PATs / API keys used as fixture payloads.
 #   * src/agent_guardian/crypto/ed25519_sig.py:62 — the ``Ed25519Keypair``
@@ -41,3 +43,5 @@ cfad796936d788cdd7b58a3cc08a0c55a5605daa:src/agent_guardian/crypto/ed25519_sig.p
 f16714a4663fdebd37705d1b68b7ea8c64e03b8f:tests/unit/test_obs_otel.py:generic-api-key:728
 77c521516afe4e972d13512a04703e7b60079574:tests/unit/test_report_json.py:github-pat:332
 77c521516afe4e972d13512a04703e7b60079574:tests/unit/test_report_json.py:github-pat:343
+060f477ce8d4228d3d1cd05ef8832b2565d0a613:tests/unit/test_logging_setup.py:aws-access-token:13
+2065041face277697d474cac52ec3f3cf97f8c1c:docs/superpowers/plans/2026-07-17-aws-bedrock-release-hardening.md:aws-access-token:43
