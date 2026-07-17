@@ -167,6 +167,23 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         r"\1" + _REDACTED,
     ),
     (re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"), r"\1" + _REDACTED),
+    (
+        re.compile(
+            r"(?i)([\"']?(?:accessKeyId|secretAccessKey|sessionToken|"
+            r"aws_access_key_id|aws_secret_access_key|aws_session_token)[\"']?"
+            r"\s*[:=]\s*[\"']?)[^\"'\s,}]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(r"(?i)(x-amz-security-token:\s*)\S+"),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(r"(?i)(authorization:\s*AWS4-HMAC-SHA256\s+).+"),
+        r"\1" + _REDACTED,
+    ),
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), _REDACTED),
     (re.compile(r"AIza[0-9A-Za-z_\-]{10,}"), _REDACTED),
     (re.compile(r"sk-(?:ant-)?[A-Za-z0-9_\-]{12,}"), _REDACTED),
 )
@@ -821,6 +838,9 @@ def configure_logging(
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
+        "botocore.credentials",
     )
     for noisy in _NOISY_DEPS:
         logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))

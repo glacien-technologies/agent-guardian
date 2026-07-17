@@ -10,6 +10,17 @@ import pytest
 
 from agent_guardian import logging_setup
 
+_AWS_ACCESS_KEY = "ASIAABCDEFGHIJKLMNOP"
+_AWS_SECRET_KEY = "aws-secret-example-value-1234567890"
+_AWS_SESSION_TOKEN = "aws-session-token-example-value-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_AWS_SSO_RESPONSE = (
+    'Response body: b\'{"roleCredentials": {'
+    f'"accessKeyId": "{_AWS_ACCESS_KEY}", '
+    f'"secretAccessKey": "{_AWS_SECRET_KEY}", '
+    f'"sessionToken": "{_AWS_SESSION_TOKEN}", '
+    '"expiration": 1784303417000}}\''
+)
+
 
 @pytest.fixture(autouse=True)
 def _reset_logging() -> None:
@@ -33,6 +44,8 @@ def _reset_logging() -> None:
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     # Also drop any handlers that a prior test installed so we don't double-print.
@@ -54,6 +67,8 @@ def _reset_logging() -> None:
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     try:
@@ -134,6 +149,9 @@ def test_noisy_dependencies_pinned_at_warning_when_caller_runs_info(
     assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.parsers").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.credentials").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_pinned_at_warning_even_at_debug_root(
@@ -152,6 +170,9 @@ def test_noisy_dependencies_pinned_at_warning_even_at_debug_root(
     assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.parsers").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.credentials").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_escalate_above_warning_when_caller_runs_error(
@@ -186,6 +207,24 @@ def test_custom_stream_is_used() -> None:
     logging.getLogger(__name__).info("hello %s", "world")
     contents = buf.getvalue()
     assert "hello world" in contents
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _AWS_SSO_RESPONSE,
+        f"Authorization: AWS4-HMAC-SHA256 Credential={_AWS_ACCESS_KEY}/scope, "
+        "SignedHeaders=host;x-amz-date, Signature=abcdef0123456789",
+        f"X-Amz-Security-Token: {_AWS_SESSION_TOKEN}",
+        f"aws_access_key_id={_AWS_ACCESS_KEY} aws_secret_access_key={_AWS_SECRET_KEY}",
+    ],
+)
+def test_redact_secrets_masks_aws_credentials(message: str) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert _AWS_ACCESS_KEY not in redacted
+    assert _AWS_SECRET_KEY not in redacted
+    assert _AWS_SESSION_TOKEN not in redacted
+    assert "***REDACTED***" in redacted
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +412,41 @@ def test_attach_run_log_file_captures_debug_while_terminal_quiet(tmp_path) -> No
         assert "debug-only-line" not in term
     finally:
         logging.getLogger().removeHandler(handler)
+
+
+def test_botocore_debug_is_excluded_from_run_log(tmp_path: Path) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    try:
+        logging.getLogger("botocore.parsers").debug(_AWS_SSO_RESPONSE)
+        logging.getLogger("agent_guardian.test.aws").debug("guardian-debug-visible")
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert "guardian-debug-visible" in text
+        assert "roleCredentials" not in text
+        assert _AWS_ACCESS_KEY not in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    logger = logging.getLogger("botocore.parsers")
+    logger.setLevel(logging.DEBUG)
+    try:
+        logger.debug(_AWS_SSO_RESPONSE)
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert "roleCredentials" in text
+        assert _AWS_ACCESS_KEY not in text
+        assert _AWS_SECRET_KEY not in text
+        assert _AWS_SESSION_TOKEN not in text
+        assert "***REDACTED***" in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
 
 
 def test_detach_run_log_file_seals_file(tmp_path: Path) -> None:
