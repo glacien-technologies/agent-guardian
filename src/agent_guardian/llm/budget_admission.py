@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from agent_guardian.core.budget import (
@@ -15,6 +16,8 @@ from agent_guardian.llm.base import BaseLLM, LLMRequest, LLMResponse
 from agent_guardian.llm.usage_tracking import UsageTrackingLLM
 
 __all__ = ["BudgetAdmissionLLM", "admission_reservation_usd", "with_budget_admission"]
+
+_LOG = logging.getLogger(__name__)  # codeql[py/unused-global-variable] -- required diagnostic hook
 
 # Fail-closed Standard-rate floor for Gemini admission, verified 2026-07-16
 # against Google's primary Gemini API and Vertex pricing pages. It is the
