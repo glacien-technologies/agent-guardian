@@ -54,6 +54,7 @@ __all__ = [
     "JsonlLogHandler",
     "build_partial_scan",
     "clear_interrupt_marker",
+    "detach_jsonl_log_handler",
     "install_jsonl_log_handler",
     "interrupt_marker_path",
     "is_interrupted_on_disk",
@@ -724,9 +725,9 @@ def install_jsonl_log_handler(
     The handler is attached at level ``DEBUG`` so the per-record allowlist
     + the operator-configured root level decide what actually gets written.
 
-    Returns the handler so the caller can detach it on scan-end via
-    ``logging.getLogger().removeHandler(handler)`` if desired (not required
-    — leaving it attached until process exit is harmless).
+    Returns the exact handler so the caller can retain it through final
+    summaries and gate evaluation, then pass it to
+    :func:`detach_jsonl_log_handler` during the joint run/event forensic seal.
     """
     root = logging.getLogger()
     resolved = scan_dir.resolve()
@@ -737,3 +738,16 @@ def install_jsonl_log_handler(
     handler.setLevel(0)  # let the logger / root level decide
     root.addHandler(handler)
     return handler
+
+
+def detach_jsonl_log_handler(handler: JsonlLogHandler) -> None:
+    """Detach and close one JSONL log handler without touching other sinks.
+
+    ``JsonlLogHandler`` opens the events file per record, so there is no
+    persistent stream to flush. The operation is idempotent for finalization.
+    """
+    root = logging.getLogger()
+    if handler in root.handlers:
+        root.removeHandler(handler)
+    with contextlib.suppress(Exception):
+        handler.close()

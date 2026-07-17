@@ -1570,7 +1570,10 @@ def verify(
     pubkey_file: Path | None = typer.Option(
         None,
         "--pubkey-file",
-        help="Read the pinned Ed25519 public key (base32) from this file instead of --pubkey.",
+        help=(
+            "Read the pinned Ed25519 public key (raw 32-byte or base32 text) "
+            "from this file instead of --pubkey."
+        ),
     ),
     secret: str | None = typer.Option(
         None,
@@ -1635,7 +1638,16 @@ def verify(
         if not pubkey_file.is_file():
             typer.echo(f"pubkey file not found: {pubkey_file}", err=True)
             raise typer.Exit(code=EXIT_CONFIG)
-        expected_pubkey = pubkey_file.read_text(encoding="utf-8").strip()
+        from agent_guardian.crypto.ed25519_sig import load_ed25519_public_key
+
+        try:
+            expected_pubkey = load_ed25519_public_key(pubkey_file)
+        except (OSError, ValueError):
+            typer.echo(
+                "invalid Ed25519 public key file: expected a 32-byte raw key or a UTF-8 base32 key",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from None
     # Resolve the HMAC secret (explicit flag > env). verify_signatures itself
     # falls back to AGENT_GUARDIAN_SIGNING_SECRET, but resolving here lets us
     # tell the operator clearly whether *any* anchor was supplied.
@@ -3261,7 +3273,7 @@ def scan(
         help=(
             "LLM model spec (default: stub). Examples: 'stub', 'openai:gpt-4o', "
             "'anthropic:claude-haiku-4-5', 'gemini:gemini-2.5-flash', "
-            "'ollama:llama3.1', 'bedrock:us.anthropic.claude-haiku-4-5-v1:0'."
+            "'ollama:llama3.1', 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0'."
         ),
     ),
     commander_model: str | None = typer.Option(
@@ -4463,6 +4475,7 @@ async def _run_scan_inner(
     # CLI feed renderer / TUI so those wrap our observer (and the partial
     # writer always runs, regardless of which optional UI was attached).
     from agent_guardian.server.partial_scan import (
+        detach_jsonl_log_handler,
         install_jsonl_log_handler,
         make_events_writer,
         make_partial_writer,
@@ -4483,9 +4496,9 @@ async def _run_scan_inner(
     # same events.jsonl as ``kind="log"`` records so the Executive Logs
     # tab renders a real CLI-style running log instead of just structured
     # SwarmEvents. Idempotent: a second call for the same scan_dir is a
-    # no-op. Stays attached to the root logger until process exit — the
-    # CLI is a one-scan-per-process tool, so cleanup isn't required.
-    install_jsonl_log_handler(partial_scan_dir)
+    # no-op. Retain the exact handler so successful finalization can jointly
+    # seal events.jsonl and run.log immediately before forensic hashing.
+    jsonl_log_handler = install_jsonl_log_handler(partial_scan_dir)
 
     # QA-072 (2026-06-04) — route the FULL raw log trace to a per-scan run.log
     # and keep the terminal quiet by default. ``AGENT_GUARDIAN_LOG_LEVEL`` now
@@ -4494,10 +4507,15 @@ async def _run_scan_inner(
     # feed unless the operator explicitly raised verbosity via the global
     # ``-v`` / ``--log-level``. The full per-call model trace is always one
     # ``cat ~/.agentguardian/scans/<id>/run.log`` away.
-    from agent_guardian.logging_setup import attach_run_log_file, set_terminal_log_level
+    from agent_guardian.logging_setup import (
+        attach_run_log_file,
+        detach_run_log_file,
+        set_terminal_log_level,
+    )
 
+    run_log_handler: logging.Handler | None = None
     try:
-        attach_run_log_file(
+        run_log_handler = attach_run_log_file(
             partial_scan_dir / "run.log",
             level=os.environ.get("AGENT_GUARDIAN_LOG_LEVEL") or "DEBUG",
         )
@@ -4640,9 +4658,13 @@ async def _run_scan_inner(
         # the same model spec is reused) so we don't double-close. Returning
         # exceptions instead of raising keeps a noisy aclose from masking the
         # original scan error.
-        seen: set[int] = set()
+        seen: set[int] = set(adapter.owned_llm_ids) if isinstance(adapter, PromptAdapter) else set()
         closeables: list[Any] = [adapter]
         for client in (attacker_llm, evaluator_llm, commander_llm, target_llm):
+            # PromptAdapter owns its target LLM and closes the original
+            # provider beneath any scan-time instrumentation decorators.
+            if client is target_llm and isinstance(adapter, PromptAdapter):
+                continue
             if id(client) not in seen:
                 seen.add(id(client))
                 closeables.append(client)
@@ -4695,7 +4717,100 @@ async def _run_scan_inner(
         if warning_text is not None:
             typer.echo(warning_text, err=True)
 
-    # 9. Render + persist report(s). The canonical scan.json is always written
+    # 9. Export probes, reserve/account for optional summaries, then render and
+    #    persist report(s). Probe exports must exist first because the summary
+    #    reservation prices the exact set of graded exports. Summary work is
+    #    best-effort, but any successful provider usage is folded into the
+    #    frozen Scan before a user report or canonical/raw JSON is written.
+    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from agent_guardian.server.probe_export import write_probe_exports
+
+        write_probe_exports(scan_dir)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
+
+    summary_counter = None
+    summary_inner = None
+    summary_ledger = None
+    try:
+        from agent_guardian.core.budget import BudgetEnvelope, BudgetLedger
+        from agent_guardian.llm.budget_admission import with_budget_admission
+        from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+        from agent_guardian.reports.postscan import (
+            can_run_probe_summaries,
+            fold_postscan_usage,
+        )
+        from agent_guardian.server.probe_summary import (
+            awrite_probe_summaries,
+            summary_reservation_usd,
+            write_empty_probe_summaries,
+        )
+
+        base_spend = scan_result.cost_usd
+        if scan_result.budget is not None:
+            base_spend = max(base_spend, scan_result.budget.spent_usd)
+        reservation = summary_reservation_usd(scan_dir, eff_evaluator)
+        if not can_run_probe_summaries(budget_usd, base_spend, reservation):
+            write_empty_probe_summaries(scan_dir)
+            _LOG.info(
+                "probe summaries skipped: reservation $%.6f exceeds remaining budget $%.6f",
+                reservation,
+                max(0.0, (budget_usd or 0.0) - base_spend),
+            )
+        else:
+            summary_counter = UsageCounter()
+            summary_inner = build_llm(eff_evaluator, role="evaluator")
+            summary_llm: BaseLLM = UsageTrackingLLM(
+                summary_inner,
+                counter=summary_counter,
+            )
+            if budget_usd is not None:
+                summary_ledger = BudgetLedger(
+                    BudgetEnvelope(
+                        usd_cap=max(0.0, budget_usd - base_spend),
+                        token_cap=sys.maxsize,
+                        wallclock_cap_s=float("inf"),
+                    )
+                )
+                summary_llm = with_budget_admission(
+                    summary_llm,
+                    ledger=summary_ledger,
+                    agent_id="postscan-summary",
+                )
+            await awrite_probe_summaries(
+                scan_dir,
+                summary_llm,
+                model=_normalise_model_name(eff_evaluator),
+            )
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
+        with contextlib.suppress(Exception):
+            from agent_guardian.server.probe_summary import write_empty_probe_summaries
+
+            write_empty_probe_summaries(scan_dir)
+    finally:
+        if summary_inner is not None:
+            with contextlib.suppress(Exception):
+                await summary_inner.aclose()
+        if summary_counter is not None:
+            try:
+                scan_result = fold_postscan_usage(
+                    scan_result,
+                    summary_counter,
+                    eff_evaluator,
+                    committed_spend_usd=(
+                        summary_ledger.spent_usd if summary_ledger is not None else 0.0
+                    ),
+                )
+            except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+                typer.echo(
+                    f"note: AI probe summary usage accounting skipped: {type(exc).__name__}: {exc}",
+                    err=True,
+                )
+
+    # The canonical scan.json is always written
     #    via the signed/redacted ``write_json`` path so the persisted artifact
     #    is schema-stamped, signed, and PII-redacted (#1/#2). The user-chosen
     #    --output report(s) are written separately (may be different formats).
@@ -4707,7 +4822,7 @@ async def _run_scan_inner(
     #                                                write <stem>.<ext> per format
     #   - any count + no --output-path            -> default per-format
     #                                                ~/.agentguardian/scans/<scan_id>/report.<ext>
-    default_dir = Path.home() / ".agentguardian" / "scans" / scan_id
+    default_dir = scan_dir
 
     def _resolve_per_format_path(fmt: str) -> Path:
         if output_path is None:
@@ -4758,55 +4873,12 @@ async def _run_scan_inner(
     # is kept alongside as scan.raw.json for debugging only.
     from agent_guardian.reports.json_report import write_json
 
-    scan_dir = Path.home() / ".agentguardian" / "scans" / scan_id
-    scan_dir.mkdir(parents=True, exist_ok=True)
     try:
         write_json(scan_result, scan_dir / "scan.json")
     except Exception as exc:
         typer.echo(f"could not persist canonical scan.json: {type(exc).__name__}: {exc}", err=True)
         return EXIT_CONFIG
     (scan_dir / "scan.raw.json").write_text(scan_result.model_dump_json(indent=2), encoding="utf-8")
-    # Persist the authoritative, untruncated per-probe JSON export under
-    # ``<scan_dir>/probe/`` (one file per probe + index.json). Unlike the
-    # dashboard's previewed log lines, this is the complete record — verbatim
-    # prompts, full target responses, full judge reasoning, worst-case verdict.
-    # Best-effort: an export failure never fails the scan.
-    try:
-        from agent_guardian.server.probe_export import write_probe_exports
-
-        write_probe_exports(scan_dir)
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: per-probe export skipped: {type(exc).__name__}: {exc}", err=True)
-    # AI-write the per-agent Probes-table SUMMARY (one LLM call per agent, run
-    # concurrently) from each agent's full turns + verdict, persisted to
-    # ``probe/summaries.json``. The run-scope evaluator clients are already
-    # closed above, so build a fresh one from the same model spec. Best-effort:
-    # never fail (or noticeably slow) a scan on summary generation.
-    try:
-        from agent_guardian.server.probe_summary import awrite_probe_summaries
-
-        _summary_model = _normalise_model_name(eff_evaluator)
-        _summary_llm = build_llm(eff_evaluator, role="evaluator")
-        try:
-            # We are inside ``async def _run_scan_inner`` — await directly
-            # (asyncio.run() would raise "cannot be called from a running loop").
-            await awrite_probe_summaries(scan_dir, _summary_llm, model=_summary_model)
-        finally:
-            with contextlib.suppress(Exception):
-                await _summary_llm.aclose()
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: AI probe summaries skipped: {type(exc).__name__}: {exc}", err=True)
-    # D2 (issue #76) — seal the forensic record: write a signed manifest of the
-    # SHA-256 digests of run.log / memory.jsonl / events.jsonl / scan.json /
-    # probe/*.json so any post-hoc edit to the evidence trail is detectable
-    # (OWASP immutable-logging bar). Best-effort: never fail a scan on this.
-    try:
-        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
-
-        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
-        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
-    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
-        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
     # Remove the mid-flight partial snapshot now that the terminal scan.raw.json
     # has landed -- the dashboard subprocess's ``load_completed`` reads the
     # terminal file first, but unlinking the partial avoids a stale snapshot
@@ -4930,6 +5002,7 @@ async def _run_scan_inner(
         threshold is not None
         for threshold in (fail_under, max_critical, max_high, max_medium, max_low)
     )
+    exit_code = EXIT_OK
     if gate_requested:
         from agent_guardian.core.gate import evaluate_gate
 
@@ -4944,8 +5017,26 @@ async def _run_scan_inner(
         if not gate.passed:
             for reason in gate.reasons:
                 typer.echo(f"gate FAILED: {reason}", err=True)
-            return EXIT_FAIL_UNDER
-    return EXIT_OK
+            exit_code = EXIT_FAIL_UNDER
+
+    # D2 (issue #76) — the seal marker is the final logger record. Keep both
+    # forensic log sinks live through summaries and gate evaluation, then
+    # detach their exact handlers before hashing. From this point to return,
+    # only non-logger terminal output is allowed.
+    if jsonl_log_handler.level > logging.INFO:
+        jsonl_log_handler.setLevel(logging.INFO)
+    _LOG.info("forensic seal: run.log and events.jsonl complete")
+    if run_log_handler is not None:
+        detach_run_log_file(run_log_handler)
+    detach_jsonl_log_handler(jsonl_log_handler)
+    try:
+        from agent_guardian.reports.forensic_manifest import write_forensic_manifest
+
+        _mpath = write_forensic_manifest(scan_dir, scan_id, scan_result.created_at.isoformat())
+        typer.echo(f"forensic:  {_mpath}  (signed digests of the evidence trail)", err=True)
+    except Exception as exc:  # pragma: no cover — defensive, never fail a scan
+        typer.echo(f"note: forensic manifest skipped: {type(exc).__name__}: {exc}", err=True)
+    return exit_code
 
 
 # ---------------------------------------------------------------------------

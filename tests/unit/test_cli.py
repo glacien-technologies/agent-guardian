@@ -6,6 +6,8 @@ no real LLMs (``--model stub`` everywhere).
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,6 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agent_guardian import __version__
+from agent_guardian import cli as cli_module
 from agent_guardian.cli import (
     EXIT_CONFIG,
     EXIT_FAIL_UNDER,
@@ -20,11 +23,79 @@ from agent_guardian.cli import (
     app,
     build_llm,
 )
+from agent_guardian.core.budget import tokens_to_usd
 from agent_guardian.llm import GeminiClient, OpenAIClient, StubLLM
+from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.budget_admission import admission_reservation_usd
+from agent_guardian.reports import postscan
+
+_PAID_SUMMARY_MODEL = "vertex:gemini-2.5-flash"
+_SUMMARY_PROMPT_TOKENS = 11
+_SUMMARY_COMPLETION_TOKENS = 7
+_SUMMARY_TOTAL_TOKENS = 18
+
+
+class _DeterministicSummaryLLM(StubLLM):
+    """Network-free summary client with exact provider usage and close tracking."""
+
+    def __init__(
+        self,
+        *,
+        fail_on_calls: set[int] | None = None,
+        cancel_on_calls: set[int] | None = None,
+    ) -> None:
+        super().__init__()
+        self.calls = 0
+        self.successful_calls = 0
+        self.failed_calls = 0
+        self.cancelled_calls = 0
+        self.unknown_outcome_reservations: list[float] = []
+        self.closed = False
+        self._fail_on_calls = fail_on_calls or set()
+        self._cancel_on_calls = cancel_on_calls or set()
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.calls += 1
+        if self.calls in self._cancel_on_calls:
+            self.cancelled_calls += 1
+            self.unknown_outcome_reservations.append(_summary_request_reservation(request))
+            raise asyncio.CancelledError()
+        if self.calls in self._fail_on_calls:
+            self.failed_calls += 1
+            self.unknown_outcome_reservations.append(_summary_request_reservation(request))
+            raise RuntimeError("deterministic summary failure")
+        self.successful_calls += 1
+        return LLMResponse(
+            text=(
+                "The target consistently refused the unauthorized request and preserved "
+                "the protected data throughout the completed adversarial exchange."
+            ),
+            model=request.model,
+            provider="vertex",
+            usage=LLMUsage(
+                prompt_tokens=_SUMMARY_PROMPT_TOKENS,
+                completion_tokens=_SUMMARY_COMPLETION_TOKENS,
+                total_tokens=_SUMMARY_TOTAL_TOKENS,
+            ),
+            finish_reason="stop",
+            raw={"fixture": "deterministic-summary"},
+        )
+
+    async def aclose(self) -> None:
+        self.closed = True
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _summary_request_reservation(request: LLMRequest) -> float:
+    input_ceiling = 32 + sum(
+        len(message.content.encode("utf-8")) + len(message.role) + 32
+        for message in request.messages
+    )
+    return admission_reservation_usd(request.model, input_ceiling, request.max_tokens)
 
 
 def _extract_scan_id_from_summary(stdout: str) -> str:
@@ -42,6 +113,83 @@ def _extract_scan_id_from_summary(stdout: str) -> str:
             return line.split()[1]
     raise AssertionError(
         f"could not find a `scan <id> done: ...` summary line in stdout:\n{stdout}"
+    )
+
+
+def _install_paid_summary_llm(
+    monkeypatch: pytest.MonkeyPatch,
+    summary_llm: _DeterministicSummaryLLM,
+) -> list[tuple[int, float, dict[str, int], str, float]]:
+    """Keep the scan offline while exercising real summary generation/accounting."""
+    original_build_llm = cli_module.build_llm
+    evaluator_builds = 0
+
+    def offline_build_llm(model_spec: str, role: str):  # type: ignore[no-untyped-def]
+        nonlocal evaluator_builds
+        if role == "evaluator":
+            evaluator_builds += 1
+            if evaluator_builds == 2:
+                return summary_llm
+        return original_build_llm("stub", role)
+
+    monkeypatch.setattr(cli_module, "build_llm", offline_build_llm)
+
+    fold_inputs: list[tuple[int, float, dict[str, int], str, float]] = []
+    original_fold = postscan.fold_postscan_usage
+
+    def recording_fold(  # type: ignore[no-untyped-def]
+        scan,
+        counter,
+        model_spec,
+        *,
+        committed_spend_usd=0.0,
+    ):
+        fold_inputs.append(
+            (
+                scan.tokens_total,
+                scan.cost_usd,
+                counter.snapshot(),
+                model_spec,
+                committed_spend_usd,
+            )
+        )
+        return original_fold(
+            scan,
+            counter,
+            model_spec,
+            committed_spend_usd=committed_spend_usd,
+        )
+
+    monkeypatch.setattr(postscan, "fold_postscan_usage", recording_fold)
+    return fold_inputs
+
+
+def _invoke_paid_summary_scan(
+    runner: CliRunner,
+    tmp_path: Path,
+    output_path: Path,
+):  # type: ignore[no-untyped-def]
+    prompt = tmp_path / "paid-summary-prompt.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    return runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--evaluator-model",
+            _PAID_SUMMARY_MODEL,
+            "--no-preflight",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--budget-usd",
+            "1.0",
+            "--output-path",
+            str(output_path),
+        ],
     )
 
 
@@ -313,6 +461,236 @@ def test_verify_pinned_pubkey_anchors_genuine_report_without_hmac_secret(
     assert "PINNED" in result.stdout
     assert "Ed25519:      OK" in result.stdout
     assert "HMAC-SHA256:  NO-SECRET" in result.stdout
+
+
+def test_verify_pubkey_file_accepts_signer_generated_raw_key(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """The signer-produced ``ed25519.pub`` is the canonical CLI file input."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    keys_dir = tmp_path / "keys"
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path, keys_dir=keys_dir)
+
+    pubkey_file = keys_dir / "ed25519.pub"
+    assert len(pubkey_file.read_bytes()) == 32
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_preserves_base32_text_support(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Existing UTF-8 base32 key files remain valid trust anchors."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    keys_dir = tmp_path / "keys"
+    payload = emit_json(make_scan(), keys_dir=keys_dir)
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    pubkey_file = tmp_path / "ed25519-base32.pub"
+    pubkey_file.write_text(
+        payload["signatures"]["ed25519"]["public_key_b32"] + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_accepts_lowercase_base32(runner: CliRunner, tmp_path: Path) -> None:
+    """Base32 text is case-insensitive and normalized before verification."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    pubkey_file = tmp_path / "ed25519-lowercase.pub"
+    pubkey_file.write_text(
+        payload["signatures"]["ed25519"]["public_key_b32"].lower(),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_accepts_mixed_case_base32(runner: CliRunner, tmp_path: Path) -> None:
+    """Mixed-case base32 is normalized only at the key-file boundary."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    mixed_case = "".join(
+        char.lower() if index % 2 else char for index, char in enumerate(canonical)
+    )
+    pubkey_file = tmp_path / "ed25519-mixed-case.pub"
+    pubkey_file.write_text(mixed_case, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_literal_pubkey_remains_case_sensitive(runner: CliRunner, tmp_path: Path) -> None:
+    """The file-only compatibility rule must not expand literal pin parsing."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    lowercase_pin = payload["signatures"]["ed25519"]["public_key_b32"].lower()
+
+    result = runner.invoke(app, ["verify", str(path), "--pubkey", lowercase_pin])
+
+    assert result.exit_code == EXIT_FAIL_UNDER
+    assert "Ed25519:      FAIL" in result.stdout
+    assert "trust anchor: UNANCHORED" in result.stdout
+
+
+def test_verify_embedded_pubkey_remains_case_sensitive(runner: CliRunner, tmp_path: Path) -> None:
+    """Reports with a noncanonical lowercase embedded key remain invalid."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    payload["signatures"]["ed25519"]["public_key_b32"] = canonical.lower()
+    path = tmp_path / "report-lowercase-embedded-key.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = runner.invoke(app, ["verify", str(path), "--pubkey", canonical])
+
+    assert result.exit_code == EXIT_FAIL_UNDER
+    assert "Ed25519:      FAIL" in result.stdout
+    assert "trust anchor: UNANCHORED" in result.stdout
+
+
+def test_verify_pubkey_file_accepts_exact_base32_padding_and_outer_whitespace(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """A 32-byte key's canonical padded form has exactly four padding bytes."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    pubkey_file = tmp_path / "ed25519-padded.pub"
+    pubkey_file.write_text(f" \t{canonical}====\r\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+
+    assert result.exit_code == EXIT_OK, (result.stdout, result.stderr)
+    assert "Ed25519:      OK" in result.stdout
+    assert "trust anchor: PINNED" in result.stdout
+
+
+def test_verify_pubkey_file_rejects_noncanonical_base32_text(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Text keys must have canonical symbols and either zero or four pads."""
+    from agent_guardian.reports.json_report import emit_json
+    from tests.unit._report_fixtures import make_scan
+
+    payload = emit_json(make_scan(), keys_dir=tmp_path / "keys")
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    canonical = payload["signatures"]["ed25519"]["public_key_b32"]
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    alternate_last = alphabet[alphabet.index(canonical[-1]) + 1]
+    malformed = {
+        "partial padding": canonical + "=",
+        "excess padding": canonical + "=====",
+        "misplaced padding": canonical[:24] + "=" + canonical[24:] + "===",
+        "internal whitespace": canonical[:24] + " \n" + canonical[24:],
+        "trailing junk": canonical + "!",
+        "non-zero unused bits": canonical[:-1] + alternate_last,
+    }
+    pubkey_file = tmp_path / "malformed-base32.pub"
+
+    for label, candidate in malformed.items():
+        pubkey_file.write_text(candidate, encoding="utf-8")
+        result = runner.invoke(
+            app,
+            ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+        )
+        output = result.stdout + (result.stderr or "")
+
+        assert result.exit_code == EXIT_CONFIG, label
+        assert "invalid Ed25519 public key file" in output, label
+        assert "UnicodeDecodeError" not in output, label
+        assert "Traceback" not in output, label
+        assert candidate not in output, label
+        assert not isinstance(result.exception, UnicodeDecodeError), label
+
+
+@pytest.mark.parametrize(
+    "malformed_key",
+    [
+        b"sensitive-binary-key-material\xff",
+        b"sensitive-text-key-material-not-base32",
+    ],
+)
+def test_verify_pubkey_file_rejects_malformed_keys_cleanly(
+    runner: CliRunner, tmp_path: Path, malformed_key: bytes
+) -> None:
+    """Malformed binary or text keys fail without traceback or key disclosure."""
+    from agent_guardian.reports.json_report import write_json
+    from tests.unit._report_fixtures import make_scan
+
+    path = tmp_path / "report.json"
+    write_json(make_scan(), path, keys_dir=tmp_path / "keys")
+    pubkey_file = tmp_path / "malformed.pub"
+    pubkey_file.write_bytes(malformed_key)
+
+    result = runner.invoke(
+        app,
+        ["verify", str(path), "--pubkey-file", str(pubkey_file)],
+    )
+    output = result.stdout + (result.stderr or "")
+
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid Ed25519 public key file" in output
+    assert "UnicodeDecodeError" not in output
+    assert "Traceback" not in output
+    assert "sensitive-" not in output
+    assert not isinstance(result.exception, UnicodeDecodeError)
 
 
 def test_verify_succeeds_with_real_hmac_secret(
@@ -1013,6 +1391,222 @@ def test_scan_persists_signed_canonical_and_raw_json(runner: CliRunner, tmp_path
     assert (scan_dir / "scan.raw.json").is_file()
     raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
     assert raw["id"] == scan_id  # raw uses the Scan model field name
+    selected = json.loads(out_path.read_text(encoding="utf-8"))
+    assert canonical["tokens_total"] == raw["tokens_total"] == selected["tokens_total"]
+    assert canonical["cost_usd"] == raw["cost_usd"] == selected["cost_usd"]
+
+
+def test_scan_quiet_joint_seal_is_hashed_without_terminal_noise(
+    runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+    out_path = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        [
+            "--quiet",
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--output-path",
+            str(out_path),
+        ],
+    )
+    assert result.exit_code == EXIT_OK, result.output
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    marker = "forensic seal: run.log and events.jsonl complete"
+    manifest = json.loads((scan_dir / "forensic_manifest.json").read_text(encoding="utf-8"))
+
+    for relative in ("run.log", "events.jsonl"):
+        artifact = scan_dir / relative
+        assert marker in artifact.read_text(encoding="utf-8")
+        assert (
+            manifest["files"][relative]["sha256"]
+            == hashlib.sha256(artifact.read_bytes()).hexdigest()
+        )
+    assert marker not in result.output
+
+
+def test_scan_folds_successful_paid_summary_usage_into_every_json_report(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM()
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "paid-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.calls > 0
+    assert summary_llm.successful_calls == summary_llm.calls
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["prompt_tokens"] == summary_llm.calls * _SUMMARY_PROMPT_TOKENS
+    assert usage["completion_tokens"] == summary_llm.calls * _SUMMARY_COMPLETION_TOKENS
+    assert usage["total_tokens"] == summary_llm.calls * _SUMMARY_TOTAL_TOKENS
+    expected_tokens = original_tokens + usage["total_tokens"]
+    expected_cost = original_cost + tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+    assert committed_spend == pytest.approx(expected_cost - original_cost)
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    summaries = json.loads((scan_dir / "probe" / "summaries.json").read_text(encoding="utf-8"))
+    assert len(summaries["summaries"]) == summary_llm.successful_calls
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
+
+
+def test_scan_folds_successful_usage_when_another_summary_call_fails(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM(fail_on_calls={2})
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "mixed-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.failed_calls == 1
+    assert summary_llm.successful_calls > 0
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["calls"] == summary_llm.successful_calls
+    assert usage["prompt_tokens"] == summary_llm.successful_calls * _SUMMARY_PROMPT_TOKENS
+    assert usage["completion_tokens"] == (summary_llm.successful_calls * _SUMMARY_COMPLETION_TOKENS)
+    assert usage["total_tokens"] == summary_llm.successful_calls * _SUMMARY_TOTAL_TOKENS
+    expected_tokens = original_tokens + usage["total_tokens"]
+    observed_summary_cost = tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+    expected_summary_spend = observed_summary_cost + sum(summary_llm.unknown_outcome_reservations)
+    expected_cost = original_cost + expected_summary_spend
+    assert committed_spend == pytest.approx(expected_summary_spend)
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    summaries = json.loads((scan_dir / "probe" / "summaries.json").read_text(encoding="utf-8"))
+    assert len(summaries["summaries"]) == summary_llm.successful_calls
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
+        assert report["cost_usd"] <= report["budget"]["cap_usd"]
+
+
+def test_scan_charges_cancelled_summary_reservation_without_fabricating_tokens(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM(cancel_on_calls={2})
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "cancelled-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.cancelled_calls == 1
+    assert summary_llm.successful_calls > 0
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["calls"] == summary_llm.successful_calls
+    assert usage["total_tokens"] == summary_llm.successful_calls * _SUMMARY_TOTAL_TOKENS
+    observed_summary_cost = tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+    expected_summary_spend = observed_summary_cost + sum(summary_llm.unknown_outcome_reservations)
+    assert committed_spend == pytest.approx(expected_summary_spend)
+    expected_tokens = original_tokens + usage["total_tokens"]
+    expected_cost = original_cost + expected_summary_spend
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
+        assert report["cost_usd"] <= report["budget"]["cap_usd"]
+
+
+def test_scan_skips_probe_summaries_when_reservation_exceeds_budget(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_guardian.server import probe_summary
+
+    monkeypatch.setattr(probe_summary, "summary_reservation_usd", lambda *_args: 1.0)
+    build_roles: list[str] = []
+    original_build_llm = cli_module.build_llm
+
+    def tracking_build_llm(model_spec: str, role: str):  # type: ignore[no-untyped-def]
+        build_roles.append(role)
+        return original_build_llm(model_spec, role)
+
+    monkeypatch.setattr(cli_module, "build_llm", tracking_build_llm)
+    prompt = tmp_path / "p.txt"
+    prompt.write_text("You are a safe bot.", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--system-prompt",
+            str(prompt),
+            "--model",
+            "stub",
+            "--no-tui",
+            "--mode",
+            "fast",
+            "--budget-usd",
+            "0.000001",
+            "--output-path",
+            str(tmp_path / "report.json"),
+        ],
+    )
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert build_roles.count("evaluator") == 1
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    summaries_path = tmp_path / ".agentguardian" / "scans" / scan_id / "probe" / "summaries.json"
+    assert json.loads(summaries_path.read_text(encoding="utf-8")) == {"summaries": {}}
 
 
 def test_report_pdf_requires_output_path(runner: CliRunner, tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ the cost-estimate countdown only to crash on the first request.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -201,6 +202,22 @@ def _happy_response() -> Response:
             "stopReason": "end_turn",
         },
     )
+
+
+def test_bedrock_pricing_identity_is_provider_qualified(_fake_aws_env: None) -> None:
+    client = BedrockClient(region="us-east-1")
+    try:
+        bare = LLMRequest(
+            messages=[LLMMessage(role="user", content="x")],
+            model="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        )
+        prefixed = bare.model_copy(update={"model": f"bedrock:{bare.model}"})
+        assert client.pricing_model_spec(bare) == (
+            "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        )
+        assert client.pricing_model_spec(prefixed) == client.pricing_model_spec(bare)
+    finally:
+        asyncio.run(client.aclose())
 
 
 @respx.mock

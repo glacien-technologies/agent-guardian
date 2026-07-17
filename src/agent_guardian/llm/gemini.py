@@ -302,8 +302,19 @@ class GeminiClient(BaseLLM):
                     thought_tokens,
                 )
         prompt_tokens = int(usage_meta.get("promptTokenCount", 0))
-        completion_tokens = int(usage_meta.get("candidatesTokenCount", 0))
-        total_tokens = int(usage_meta.get("totalTokenCount", prompt_tokens + completion_tokens))
+        candidate_tokens = int(usage_meta.get("candidatesTokenCount", 0))
+        thought_tokens = int(usage_meta.get("thoughtsTokenCount", 0))
+        total_tokens = int(
+            usage_meta.get(
+                "totalTokenCount",
+                prompt_tokens + candidate_tokens + thought_tokens,
+            )
+        )
+        completion_tokens = max(
+            candidate_tokens,
+            candidate_tokens + thought_tokens,
+            max(0, total_tokens - prompt_tokens),
+        )
         return LLMResponse(
             text=text,
             model=data.get("modelVersion", model),

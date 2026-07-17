@@ -4,10 +4,23 @@ from __future__ import annotations
 
 import io
 import logging
+from pathlib import Path
 
 import pytest
 
 from agent_guardian import logging_setup
+
+_AWS_ACCESS_KEY = "ASIAABCDEFGHIJKLMNOP"
+_AWS_SECRET_KEY = "aws-secret-example-value-1234567890"
+_AWS_SESSION_TOKEN = "aws-session-token-example-value-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_AWS_SIGV4_SIGNATURE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+_AWS_SSO_RESPONSE = (
+    'Response body: b\'{"roleCredentials": {'
+    f'"accessKeyId": "{_AWS_ACCESS_KEY}", '
+    f'"secretAccessKey": "{_AWS_SECRET_KEY}", '
+    f'"sessionToken": "{_AWS_SESSION_TOKEN}", '
+    '"expiration": 1784303417000}}\''
+)
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +45,9 @@ def _reset_logging() -> None:
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
+        "botocore.credentials",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     # Also drop any handlers that a prior test installed so we don't double-print.
@@ -53,6 +69,9 @@ def _reset_logging() -> None:
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
+        "botocore.credentials",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     try:
@@ -133,6 +152,9 @@ def test_noisy_dependencies_pinned_at_warning_when_caller_runs_info(
     assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.parsers").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.credentials").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_pinned_at_warning_even_at_debug_root(
@@ -151,6 +173,9 @@ def test_noisy_dependencies_pinned_at_warning_even_at_debug_root(
     assert logging.getLogger("httpcore.connection").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("urllib3").getEffectiveLevel() == logging.WARNING
     assert logging.getLogger("google_genai.models").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.parsers").getEffectiveLevel() == logging.WARNING
+    assert logging.getLogger("botocore.credentials").getEffectiveLevel() == logging.WARNING
 
 
 def test_noisy_dependencies_escalate_above_warning_when_caller_runs_error(
@@ -185,6 +210,122 @@ def test_custom_stream_is_used() -> None:
     logging.getLogger(__name__).info("hello %s", "world")
     contents = buf.getvalue()
     assert "hello world" in contents
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        _AWS_SSO_RESPONSE,
+        f"Authorization: AWS4-HMAC-SHA256 Credential={_AWS_ACCESS_KEY}/scope, "
+        "SignedHeaders=host;x-amz-date, Signature=abcdef0123456789",
+        f"X-Amz-Security-Token: {_AWS_SESSION_TOKEN}",
+        f"aws_access_key_id={_AWS_ACCESS_KEY} aws_secret_access_key={_AWS_SECRET_KEY}",
+    ],
+)
+def test_redact_secrets_masks_aws_credentials(message: str) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert _AWS_ACCESS_KEY not in redacted
+    assert _AWS_SECRET_KEY not in redacted
+    assert _AWS_SESSION_TOKEN not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    ("message", "secret_values"),
+    [
+        (
+            "{'Authorization': 'AWS4-HMAC-SHA256 "
+            f"Credential={_AWS_ACCESS_KEY}/20260717/us-east-1/bedrock/aws4_request, "
+            "SignedHeaders=host;x-amz-date, "
+            f"Signature={_AWS_SIGV4_SIGNATURE}'}}",
+            (_AWS_ACCESS_KEY, _AWS_SIGV4_SIGNATURE),
+        ),
+        (
+            "SigV4Auth("
+            f"access_key_id='{_AWS_ACCESS_KEY}', "
+            f"secret_access_key='{_AWS_SECRET_KEY}', "
+            f"session_token='{_AWS_SESSION_TOKEN}'"
+            ")",
+            (_AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_SESSION_TOKEN),
+        ),
+        (
+            "Credentials("
+            f"access_key='{_AWS_ACCESS_KEY}', "
+            f"secret_key='{_AWS_SECRET_KEY}', "
+            f"token='{_AWS_SESSION_TOKEN}'"
+            ")",
+            (_AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_SESSION_TOKEN),
+        ),
+    ],
+)
+def test_redact_secrets_masks_aws_mapping_and_object_representations(
+    message: str,
+    secret_values: tuple[str, ...],
+) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    for secret_value in secret_values:
+        assert secret_value not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Authorization=AWS4-HMAC-SHA256 "
+        f"Credential={_AWS_ACCESS_KEY}/20260717/us-east-1/bedrock/aws4_request, "
+        "SignedHeaders=host;x-amz-date, "
+        f"Signature={_AWS_SIGV4_SIGNATURE}",
+    ],
+)
+def test_redact_secrets_masks_sigv4_signature_equals_representations(message: str) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert _AWS_SIGV4_SIGNATURE not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    ("message", "secret"),
+    [
+        (
+            f"{{'X-Amz-Security-Token': '{_AWS_SESSION_TOKEN}'}}",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f'{{"X-Amz-Security-Token": "{_AWS_SESSION_TOKEN}"}}',
+            _AWS_SESSION_TOKEN,
+        ),
+        (f"X-Amz-Security-Token={_AWS_SESSION_TOKEN}", _AWS_SESSION_TOKEN),
+        (
+            f"https://example.test/?X-Amz-Security-Token={_AWS_SESSION_TOKEN}&ok=1",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f"https://example.test/?X-Amz-Signature={_AWS_SIGV4_SIGNATURE}&ok=1",
+            _AWS_SIGV4_SIGNATURE,
+        ),
+    ],
+)
+def test_redact_secrets_masks_aws_mapping_assignment_and_query_representations(
+    message: str,
+    secret: str,
+) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert secret not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "token=value",
+        "refresh_token=value",
+        "access_key=value",
+        "secret_key=value",
+        f"cache signature={_AWS_SIGV4_SIGNATURE}",
+    ],
+)
+def test_redact_secrets_preserves_non_aws_diagnostics(message: str) -> None:
+    assert logging_setup.redact_secrets(message) == message
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +513,110 @@ def test_attach_run_log_file_captures_debug_while_terminal_quiet(tmp_path) -> No
         assert "debug-only-line" not in term
     finally:
         logging.getLogger().removeHandler(handler)
+
+
+def test_botocore_debug_is_excluded_from_run_log(tmp_path: Path) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    try:
+        logging.getLogger("botocore.parsers").debug(
+            _AWS_SSO_RESPONSE
+        )  # codeql[py/clear-text-logging-sensitive-data] -- synthetic redaction fixture
+        logging.getLogger("agent_guardian.test.aws").debug("guardian-debug-visible")
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert "guardian-debug-visible" in text
+        assert "roleCredentials" not in text
+        assert _AWS_ACCESS_KEY not in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    logger = logging.getLogger("botocore.parsers")
+    logger.setLevel(logging.DEBUG)
+    try:
+        logger.debug(
+            _AWS_SSO_RESPONSE
+        )  # codeql[py/clear-text-logging-sensitive-data] -- synthetic redaction fixture
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert "roleCredentials" in text
+        assert _AWS_ACCESS_KEY not in text
+        assert _AWS_SECRET_KEY not in text
+        assert _AWS_SESSION_TOKEN not in text
+        assert "***REDACTED***" in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+@pytest.mark.parametrize(
+    ("message", "secret"),
+    [
+        (
+            f"{{'X-Amz-Security-Token': '{_AWS_SESSION_TOKEN}'}}",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f'{{"X-Amz-Security-Token": "{_AWS_SESSION_TOKEN}"}}',
+            _AWS_SESSION_TOKEN,
+        ),
+        (f"X-Amz-Security-Token={_AWS_SESSION_TOKEN}", _AWS_SESSION_TOKEN),
+        (
+            f"https://example.test/?X-Amz-Security-Token={_AWS_SESSION_TOKEN}&ok=1",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f"https://example.test/?X-Amz-Signature={_AWS_SIGV4_SIGNATURE}&ok=1",
+            _AWS_SIGV4_SIGNATURE,
+        ),
+    ],
+)
+def test_run_log_redacts_aws_mapping_assignment_and_query_representations(
+    tmp_path: Path,
+    message: str,
+    secret: str,
+) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    try:
+        logging.getLogger("agent_guardian.test.aws").debug(message)
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert secret not in text
+        assert "***REDACTED***" in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+def test_detach_run_log_file_seals_file(tmp_path: Path) -> None:
+    stream = io.StringIO()
+    logging_setup.configure_logging(level="DEBUG", stream=stream, force=True)
+    root = logging.getLogger()
+    terminal_handler = root.handlers[0]
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log)
+    event_handler = logging.NullHandler()
+    root.addHandler(event_handler)
+    log = logging.getLogger("agent_guardian.test.seal")
+    try:
+        log.info("before-seal")
+        logging_setup.detach_run_log_file(handler)
+        logging_setup.detach_run_log_file(handler)
+        log.info("after-seal")
+        assert handler not in root.handlers
+        assert terminal_handler in root.handlers
+        assert event_handler in root.handlers
+        assert "after-seal" in stream.getvalue()
+        assert "before-seal" in run_log.read_text(encoding="utf-8")
+        assert "after-seal" not in run_log.read_text(encoding="utf-8")
+    finally:
+        root.removeHandler(event_handler)
 
 
 def test_set_terminal_log_level_skips_file_and_jsonl_handlers(tmp_path) -> None:

@@ -8,9 +8,10 @@ the ``events.jsonl`` SSE stream. This module seals those by writing a
 signs the manifest with the same Ed25519 + HMAC machinery as the report, so any
 post-hoc edit to a forensic file is detectable.
 
-Note: ``run.log`` is written live; the manifest captures it as-of-finalize, so
-log lines emitted *after* the manifest is sealed (there are a few) are not
-covered — the scan-body evidence is.
+The CLI keeps ``run.log`` and ``events.jsonl`` live through final summaries and
+gate evaluation, writes one joint seal marker, and detaches both exact logging
+handlers before building this manifest. No later logger or observer records are
+allowed, so the recorded digests describe the final on-disk log bytes.
 """
 
 from __future__ import annotations

@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from pathlib import Path
 
 import pytest
 
+import agent_guardian.cost as cost
 from agent_guardian.core.budget import (
     BudgetEnvelope,
     BudgetExhausted,
     BudgetLedger,
     tokens_to_usd,
 )
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
+from agent_guardian.llm.stub import StubLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 
 
 def _envelope(
@@ -107,3 +113,139 @@ def test_property_spend_never_exceeds_cap() -> None:
             # reservation gate is on the estimate. We model honest estimates.
             led.commit(r, actual_usd=amt)
         assert led.spent_usd <= cap + 1e-9
+
+
+class _FailingLLM(BaseLLM):
+    provider = "gemini"
+
+    def __init__(self, *, wait: bool = False) -> None:
+        super().__init__(owns_client=False)
+        self.started = asyncio.Event()
+        self._wait = wait
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.started.set()
+        if self._wait:
+            await asyncio.Event().wait()
+        raise RuntimeError("provider failed")
+
+
+def _request() -> LLMRequest:
+    return LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="gemini-2.5-flash",
+        max_tokens=32,
+    )
+
+
+@pytest.mark.asyncio
+async def test_admission_receipt_is_conservatively_settled_on_exception() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    llm = BudgetAdmissionLLM(_FailingLLM(), ledger=ledger, agent_id="evaluator")
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        await llm.complete(_request())
+
+    assert [entry.kind for entry in ledger.entries()] == ["reserve", "commit"]
+    assert ledger.committed_plus_reserved_usd == pytest.approx(ledger.spent_usd)
+
+
+@pytest.mark.asyncio
+async def test_admission_receipt_is_conservatively_settled_on_cancellation() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    inner = _FailingLLM(wait=True)
+    llm = BudgetAdmissionLLM(inner, ledger=ledger, agent_id="attacker")
+    task = asyncio.create_task(llm.complete(_request()))
+    await inner.started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        _ = await task
+
+    assert [entry.kind for entry in ledger.entries()] == ["reserve", "commit"]
+    assert ledger.committed_plus_reserved_usd == pytest.approx(ledger.spent_usd)
+
+
+@pytest.mark.asyncio
+async def test_admission_does_not_double_count_pretracked_usage() -> None:
+    counter = UsageCounter()
+    tracked = UsageTrackingLLM(StubLLM(default="ok"), counter=counter)
+    llm = with_budget_admission(
+        tracked,
+        ledger=BudgetLedger(_envelope(usd=1.0)),
+        agent_id="commander",
+    )
+
+    await llm.complete(_request())
+
+    assert counter.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_budget_admission_falls_back_to_request_model_for_legacy_inner() -> None:
+    """Complete-compatible duck types predate ``pricing_model_spec``."""
+
+    class _LegacyInner:
+        provider = "stub"
+
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            return LLMResponse(
+                text="ok",
+                model=request.model,
+                provider="stub",
+                usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            )
+
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="stub",
+        max_tokens=32,
+    )
+    llm = BudgetAdmissionLLM(  # type: ignore[arg-type]
+        _LegacyInner(),
+        ledger=BudgetLedger(_envelope(usd=1.0)),
+        agent_id="target",
+    )
+
+    response = await llm.complete(request)
+
+    assert response.text == "ok"
+
+
+def test_gemini_25_pro_long_context_uses_high_price_tier() -> None:
+    actual = tokens_to_usd("gemini:gemini-2.5-pro", 200_001, 1_000_000)
+    expected = (200_001 / 1_000_000) * 2.50 + 15.00
+    assert actual == pytest.approx(expected)
+
+
+@pytest.mark.asyncio
+async def test_gemini_admission_floor_rejects_stale_low_table_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cost,
+        "PRICE_TABLE",
+        (cost.PriceRow("gemini", "gemini-3.5-flash", 0.30, 2.50),),
+    )
+    ledger = BudgetLedger(_envelope(usd=0.005))
+    llm = BudgetAdmissionLLM(StubLLM(default="ok"), ledger=ledger, agent_id="attacker")
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="hello")],
+        model="gemini:gemini-3.5-flash",
+        max_tokens=1_000,
+    )
+
+    with pytest.raises(BudgetExhausted):
+        await llm.complete(request)
+
+
+def test_upward_settlement_drift_closes_future_admission() -> None:
+    ledger = BudgetLedger(_envelope(usd=1.0))
+    receipt = ledger.reserve("attacker", tokens=100, est_usd=0.50)
+
+    ledger.commit(receipt, actual_usd=0.60, actual_tokens=100)
+
+    assert ledger.spent_usd == pytest.approx(0.60)
+    assert ledger.is_exhausted() is True
+    with pytest.raises(BudgetExhausted):
+        ledger.reserve("attacker", tokens=1, est_usd=0.01)

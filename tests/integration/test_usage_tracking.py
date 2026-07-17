@@ -23,9 +23,31 @@ from agent_guardian.adapters.prompt import PromptAdapter
 from agent_guardian.agents.base import AgentBudget
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
 from agent_guardian.core.memory import SharedMemory
-from agent_guardian.llm.base import LLMMessage, LLMRequest
+from agent_guardian.cost import token_cost_usd
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.stub import StubLLM, StubScript
 from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
+
+
+class _FixedUsageLLM(BaseLLM):
+    provider = "gemini"
+
+    def __init__(self, *, prompt_tokens: int, completion_tokens: int) -> None:
+        super().__init__(owns_client=False)
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        return LLMResponse(
+            text="ok",
+            model=request.model,
+            provider=self.provider,
+            usage=LLMUsage(
+                prompt_tokens=self.prompt_tokens,
+                completion_tokens=self.completion_tokens,
+                total_tokens=self.prompt_tokens + self.completion_tokens,
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -60,14 +82,99 @@ async def test_wrapper_is_concurrency_safe() -> None:
     assert wrapped.counter.calls == n
 
 
+@pytest.mark.asyncio
+async def test_wrapper_accumulates_tiered_cost_at_each_request_boundary() -> None:
+    model = "gemini:gemini-3.1-pro-preview"
+    wrapped = UsageTrackingLLM(_FixedUsageLLM(prompt_tokens=1_000, completion_tokens=100))
+    request = LLMRequest(messages=[LLMMessage(role="user", content="x")], model=model)
+
+    for _ in range(201):
+        await wrapped.complete(request)
+
+    # Each request is safely below 200k input even though the cumulative
+    # counter crosses it. Repricing the aggregate would incorrectly charge all
+    # 201 calls at the long-context rate.
+    expected = 201 * token_cost_usd(model, 1_000, 100)
+    assert wrapped.counter.priced_cost_usd == pytest.approx(expected)
+    assert wrapped.counter.priced_cost_usd != pytest.approx(token_cost_usd(model, 201_000, 20_100))
+
+
+@pytest.mark.asyncio
+async def test_wrapper_prices_vertex_location_from_each_request_model() -> None:
+    global_model = "vertex:gemini-3.5-flash+project=p+location=global"
+    default_model = "vertex:gemini-3.5-flash+project=p"
+    global_wrapped = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    )
+    default_wrapped = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    )
+
+    await global_wrapped.complete(
+        LLMRequest(messages=[LLMMessage(role="user", content="x")], model=global_model)
+    )
+    await default_wrapped.complete(
+        LLMRequest(messages=[LLMMessage(role="user", content="x")], model=default_model)
+    )
+
+    assert global_wrapped.counter.priced_cost_usd == pytest.approx(10.50)
+    assert default_wrapped.counter.priced_cost_usd == pytest.approx(11.55)
+
+
 def test_counter_merge_sums_fields() -> None:
-    a = UsageCounter(prompt_tokens=10, completion_tokens=20, total_tokens=30, calls=2)
-    b = UsageCounter(prompt_tokens=1, completion_tokens=2, total_tokens=3, calls=1)
+    a = UsageCounter(
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30,
+        calls=2,
+        priced_cost_usd=0.10,
+    )
+    b = UsageCounter(
+        prompt_tokens=1,
+        completion_tokens=2,
+        total_tokens=3,
+        calls=1,
+        priced_cost_usd=0.02,
+    )
     a.merge(b)
     assert a.prompt_tokens == 11
     assert a.completion_tokens == 22
     assert a.total_tokens == 33
     assert a.calls == 3
+    assert a.priced_cost_usd == pytest.approx(0.12)
+
+
+def test_merge_preserves_legacy_fallback_when_manual_tokens_have_no_call_count() -> None:
+    legacy = UsageCounter(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+    exact = UsageCounter(
+        prompt_tokens=1,
+        completion_tokens=2,
+        total_tokens=3,
+        calls=1,
+        priced_cost_usd=0.02,
+    )
+
+    legacy.merge(exact)
+
+    assert legacy.priced_cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_prepopulated_manual_counter_stays_on_aggregate_cost_fallback() -> None:
+    counter = UsageCounter(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+    wrapped = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=1, completion_tokens=2),
+        counter=counter,
+    )
+
+    await wrapped.complete(
+        LLMRequest(
+            messages=[LLMMessage(role="user", content="x")],
+            model="gemini:gemini-3.1-pro-preview",
+        )
+    )
+
+    assert counter.priced_cost_usd is None
 
 
 def test_counter_snapshot_returns_plain_dict() -> None:

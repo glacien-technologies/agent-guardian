@@ -83,6 +83,49 @@ def test_map_vertex_response_happy_path() -> None:
     assert resp.finish_reason == "stop"
 
 
+def test_map_vertex_response_includes_thinking_tokens() -> None:
+    data = {
+        "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 17,
+            "totalTokenCount": 30,
+        },
+    }
+    usage = map_vertex_response("gemini-2.5-flash", data).usage
+    assert usage.prompt_tokens == 10
+    assert usage.completion_tokens == 20
+    assert usage.total_tokens == 30
+
+
+def test_map_vertex_response_uses_total_delta_when_thought_field_missing() -> None:
+    data = {
+        "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "totalTokenCount": 25,
+        },
+    }
+    assert map_vertex_response("gemini-2.5-flash", data).usage.completion_tokens == 15
+
+
+def test_map_vertex_response_reconciles_inconsistent_total_upward() -> None:
+    data = {
+        "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 17,
+            "totalTokenCount": 12,
+        },
+    }
+    usage = map_vertex_response("gemini-2.5-flash", data).usage
+    assert usage.completion_tokens == 20
+    assert usage.total_tokens == 30
+
+
 def test_map_vertex_response_concatenates_parts() -> None:
     data = {
         "candidates": [

@@ -121,8 +121,17 @@ def map_vertex_response(model: str, data: dict[str, Any]) -> LLMResponse:
         _LOG.warning("vertex: malformed response (%s): %s", type(exc).__name__, exc)
         raise LLMResponseFormatError(f"vertex: malformed response: {exc}") from exc
     prompt_tokens = int(usage.get("promptTokenCount", 0))
-    completion_tokens = int(usage.get("candidatesTokenCount", 0))
-    total_tokens = int(usage.get("totalTokenCount", prompt_tokens + completion_tokens))
+    candidate_tokens = int(usage.get("candidatesTokenCount", 0))
+    thought_tokens = int(usage.get("thoughtsTokenCount", 0))
+    total_tokens = int(
+        usage.get("totalTokenCount", prompt_tokens + candidate_tokens + thought_tokens)
+    )
+    completion_tokens = max(
+        candidate_tokens,
+        candidate_tokens + thought_tokens,
+        max(0, total_tokens - prompt_tokens),
+    )
+    total_tokens = max(total_tokens, prompt_tokens + completion_tokens)
     return LLMResponse(
         text=text,
         model=model,
@@ -177,6 +186,15 @@ class VertexClient(BaseLLM):
         if self.location == "global":
             return "aiplatform.googleapis.com"
         return VERTEX_HOST_TEMPLATE.format(region=self.location)
+
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Include the resolved endpoint location in Vertex cost identity."""
+        model = request.model.strip()
+        provider, separator, provider_model = model.partition(":")
+        if separator and provider.strip().lower() == self.provider:
+            model = provider_model
+        model = model.partition("+")[0].strip()
+        return f"vertex:{model}+location={self.location}"
 
     def _resolve_credentials(self) -> Any:
         """Resolve ADC (blocking — reads key files / hits the metadata server).

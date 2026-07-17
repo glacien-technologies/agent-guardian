@@ -14,7 +14,9 @@ import pytest
 import respx
 from httpx import Response
 
+from agent_guardian.core.budget import BudgetEnvelope, BudgetLedger, tokens_to_usd
 from agent_guardian.llm.base import LLMMessage, LLMRequest
+from agent_guardian.llm.budget_admission import BudgetAdmissionLLM
 from agent_guardian.llm.errors import (
     LLMAuthError,
     LLMPermanentError,
@@ -23,6 +25,7 @@ from agent_guardian.llm.errors import (
     LLMTransientError,
 )
 from agent_guardian.llm.gemini import GeminiClient
+from agent_guardian.llm.usage_tracking import UsageTrackingLLM
 
 _HAPPY_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
@@ -66,6 +69,59 @@ async def test_gemini_complete_happy_path() -> None:
     sent_url = urlparse(str(route.calls.last.request.url))
     assert parse_qs(sent_url.query)["key"] == ["test-key"]
     await llm.aclose()
+
+
+@respx.mock
+async def test_gemini_complete_includes_thinking_tokens_in_completion_usage() -> None:
+    body = _happy_body()
+    usage = body["usageMetadata"]
+    assert isinstance(usage, dict)
+    usage.update(
+        {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 17,
+            "totalTokenCount": 30,
+        }
+    )
+    respx.post(_HAPPY_URL).mock(return_value=Response(200, json=body))
+    llm = GeminiClient(api_key="k", rate_limiter=None)
+
+    response = await llm.complete(_req())
+
+    assert response.usage.prompt_tokens == 10
+    assert response.usage.completion_tokens == 20
+    assert response.usage.total_tokens == 30
+    await llm.aclose()
+
+
+@respx.mock
+async def test_budget_settlement_prices_gemini_thinking_tokens() -> None:
+    model = "gemini-3.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = _happy_body()
+    body["modelVersion"] = model
+    usage = body["usageMetadata"]
+    assert isinstance(usage, dict)
+    usage.update(
+        {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 3,
+            "thoughtsTokenCount": 17,
+            "totalTokenCount": 30,
+        }
+    )
+    respx.post(url).mock(return_value=Response(200, json=body))
+    inner = GeminiClient(api_key="k", rate_limiter=None)
+    tracked = UsageTrackingLLM(inner)
+    ledger = BudgetLedger(BudgetEnvelope(usd_cap=1.0, token_cap=10_000, wallclock_cap_s=60.0))
+    llm = BudgetAdmissionLLM(tracked, ledger=ledger, agent_id="evaluator")
+
+    await llm.complete(_req(model=model))
+
+    assert ledger.spent_usd == pytest.approx(tokens_to_usd(model, 10, 20))
+    assert tracked.counter.priced_cost_usd == pytest.approx(tokens_to_usd(model, 10, 20))
+    await inner.aclose()
 
 
 @respx.mock

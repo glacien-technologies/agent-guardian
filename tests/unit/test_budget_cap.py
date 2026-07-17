@@ -14,11 +14,15 @@ from datetime import UTC, datetime
 import pytest
 
 from agent_guardian.adapters.prompt import PromptAdapter
+from agent_guardian.agents.base import AgentReport
 from agent_guardian.agents.goal_hijack import GoalHijackAgent
-from agent_guardian.core.budget import tokens_to_usd
+from agent_guardian.core.budget import BudgetExhausted, tokens_to_usd
 from agent_guardian.core.swarm import SwarmCommander, SwarmConfig
-from agent_guardian.llm.base import LLMRequest, LLMResponse
+from agent_guardian.cost import token_cost_usd
+from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.budget_admission import admission_reservation_usd
 from agent_guardian.llm.stub import StubLLM
+from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
 from agent_guardian.models.asi import AsiCategory
 from agent_guardian.models.csa import CsaCategory
 from agent_guardian.models.finding import Finding
@@ -79,6 +83,149 @@ def _agent(swarm: SwarmCommander) -> GoalHijackAgent:
     )
 
 
+class _BlockingPaidLLM(BaseLLM):
+    """Provider double that holds admitted calls open during admission."""
+
+    provider = "gemini"
+
+    def __init__(self) -> None:
+        super().__init__(owns_client=False)
+        self.calls = 0
+        self.release = asyncio.Event()
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.calls += 1
+        await self.release.wait()
+        input_tokens = sum(len(message.content) for message in request.messages)
+        usage = LLMUsage(
+            prompt_tokens=input_tokens,
+            completion_tokens=request.max_tokens,
+            total_tokens=input_tokens + request.max_tokens,
+        )
+        return LLMResponse(
+            text="ok",
+            model=request.model,
+            provider=self.provider,
+            usage=usage,
+        )
+
+
+class _FixedUsageLLM(BaseLLM):
+    """Provider double with deterministic response usage per request."""
+
+    provider = "gemini"
+
+    def __init__(self, *, prompt_tokens: int, completion_tokens: int) -> None:
+        super().__init__(owns_client=False)
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        return LLMResponse(
+            text='{"verdict":"pass","confidence":0.9,"reasoning":"ok"}',
+            model=request.model,
+            provider=self.provider,
+            usage=LLMUsage(
+                prompt_tokens=self.prompt_tokens,
+                completion_tokens=self.completion_tokens,
+                total_tokens=self.prompt_tokens + self.completion_tokens,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_paid_calls_reserve_before_provider_dispatch() -> None:
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="x" * 1_000)],
+        model=_FLASH,
+        max_tokens=1_000,
+    )
+    per_call_ceiling = admission_reservation_usd(_FLASH, 1_068, 1_000)
+    cap = per_call_ceiling * 2.2
+    inner = _BlockingPaidLLM()
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="concurrent-admission",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=cap,
+        ),
+        target=target,
+        attacker_llm=inner,
+        evaluator_llm=StubLLM(default="ok"),
+    )
+
+    tasks = [asyncio.create_task(swarm.attacker_llm.complete(request)) for _ in range(3)]
+    for _ in range(100):
+        if inner.calls == 3 or any(task.done() for task in tasks):
+            break
+        await asyncio.sleep(0)
+
+    assert inner.calls == 2
+    assert swarm._stopped_reason == "budget"
+    assert swarm._budget_ledger is not None
+    assert swarm._budget_ledger.committed_plus_reserved_usd <= cap
+    assert (
+        sum(entry.usd for entry in swarm._budget_ledger.entries() if entry.kind == "reserve") <= cap
+    )
+
+    inner.release.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert sum(isinstance(result, BudgetExhausted) for result in results) == 1
+    assert inner.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_all_paid_swarm_roles_share_one_admission_ledger() -> None:
+    request = LLMRequest(
+        messages=[LLMMessage(role="user", content="x" * 1_000)],
+        model=_FLASH,
+        max_tokens=1_000,
+    )
+    cap = admission_reservation_usd(_FLASH, 1_068, 1_000) * 1.2
+    attacker = _BlockingPaidLLM()
+    evaluator = _BlockingPaidLLM()
+    commander = _BlockingPaidLLM()
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="shared-admission",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=cap,
+        ),
+        target=target,
+        attacker_llm=attacker,
+        evaluator_llm=evaluator,
+        commander_llm=commander,
+    )
+
+    tasks = [
+        asyncio.create_task(swarm.attacker_llm.complete(request)),
+        asyncio.create_task(swarm.evaluator_llm.complete(request)),
+        asyncio.create_task(swarm.commander_llm.complete(request)),
+        asyncio.create_task(swarm._finalise_evaluator_llm.complete(request)),
+    ]
+    for _ in range(100):
+        if (
+            sum(inner.calls for inner in (attacker, evaluator, commander)) == 1
+            and sum(task.done() for task in tasks) == 3
+        ):
+            break
+        await asyncio.sleep(0)
+
+    assert sum(inner.calls for inner in (attacker, evaluator, commander)) == 1
+    assert swarm._stopped_reason == "budget"
+    assert swarm._finalise_truncated is True
+    for inner in (attacker, evaluator, commander):
+        inner.release.set()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert sum(isinstance(result, BudgetExhausted) for result in results) == 3
+
+
 def test_live_cost_usd_sums_priced_commander_and_agent_counters() -> None:
     swarm = _swarm()
     swarm._commander_usage.prompt_tokens = 1_000
@@ -102,6 +249,29 @@ def test_live_cost_usd_sums_priced_commander_and_agent_counters() -> None:
 def test_live_cost_usd_is_zero_with_no_spend() -> None:
     swarm = _swarm()
     assert swarm._live_cost_usd() == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_reservation_reaches_live_and_final_cost_without_tokens() -> None:
+    swarm = _swarm(usd_cap=1.0)
+    assert swarm._budget_ledger is not None
+    receipt = swarm._budget_ledger.reserve("target", tokens=1_111, est_usd=0.0154321)
+    swarm._budget_ledger.commit(
+        receipt,
+        actual_usd=receipt.est_usd,
+        actual_tokens=receipt.tokens,
+    )
+
+    assert swarm._usage_rollup(include_report_fallback=False) == pytest.approx((0, 0.0))
+    assert swarm._live_cost_usd() == pytest.approx(0.0154321)
+
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+
+    assert scan.tokens_total == 0
+    assert scan.cost_usd == pytest.approx(0.0154321)
+    assert scan.budget is not None
+    assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
 
 
 # --------------------------------------------------------------------- watchdog
@@ -170,6 +340,145 @@ async def test_finalise_not_truncated_under_cap() -> None:
     _commander_spend(swarm, 0.01)
     await swarm._apply_pov_gate([_finding("f1")])
     assert swarm._finalise_truncated is False
+
+
+@pytest.mark.asyncio
+async def test_finalise_admission_refusal_keeps_current_and_remaining_findings() -> None:
+    swarm = _swarm(usd_cap=1e-9)
+    findings = [_finding("f1"), _finding("f2")]
+
+    result = await swarm._apply_pov_gate(findings)
+
+    assert result == findings
+    assert swarm._finalise_truncated is True
+    assert swarm._stopped_reason == "budget"
+
+
+@pytest.mark.asyncio
+async def test_panel_usage_reaches_live_and_final_scan_cost() -> None:
+    swarm = _swarm()
+    assert swarm._panel_judge is not None
+
+    await swarm._panel_judge.verdict("attack", "target response")
+    live_cost = swarm._live_cost_usd()
+
+    assert live_cost > 0.0
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total > 0
+    assert scan.cost_usd == pytest.approx(round(live_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_shared_pretracked_counter_is_aggregated_once_in_live_and_scan() -> None:
+    counter = UsageCounter(
+        prompt_tokens=1_000,
+        completion_tokens=2_000,
+        total_tokens=3_000,
+        calls=1,
+    )
+    shared = UsageTrackingLLM(StubLLM(default="ok"), counter=counter)
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="counter-alias",
+            attacker_model=_FLASH,
+            evaluator_model=_FLASH,
+            commander_model=_FLASH,
+            usd_cap=100.0,
+        ),
+        target=target,
+        attacker_llm=shared,
+        evaluator_llm=shared,
+        commander_llm=shared,
+    )
+    agents = [_agent(swarm), _agent(swarm)]
+    swarm._active_agents = agents
+    swarm._agent_reports = [
+        AgentReport(
+            agent=agent.name,
+            asi_category=agent.asi_category,
+            findings_count=0,
+            turns=1,
+            duration_seconds=0.1,
+            terminated_by="exhausted",
+            tokens_consumed=agent._snapshot_tokens(),
+        )
+        for agent in agents
+    ]
+    expected_cost = tokens_to_usd(_FLASH, 1_000, 2_000)
+
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total == 3_000
+    assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_shared_pretracked_counter_preserves_per_request_tiers_in_swarm_rollup() -> None:
+    model = "gemini:gemini-3.1-pro-preview"
+    shared = UsageTrackingLLM(_FixedUsageLLM(prompt_tokens=1_000, completion_tokens=100))
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="per-request-tier",
+            attacker_model=model,
+            evaluator_model=model,
+            commander_model=model,
+        ),
+        target=target,
+        attacker_llm=shared,
+        evaluator_llm=shared,
+        commander_llm=shared,
+    )
+    request = LLMRequest(messages=[LLMMessage(role="user", content="x")], model=model)
+
+    for _ in range(201):
+        await shared.complete(request)
+
+    expected_cost = 201 * token_cost_usd(model, 1_000, 100)
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+    assert scan.tokens_total == 201 * 1_100
+    assert scan.cost_usd == pytest.approx(round(expected_cost, 4))
+
+
+@pytest.mark.asyncio
+async def test_distinct_panel_and_recon_counters_keep_exact_request_costs() -> None:
+    model = "gemini:gemini-3.1-pro-preview"
+    attacker = _FixedUsageLLM(prompt_tokens=1_000, completion_tokens=100)
+    evaluator = _FixedUsageLLM(prompt_tokens=2_000, completion_tokens=200)
+    target = PromptAdapter("you are a test target", llm=StubLLM(default="ok"), model="stub")
+    swarm = SwarmCommander(
+        config=SwarmConfig(
+            scan_id="panel-recon-cost",
+            attacker_model=model,
+            evaluator_model=model,
+            commander_model=model,
+        ),
+        target=target,
+        attacker_llm=attacker,
+        evaluator_llm=evaluator,
+    )
+    assert swarm._panel_judge is not None
+    await swarm._panel_judge.verdict("attack", "target response")
+
+    recon_counter = UsageCounter()
+    recon = UsageTrackingLLM(
+        _FixedUsageLLM(prompt_tokens=500, completion_tokens=50),
+        counter=recon_counter,
+    )
+    await recon.complete(LLMRequest(messages=[LLMMessage(role="user", content="x")], model=model))
+    swarm._recon_usage = recon_counter
+
+    expected_cost = (
+        token_cost_usd(model, 1_000, 100)
+        + token_cost_usd(model, 2_000, 200)
+        + token_cost_usd(model, 500, 50)
+    )
+    assert swarm._live_cost_usd() == pytest.approx(expected_cost)
 
 
 # ----------------------------------------------------------------- report blocks

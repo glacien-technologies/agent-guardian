@@ -33,6 +33,7 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -155,10 +156,12 @@ _REDACTED = "***REDACTED***"
 
 # Secrets that must never reach the logs. httpx logs request URLs at INFO, and
 # Gemini/Google pass the API key in the query string (``?key=...``) -- so
-# without this every scan wrote the user's key to stderr. We cover three shapes:
+# without this every scan wrote the user's key to stderr. Covered shapes include:
 #   1. sensitive query params (key/api_key/access_token/token/sig/signature)
 #   2. ``Authorization: Bearer <token>`` headers
-#   3. bare provider key shapes anywhere in the line (Google AIza..., OpenAI/
+#   3. AWS credential fields used by AgentGuardian, botocore, and SSO responses
+#   4. AWS SigV4 authorization/security-token headers, including mapping reprs
+#   5. bare AWS access-key IDs and provider key shapes (Google AIza..., OpenAI/
 #      Anthropic sk-...), as defence-in-depth for any path we didn't anticipate.
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -166,14 +169,62 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         r"\1" + _REDACTED,
     ),
     (re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"), r"\1" + _REDACTED),
+    (
+        re.compile(
+            r"(?i)((?<![A-Za-z0-9_])[\"']?(?:accessKeyId|secretAccessKey|sessionToken|"
+            r"aws_access_key_id|aws_secret_access_key|aws_session_token|"
+            r"access_key_id|secret_access_key|session_token)[\"']?"
+            r"\s*[:=]\s*[\"']?)[^\"'\s,}]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\baccess_key\s*=\s*[\"']?)[^\"'\s,})]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\bsecret_key\s*=\s*[\"']?)[^\"'\s,})]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\btoken\s*=\s*[\"']?)[^\"'\s,})]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)((?<![A-Za-z0-9_-])[\"']?x-amz-(?:security-token|signature)[\"']?"
+            r"\s*[:=]\s*[\"']?)[^\"'&\s,}]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)([\"']?authorization[\"']?\s*[:=]\s*[\"']?AWS4-HMAC-SHA256\s+)"
+            r"[^\"'\r\n}]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), _REDACTED),
     (re.compile(r"AIza[0-9A-Za-z_\-]{10,}"), _REDACTED),
     (re.compile(r"sk-(?:ant-)?[A-Za-z0-9_\-]{12,}"), _REDACTED),
 )
 
 
 def redact_secrets(text: str) -> str:
-    """Mask API keys / bearer tokens in a log line, preserving the surrounding
-    text (e.g. ``?key=AIza...`` -> ``?key=***REDACTED***``)."""
+    """Mask API keys, bearer tokens, AWS credentials, and SigV4 headers.
+
+    Surrounding syntax is preserved (for example, ``?key=AIza...`` becomes
+    ``?key=***REDACTED***``).
+    """
     for pattern, repl in _SECRET_PATTERNS:
         text = pattern.sub(repl, text)
     return text
@@ -820,6 +871,9 @@ def configure_logging(
         "httpcore.connection",
         "urllib3",
         "google_genai.models",
+        "botocore",
+        "botocore.parsers",
+        "botocore.credentials",
     )
     for noisy in _NOISY_DEPS:
         logging.getLogger(noisy).setLevel(max(resolved, logging.WARNING))
@@ -850,9 +904,9 @@ def attach_run_log_file(
 
     The handler carries the same plain formatter as the non-TTY console path
     (timestamp + level + logger + trace id) and the same secret-redacting
-    filter, so API keys never land in the file. Returns the handler so the
-    caller can detach it (the CLI is one-scan-per-process, so it usually does
-    not bother).
+    filter, so API keys never land in the file. Returns the exact handler so
+    the caller can retain it through final summaries, then detach it during
+    the joint run/event forensic seal before hashing.
     """
     resolved = _resolve_level(level)
     root = logging.getLogger()
@@ -879,6 +933,21 @@ def attach_run_log_file(
     if root.level == logging.NOTSET or root.level > resolved:
         root.setLevel(resolved)
     return handler
+
+
+def detach_run_log_file(handler: logging.Handler) -> None:
+    """Flush, detach, and close one run-log handler without touching other sinks.
+
+    The operation is idempotent so callers can safely seal the same handler
+    during best-effort finalization more than once.
+    """
+    root = logging.getLogger()
+    with contextlib.suppress(Exception):
+        handler.flush()
+    if handler in root.handlers:
+        root.removeHandler(handler)
+    with contextlib.suppress(Exception):
+        handler.close()
 
 
 def set_terminal_log_level(level: str | int) -> None:
