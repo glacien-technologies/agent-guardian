@@ -35,7 +35,7 @@
 - Consumes: stdlib `logging.LogRecord` messages and the existing `_RedactingFilter`.
 - Produces: `redact_secrets(text: str) -> str` that masks AWS credential shapes; `configure_logging()` that pins the `botocore` hierarchy at `WARNING` or above.
 
-- [ ] **Step 1: Add synthetic AWS credential fixtures and failing redaction tests**
+- [x] **Step 1: Add synthetic AWS credential fixtures and failing redaction tests**
 
 Add to `tests/unit/test_logging_setup.py`:
 
@@ -70,7 +70,7 @@ def test_redact_secrets_masks_aws_credentials(message: str) -> None:
     assert "***REDACTED***" in redacted
 ```
 
-- [ ] **Step 2: Add failing run-log dependency-clamp and defense-in-depth tests**
+- [x] **Step 2: Add failing run-log dependency-clamp and defense-in-depth tests**
 
 Extend the autouse logger reset tuple with `"botocore"` and `"botocore.parsers"`, then add:
 
@@ -110,7 +110,7 @@ def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -> None:
         logging_setup.detach_run_log_file(handler)
 ```
 
-- [ ] **Step 3: Run the focused logging tests and verify red**
+- [x] **Step 3: Run the focused logging tests and verify red**
 
 Run:
 
@@ -123,7 +123,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: AWS values remain in `redact_secrets()` output, and botocore DEBUG enters `run.log` before the implementation.
 
-- [ ] **Step 4: Extend AWS redaction patterns**
+- [x] **Step 4: Extend AWS redaction patterns**
 
 Add field-preserving patterns to `_SECRET_PATTERNS` in `logging_setup.py` before the bare access-key pattern:
 
@@ -149,7 +149,7 @@ Add field-preserving patterns to `_SECRET_PATTERNS` in `logging_setup.py` before
 
 Keep the existing provider API-key and bearer-token patterns unchanged.
 
-- [ ] **Step 5: Clamp botocore dependency logging**
+- [x] **Step 5: Clamp botocore dependency logging**
 
 Extend `_NOISY_DEPS` in `configure_logging()`:
 
@@ -169,7 +169,7 @@ _NOISY_DEPS = (
 
 Update the logging-test autouse reset fixture and noisy-dependency assertions to cover these names.
 
-- [ ] **Step 6: Run all logging and agent-I/O tests**
+- [x] **Step 6: Run all logging and agent-I/O tests**
 
 Run:
 
@@ -182,7 +182,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: all tests pass; synthetic credentials are absent from every captured sink.
 
-- [ ] **Step 7: Commit the logging fix**
+- [x] **Step 7: Commit the logging fix**
 
 ```bash
 git add src/agent_guardian/logging_setup.py tests/unit/test_logging_setup.py
@@ -206,7 +206,7 @@ git commit -s -m "fix(logging): redact AWS session credentials"
 - Produces: `BedrockClient.pricing_model_spec(request: LLMRequest) -> str` returning exactly one `bedrock:` prefix.
 - Produces: `lookup_price()` rows for current Claude Haiku 4.5 global and geographic inference profiles.
 
-- [ ] **Step 1: Add a failing Bedrock pricing-identity test**
+- [x] **Step 1: Add a failing Bedrock pricing-identity test**
 
 Add to `tests/unit/test_llm_bedrock.py`:
 
@@ -229,7 +229,7 @@ def test_bedrock_pricing_identity_is_provider_qualified(_fake_aws_env: None) -> 
 
 Add `import asyncio` to the test module.
 
-- [ ] **Step 2: Add failing global and geographic price tests**
+- [x] **Step 2: Add failing global and geographic price tests**
 
 Add to `tests/unit/test_cost_qualifiers.py`:
 
@@ -267,7 +267,7 @@ def test_unknown_bedrock_model_keeps_conservative_fallback() -> None:
 
 Update the table-date assertion in `tests/unit/test_cost.py` to expect `2026-07-17`.
 
-- [ ] **Step 3: Run the focused pricing tests and verify red**
+- [x] **Step 3: Run the focused pricing tests and verify red**
 
 Run:
 
@@ -280,7 +280,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: provider identity is bare and current IDs resolve to the `$3/$15` fallback.
 
-- [ ] **Step 4: Preserve provider identity in `BedrockClient`**
+- [x] **Step 4: Preserve provider identity in `BedrockClient`**
 
 Add to `BedrockClient`:
 
@@ -293,7 +293,7 @@ def pricing_model_spec(self, request: LLMRequest) -> str:
     return f"bedrock:{model}"
 ```
 
-- [ ] **Step 5: Resolve the Haiku 4.5 model family by AWS identifier shape**
+- [x] **Step 5: Resolve the Haiku 4.5 model family by AWS identifier shape**
 
 In `cost.py`, import `re`, set `PRICE_TABLE_AS_OF = "2026-07-17"`, and add:
 
@@ -326,13 +326,13 @@ Remove stale `$0.80/$4.00` Claude Haiku 4.5 exact rows from `PRICE_TABLE` so the
 family helper is the single source of truth. Preserve Sonnet and unknown-model
 fallback rows.
 
-- [ ] **Step 6: Update current CLI examples**
+- [x] **Step 6: Update current CLI examples**
 
 Replace `bedrock:us.anthropic.claude-haiku-4-5-v1:0` with
 `bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0` in `cli.py` help text and
 `docs/reference/cli.mdx`.
 
-- [ ] **Step 7: Run Bedrock, cost, admission, and registry tests**
+- [x] **Step 7: Run Bedrock, cost, admission, and registry tests**
 
 Run:
 
@@ -347,7 +347,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: all tests pass; current US ID resolves to `$1.10/$5.50` and global to `$1/$5`.
 
-- [ ] **Step 8: Commit the pricing fix**
+- [x] **Step 8: Commit the pricing fix**
 
 ```bash
 git add \
@@ -376,7 +376,7 @@ git commit -s -m "fix(cost): price current Bedrock inference profiles"
 - Produces: `_build_budget_report(*, spent_usd: float | None = None) -> BudgetReport` so final report construction can use the identical cost baseline.
 - Produces: `fold_postscan_usage()` with one baseline for both cost fields.
 
-- [ ] **Step 1: Add a failing ledger-only final-report regression**
+- [x] **Step 1: Add a failing ledger-only final-report regression**
 
 Add to `tests/unit/test_budget_cap.py`:
 
@@ -404,7 +404,7 @@ async def test_cancelled_request_reservation_reaches_live_and_final_cost_without
     assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
 ```
 
-- [ ] **Step 2: Replace the separate post-scan baseline test with a failing consistency test**
+- [x] **Step 2: Replace the separate post-scan baseline test with a failing consistency test**
 
 Rename `test_fold_postscan_usage_uses_separate_scan_and_budget_cost_baselines`
 to `test_fold_postscan_usage_reconciles_to_conservative_baseline` and assert:
@@ -418,7 +418,7 @@ assert updated.budget.spent_usd == pytest.approx(expected)
 assert updated.budget.pct_of_cap == pytest.approx(expected / 0.05)
 ```
 
-- [ ] **Step 3: Run focused tests and verify red**
+- [x] **Step 3: Run focused tests and verify red**
 
 Run:
 
@@ -430,7 +430,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: live/final cost remains zero for ledger-only spend, and post-scan cost fields diverge.
 
-- [ ] **Step 4: Add a ledger spend floor to live cost**
+- [x] **Step 4: Add a ledger spend floor to live cost**
 
 In `SwarmCommander` add:
 
@@ -452,7 +452,7 @@ def _live_cost_usd(self) -> float:
     return self._conservative_cost_usd(observed)
 ```
 
-- [ ] **Step 5: Use one final report baseline**
+- [x] **Step 5: Use one final report baseline**
 
 Change `_build_budget_report` to accept an optional override:
 
@@ -488,7 +488,7 @@ This retains uncapped four-decimal behavior, retains the existing conservative
 round-up when rounding increases observed cost, and never rounds a larger
 ledger-only reservation down.
 
-- [ ] **Step 6: Reconcile post-scan fields**
+- [x] **Step 6: Reconcile post-scan fields**
 
 Change `fold_postscan_usage()` to:
 
@@ -512,7 +512,7 @@ if budget is not None:
 
 Preserve immutable `model_copy()` behavior and successful summary token folding.
 
-- [ ] **Step 7: Run budget, prompt-target, and post-scan tests**
+- [x] **Step 7: Run budget, prompt-target, and post-scan tests**
 
 Run:
 
@@ -527,7 +527,7 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: all tests pass; cancellation contributes dollars but zero tokens, and final cost fields agree.
 
-- [ ] **Step 8: Commit the accounting fix**
+- [x] **Step 8: Commit the accounting fix**
 
 ```bash
 git add \
@@ -550,7 +550,7 @@ git commit -s -m "fix(budget): preserve unknown Bedrock spend"
 - Consumes: signed implementation commits from Tasks 1-3 and AWS SSO profile `ag-dev`.
 - Produces: fresh automated and live evidence for a final release verdict.
 
-- [ ] **Step 1: Run static, type, repository, and package gates**
+- [x] **Step 1: Run static, type, repository, and package gates**
 
 Run:
 
@@ -565,7 +565,7 @@ uv build
 
 Expected: every command exits 0.
 
-- [ ] **Step 2: Run the complete suite**
+- [x] **Step 2: Run the complete suite**
 
 ```bash
 PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q
@@ -573,21 +573,21 @@ PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.ve
 
 Expected: zero failures; only documented skips and existing deprecation warnings.
 
-- [ ] **Step 3: Perform safe AWS credential readiness checks**
+- [x] **Step 3: Perform safe AWS credential readiness checks**
 
 Use `AWS_PROFILE=ag-dev` and `AWS_REGION=us-east-1`. Redirect all STS identity
 output and access tokens to `/dev/null`. If SSO is expired, run the standard
 `aws sso login --profile ag-dev` flow. Print only exit state, region, and
 credential method.
 
-- [ ] **Step 4: Run one direct Bedrock exact-response smoke**
+- [x] **Step 4: Run one direct Bedrock exact-response smoke**
 
 Use `BedrockClient(region="us-east-1")`, model
 `us.anthropic.claude-haiku-4-5-20251001-v1:0`, temperature 0, and a fixed
 sentinel instruction. Print only provider, equality state, and numeric usage.
 Do not print prompt, response, account, role, headers, or credentials.
 
-- [ ] **Step 5: Run the `$0.02` hard-cap scan**
+- [x] **Step 5: Run the `$0.02` hard-cap scan**
 
 Run the same bounded command shape as the original AWS verification:
 
@@ -614,7 +614,7 @@ Acceptance:
 - completed-response tokens are represented exactly once;
 - no credential pattern exists in any artifact.
 
-- [ ] **Step 6: Run exactly one `$1.00` functional fallback when required**
+- [x] **Step 6: Run exactly one `$1.00` functional fallback when required**
 
 If the hard-cap scan has zero tested attack turns, repeat it once with
 `--budget-usd 1.00` and a unique output path. Do not run a second fallback.
@@ -630,7 +630,7 @@ Acceptance:
 - Haiku US geo pricing uses `$1.10/$5.50` rather than fallback;
 - zero findings caused only by escaped ANSI text and zero actual ESC bytes.
 
-- [ ] **Step 7: Audit logs, manifests, and signatures**
+- [x] **Step 7: Audit logs, manifests, and signatures**
 
 For both scans:
 
@@ -643,13 +643,13 @@ For both scans:
 - verify requested reports with the raw 32-byte Ed25519 public key;
 - retain only sanitized evidence under `.superpowers/sdd/`.
 
-- [ ] **Step 8: Obtain independent code review**
+- [x] **Step 8: Obtain independent code review**
 
 Review the full diff from `main...HEAD`, the focused test output, complete-suite
 output, live report, and DCO trailers. Resolve every Critical or Important
 finding before declaring release readiness.
 
-- [ ] **Step 9: Complete and commit the plan record**
+- [x] **Step 9: Complete and commit the plan record**
 
 Mark completed checkboxes only after the evidence exists, then run:
 
