@@ -6,7 +6,7 @@ agents. Each consumes some slice of the 2M-token budget defined by
 per-provider price table and a deterministic estimator so the CLI can
 print a pre-flight USD figure before any tokens are spent.
 
-The price table is **frozen as of 2026-07-16** and reflects the public
+The price table is **frozen as of 2026-07-17** and reflects the public
 list prices for each provider's tier, expressed as **USD per one
 million tokens**. Unknown models fall back to a documented default rate
 that errs on the high side so the operator does not under-estimate.
@@ -27,6 +27,7 @@ usage skews input-heavy but the over-estimate is intentional.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 __all__ = [
@@ -39,7 +40,7 @@ __all__ = [
 ]
 
 # Date the price table was last verified against provider public pricing.
-PRICE_TABLE_AS_OF = "2026-07-16"
+PRICE_TABLE_AS_OF = "2026-07-17"
 
 # Fallback rate used when an unknown model is requested. Documented in
 # ``lookup_price`` — kept deliberately above the typical mid-tier rate so
@@ -74,6 +75,20 @@ class PriceRow:
     output_per_1m: float
 
 
+_BEDROCK_HAIKU_45_RE = re.compile(
+    r"^(?:(global|us|eu|au|jp)\.)?"
+    r"anthropic\.claude-haiku-4-5(?:-20251001)?-v1:0$"
+)
+
+
+def _bedrock_haiku_45_price(model: str) -> PriceRow | None:
+    match = _BEDROCK_HAIKU_45_RE.fullmatch(model)
+    if match is None:
+        return None
+    rates = (1.00, 5.00) if match.group(1) == "global" else (1.10, 5.50)
+    return PriceRow("bedrock", model, *rates)
+
+
 PRICE_TABLE: tuple[PriceRow, ...] = (
     # OpenAI — list prices for the gpt-4o family (verified 2026-05-27).
     PriceRow("openai", "gpt-4o", 2.50, 10.00),
@@ -92,18 +107,13 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     # regions price the same on-demand. The full Bedrock model ID
     # (with version suffix + colon-zero ARN tail) is what the Converse
     # API expects, so we list the canonical IDs verbatim.
-    PriceRow("bedrock", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("bedrock", "claude-sonnet-4-6", 3.00, 15.00),
-    PriceRow("bedrock", "anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
     PriceRow("bedrock", "anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
     # Cross-region inference profiles (``us.``, ``eu.``, ``apac.`` prefixes)
     # route the same model with the same per-token price — Bedrock charges
     # routing, not regional egress.
-    PriceRow("bedrock", "us.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
     PriceRow("bedrock", "us.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
-    PriceRow("bedrock", "eu.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
     PriceRow("bedrock", "eu.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
-    PriceRow("bedrock", "apac.anthropic.claude-haiku-4-5-v1:0", 0.80, 4.00),
     PriceRow("bedrock", "apac.anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
     # Global inference profile IDs — verified working 2026-05-28 in
     # ap-southeast-1 / us-east-1 / us-west-2 / eu-west-1. Note the
@@ -188,6 +198,10 @@ def lookup_price(model_spec: str) -> PriceRow:
             key, separator, value = chunk.partition("=")
             if separator:
                 qualifiers[key.strip()] = value.strip()
+        if provider == "bedrock":
+            bedrock_row = _bedrock_haiku_45_price(model)
+            if bedrock_row is not None:
+                return bedrock_row
         # Exact match.
         for row in PRICE_TABLE:
             if row.provider == provider and row.model == model:

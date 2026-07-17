@@ -7,6 +7,37 @@ import pytest
 from agent_guardian.cost import estimate_scan_cost, lookup_price, token_cost_usd
 
 
+@pytest.mark.parametrize(
+    ("model", "input_rate", "output_rate"),
+    [
+        ("global.anthropic.claude-haiku-4-5-20251001-v1:0", 1.00, 5.00),
+        ("us.anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
+        ("eu.anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
+        ("au.anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
+        ("jp.anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
+        ("anthropic.claude-haiku-4-5-20251001-v1:0", 1.10, 5.50),
+        ("us.anthropic.claude-haiku-4-5-v1:0", 1.10, 5.50),
+    ],
+)
+def test_bedrock_haiku45_inference_profile_rates(
+    model: str,
+    input_rate: float,
+    output_rate: float,
+) -> None:
+    row = lookup_price(f"bedrock:{model}")
+    assert row.provider == "bedrock"
+    assert row.model == model
+    assert row.input_per_1m == pytest.approx(input_rate)
+    assert row.output_per_1m == pytest.approx(output_rate)
+
+
+def test_unknown_bedrock_model_keeps_conservative_fallback() -> None:
+    row = lookup_price("bedrock:vendor.future-model-v99")
+    assert row.provider == "bedrock"
+    assert row.input_per_1m == pytest.approx(3.00)
+    assert row.output_per_1m == pytest.approx(15.00)
+
+
 def test_qualifier_stripped_before_lookup() -> None:
     base = lookup_price("vertex:gemini-2.5-flash")
     with_quals = lookup_price("vertex:gemini-2.5-flash+project=p+location=us-central1")

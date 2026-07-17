@@ -28,7 +28,7 @@ def test_price_table_is_non_empty() -> None:
 
 def test_price_table_as_of_is_string() -> None:
     assert isinstance(PRICE_TABLE_AS_OF, str)
-    assert PRICE_TABLE_AS_OF
+    assert PRICE_TABLE_AS_OF == "2026-07-17"
 
 
 def test_price_table_rows_have_non_negative_prices() -> None:

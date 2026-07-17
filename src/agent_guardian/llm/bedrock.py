@@ -327,6 +327,13 @@ class BedrockClient(BaseLLM):
     def host(self) -> str:
         return BEDROCK_HOST_TEMPLATE.format(region=self.region)
 
+    def pricing_model_spec(self, request: LLMRequest) -> str:
+        """Return the provider-qualified Bedrock model used for pricing."""
+        model = request.model
+        if model.startswith("bedrock:"):
+            model = model[len("bedrock:") :]
+        return f"bedrock:{model}"
+
     def _build_signed_headers(self, url: str, body_json: str) -> dict[str, str]:
         """Sign the request body for ``url`` and return the headers to send.
 

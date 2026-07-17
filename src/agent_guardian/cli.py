@@ -3273,7 +3273,7 @@ def scan(
         help=(
             "LLM model spec (default: stub). Examples: 'stub', 'openai:gpt-4o', "
             "'anthropic:claude-haiku-4-5', 'gemini:gemini-2.5-flash', "
-            "'ollama:llama3.1', 'bedrock:us.anthropic.claude-haiku-4-5-v1:0'."
+            "'ollama:llama3.1', 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0'."
         ),
     ),
     commander_model: str | None = typer.Option(
