@@ -9,13 +9,22 @@ from agent_guardian.models.scan import Scan
 __all__ = ["can_run_probe_summaries", "fold_postscan_usage"]
 
 
-def fold_postscan_usage(scan: Scan, counter: UsageCounter, model_spec: str) -> Scan:
-    """Return a copy of ``scan`` with successful post-scan usage included."""
-    extra_cost = tokens_to_usd(
-        model_spec,
-        counter.prompt_tokens,
-        counter.completion_tokens,
-    )
+def fold_postscan_usage(
+    scan: Scan,
+    counter: UsageCounter,
+    model_spec: str,
+    *,
+    committed_spend_usd: float = 0.0,
+) -> Scan:
+    """Return a copy of ``scan`` with conservative post-scan spend included."""
+    observed_cost = counter.priced_cost_usd
+    if observed_cost is None:
+        observed_cost = tokens_to_usd(
+            model_spec,
+            counter.prompt_tokens,
+            counter.completion_tokens,
+        )
+    extra_cost = max(observed_cost, committed_spend_usd)
     budget = scan.budget
     base_cost = scan.cost_usd
     if budget is not None:

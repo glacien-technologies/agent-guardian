@@ -59,6 +59,57 @@ def test_fold_postscan_usage_reconciles_to_conservative_baseline() -> None:
     assert updated.budget.pct_of_cap == pytest.approx(expected / 0.05)
 
 
+def test_fold_postscan_usage_preserves_committed_unknown_outcome_without_tokens() -> None:
+    scan = make_scan().model_copy(
+        update={
+            "cost_usd": 0.010,
+            "tokens_total": 100,
+            "budget": BudgetReport(cap_usd=0.05, spent_usd=0.010, pct_of_cap=0.2),
+        }
+    )
+
+    updated = fold_postscan_usage(
+        scan,
+        UsageCounter(),
+        "vertex:gemini-2.5-flash",
+        committed_spend_usd=0.004,
+    )
+
+    assert updated.tokens_total == 100
+    assert updated.cost_usd == pytest.approx(0.014)
+    assert updated.budget is not None
+    assert updated.budget.spent_usd == pytest.approx(updated.cost_usd)
+    assert updated.budget.pct_of_cap == pytest.approx(0.014 / 0.05)
+
+
+def test_fold_postscan_usage_does_not_double_count_successful_committed_spend() -> None:
+    scan = make_scan().model_copy(
+        update={
+            "cost_usd": 0.010,
+            "tokens_total": 100,
+            "budget": BudgetReport(cap_usd=0.05, spent_usd=0.010, pct_of_cap=0.2),
+        }
+    )
+    counter = UsageCounter(
+        prompt_tokens=1_000,
+        completion_tokens=2_000,
+        total_tokens=3_000,
+    )
+    observed_cost = tokens_to_usd("vertex:gemini-2.5-flash", 1_000, 2_000)
+
+    updated = fold_postscan_usage(
+        scan,
+        counter,
+        "vertex:gemini-2.5-flash",
+        committed_spend_usd=observed_cost,
+    )
+
+    assert updated.tokens_total == 3_100
+    assert updated.cost_usd == pytest.approx(0.010 + observed_cost)
+    assert updated.budget is not None
+    assert updated.budget.spent_usd == pytest.approx(updated.cost_usd)
+
+
 def test_fold_postscan_usage_keeps_uncapped_budget_percentage_unset() -> None:
     scan = make_scan().model_copy(
         update={"budget": BudgetReport(cap_usd=None, spent_usd=0.04, pct_of_cap=None)}

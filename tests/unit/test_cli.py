@@ -6,6 +6,7 @@ no real LLMs (``--model stub`` everywhere).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -25,6 +26,7 @@ from agent_guardian.cli import (
 from agent_guardian.core.budget import tokens_to_usd
 from agent_guardian.llm import GeminiClient, OpenAIClient, StubLLM
 from agent_guardian.llm.base import LLMRequest, LLMResponse, LLMUsage
+from agent_guardian.llm.budget_admission import admission_reservation_usd
 from agent_guardian.reports import postscan
 
 _PAID_SUMMARY_MODEL = "vertex:gemini-2.5-flash"
@@ -36,18 +38,31 @@ _SUMMARY_TOTAL_TOKENS = 18
 class _DeterministicSummaryLLM(StubLLM):
     """Network-free summary client with exact provider usage and close tracking."""
 
-    def __init__(self, *, fail_on_calls: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_calls: set[int] | None = None,
+        cancel_on_calls: set[int] | None = None,
+    ) -> None:
         super().__init__()
         self.calls = 0
         self.successful_calls = 0
         self.failed_calls = 0
+        self.cancelled_calls = 0
+        self.unknown_outcome_reservations: list[float] = []
         self.closed = False
         self._fail_on_calls = fail_on_calls or set()
+        self._cancel_on_calls = cancel_on_calls or set()
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         self.calls += 1
+        if self.calls in self._cancel_on_calls:
+            self.cancelled_calls += 1
+            self.unknown_outcome_reservations.append(_summary_request_reservation(request))
+            raise asyncio.CancelledError()
         if self.calls in self._fail_on_calls:
             self.failed_calls += 1
+            self.unknown_outcome_reservations.append(_summary_request_reservation(request))
             raise RuntimeError("deterministic summary failure")
         self.successful_calls += 1
         return LLMResponse(
@@ -75,6 +90,14 @@ class _DeterministicSummaryLLM(StubLLM):
 # ---------------------------------------------------------------------------
 
 
+def _summary_request_reservation(request: LLMRequest) -> float:
+    input_ceiling = 32 + sum(
+        len(message.content.encode("utf-8")) + len(message.role) + 32
+        for message in request.messages
+    )
+    return admission_reservation_usd(request.model, input_ceiling, request.max_tokens)
+
+
 def _extract_scan_id_from_summary(stdout: str) -> str:
     """Pluck the scan_id from the ``scan <id> done: ...`` summary line.
 
@@ -96,7 +119,7 @@ def _extract_scan_id_from_summary(stdout: str) -> str:
 def _install_paid_summary_llm(
     monkeypatch: pytest.MonkeyPatch,
     summary_llm: _DeterministicSummaryLLM,
-) -> list[tuple[int, float, dict[str, int], str]]:
+) -> list[tuple[int, float, dict[str, int], str, float]]:
     """Keep the scan offline while exercising real summary generation/accounting."""
     original_build_llm = cli_module.build_llm
     evaluator_builds = 0
@@ -111,12 +134,31 @@ def _install_paid_summary_llm(
 
     monkeypatch.setattr(cli_module, "build_llm", offline_build_llm)
 
-    fold_inputs: list[tuple[int, float, dict[str, int], str]] = []
+    fold_inputs: list[tuple[int, float, dict[str, int], str, float]] = []
     original_fold = postscan.fold_postscan_usage
 
-    def recording_fold(scan, counter, model_spec):  # type: ignore[no-untyped-def]
-        fold_inputs.append((scan.tokens_total, scan.cost_usd, counter.snapshot(), model_spec))
-        return original_fold(scan, counter, model_spec)
+    def recording_fold(  # type: ignore[no-untyped-def]
+        scan,
+        counter,
+        model_spec,
+        *,
+        committed_spend_usd=0.0,
+    ):
+        fold_inputs.append(
+            (
+                scan.tokens_total,
+                scan.cost_usd,
+                counter.snapshot(),
+                model_spec,
+                committed_spend_usd,
+            )
+        )
+        return original_fold(
+            scan,
+            counter,
+            model_spec,
+            committed_spend_usd=committed_spend_usd,
+        )
 
     monkeypatch.setattr(postscan, "fold_postscan_usage", recording_fold)
     return fold_inputs
@@ -143,6 +185,8 @@ def _invoke_paid_summary_scan(
             "--no-tui",
             "--mode",
             "fast",
+            "--budget-usd",
+            "1.0",
             "--output-path",
             str(output_path),
         ],
@@ -1407,7 +1451,7 @@ def test_scan_folds_successful_paid_summary_usage_into_every_json_report(
     assert summary_llm.successful_calls == summary_llm.calls
     assert summary_llm.closed is True
     assert len(fold_inputs) == 1
-    original_tokens, original_cost, usage, model_spec = fold_inputs[0]
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
     assert model_spec == _PAID_SUMMARY_MODEL
     assert usage["prompt_tokens"] == summary_llm.calls * _SUMMARY_PROMPT_TOKENS
     assert usage["completion_tokens"] == summary_llm.calls * _SUMMARY_COMPLETION_TOKENS
@@ -1418,6 +1462,7 @@ def test_scan_folds_successful_paid_summary_usage_into_every_json_report(
         usage["prompt_tokens"],
         usage["completion_tokens"],
     )
+    assert committed_spend == pytest.approx(expected_cost - original_cost)
 
     scan_id = _extract_scan_id_from_summary(result.stdout)
     scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
@@ -1429,6 +1474,7 @@ def test_scan_folds_successful_paid_summary_usage_into_every_json_report(
     for report in (selected, canonical, raw):
         assert report["tokens_total"] == expected_tokens
         assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
 
 
 def test_scan_folds_successful_usage_when_another_summary_call_fails(
@@ -1447,18 +1493,21 @@ def test_scan_folds_successful_usage_when_another_summary_call_fails(
     assert summary_llm.successful_calls > 0
     assert summary_llm.closed is True
     assert len(fold_inputs) == 1
-    original_tokens, original_cost, usage, model_spec = fold_inputs[0]
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
     assert model_spec == _PAID_SUMMARY_MODEL
     assert usage["calls"] == summary_llm.successful_calls
     assert usage["prompt_tokens"] == summary_llm.successful_calls * _SUMMARY_PROMPT_TOKENS
     assert usage["completion_tokens"] == (summary_llm.successful_calls * _SUMMARY_COMPLETION_TOKENS)
     assert usage["total_tokens"] == summary_llm.successful_calls * _SUMMARY_TOTAL_TOKENS
     expected_tokens = original_tokens + usage["total_tokens"]
-    expected_cost = original_cost + tokens_to_usd(
+    observed_summary_cost = tokens_to_usd(
         _PAID_SUMMARY_MODEL,
         usage["prompt_tokens"],
         usage["completion_tokens"],
     )
+    expected_summary_spend = observed_summary_cost + sum(summary_llm.unknown_outcome_reservations)
+    expected_cost = original_cost + expected_summary_spend
+    assert committed_spend == pytest.approx(expected_summary_spend)
 
     scan_id = _extract_scan_id_from_summary(result.stdout)
     scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
@@ -1470,6 +1519,50 @@ def test_scan_folds_successful_usage_when_another_summary_call_fails(
     for report in (selected, canonical, raw):
         assert report["tokens_total"] == expected_tokens
         assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
+        assert report["cost_usd"] <= report["budget"]["cap_usd"]
+
+
+def test_scan_charges_cancelled_summary_reservation_without_fabricating_tokens(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary_llm = _DeterministicSummaryLLM(cancel_on_calls={2})
+    fold_inputs = _install_paid_summary_llm(monkeypatch, summary_llm)
+    selected_path = tmp_path / "cancelled-summary-report.json"
+
+    result = _invoke_paid_summary_scan(runner, tmp_path, selected_path)
+
+    assert result.exit_code == EXIT_OK, result.output
+    assert summary_llm.cancelled_calls == 1
+    assert summary_llm.successful_calls > 0
+    assert summary_llm.closed is True
+    assert len(fold_inputs) == 1
+    original_tokens, original_cost, usage, model_spec, committed_spend = fold_inputs[0]
+    assert model_spec == _PAID_SUMMARY_MODEL
+    assert usage["calls"] == summary_llm.successful_calls
+    assert usage["total_tokens"] == summary_llm.successful_calls * _SUMMARY_TOTAL_TOKENS
+    observed_summary_cost = tokens_to_usd(
+        _PAID_SUMMARY_MODEL,
+        usage["prompt_tokens"],
+        usage["completion_tokens"],
+    )
+    expected_summary_spend = observed_summary_cost + sum(summary_llm.unknown_outcome_reservations)
+    assert committed_spend == pytest.approx(expected_summary_spend)
+    expected_tokens = original_tokens + usage["total_tokens"]
+    expected_cost = original_cost + expected_summary_spend
+
+    scan_id = _extract_scan_id_from_summary(result.stdout)
+    scan_dir = tmp_path / ".agentguardian" / "scans" / scan_id
+    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    canonical = json.loads((scan_dir / "scan.json").read_text(encoding="utf-8"))
+    raw = json.loads((scan_dir / "scan.raw.json").read_text(encoding="utf-8"))
+    for report in (selected, canonical, raw):
+        assert report["tokens_total"] == expected_tokens
+        assert report["cost_usd"] == pytest.approx(expected_cost)
+        assert report["budget"]["spent_usd"] == pytest.approx(report["cost_usd"])
+        assert report["cost_usd"] <= report["budget"]["cap_usd"]
 
 
 def test_scan_skips_probe_summaries_when_reservation_exceeds_budget(

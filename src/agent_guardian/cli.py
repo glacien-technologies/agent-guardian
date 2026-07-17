@@ -4733,7 +4733,10 @@ async def _run_scan_inner(
 
     summary_counter = None
     summary_inner = None
+    summary_ledger = None
     try:
+        from agent_guardian.core.budget import BudgetEnvelope, BudgetLedger
+        from agent_guardian.llm.budget_admission import with_budget_admission
         from agent_guardian.llm.usage_tracking import UsageCounter, UsageTrackingLLM
         from agent_guardian.reports.postscan import (
             can_run_probe_summaries,
@@ -4745,18 +4748,37 @@ async def _run_scan_inner(
             write_empty_probe_summaries,
         )
 
+        base_spend = scan_result.cost_usd
+        if scan_result.budget is not None:
+            base_spend = max(base_spend, scan_result.budget.spent_usd)
         reservation = summary_reservation_usd(scan_dir, eff_evaluator)
-        if not can_run_probe_summaries(budget_usd, scan_result.cost_usd, reservation):
+        if not can_run_probe_summaries(budget_usd, base_spend, reservation):
             write_empty_probe_summaries(scan_dir)
             _LOG.info(
                 "probe summaries skipped: reservation $%.6f exceeds remaining budget $%.6f",
                 reservation,
-                max(0.0, (budget_usd or 0.0) - scan_result.cost_usd),
+                max(0.0, (budget_usd or 0.0) - base_spend),
             )
         else:
             summary_counter = UsageCounter()
             summary_inner = build_llm(eff_evaluator, role="evaluator")
-            summary_llm = UsageTrackingLLM(summary_inner, counter=summary_counter)
+            summary_llm: BaseLLM = UsageTrackingLLM(
+                summary_inner,
+                counter=summary_counter,
+            )
+            if budget_usd is not None:
+                summary_ledger = BudgetLedger(
+                    BudgetEnvelope(
+                        usd_cap=max(0.0, budget_usd - base_spend),
+                        token_cap=sys.maxsize,
+                        wallclock_cap_s=float("inf"),
+                    )
+                )
+                summary_llm = with_budget_admission(
+                    summary_llm,
+                    ledger=summary_ledger,
+                    agent_id="postscan-summary",
+                )
             await awrite_probe_summaries(
                 scan_dir,
                 summary_llm,
@@ -4778,6 +4800,9 @@ async def _run_scan_inner(
                     scan_result,
                     summary_counter,
                     eff_evaluator,
+                    committed_spend_usd=(
+                        summary_ledger.spent_usd if summary_ledger is not None else 0.0
+                    ),
                 )
             except Exception as exc:  # pragma: no cover — defensive, never fail a scan
                 typer.echo(

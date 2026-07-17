@@ -100,13 +100,12 @@ PRICE_TABLE: tuple[PriceRow, ...] = (
     PriceRow("anthropic", "claude-haiku-4-5", 0.80, 4.00),
     PriceRow("anthropic", "claude-sonnet-4-6", 3.00, 15.00),
     PriceRow("anthropic", "claude-opus-4-7", 15.00, 75.00),
-    # Bedrock — Anthropic Claude models. Bedrock list prices on
-    # on-demand throughput match the direct Anthropic per-token rates
-    # (billed via AWS invoice instead of Anthropic). Verified 2026-05-27
-    # against https://aws.amazon.com/bedrock/pricing/ in us-east-1; other
-    # regions price the same on-demand. The full Bedrock model ID
-    # (with version suffix + colon-zero ARN tail) is what the Converse
-    # API expects, so we list the canonical IDs verbatim.
+    # Bedrock — remaining Anthropic Claude Sonnet rows. Haiku 4.5 global
+    # and geographic inference-profile pricing is resolved above by
+    # ``_bedrock_haiku_45_price``. These Sonnet on-demand rates were verified
+    # 2026-05-27 against https://aws.amazon.com/bedrock/pricing/ in us-east-1.
+    # The full model ID (including its version suffix and ARN colon tail) is
+    # what the Converse API expects, so the canonical IDs remain verbatim.
     PriceRow("bedrock", "claude-sonnet-4-6", 3.00, 15.00),
     PriceRow("bedrock", "anthropic.claude-sonnet-4-6-v1:0", 3.00, 15.00),
     # Cross-region inference profiles (``us.``, ``eu.``, ``apac.`` prefixes)

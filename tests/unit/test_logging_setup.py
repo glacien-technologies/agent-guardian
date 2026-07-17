@@ -271,7 +271,6 @@ def test_redact_secrets_masks_aws_mapping_and_object_representations(
 @pytest.mark.parametrize(
     "message",
     [
-        f"Signature={_AWS_SIGV4_SIGNATURE}",
         "Authorization=AWS4-HMAC-SHA256 "
         f"Credential={_AWS_ACCESS_KEY}/20260717/us-east-1/bedrock/aws4_request, "
         "SignedHeaders=host;x-amz-date, "
@@ -285,12 +284,44 @@ def test_redact_secrets_masks_sigv4_signature_equals_representations(message: st
 
 
 @pytest.mark.parametrize(
+    ("message", "secret"),
+    [
+        (
+            f"{{'X-Amz-Security-Token': '{_AWS_SESSION_TOKEN}'}}",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f'{{"X-Amz-Security-Token": "{_AWS_SESSION_TOKEN}"}}',
+            _AWS_SESSION_TOKEN,
+        ),
+        (f"X-Amz-Security-Token={_AWS_SESSION_TOKEN}", _AWS_SESSION_TOKEN),
+        (
+            f"https://example.test/?X-Amz-Security-Token={_AWS_SESSION_TOKEN}&ok=1",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f"https://example.test/?X-Amz-Signature={_AWS_SIGV4_SIGNATURE}&ok=1",
+            _AWS_SIGV4_SIGNATURE,
+        ),
+    ],
+)
+def test_redact_secrets_masks_aws_mapping_assignment_and_query_representations(
+    message: str,
+    secret: str,
+) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert secret not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
     "message",
     [
         "token=value",
         "refresh_token=value",
         "access_key=value",
         "secret_key=value",
+        f"cache signature={_AWS_SIGV4_SIGNATURE}",
     ],
 )
 def test_redact_secrets_preserves_non_aws_diagnostics(message: str) -> None:
@@ -514,6 +545,46 @@ def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -> None:
         assert _AWS_ACCESS_KEY not in text
         assert _AWS_SECRET_KEY not in text
         assert _AWS_SESSION_TOKEN not in text
+        assert "***REDACTED***" in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+@pytest.mark.parametrize(
+    ("message", "secret"),
+    [
+        (
+            f"{{'X-Amz-Security-Token': '{_AWS_SESSION_TOKEN}'}}",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f'{{"X-Amz-Security-Token": "{_AWS_SESSION_TOKEN}"}}',
+            _AWS_SESSION_TOKEN,
+        ),
+        (f"X-Amz-Security-Token={_AWS_SESSION_TOKEN}", _AWS_SESSION_TOKEN),
+        (
+            f"https://example.test/?X-Amz-Security-Token={_AWS_SESSION_TOKEN}&ok=1",
+            _AWS_SESSION_TOKEN,
+        ),
+        (
+            f"https://example.test/?X-Amz-Signature={_AWS_SIGV4_SIGNATURE}&ok=1",
+            _AWS_SIGV4_SIGNATURE,
+        ),
+    ],
+)
+def test_run_log_redacts_aws_mapping_assignment_and_query_representations(
+    tmp_path: Path,
+    message: str,
+    secret: str,
+) -> None:
+    logging_setup.configure_logging(level="WARNING", stream=io.StringIO(), force=True)
+    run_log = tmp_path / "run.log"
+    handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
+    try:
+        logging.getLogger("agent_guardian.test.aws").debug(message)
+        handler.flush()
+        text = run_log.read_text(encoding="utf-8")
+        assert secret not in text
         assert "***REDACTED***" in text
     finally:
         logging_setup.detach_run_log_file(handler)
