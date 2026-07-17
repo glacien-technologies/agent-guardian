@@ -156,10 +156,12 @@ _REDACTED = "***REDACTED***"
 
 # Secrets that must never reach the logs. httpx logs request URLs at INFO, and
 # Gemini/Google pass the API key in the query string (``?key=...``) -- so
-# without this every scan wrote the user's key to stderr. We cover three shapes:
+# without this every scan wrote the user's key to stderr. Covered shapes include:
 #   1. sensitive query params (key/api_key/access_token/token/sig/signature)
 #   2. ``Authorization: Bearer <token>`` headers
-#   3. bare provider key shapes anywhere in the line (Google AIza..., OpenAI/
+#   3. AWS credential fields used by AgentGuardian, botocore, and SSO responses
+#   4. AWS SigV4 authorization/security-token headers, including mapping reprs
+#   5. bare AWS access-key IDs and provider key shapes (Google AIza..., OpenAI/
 #      Anthropic sk-...), as defence-in-depth for any path we didn't anticipate.
 _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -170,7 +172,9 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"(?i)([\"']?(?:accessKeyId|secretAccessKey|sessionToken|"
-            r"aws_access_key_id|aws_secret_access_key|aws_session_token)[\"']?"
+            r"aws_access_key_id|aws_secret_access_key|aws_session_token|"
+            r"access_key_id|secret_access_key|session_token|"
+            r"access_key|secret_key|token)[\"']?"
             r"\s*[:=]\s*[\"']?)[^\"'\s,}]+"
         ),
         r"\1" + _REDACTED,
@@ -180,7 +184,10 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         r"\1" + _REDACTED,
     ),
     (
-        re.compile(r"(?i)(authorization:\s*AWS4-HMAC-SHA256\s+).+"),
+        re.compile(
+            r"(?i)([\"']?authorization[\"']?\s*:\s*[\"']?AWS4-HMAC-SHA256\s+)"
+            r"[^\"'\r\n}]+"
+        ),
         r"\1" + _REDACTED,
     ),
     (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), _REDACTED),
@@ -190,8 +197,11 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def redact_secrets(text: str) -> str:
-    """Mask API keys / bearer tokens in a log line, preserving the surrounding
-    text (e.g. ``?key=AIza...`` -> ``?key=***REDACTED***``)."""
+    """Mask API keys, bearer tokens, AWS credentials, and SigV4 headers.
+
+    Surrounding syntax is preserved (for example, ``?key=AIza...`` becomes
+    ``?key=***REDACTED***``).
+    """
     for pattern, repl in _SECRET_PATTERNS:
         text = pattern.sub(repl, text)
     return text

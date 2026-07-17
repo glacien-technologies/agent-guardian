@@ -13,6 +13,7 @@ from agent_guardian import logging_setup
 _AWS_ACCESS_KEY = "ASIAABCDEFGHIJKLMNOP"
 _AWS_SECRET_KEY = "aws-secret-example-value-1234567890"
 _AWS_SESSION_TOKEN = "aws-session-token-example-value-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_AWS_SIGV4_SIGNATURE = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 _AWS_SSO_RESPONSE = (
     'Response body: b\'{"roleCredentials": {'
     f'"accessKeyId": "{_AWS_ACCESS_KEY}", '
@@ -46,6 +47,7 @@ def _reset_logging() -> None:
         "google_genai.models",
         "botocore",
         "botocore.parsers",
+        "botocore.credentials",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     # Also drop any handlers that a prior test installed so we don't double-print.
@@ -69,6 +71,7 @@ def _reset_logging() -> None:
         "google_genai.models",
         "botocore",
         "botocore.parsers",
+        "botocore.credentials",
     ):
         logging.getLogger(noisy).setLevel(logging.NOTSET)
     try:
@@ -224,6 +227,44 @@ def test_redact_secrets_masks_aws_credentials(message: str) -> None:
     assert _AWS_ACCESS_KEY not in redacted
     assert _AWS_SECRET_KEY not in redacted
     assert _AWS_SESSION_TOKEN not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    ("message", "secret_values"),
+    [
+        (
+            "{'Authorization': 'AWS4-HMAC-SHA256 "
+            f"Credential={_AWS_ACCESS_KEY}/20260717/us-east-1/bedrock/aws4_request, "
+            "SignedHeaders=host;x-amz-date, "
+            f"Signature={_AWS_SIGV4_SIGNATURE}'}}",
+            (_AWS_ACCESS_KEY, _AWS_SIGV4_SIGNATURE),
+        ),
+        (
+            "SigV4Auth("
+            f"access_key_id='{_AWS_ACCESS_KEY}', "
+            f"secret_access_key='{_AWS_SECRET_KEY}', "
+            f"session_token='{_AWS_SESSION_TOKEN}'"
+            ")",
+            (_AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_SESSION_TOKEN),
+        ),
+        (
+            "Credentials("
+            f"access_key='{_AWS_ACCESS_KEY}', "
+            f"secret_key='{_AWS_SECRET_KEY}', "
+            f"token='{_AWS_SESSION_TOKEN}'"
+            ")",
+            (_AWS_ACCESS_KEY, _AWS_SECRET_KEY, _AWS_SESSION_TOKEN),
+        ),
+    ],
+)
+def test_redact_secrets_masks_aws_mapping_and_object_representations(
+    message: str,
+    secret_values: tuple[str, ...],
+) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    for secret_value in secret_values:
+        assert secret_value not in redacted
     assert "***REDACTED***" in redacted
 
 
