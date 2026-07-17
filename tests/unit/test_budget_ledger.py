@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
+import agent_guardian.cost as cost
 from agent_guardian.core.budget import (
     BudgetEnvelope,
     BudgetExhausted,
     BudgetLedger,
     tokens_to_usd,
 )
-from agent_guardian.cost import PriceRow
 from agent_guardian.llm.base import BaseLLM, LLMMessage, LLMRequest, LLMResponse, LLMUsage
 from agent_guardian.llm.budget_admission import BudgetAdmissionLLM, with_budget_admission
 from agent_guardian.llm.stub import StubLLM
@@ -160,7 +160,7 @@ async def test_admission_receipt_is_conservatively_settled_on_cancellation() -> 
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await task
+        _ = await task
 
     assert [entry.kind for entry in ledger.entries()] == ["reserve", "commit"]
     assert ledger.committed_plus_reserved_usd == pytest.approx(ledger.spent_usd)
@@ -222,12 +222,10 @@ def test_gemini_25_pro_long_context_uses_high_price_tier() -> None:
 async def test_gemini_admission_floor_rejects_stale_low_table_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import agent_guardian.cost as cost
-
     monkeypatch.setattr(
         cost,
         "PRICE_TABLE",
-        (PriceRow("gemini", "gemini-3.5-flash", 0.30, 2.50),),
+        (cost.PriceRow("gemini", "gemini-3.5-flash", 0.30, 2.50),),
     )
     ledger = BudgetLedger(_envelope(usd=0.005))
     llm = BudgetAdmissionLLM(StubLLM(default="ok"), ledger=ledger, agent_id="attacker")

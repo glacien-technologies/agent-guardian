@@ -5028,7 +5028,6 @@ async def _run_scan_inner(
     _LOG.info("forensic seal: run.log and events.jsonl complete")
     if run_log_handler is not None:
         detach_run_log_file(run_log_handler)
-        run_log_handler = None
     detach_jsonl_log_handler(jsonl_log_handler)
     try:
         from agent_guardian.reports.forensic_manifest import write_forensic_manifest
