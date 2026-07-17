@@ -268,6 +268,35 @@ def test_redact_secrets_masks_aws_mapping_and_object_representations(
     assert "***REDACTED***" in redacted
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        f"Signature={_AWS_SIGV4_SIGNATURE}",
+        "Authorization=AWS4-HMAC-SHA256 "
+        f"Credential={_AWS_ACCESS_KEY}/20260717/us-east-1/bedrock/aws4_request, "
+        "SignedHeaders=host;x-amz-date, "
+        f"Signature={_AWS_SIGV4_SIGNATURE}",
+    ],
+)
+def test_redact_secrets_masks_sigv4_signature_equals_representations(message: str) -> None:
+    redacted = logging_setup.redact_secrets(message)
+    assert _AWS_SIGV4_SIGNATURE not in redacted
+    assert "***REDACTED***" in redacted
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "token=value",
+        "refresh_token=value",
+        "access_key=value",
+        "secret_key=value",
+    ],
+)
+def test_redact_secrets_preserves_non_aws_diagnostics(message: str) -> None:
+    assert logging_setup.redact_secrets(message) == message
+
+
 # ---------------------------------------------------------------------------
 # Trace correlation (item: install LogRecordFactory for trace_id/span_id)
 # ---------------------------------------------------------------------------

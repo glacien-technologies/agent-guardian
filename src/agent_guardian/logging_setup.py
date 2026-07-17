@@ -171,11 +171,31 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)(authorization:\s*bearer\s+)\S+"), r"\1" + _REDACTED),
     (
         re.compile(
-            r"(?i)([\"']?(?:accessKeyId|secretAccessKey|sessionToken|"
+            r"(?i)((?<![A-Za-z0-9_])[\"']?(?:accessKeyId|secretAccessKey|sessionToken|"
             r"aws_access_key_id|aws_secret_access_key|aws_session_token|"
-            r"access_key_id|secret_access_key|session_token|"
-            r"access_key|secret_key|token)[\"']?"
+            r"access_key_id|secret_access_key|session_token)[\"']?"
             r"\s*[:=]\s*[\"']?)[^\"'\s,}]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\baccess_key\s*=\s*[\"']?)[^\"'\s,})]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\bsecret_key\s*=\s*[\"']?)[^\"'\s,})]+"
+        ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:ReadOnly|Refreshable|DeferredRefreshable)?Credentials\("
+            r"[^)]*?\btoken\s*=\s*[\"']?)[^\"'\s,})]+"
         ),
         r"\1" + _REDACTED,
     ),
@@ -185,9 +205,13 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(
-            r"(?i)([\"']?authorization[\"']?\s*:\s*[\"']?AWS4-HMAC-SHA256\s+)"
+            r"(?i)([\"']?authorization[\"']?\s*[:=]\s*[\"']?AWS4-HMAC-SHA256\s+)"
             r"[^\"'\r\n}]+"
         ),
+        r"\1" + _REDACTED,
+    ),
+    (
+        re.compile(r"(?i)(\bsignature\s*=\s*[\"']?)[0-9a-f]{64}\b"),
         r"\1" + _REDACTED,
     ),
     (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), _REDACTED),
