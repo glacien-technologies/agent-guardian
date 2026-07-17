@@ -520,7 +520,9 @@ def test_botocore_debug_is_excluded_from_run_log(tmp_path: Path) -> None:
     run_log = tmp_path / "run.log"
     handler = logging_setup.attach_run_log_file(run_log, level="DEBUG")
     try:
-        logging.getLogger("botocore.parsers").debug(_AWS_SSO_RESPONSE)
+        logging.getLogger("botocore.parsers").debug(
+            _AWS_SSO_RESPONSE
+        )  # codeql[py/clear-text-logging-sensitive-data] -- synthetic redaction fixture
         logging.getLogger("agent_guardian.test.aws").debug("guardian-debug-visible")
         handler.flush()
         text = run_log.read_text(encoding="utf-8")
@@ -538,7 +540,9 @@ def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -> None:
     logger = logging.getLogger("botocore.parsers")
     logger.setLevel(logging.DEBUG)
     try:
-        logger.debug(_AWS_SSO_RESPONSE)
+        logger.debug(
+            _AWS_SSO_RESPONSE
+        )  # codeql[py/clear-text-logging-sensitive-data] -- synthetic redaction fixture
         handler.flush()
         text = run_log.read_text(encoding="utf-8")
         assert "roleCredentials" in text
