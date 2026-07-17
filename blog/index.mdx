@@ -1,0 +1,39 @@
+---
+title: "AgentGuardian Blog"
+sidebarTitle: "Overview"
+description: "Engineering deep-dives, attack walkthroughs, and release notes from the AgentGuardian project."
+icon: "newspaper"
+---
+
+The AgentGuardian blog is where the maintainers write up the engineering work behind the project. Three buckets:
+
+- **Releases** — what shipped, why it shipped, what it changes for users. The canonical entry point for any reader landing here from a release tag.
+- **Deep-dives** — the attacks AgentGuardian models, the standards it maps to, the trade-offs behind the swarm architecture. Written for security engineers and principal engineers, not for procurement.
+- **Walkthroughs** — step-by-step attack reproductions against deliberately-vulnerable demo agents, ending with the AgentGuardian report and the mitigation diff.
+
+We do not publish marketing copy here. If a post reads like an announcement, it has been mis-filed.
+
+## Current posts
+
+<CardGroup cols={2}>
+  <Card title="Introducing AgentGuardian" icon="rocket" href="/blog/introducing-agentguardian">
+    Why we built an open-source red-teaming toolkit for AI agents, what ships in v1.1, and how to run the first scan against your own agent.
+  </Card>
+  <Card title="How prompt injection becomes tool abuse" icon="shield-alert" href="/blog/prompt-injection-to-tool-abuse">
+    The three-step cascade — recon, payload delivery, tool call — that turns a single injected instruction into data exfiltration or privilege escalation. OWASP ASI 2026 and MITRE ATLAS mapping inline.
+  </Card>
+  <Card title="Breaking a LangGraph agent" icon="bug" href="/blog/breaking-a-langgraph-agent">
+    A full reproduction against the testbench's coding-assistant agent — attack prompts, transcript, AIVSS score, mitigation, and a clean re-run.
+  </Card>
+  <Card title="AgentGuardian vs other red-team tools" icon="git-compare" href="/concepts/agent-guardian-vs">
+    Factual comparison against PyRIT, garak, Promptfoo, Inspect, DeepTeam, and manual testing. What each tool optimises for and where AgentGuardian fits.
+  </Card>
+</CardGroup>
+
+## Watch the 90-second demo
+
+The hero video — start vulnerable agent, run a scan, read the report, ship the mitigation, re-scan to zero findings — is on YouTube and linked from the [README](https://github.com/glacien-technologies/agent-guardian#demo). If you only have ninety seconds, watch that first.
+
+## Contribute
+
+The blog source lives in `docs/blog/*.mdx` in the [agent-guardian repository](https://github.com/glacien-technologies/agent-guardian). PRs with deep-dives, walkthroughs against your own agents, or reproductions of published agent-security research are welcome — see [CONTRIBUTING.md](https://github.com/glacien-technologies/agent-guardian/blob/main/CONTRIBUTING.md).

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>Governance - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#governance" class="nav-link">Governance</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#sponsor" class="nav-link">Sponsor</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#roles" class="nav-link">Roles</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#decision-making" class="nav-link">Decision-making</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#contributor-certificate-of-origin" class="nav-link">Contributor Certificate of Origin</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#disagreeing-with-a-maintainer" class="nav-link">Disagreeing with a maintainer</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#code-of-conduct-enforcement" class="nav-link">Code of Conduct enforcement</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#removal-of-maintainers" class="nav-link">Removal of maintainers</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#forks-and-downstream-distributions" class="nav-link">Forks and downstream distributions</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#this-document" class="nav-link">This document</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="governance">Governance</h1>
+<p>This document explains how decisions are made on AgentGuardian. It is intentionally brief — the rules are short enough to read in five minutes.</p>
+<h2 id="sponsor">Sponsor</h2>
+<p>AgentGuardian is funded and operated by <a href="https://glacien.ai">Glacien Pte. Ltd.</a>. Glacien employs the maintainers and underwrites the project's infrastructure (CI minutes, PyPI organisation, docs hosting, status page, etc.). This is a <strong>corporate-backed open-source project</strong>, not a community project. We say so plainly to avoid the ambiguity that erodes trust over time.</p>
+<p>That said: every line of code, every probe, and every documented practice is Apache-2.0 licensed and open to community contribution under the rules below.</p>
+<h2 id="roles">Roles</h2>
+<p>There are four maintainer roles. Per <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md"><code>MAINTAINERS.md</code></a>:</p>
+<ul>
+<li><strong>Tech Lead</strong> — sets architectural direction; final say on engine, agent, and strategy design.</li>
+<li><strong>Security Lead</strong> — owns SECURITY.md, the disclosure history, and the security-sensitive code paths listed in <code>.github/CODEOWNERS</code>.</li>
+<li><strong>Community Lead</strong> — owns CONTRIBUTING.md, CODE_OF_CONDUCT.md, GitHub Discussions, and the <code>good-first-issue</code> curation.</li>
+<li><strong>Release Manager</strong> — owns the release tag, the changelog, the PyPI upload, and the GitHub Release.</li>
+</ul>
+<p>At least three roles are filled at all times for bus-factor depth.</p>
+<h2 id="decision-making">Decision-making</h2>
+<p>Decisions on AgentGuardian fall into four tiers, each with its own approval rule. The same rules apply equally to Glacien staff and to external contributors.</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Examples</th>
+<th>Approval rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. Routine technical</strong></td>
+<td>bug fix, single-file refactor, docstring update, dependency bump</td>
+<td>one CODEOWNERS reviewer + CI green</td>
+</tr>
+<tr>
+<td><strong>2. Cross-cutting</strong></td>
+<td>new API surface, breaking change to an internal interface, new dependency</td>
+<td>two maintainers concurring + CI green</td>
+</tr>
+<tr>
+<td><strong>3. Scope / roadmap / governance</strong></td>
+<td>new feature direction, deprecation of public API, this file</td>
+<td>three of four maintainer roles concurring; decision recorded in the quarterly review minutes under <code>docs/engineering-standards-reviews/</code></td>
+</tr>
+<tr>
+<td><strong>4. Conflict-of-interest or Code-of-Conduct</strong></td>
+<td>maintainer-vs-contributor dispute, suspected harassment, brand integrity</td>
+<td>escalated to Glacien Office of the CTO via <code>oss@glacien.ai</code></td>
+</tr>
+</tbody>
+</table>
+<p>CODEOWNERS routing in <code>.github/CODEOWNERS</code> assigns the right reviewer automatically. Branch protection on <code>main</code> enforces the review requirement at merge time.</p>
+<h2 id="contributor-certificate-of-origin">Contributor Certificate of Origin</h2>
+<p>Every commit on <code>main</code> must carry a <code>Signed-off-by:</code> trailer per the <a href="https://developercertificate.org/">Developer Certificate of Origin</a>. The DCO is enforced by <code>.github/workflows/dco.yml</code>. The check cannot be bypassed by maintainer override — that's by design.</p>
+<p>We do not require a separate Contributor License Agreement. The DCO is sufficient.</p>
+<h2 id="disagreeing-with-a-maintainer">Disagreeing with a maintainer</h2>
+<p>If you disagree with a maintainer's decision on your PR or issue:</p>
+<ol>
+<li><strong>Reply on the thread first.</strong> State your reasoning. The maintainer is required to respond within five business days.</li>
+<li><strong>Tag a second maintainer.</strong> Use <code>@glacien-technologies/oss-maintainers</code> to surface the disagreement to the whole team.</li>
+<li><strong>Escalate to the Office of the CTO.</strong> Email <code>oss@glacien.ai</code>. Decisions at this level are recorded in the quarterly review minutes and become public.</li>
+</ol>
+<p>We commit to public, written rationale for any tier-3 decision so that future contributors can read why a direction was chosen.</p>
+<h2 id="code-of-conduct-enforcement">Code of Conduct enforcement</h2>
+<p>The <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/CODE_OF_CONDUCT.md">Contributor Covenant v2.1</a> applies in all project spaces (GitHub, Discord, project email). Reports go to <code>conduct@glacien.ai</code> and are handled by a rotating Code of Conduct committee per the file's escalation path.</p>
+<h2 id="removal-of-maintainers">Removal of maintainers</h2>
+<p>A maintainer is removed when:</p>
+<ul>
+<li>They leave Glacien employment, or</li>
+<li>They are inactive (no review or commit on the project) for 90 consecutive days, or</li>
+<li>A Code of Conduct enforcement action requires it, or</li>
+<li>They request removal voluntarily.</li>
+</ul>
+<p>Removal is recorded in <code>MAINTAINERS.md</code> and the quarterly review minutes.</p>
+<h2 id="forks-and-downstream-distributions">Forks and downstream distributions</h2>
+<p>Forks are encouraged. The Apache-2.0 licence permits redistribution. The <a href="https://github.com/glacien-technologies/agent-guardian/blob/main/TRADEMARKS.md"><code>TRADEMARKS.md</code></a> policy applies — the AgentGuardian name and mark are Glacien property and may not be used in fork names or marketing without permission.</p>
+<h2 id="this-document">This document</h2>
+<p>Changes to this file are a tier-3 decision (three of four roles concurring). The current version is canonical; older versions are in git history.</p>
+<hr />
+<p><em>Last revised: 2026-05-27. Reviewed quarterly per Engineering Standards §16.1.</em></p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

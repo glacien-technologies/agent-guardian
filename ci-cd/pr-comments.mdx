@@ -1,0 +1,117 @@
+---
+title: "PR / MR comments"
+sidebarTitle: "PR comments"
+description: "The single sticky AgentGuardian comment — upserted by a hidden marker, identical across GitHub, GitLab, and Bitbucket."
+icon: "message-square"
+---
+
+`agent-guardian comment` posts **one** AgentGuardian summary comment on the
+current pull / merge request and keeps it current on every push. The same
+renderer drives all three code hosts, so the body reads identically whether you
+are on GitHub, GitLab, or Bitbucket — only the REST call underneath differs.
+
+## How the sticky behaviour works
+
+The comment body always starts with a hidden HTML marker on its first line:
+
+```text
+<!-- agentguardian-pr-marker:scan -->
+```
+
+On every run the poster:
+
+1. Lists the PR/MR comments via the host's REST API.
+2. Finds the first comment whose body contains the marker.
+3. **Edits that comment in place** (`PATCH` on GitHub, `PUT` on GitLab/Bitbucket)
+   with the new body — or **creates** a fresh comment if none is found.
+
+Push ten times and you still have exactly one always-current AgentGuardian
+comment, never a wall of ten. The marker string is a stable contract: it must
+not change once shipped, because an existing comment is matched by substring.
+
+## Running it
+
+```bash
+agent-guardian comment --platform github  --fail-under 70
+agent-guardian comment --platform gitlab  --fail-under 70 --max-critical 0
+agent-guardian comment --platform bitbucket --fail-under 70
+```
+
+`--platform` is `github` | `gitlab` | `bitbucket`. The verdict embedded in the
+comment reuses the same `--fail-under` / `--max-critical` / `--max-high` /
+`--max-medium` / `--max-low` thresholds as the [`scan` gate](/ci-cd/security-gates),
+so the comment's **PASSED** / **FAILED** always matches the pipeline's exit code.
+
+Each platform reads its PR/MR context and credentials from the standard CI
+environment — see the per-host pages for the exact variable list:
+
+| Platform | PR/MR id | Credential |
+|---|---|---|
+| [GitHub](/ci-cd/github-actions) | `GITHUB_EVENT_PATH` → `pull_request.number` (or `GITHUB_REF`) | `GITHUB_TOKEN` |
+| [GitLab](/ci-cd/gitlab-ci) | `CI_MERGE_REQUEST_IID` | `GITLAB_TOKEN` (falls back to `CI_JOB_TOKEN`) |
+| [Bitbucket](/ci-cd/bitbucket) | `BITBUCKET_PR_ID` | `BITBUCKET_TOKEN` (falls back to app-password Basic auth) |
+
+Pass `--dry-run` to render the body to stdout without posting it — useful for a
+local preview or a fork PR where the token lacks write scope.
+
+## A rendered comment
+
+```markdown
+<!-- agentguardian-pr-marker:scan -->
+## AgentGuardian scan `ag_2026_8f3a91cd`
+
+**AIVSS 58/100 (elevated risk)** &nbsp;|&nbsp; 11 findings &nbsp;|&nbsp; $0.0820 &nbsp;|&nbsp; 42.7s
+
+### Gate: FAILED
+
+- AIVSS 58 is below --fail-under 70
+- 1 critical finding(s) exceed --max-critical 0
+
+#### Top 5 findings
+
+| Severity | Probe | ASI | Summary |
+|----------|-------|-----|---------|
+| Critical | `pi_sys_override` | `ASI01` | System-prompt override via nested instruction injection |
+| High     | `tool_exfil_url`  | `ASI06` | Tool argument smuggles data to an attacker URL |
+| High     | `mem_poison_recall` | `ASI03` | Poisoned memory recalled into a later turn |
+| Medium   | `jailbreak_roleplay` | `ASI01` | Roleplay framing bypasses refusal |
+| Medium   | `pii_leak_logs` | `ASI09` | PII echoed into agent debug output |
+```
+
+A clean scan renders `### Gate: PASSED` and a `_No findings — this scan came
+back clean._` line in place of the table.
+
+## What's in the body
+
+- **Headline** — the scan id, AIVSS / band, finding count, cost, and wall-clock.
+  A non-authoritative scan (stub model or non-`full` mode) renders
+  `AIVSS n/a (not evaluated)` rather than quoting a misleading number.
+- **Verdict** — `PASSED`, or `FAILED` with one bullet per failing gate
+  condition (the floor and each exceeded `--max-*` ceiling).
+- **Top findings** — the highest-severity findings (default top 5),
+  severity-ranked. All finding-supplied strings are HTML-escaped and run
+  through the same PII / credential redactor as the standalone Markdown report.
+
+## Advisory, never gate-changing
+
+The comment is **advisory**. If it cannot post — a fork PR whose token lacks
+write scope, a transient API error — the failure is logged and the job
+continues. The comment never changes the scan's pass/fail outcome; the gate's
+exit code is the single source of truth for whether the merge is blocked.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Security gates" icon="shield-check" href="/ci-cd/security-gates">
+    The `--fail-under` / `--max-*` thresholds the verdict mirrors.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The sticky comment wired into a PR workflow.
+  </Card>
+  <Card title="GitLab CI" icon="gitlab" href="/ci-cd/gitlab-ci">
+    The same comment as a sticky MR note.
+  </Card>
+  <Card title="Bitbucket" icon="bitbucket" href="/ci-cd/bitbucket">
+    The comment alongside a Code Insights report.
+  </Card>
+</CardGroup>

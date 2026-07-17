@@ -1,0 +1,126 @@
+---
+title: "Roadmap"
+description: "Where AgentGuardian is going next — corpus growth, adapter coverage, report features, CI/CD integrations."
+icon: "map"
+---
+
+## How to read this
+
+AgentGuardian is in active development. The roadmap below tracks the
+public OSS package only; the Enterprise tier has its own roadmap
+(out of scope for this site — see
+[Open vs Enterprise](/concepts/open-vs-enterprise)).
+
+The canonical source for the roadmap is the
+[`docs/community/oss-roadmap.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/community/oss-roadmap.md)
+file at the repo root, and the
+[GitHub Projects board](https://github.com/orgs/glacien-technologies/projects)
+for live progress.
+
+<Info>
+Anything not in the OSS roadmap is **not** a public commitment. We don't
+ship features from marketing copy — we ship features from PRs.
+</Info>
+
+## Themes for the current cycle
+
+### Probe corpus growth
+
+The corpus is at **96 probes across 10 OWASP ASI 2026 categories**
+(see `src/agent_guardian/probes/_meta/version.yaml`). The roadmap
+covers:
+
+- Expanding ASI04 (supply chain) with MCP-registry-specific probes as
+  the MCP-server ecosystem matures.
+- Expanding ASI10 (rogue agent / drift) with long-horizon probes that
+  span multiple scan windows.
+- New ASI09 (trust exploitation) probes for emerging output-channel
+  attacks (artifact-rendering, agentic-document tampering).
+- Continued alignment with new MITRE ATLAS releases.
+
+### Target-adapter coverage
+
+The current adapters live under `src/agent_guardian/adapters/framework/`
+and `src/agent_guardian/transports/`. Roadmap items track:
+
+- Deeper coverage of the OpenAI Agents SDK.
+- Anthropic Computer-Use and tool-use coverage.
+- Gemini-CLI agentic patterns.
+- A2A v1.0 protocol coverage as it stabilises.
+- Better default support for streaming responses across all adapters.
+
+### Reports and exports
+
+The current report engines live at `src/agent_guardian/reports/`:
+`json`, `sarif`, `junit`, `markdown`, `pdf`, plus the signed `bundle`.
+Roadmap items:
+
+- Per-finding remediation rendering inline in the HTML preview.
+- SARIF 2.1.1 stability across GitHub, GitLab, and Azure DevOps code-
+  scanning views.
+- Better JUnit per-suite grouping for CI failure tabs.
+
+### CI/CD integrations
+
+The goal is to make AgentGuardian a one-line install in the major CI
+systems. Current native support: GitHub Actions, GitLab CI. Roadmap:
+
+- A reusable GitHub composite action (no more raw `pip install` step).
+- Pre-built GitLab CI template.
+- CircleCI orb (community-driven).
+- A `--diff-against` flag so PR scans compare to the main-branch
+  baseline.
+
+### Developer experience
+
+- A `--profile fast-iteration` mode for tighter dev loops.
+- Better terminal output for the scan progress view (richer per-agent
+  status lines).
+- A standalone `agent-guardian inspect <probe-id>` for probe debugging.
+
+## How to influence the roadmap
+
+The roadmap is **not** a closed list. The fastest paths to influence:
+
+1. **Open a Discussion.** Use the
+   [Roadmap category](https://github.com/glacien-technologies/agent-guardian/discussions/categories/roadmap)
+   to propose a new direction or signal what you'd like to see
+   prioritised.
+2. **Open an issue with a concrete proposal.** A specific probe, a
+   specific adapter, a specific report feature. We label
+   `kind/roadmap-candidate` for those.
+3. **Ship a PR.** A working PR is the most persuasive form of roadmap
+   input we accept. See [Contributing](/community/contributing).
+
+## What's explicitly *not* on the OSS roadmap
+
+These are deliberate non-goals for the OSS package — they belong to the
+Enterprise tier or to other products:
+
+- **Runtime defensive controls.** AgentGuardian is a *testing*
+  framework, not a *runtime gateway*. We do not ship policy
+  enforcement, request blocking, or live traffic interception in OSS.
+  See [Open vs Enterprise](/concepts/open-vs-enterprise).
+- **Managed evidence storage.** Reports are written to disk locally.
+  We do not host them.
+- **Team / SSO / audit-log workflows.** No multi-user UI in OSS.
+- **Telemetry.** AgentGuardian does not phone home — by design,
+  not as an option to opt out of.
+
+## Release cadence
+
+We aim for a tagged PyPI release whenever the `CHANGELOG.md` has more
+than a few user-visible entries — historically every 2-4 weeks. The
+release process is documented in
+[`MAINTAINERS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md).
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="users" href="/community/contributing">
+    Six on-ramps for contributors — probe, adapter, eval, demo, docs, security.
+  </Card>
+  <Card title="Release notes" icon="clipboard-list" href="/community/release-notes">
+    What shipped in the latest release and the one before it.
+  </Card>
+</CardGroup>

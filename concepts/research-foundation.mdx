@@ -1,0 +1,162 @@
+---
+title: "Research foundation"
+sidebarTitle: "Research foundation"
+description: "The published academic work and industry standards every step of an AgentGuardian scan is anchored to: TAP, MAD-MAX, RedAgent, Co-RedTeam, MUZZLE, MITRE ATLAS, CSA AI controls, AIVSS, and OWASP ASI 2026."
+icon: "book-open"
+---
+
+AgentGuardian is not a from-scratch attack engine. Every layer — recon,
+strategy, swarm coordination, evaluation, scoring, taxonomy — is
+anchored to published academic work or to an industry standard. This
+page collects those citations in one place so the rest of the docs can
+stay developer-first.
+
+If you want the developer mental model, read
+[How AgentGuardian works](/concepts/how-agentguardian-works) instead.
+This page is the academic appendix.
+
+## Attack generation
+
+### TAP — Tree of Attacks with Pruning
+
+Mehrotra, Zou, Yu, et al. (2024). *Tree of Attacks: Jailbreaking
+Black-Box LLMs Automatically.* arXiv:2312.02119.
+
+The TAP algorithm formalises iterative attack-prompt refinement as a
+tree search with pruning of low-value branches. AgentGuardian's
+multi-turn jailbreak strategies (`src/agent_guardian/strategies/`) use
+the same prune-then-expand discipline: each attacker LLM response is
+scored by the heuristic judge before the strategy decides whether to
+continue along the current branch or back off.
+
+### RedAgent — context-aware red-team agents
+
+Xu, Chen, et al. (2024). *RedAgent: Red Teaming Large Language Models
+with Context-Aware Autonomous Language Agents.* arXiv:2407.16667.
+
+RedAgent argues that context-conditioned attackers (one specialist per
+vulnerability category) outperform a single generic attacker. That
+shape — one specialist per OWASP ASI category, each conditioned on the
+target's fingerprint — is the AgentGuardian swarm
+(`src/agent_guardian/agents/`).
+
+### MAD-MAX — multi-agent debate for adversarial generation
+
+Liu, Yao, Khalifa, et al. (2024). *MAD-MAX: Multi-Agent Debate for
+Adversarial Examples.*
+
+MAD-MAX uses multi-agent debate between attacker variants to escape
+local maxima in attack effectiveness. The AgentGuardian Commander step
+plays this role: when `--goal` is supplied, the Commander LLM
+emits a `SwarmBrief` that gives each specialist a debate-style
+sub-goal and priority weight.
+
+### Co-RedTeam — coordinated multi-agent red-teaming
+
+Zou et al. (2024). *Co-RedTeam: Coordinated Multi-Agent Adversarial
+Probing of Large Language Models.*
+
+Co-RedTeam is the academic precedent for running specialists in
+parallel against a shared target with shared memory. The Phase 3
+`asyncio.TaskGroup` execution model
+(`src/agent_guardian/core/swarm.py`) follows the Co-RedTeam pattern.
+
+### MUZZLE — jailbreak evaluation
+
+Wang, Chao, et al. (2024). *MUZZLE: A Multi-Model Benchmark for
+Evaluating LLM Jailbreak Robustness.*
+
+MUZZLE provides the framework for cross-model jailbreak comparison.
+AgentGuardian's `--commander-model` / `--attacker-model` /
+`--evaluator-model` triplet (and the model-race option in
+`src/agent_guardian/core/model_race.py`) lets a scan operator reproduce
+MUZZLE-style cross-model evaluations on their own targets.
+
+## Evaluation
+
+### LLM-as-judge
+
+Zheng, Chiang, Sheng, et al. (2024). *Judging LLM-as-a-Judge with
+MT-Bench and Chatbot Arena.* NeurIPS 2023.
+
+The empirical justification for using a separate LLM as the final
+evaluator. AgentGuardian's `Judge`
+(`src/agent_guardian/agents/base.py`) implements the LLM-as-judge
+pattern with one critical departure: the judge is **always** a
+different role from the attacker, even when wired to the same model
+endpoint, so the chain-of-thought that picked the attack cannot grade
+its own output.
+
+## Threat taxonomies
+
+### MITRE ATLAS
+
+[atlas.mitre.org](https://atlas.mitre.org/)
+
+The Adversarial Threat Landscape for AI Systems. Every AgentGuardian
+finding carries a `MitreTechnique` enum value
+(`src/agent_guardian/models/mitre.py`) so SARIF emitters can map
+findings directly into GitHub Code Scanning and SOC tooling that
+consume the ATLAS taxonomy.
+
+### CSA AI Controls Matrix
+
+Cloud Security Alliance, *AI Controls Matrix v1*.
+
+The CSA matrix is the governance-facing taxonomy used by enterprise
+security teams. Every finding also carries a `CsaCategory` enum
+(`src/agent_guardian/models/csa.py`) so the report can be consumed by
+GRC tooling alongside the technical ATLAS view.
+
+### OWASP ASI 2026
+
+[OWASP Agentic Security Initiative](https://owasp.org/www-project-ai-security-and-privacy-guide/) (ASI 2026 draft).
+
+The ten ASI categories are the spine of the entire swarm. Each
+specialist agent owns exactly one category
+(`src/agent_guardian/models/asi.py::AsiCategory`), the bundled probe
+corpus is sharded by category
+(`src/agent_guardian/probes/asi01..asi10/`), and the final report
+breaks down AIVSS sub-scores by ASI category.
+
+## Scoring
+
+### AIVSS — Agentic AI Vulnerability Scoring System
+
+Cloud Security Alliance + OWASP joint working group (2025). *AIVSS:
+A Vulnerability Scoring System for Agentic AI.*
+
+AIVSS is the deterministic 0-100 score AgentGuardian emits at the end
+of every scan. The formula combines per-finding severity, tier weights
+(T1/T2/T3/T4), and category weights into a single number that is
+reproducible across runs given the same `--seed` and the same target.
+See [AIVSS score](/reports/aivss-score) for the formula and band
+thresholds; the implementation lives in
+`src/agent_guardian/core/scoring.py`.
+
+## Recon and fingerprinting
+
+### Black-box capability auditing
+
+The recon agent (`src/agent_guardian/agents/recon.py`) draws on the
+agent-fingerprinting literature — notably the body of work around
+black-box LLM capability inference — to interrogate a target without
+needing the system prompt, the tool definitions, or the model name.
+Ten audit rounds (configurable via `--recon-budget-seconds` /
+`recon_audit_rounds`) probe the target's tools, memory, multi-agent
+hand-offs, PII exposure, and reachable external systems.
+
+## Citation file
+
+A canonical BibTeX/CFF citation for AgentGuardian itself lives at
+`CITATION.cff` in the repository root. Cite it alongside the papers
+above when you publish results that use AgentGuardian.
+
+## Where to go next
+
+- [How AgentGuardian works](/concepts/how-agentguardian-works) — the
+  developer mental model that sits on top of these foundations.
+- [Adversarial swarm](/concepts/adversarial-swarm) — the
+  RedAgent/MAD-MAX/Co-RedTeam shape in code.
+- [AIVSS score](/reports/aivss-score) — the AIVSS formula in detail.
+- [Evaluators](/concepts/evaluators) — the LLM-as-judge implementation.

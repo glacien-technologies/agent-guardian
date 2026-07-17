@@ -1,0 +1,168 @@
+---
+title: "Fail builds on critical findings"
+sidebarTitle: "Fail on critical findings"
+description: "Turn a single critical-band finding into a non-zero exit, without double-counting against the AIVSS gate."
+icon: "circle-x"
+---
+
+The default `--fail-under` gate is a *score* gate — it blocks when the aggregate AIVSS drops below your floor. This page covers the complementary *finding* gate: block when **any** finding lands in the `critical` band, regardless of the aggregate score.
+
+## When to use this
+
+- A release branch where one critical-band ASI05 (code execution) or ASI03 (privilege escalation) finding is a non-negotiable block, even if the rest of the run is clean and the aggregate AIVSS clears the floor.
+- An agent that runs in a high-blast-radius environment (production database write access, customer-data egress, payment APIs).
+- Any time the score gate alone has let a single high-severity finding slip through because the aggregate stayed above the floor.
+
+If your only concern is the aggregate AIVSS, the score gate from [security gates](/ci-cd/security-gates) is enough on its own — skip this page.
+
+## The two gates, side by side
+
+The CLI ships one built-in gate flag: `--fail-under` (score gate). A finding gate is a thin post-processing step on the `scan.json` the CLI always emits. Wire both together so they share the same scan and the build fails on whichever fires first.
+
+| Gate | Flag / mechanism | Fires when | Exit code |
+|------|------------------|------------|-----------|
+| Score gate | `--fail-under N` | AIVSS &lt; `N`, or scan is non-authoritative | `1` (`EXIT_FAIL_UNDER`) |
+| Finding gate | Post-step: parse `scan.json`, count `band=critical` findings | Any finding has `band=critical` | Whatever the post-step exits with (use `1` for parity) |
+
+The bands are defined in [`models/severity.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/models/severity.py): `excellent`, `good`, `warning`, `poor`, `critical`, plus the non-numeric `not_evaluated` for non-authoritative scans. The `critical` band covers AIVSS 0&ndash;39 (the lowest 40 points of the 100-point scale).
+
+## Step 1: produce a JSON report
+
+The JSON report is structured, signed, and always emitted alongside any other format. Ask for it explicitly so the post-step has a deterministic path:
+
+```bash
+agent-guardian scan \
+  --framework langgraph \
+  --framework-ref my_app.graph:graph \
+  --model gemini:gemini-2.5-flash \
+  --mode full \
+  --budget-usd 0.10 \
+  --output json \
+  --output-path scan.json \
+  --fail-under 70
+```
+
+`--output` accepts `json`, `sarif`, `junit`, `md`, or `pdf` (see [`cli.py:2306–2308`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L2306-L2308)). If you need both a JSON for the finding gate and a SARIF for GitHub Code Scanning, ask the CLI for `--output sarif --output-path scan.sarif` and emit a sidecar `scan.json` from a second `agent-guardian report SCAN_ID --output json` call — or use `--bundle DIR` to write a checksummed SARIF+PoV bundle, with the JSON included.
+
+## Step 2: count critical findings
+
+Each entry in the `findings[]` array carries a per-finding `band` field, populated from the same `band_for_score` enum. The shell post-step is two lines of `jq`:
+
+```bash
+critical=$(jq '[.findings[] | select(.band == "critical")] | length' scan.json)
+if [ "$critical" -gt 0 ]; then
+  echo "::error::AgentGuardian found $critical critical-band finding(s)" >&2
+  jq -r '.findings[] | select(.band == "critical") | "\(.id) \(.category) \(.title)"' scan.json >&2
+  exit 1
+fi
+```
+
+The `::error::` prefix is GitHub Actions log-command syntax — it surfaces the line as a red annotation on the PR. On GitLab or Jenkins, drop the prefix and rely on the non-zero exit.
+
+## Step 3: wire both gates into one job
+
+The CLI's score gate runs first (inside the `scan` step). If it passes, the post-step's finding gate runs. The job fails if either fires.
+
+```yaml .github/workflows/agent-guardian.yml
+name: AgentGuardian Red Team Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # required for codeql-action/upload-sarif
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install agent-guardian
+
+      - name: Score gate (--fail-under)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          agent-guardian scan \
+            --framework langgraph \
+            --framework-ref my_app.graph:graph \
+            --model gemini:gemini-2.5-flash \
+            --mode full \
+            --budget-usd 0.10 \
+            --output json \
+            --output-path scan.json \
+            --fail-under 70
+
+      - name: Finding gate (no critical-band findings)
+        if: always()
+        run: |
+          test -f scan.json || { echo "::error::scan.json missing"; exit 1; }
+          critical=$(jq '[.findings[] | select(.band == "critical")] | length' scan.json)
+          if [ "$critical" -gt 0 ]; then
+            echo "::error::AgentGuardian found $critical critical-band finding(s)" >&2
+            jq -r '.findings[] | select(.band == "critical") | "\(.id) \(.category) \(.title)"' scan.json >&2
+            exit 1
+          fi
+```
+
+The `if: always()` on the finding gate runs it even when the score gate exited `1` — so a single run surfaces both failure modes instead of stopping at the first one. The job's final status is the OR of the two steps.
+
+## Step 4: confirm the gate is real
+
+Before trusting the gate in production, prove it fails on a known-bad target. The bundled vulnerable demo agent — `agent_guardian.examples.vulnerable_demo` — is calibrated to produce `critical`-band findings on a `full`-mode scan. Run it locally:
+
+```bash
+uv run agent-guardian scan \
+  --framework langgraph \
+  --framework-ref agent_guardian.examples.vulnerable_demo:graph \
+  --model gemini:gemini-2.5-flash \
+  --mode full \
+  --budget-usd 0.10 \
+  --output json \
+  --output-path /tmp/demo.json \
+  --fail-under 70
+echo "exit=$?"
+jq '[.findings[] | select(.band == "critical")] | length' /tmp/demo.json
+```
+
+A successful test run will exit non-zero from the `scan` command (score gate fired) **and** report a non-zero count of `critical`-band findings (finding gate would fire). If both produce the expected signals, the same workflow on real targets is trustworthy.
+
+## How to interpret the two gates together
+
+The two gates answer different questions, and reading both is what makes the verdict actionable:
+
+| Score gate | Finding gate | What it means | What to do |
+|------------|--------------|---------------|------------|
+| Pass | Pass | Aggregate AIVSS clears the floor and no critical-band findings. | Merge. |
+| Pass | **Fail** | Aggregate is healthy but one finding is in the `critical` band (likely a single ASI05/ASI03 exploit). | Block. Triage the named finding(s); the rest of the agent is fine, but one capability is severely broken. |
+| **Fail** | Pass | AIVSS &lt; floor (broad mediocrity), no single finding hit `critical`. | Block. The agent has too many warning/poor-band findings — mitigate the most-common category. |
+| **Fail** | **Fail** | Both broad mediocrity and a critical-band finding. | Block. Fix the critical finding first; re-scan to see whether the aggregate clears once it's removed. |
+
+## What this does *not* do
+
+- It does not change the CLI's exit codes. The CLI still uses the six codes from [`cli.py:83–89`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L83-L89); the finding gate is a sibling shell step with its own exit.
+- It does not run in `--mode fast` or `--mode smart` and still produce a meaningful "critical" verdict. A `fast` scan that finds zero critical-band issues has only run 3 probes per agent — absence of evidence is not evidence of absence. The QA-004 authoritativeness rules ([security gates](/ci-cd/security-gates)) apply to the finding gate too: only trust a "no critical findings" result from a `full`-mode authoritative scan.
+- It does not de-duplicate findings across runs. If the same agent flaw is found twice, both findings land in the JSON and both count. Use `--pov-gate` to drop unreproducible triggers, and `--critic` to drop low-quality / high-false-positive-risk findings before they reach the gate.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Security gates" icon="shield-check" href="/ci-cd/security-gates">
+    The full exit-code table and the QA-004 authoritativeness rules behind `--fail-under`.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The full workflow YAML, including SARIF upload to the Security tab.
+  </Card>
+  <Card title="Reports" icon="file-text" href="/reports/overview">
+    The structure of `scan.json` — including the `findings[].band` field this gate parses.
+  </Card>
+  <Card title="Attack library" icon="shield-alert" href="/attacks/overview">
+    What the 96 probes across 10 ASI categories actually exercise.
+  </Card>
+</CardGroup>

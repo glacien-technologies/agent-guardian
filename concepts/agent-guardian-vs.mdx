@@ -1,0 +1,115 @@
+---
+title: "AgentGuardian vs other red-team tools"
+sidebarTitle: "AgentGuardian vs"
+description: "Factual comparison of AgentGuardian against PyRIT, garak, Promptfoo, Inspect, DeepTeam, and manual prompt testing. What each tool optimises for and where AgentGuardian fits. Living document — reviewed monthly."
+icon: "git-compare"
+---
+
+This page is a factual comparison. It is not a sales pitch. The OSS landscape for LLM and agent red-teaming is busy and most readers landing here have already tried at least one of the alternatives below; the goal of the page is to help you pick *the right tool for your problem*, which is sometimes AgentGuardian and sometimes not.
+
+The table is reviewed monthly. If a row goes stale, file an issue at [glacien-technologies/agent-guardian](https://github.com/glacien-technologies/agent-guardian) and we'll fix it in the next release.
+
+## The matrix
+
+| Tool                          | Multi-agent swarm | Agentic-AI focus | Standards alignment                              | Open formula | License        |
+|-------------------------------|:-----------------:|:----------------:|--------------------------------------------------|:------------:|----------------|
+| PyRIT [¹](#fn1)               |        no         |        no        | NIST AI RMF (partial)                            |    no        | MIT            |
+| garak                         |        no         |        no        | own taxonomy                                     |    no        | Apache-2.0     |
+| Promptfoo (redteam)           |        no         |        no        | OWASP LLM Top 10 + MITRE ATLAS + EU AI Act       |    no        | MIT            |
+| Inspect (UK AISI)             |        no         |        no        | own taxonomy                                     |    no        | MIT            |
+| DeepTeam                      |        no         |        no        | OWASP LLM Top 10                                 |    no        | Apache-2.0     |
+| Manual prompt testing         |        no         |        no        | none                                             |     —        |  —             |
+| **AgentGuardian**             |     **yes**       |    **yes**       | **OWASP ASI 2026 + ATLAS v5.4 + CSA + AIVSS**    |    **yes**   | **Apache-2.0** |
+
+<a name="fn1">¹</a> Microsoft's public PyRIT repository at `Azure/PyRIT` was archived 2026-03-27 and is no longer maintained. We keep PyRIT in the comparison because it remains the academic reference most readers know; new work should consider one of the maintained alternatives instead.
+
+## What each row means
+
+### Multi-agent swarm
+
+Whether the tool runs multiple attacker specialists *concurrently* against the same target, with a coordinator and shared adversarial memory. Single-attacker tools issue prompts sequentially from one corpus; swarm tools fan out across a category-sharded corpus and re-task idle attackers.
+
+AgentGuardian is the only OSS tool in this list that ships a swarm by default — sixteen specialists (ten ASI + one always-on identity-leak gap-fill agent + five OWASP-LLM), an `asyncio.TaskGroup` execution model, and a shared `VectorMemory` so multi-hop attacks can compose. The academic precedents are RedAgent and Co-RedTeam; see [/concepts/research-foundation](/concepts/research-foundation).
+
+### Agentic-AI focus
+
+Whether the tool's threat model and probes are designed for *agents* (tool-using, memory-holding, multi-step) or for *chatbots* (single completion calls). All of the listed alternatives are excellent at the chatbot threat model; none of them models the cascade `inject -> plan change -> tool call -> side-effect` natively.
+
+AgentGuardian's specialists are sharded by the OWASP ASI 2026 categories — Tool Misuse (ASI02), Memory Poisoning (ASI06), Agent-to-Agent Compromise (ASI07), Cascading Failures (ASI08), Rogue Agent / Drift (ASI10) — that are specific to agent architectures.
+
+### Standards alignment
+
+Which industry / academic taxonomies the tool's findings map to. Multiple taxonomies matter because different audiences read different ones: security engineers read MITRE ATLAS, application developers read OWASP, governance teams read CSA.
+
+| Taxonomy            | AgentGuardian | PyRIT | garak | Promptfoo | Inspect | DeepTeam |
+|---------------------|:-------------:|:-----:|:-----:|:---------:|:-------:|:--------:|
+| OWASP LLM Top 10    |       ✓       |  —    |   —   |     ✓     |    —    |    ✓     |
+| OWASP ASI 2026      |       ✓       |  —    |   —   |     —     |    —    |    —     |
+| MITRE ATLAS v5.4    |       ✓       |  —    |   —   |     ✓     |    —    |    —     |
+| CSA Agentic-RT      |       ✓       |  —    |   —   |     —     |    —    |    —     |
+| NIST AI RMF         |       —       |  ✓    |   —   |     —     |    —    |    —     |
+| EU AI Act risk      |       —       |  —    |   —   |     ✓     |    —    |    —     |
+
+AgentGuardian is the only entry that maps to all three of OWASP ASI 2026 + MITRE ATLAS + CSA. NIST AI RMF and EU AI Act are valuable for governance work but are not technical taxonomies; integrating them is on the roadmap, not in the table yet.
+
+### Open formula
+
+Whether the tool's risk score is computed from a **published, deterministic formula** or from an opaque heuristic / proprietary model.
+
+AgentGuardian's AIVSS score is computed from a published formula in `src/agent_guardian/scoring/aivss.py` — see [reports/aivss-score](/reports/aivss-score). A reader can audit the formula, contest a score, and reproduce the number locally. PyRIT, garak, Promptfoo, Inspect, and DeepTeam all surface findings but do not produce a single comparable risk score; for the agent threat model that gap matters because a single number is what gates a PR in CI.
+
+### License
+
+All tools in this table are open source. AgentGuardian is **Apache-2.0**, which is the same license garak and DeepTeam use; PyRIT, Promptfoo, and Inspect use MIT. For most enterprise legal reviews the practical difference is small; the Apache patent grant matters in a subset of corporate environments.
+
+## When each tool fits best
+
+This section is what most readers actually came here for.
+
+### Pick **PyRIT** if
+
+You need the academic reference implementation of multi-turn jailbreak research and you are comfortable forking an archived repo. PyRIT's converter / orchestrator design is genuinely useful as a research substrate. We do not recommend it for new production use because the upstream repo is archived.
+
+### Pick **garak** if
+
+Your problem is a *standalone LLM* (a chat model, a code-completion model) and you want a fast, well-maintained corpus of probes graded by detector rules. garak is excellent at what it does. It is not agentic; if your target has tools, you'll need to wrap it.
+
+### Pick **Promptfoo (redteam)** if
+
+You already use Promptfoo for evals and you want red-team and eval workflows in the same tool. The OWASP LLM Top 10 + MITRE ATLAS + EU AI Act plugin packs are mature. Promptfoo is not a swarm tool and does not model the agent-cascade threat surface natively, but for chatbot-shaped targets it is a strong choice.
+
+### Pick **Inspect (UK AISI)** if
+
+You are running evaluation work in the UK AISI / academic ecosystem and your workflow already centres on Inspect. Inspect's strength is evaluation rigour, not agent-specific red-teaming.
+
+### Pick **DeepTeam** if
+
+You want a lightweight OSS red-team library that maps to OWASP LLM Top 10 and you don't need agent-cascade coverage. DeepTeam is a smaller surface than AgentGuardian, which is sometimes what you want.
+
+### Pick **manual prompt testing** if
+
+You're at an experimental scale (one agent, one engineer, one afternoon). At that scale, a tool's setup cost outweighs its benefit. Once you have more than one agent or more than one engineer touching the agent, the manual approach stops scaling.
+
+### Pick **AgentGuardian** if
+
+- your target is an *agent* (LangGraph, CrewAI, MCP server, RAG app, multi-tool REST API),
+- you need a deterministic, formula-driven risk score you can put in a PR check,
+- you need OWASP ASI 2026 + MITRE ATLAS + CSA mappings on every finding so multiple audiences can consume the same report,
+- you want the swarm architecture (parallel specialists, shared memory, multi-hop cascade detection), and
+- you want all of the above locally, with no telemetry, under Apache-2.0.
+
+## What AgentGuardian is *not*
+
+For completeness and to keep this page honest:
+
+- **Not a runtime gateway.** AgentGuardian does not sit in front of a production agent at serve time. If you need runtime governance see [Open vs Enterprise](/concepts/open-vs-enterprise).
+- **Not a managed SaaS.** Reports live on your disk. There is no AgentGuardian account.
+- **Not a guarantee.** No red-team tool is, and any tool that says otherwise should be treated with suspicion. AgentGuardian's value is reproducible, score-anchored adversarial coverage — not a proof of absence.
+
+## Living document
+
+This comparison is reviewed monthly. The next review is tracked in [`docs/community/oss-roadmap.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/community/oss-roadmap.md). If a competitor has shipped a feature that changes a row above, file a PR against `docs/concepts/agent-guardian-vs.mdx` or open an issue — corrections are merged on the next release.
+
+## Source
+
+The matrix tracks the row in the README's "How it compares" table; that row is the canonical statement and this page expands on it. Both stay in sync.

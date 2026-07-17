@@ -1,0 +1,191 @@
+---
+title: "Exit codes"
+description: "CLI exit codes (and the LLM provider exception taxonomy that maps to them)."
+icon: "circle-alert"
+---
+
+How `agent-guardian` signals failure. CLI exit codes drive CI gates;
+the `LLMError` hierarchy lets SDK callers branch on transport / auth /
+quota faults without parsing strings.
+
+## When to use this
+
+- You're writing a CI job and need to know which exit codes a
+  `scan` step can return.
+- You're wrapping the SDK and need a clean `try / except` taxonomy for
+  provider failures.
+- You're debugging a scan that exited non-zero and want to know what
+  the number means.
+
+## CLI exit codes
+
+Defined in `src/agent_guardian/cli.py`. Every top-level command exits
+with one of these.
+
+| Code | Constant | Raised by | Meaning |
+| --- | --- | --- | --- |
+| `0` | `EXIT_OK` | Any command on success | Success. |
+| `1` | `EXIT_FAIL_UNDER` | `scan` (with `--fail-under N` and/or `--max-critical` / `--max-high` / `--max-medium` / `--max-low`), `verify`, `publish`, `last-score --score-only` | A CI gate failed: final AIVSS `< N`, a severity-count ceiling was exceeded, the scan was non-authoritative, signature verification failed, or `last-score` had no scans on record. |
+| `2` | `EXIT_CONFIG` | All commands | Configuration error: bad flag, missing file, unknown format, unsafe `serve` bind, contract migration failure, invalid `scan_id`. |
+| `3` | `EXIT_TARGET_UNREACHABLE` | `scan` (HTTP endpoint mode) | Endpoint preflight could not reach the target after 5 attempts (5s, 10s, 15s, 20s, 30s — cold-start tolerant). |
+| `4` | `EXIT_LLM_PROVIDER` | `scan` | LLM provider misconfigured (missing key, unknown provider) or model not found during pre-scan validation. |
+| `5` | `EXIT_SANDBOX` | `scan` | Sandbox violation — an agent attempted a blocked filesystem / network operation. |
+| `130` | `EXIT_USER_INTERRUPT` | `scan` | Operator hit Ctrl-C (POSIX convention: `128 + SIGINT(2)`). |
+
+### How CI gates branch on this
+
+```bash
+agent-guardian scan --endpoint https://api.your-agent.com/v1/chat \
+                    --fail-under 80 \
+                    --model anthropic:claude-haiku-4-5
+EXIT=$?
+case $EXIT in
+  0)   echo "scan passed (gate satisfied)" ;;
+  1)   echo "gate failed (AIVSS < 80, a --max-* ceiling exceeded, or non-authoritative)" ; exit 1 ;;
+  2)   echo "config error — fix flags or config" ; exit 1 ;;
+  3)   echo "target unreachable — check endpoint" ; exit 1 ;;
+  4)   echo "LLM provider error — check API keys" ; exit 1 ;;
+  5)   echo "sandbox violation — investigate" ; exit 1 ;;
+  130) echo "interrupted" ; exit 130 ;;
+  *)   echo "unexpected exit $EXIT" ; exit 1 ;;
+esac
+```
+
+Always branch on the exit code rather than parsing stdout: the exit
+contract is stable; the human-readable lines are not.
+
+### Sample exit-code triggers
+
+A few concrete shapes:
+
+```bash
+# EXIT_OK — happy path
+agent-guardian scan --system-prompt prompt.txt --model stub
+echo $?    # 0
+
+# EXIT_FAIL_UNDER — gate trips
+agent-guardian scan --system-prompt prompt.txt --fail-under 100
+echo $?    # 1 (stub scores are rarely 100)
+
+# EXIT_CONFIG — bad flag
+agent-guardian report some-scan --output xml
+echo $?    # 2 — unknown format
+
+# EXIT_TARGET_UNREACHABLE — endpoint down
+agent-guardian scan --endpoint http://127.0.0.1:1 --model stub
+echo $?    # 3
+
+# EXIT_LLM_PROVIDER — missing key
+unset OPENAI_API_KEY AGENT_GUARDIAN_OPENAI_API_KEY
+agent-guardian scan --system-prompt prompt.txt --model openai:gpt-4o
+echo $?    # 4
+
+# EXIT_USER_INTERRUPT — Ctrl-C during scan
+# (interactive only)
+echo $?    # 130
+```
+
+## LLM provider exception taxonomy
+
+Defined in `src/agent_guardian/llm/errors.py`. Every provider client
+maps HTTP / SDK errors into one of these so the rest of the framework
+can decide whether to retry, surface to the operator, or abort the scan
+without caring about the underlying transport.
+
+```text
+LLMError                       (base)
+├── LLMRateLimitError          # 429 / quota exhausted (carries retry_after)
+├── LLMAuthError               # 401 / 403 — credentials missing or invalid
+├── LLMTimeoutError            # transport-layer timeout
+├── LLMTransientError          # 5xx / network blip — safe to retry
+├── LLMPermanentError          # non-retryable 4xx (bad model, bad payload, …)
+└── LLMResponseFormatError     # 200 OK but the payload was missing required fields
+```
+
+All seven are exported from `agent_guardian` (the top-level package).
+
+| Exception | When | Retry? | Typical cause |
+| --- | --- | --- | --- |
+| `LLMError` | Base class | — | Catch this if you don't care about the sub-class. |
+| `LLMRateLimitError` | 429, quota exhausted | Yes (honour `retry_after`) | You're hitting your tier's TPM / RPM cap. The exception carries an optional `retry_after` (seconds) lifted from the provider's `Retry-After` header. |
+| `LLMAuthError` | 401, 403 | No | Missing / wrong / revoked API key. Check `AGENT_GUARDIAN_<PROVIDER>_API_KEY` or the conventional fallback (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`). |
+| `LLMTimeoutError` | Transport timeout | Yes | The request didn't complete in the client's deadline. Often a cold start; sometimes a provider blip. |
+| `LLMTransientError` | 5xx, network blip | Yes | Provider-side fault. Backoff and retry. |
+| `LLMPermanentError` | Non-retryable 4xx | No | Bad model name, malformed payload, content-policy refusal that won't change on retry. |
+| `LLMResponseFormatError` | 200 OK, malformed body | Maybe (could be a schema drift) | Provider returned success but the body was missing required fields. Usually a provider schema change. |
+
+### Catching them in your code
+
+```python
+from agent_guardian import (
+    LLMAuthError, LLMError, LLMPermanentError,
+    LLMRateLimitError, LLMResponseFormatError,
+    LLMTimeoutError, LLMTransientError,
+)
+import asyncio
+
+async def call_with_recovery(llm, request):
+    try:
+        return await llm.chat(request)
+    except LLMRateLimitError as exc:
+        wait = exc.retry_after or 5.0
+        await asyncio.sleep(wait)
+        return await llm.chat(request)
+    except LLMAuthError:
+        raise SystemExit(
+            "Provider returned 401/403. Check your API key env vars."
+        )
+    except (LLMTimeoutError, LLMTransientError):
+        # Backoff handled at a higher layer or a retry helper.
+        raise
+    except LLMPermanentError:
+        # No point retrying — fix the request.
+        raise
+    except LLMResponseFormatError:
+        # Provider schema change. Worth surfacing loudly.
+        raise
+    except LLMError:
+        # Unknown LLM-layer fault.
+        raise
+```
+
+The bundled `agent_guardian.llm.retry` helpers honour this taxonomy:
+they retry the transient classes (`LLMRateLimitError`,
+`LLMTimeoutError`, `LLMTransientError`), respect `retry_after`, and
+fail fast on the rest.
+
+### Mapping back to a CLI exit code
+
+When the CLI hits a provider error during a scan, it surfaces it as
+`EXIT_LLM_PROVIDER` (`4`) after pre-scan validation, or lets the swarm's
+internal retry policy absorb transients. The operator always sees:
+
+```text
+llm config error: ...
+# or
+warning: <transient blip>
+```
+
+on stderr.
+
+## How to interpret the result
+
+- **`0` / `1`** are the only exit codes a healthy scan should produce.
+  Anything else means the scan didn't run to completion.
+- **`2` / `3` / `4`** are operator-fixable: bad config, dead endpoint,
+  missing key. Surface the underlying message on stderr — the CLI tells
+  you which.
+- **`5`** is rare and means an agent tried to escape the sandbox. File
+  an issue with the scan transcript.
+- **`130`** is just Ctrl-C — no action needed.
+- In Python code, prefer catching specific `LLMError` subclasses over
+  the base — your retry policy depends on the distinction.
+
+## Next step
+
+- Wire these exit codes into a GitHub Actions job:
+  [GitHub Actions integration](/ci-cd/github-actions).
+- Use the SDK to drive your own retry policy:
+  [Python SDK](/reference/python-sdk).
+- Tune what the CLI surfaces via [Configuration](/reference/config) and
+  `AGENT_GUARDIAN_LOG_LEVEL=DEBUG`.

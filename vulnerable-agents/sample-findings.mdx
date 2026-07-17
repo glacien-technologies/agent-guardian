@@ -1,0 +1,39 @@
+---
+title: "Sample findings"
+description: "What AgentGuardian produces when you scan the vulnerable demo agents."
+---
+
+The sibling repo ships pre-captured scan output in [`sample-findings/`](https://github.com/glacien-technologies/agentguardian-vulnerable-agents/tree/main/sample-findings) — one directory per agent, with `fast-scan.json`, `fast-scan.sarif`, and `fast-scan.pdf`. Read these before running your own scan to know what the result should look like.
+
+## What to look for
+
+- **`fast-scan.json`** — machine-readable. Top-level `findings: [...]` array; each finding has `category`, `severity`, `aivss_score`, `evidence.prompt`, `evidence.response`.
+- **`fast-scan.sarif`** — GitHub Code Scanning format. Upload to a repo's Security tab with `actions/upload-sarif@v3` and the findings render inline on the PR.
+- **`fast-scan.pdf`** — human-readable report with attack transcripts. The shareable artifact for a launch demo.
+
+## Regenerating
+
+The sample files commit empty until the first real scan is captured. To regenerate:
+
+```bash
+docker compose up --build -d
+
+for agent in vulnerable-langgraph-chatbot vulnerable-mcp-server vulnerable-tool-agent vulnerable-rag-agent defended-baseline; do
+  agent-guardian scan \
+    --endpoint "http://localhost:8000/${agent}/chat" \
+    --model stub --mode fast \
+    --output pdf --output-path "sample-findings/${agent}/fast-scan.pdf"
+done
+```
+
+## Expected severities
+
+| Agent                            | High-severity findings expected | Notes                                               |
+| -------------------------------- | :-----------------------------: | --------------------------------------------------- |
+| `vulnerable-langgraph-chatbot`   | 3-5                             | LLM01 + LLM06 + LLM07 always; others mode-dependent |
+| `vulnerable-rag-agent`           | 1-2                             | LLM02 reliable; LLM10 surfaces in `--mode full`     |
+| `vulnerable-tool-agent`          | 2-3                             | LLM06 + LLM05 always                                |
+| `vulnerable-mcp-server`          | 2-3                             | LLM01 + LLM06 + LLM07                               |
+| `defended-baseline`              | 0                               | A high-severity finding here is a scanner bug       |
+
+Use the `defended-baseline` row as your regression check whenever the scanner ships a new probe library.

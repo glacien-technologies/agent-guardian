@@ -1,0 +1,744 @@
+---
+title: "CLI reference"
+description: "Every command, flag, and exit code of the agent-guardian CLI."
+icon: "terminal"
+---
+
+The complete `agent-guardian` command surface. Every flag listed here is
+sourced from `src/agent_guardian/cli.py` (Typer decorators) — no documented
+flag is invented.
+
+## Global flags
+
+```bash
+agent-guardian --version    # print version and exit
+agent-guardian --help       # show top-level help
+```
+
+The CLI also auto-loads `.env` / `.env.local` from the current working
+directory (project-local, never `$HOME` or ancestors) when `python-dotenv`
+is installed. Existing shell exports always win over `.env` values.
+
+## Commands
+
+The top-level command set:
+
+```text
+agent-guardian COMMAND [ARGS]...
+
+Commands:
+  version       Print the installed agent-guardian version and exit.
+  doctor        Verify install, available LLM keys, and runtime prerequisites.
+  last-score    Print the AIVSS of the most recent scan.
+  serve         Start the local dashboard at http://<host>:<port>.
+  report        Regenerate a report from a stored scan (incl. --output badge).
+  gate          Apply pass/fail thresholds to a stored scan (CI-friendly).
+  verify        Verify HMAC-SHA256 + Ed25519 signatures on a JSON report.
+  scan          Run an adversarial swarm scan against a target.
+  telemetry     Opt-in usage telemetry (consent + status).
+  scans         Manage stored scans (list; delete by id or --older-than).
+  config        Inspect (show) and scaffold (init) the config file.
+```
+
+<Note>
+  CI integrations (`comment`, `code-insights`) and benchmark/maintainer tools
+  (`agentdojo`, `suite`, `calibrate`) are still installed and callable — they
+  are driven by the composite Action / GitLab template or gated behind extras,
+  so they are kept off the default `--help` to foreground the core workflow.
+</Note>
+
+<Note>
+  `suite` runs many independent scans in parallel from one YAML file and
+  aggregates a cross-scan summary. See
+  [Parallel suites & bulk scanning](/ci-cd/parallel-suites) for the full guide
+  and `examples/suite.yaml` for a commented reference file.
+</Note>
+
+---
+
+### `version`
+
+Print the installed `agent-guardian` version and exit.
+
+```bash
+agent-guardian version
+```
+
+Sample output:
+
+```text
+1.0.0
+```
+
+---
+
+### `doctor`
+
+Verify install, available LLM keys, and runtime prerequisites.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--check-connectivity` | off | Probe each detected provider with one tiny request to validate the key + reach the endpoint. Costs ~0 tokens per provider. |
+
+```bash
+agent-guardian doctor
+```
+
+Sample output:
+
+```text
+agent-guardian 1.0.0
+CLI: ok
+python: 3.11.13
+llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
+bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
+sandbox: importable
+pdf engines — weasyprint: not installed | reportlab: reportlab 4.2  (install 'agent-guardian[full]' to add WeasyPrint for higher-fidelity HTML→PDF)
+otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
+dashboard port 7474: free
+state dir: /Users/you/.agentguardian
+config (cwd): <not present>
+```
+
+Run `doctor --check-connectivity` before a paid scan to confirm your keys
+actually authenticate against each provider's API.
+
+---
+
+### `gate`
+
+Apply pass/fail thresholds to a **stored** scan, decoupled from `scan` — re-gate
+a completed scan without re-running it. The same gate `comment` uses.
+
+| Argument | Type | Purpose |
+| --- | --- | --- |
+| `SCAN_ID` | str / path | Scan to gate. Omit for the newest scan on disk. |
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--fail-under N` | unset | Fail if final AIVSS is below `N`. |
+| `--max-critical N` / `--max-high` / `--max-medium` / `--max-low` | unset | Fail if findings of that severity exceed `N`. |
+
+```bash
+agent-guardian gate --fail-under 70 --max-critical 0
+# exit 0 on pass, 1 on breach — drops straight into a CI step
+```
+
+An AIVSS badge is now a `report` output format:
+
+```bash
+agent-guardian report <id> --output badge            # AIVSS 87 (GOOD) #22c55e
+agent-guardian report <id> --output badge-svg > badge.svg
+```
+
+---
+
+### `last-score`
+
+Print the AIVSS of the most recent scan (read from `~/.agentguardian/state.json`).
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--score-only` | off | Emit only the integer score. Exits `1` when no scans are on record so the outer pipeline fails loudly. |
+
+```bash
+agent-guardian last-score
+# AIVSS 87 (GOOD)
+
+agent-guardian last-score --score-only
+# 87
+```
+
+---
+
+### `serve`
+
+Start the local dashboard at `http://<host>:<port>`.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--host HOST` | `127.0.0.1` | Bind host. Loopback by default. |
+| `--port PORT` | `7474` | Bind port. |
+| `--reload` | off | Auto-reload on code changes (dev only). |
+| `--token TOKEN` | env: `AGENT_GUARDIAN_DASHBOARD_TOKEN` | Dashboard auth token; required for non-loopback binds unless `--insecure-no-auth` is passed. |
+| `--insecure-no-auth` | off | Allow off-loopback bind WITHOUT a token. Exposes scan history to anyone who can reach the port. |
+
+```bash
+agent-guardian serve                          # loopback, no auth needed
+agent-guardian serve --host 0.0.0.0 --token $SECRET   # exposed, token-gated
+```
+
+Binding to a non-loopback address without `--token` or
+`--insecure-no-auth` is refused with `EXIT_CONFIG` (2) so a misconfigured
+deploy can't silently expose findings.
+
+---
+
+### `report`
+
+Regenerate a report from a stored scan.
+
+| Argument | Type | Purpose |
+| --- | --- | --- |
+| `SCAN_ID` | str | Scan ID to regenerate reports for. |
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `gitlab` \| `pdf`. |
+| `--output-path PATH` | unset | Write the report to this file. Required for `--output pdf` (binary). |
+
+```bash
+agent-guardian report cli-3a4c1d9c2840 --output sarif > scan.sarif
+agent-guardian report cli-3a4c1d9c2840 --output pdf --output-path scan.pdf
+```
+
+Text formats (`json` / `sarif` / `junit` / `md` / `gitlab`) print to stdout by
+default, or to `--output-path` when given. PDF is binary and always
+requires `--output-path`.
+
+---
+
+### `verify`
+
+Verify HMAC-SHA256 + Ed25519 signatures on a JSON report.
+
+| Argument | Type | Purpose |
+| --- | --- | --- |
+| `PATH` | path | Path to a signed JSON report. |
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--pubkey KEY` | unset | Pinned Ed25519 signer public key (base32, no padding). |
+| `--pubkey-file PATH` | unset | Read the pinned Ed25519 public key from this file. |
+| `--secret SECRET` | env: `AGENT_GUARDIAN_SIGNING_SECRET` | Expected HMAC signing secret. The public default secret is never accepted on verify. |
+
+```bash
+agent-guardian verify report.json --pubkey-file ./team.pub --secret $HMAC
+```
+
+Verification fails closed: a signature alone proves only that the bytes
+were not tampered (integrity), not *who* signed them. To report a green
+(OK) result you must supply a trust anchor. Without an anchor the report
+is shown as `UNANCHORED` and the command exits non-zero
+(`EXIT_FAIL_UNDER`, 1).
+
+---
+
+### `config`
+
+Inspect and scaffold the AgentGuardian config file. Distinct from the
+`scan --config` flag (which points a single run at an explicit file).
+
+| Command | Purpose |
+| --- | --- |
+| `config show [--config PATH]` | Print the effective resolved config (file values merged over built-in defaults). |
+| `config init [--out PATH] [--force]` | Scaffold a default config file (default `~/.agentguardian/config.yaml`). |
+
+```bash
+agent-guardian config show
+agent-guardian config init --out ./agentguardian.config.yaml
+```
+
+---
+
+### `scan`
+
+Run an adversarial swarm scan against a target. The big one — every flag
+is documented below.
+
+#### Target selection (exactly one required)
+
+| Argument / flag | Mode |
+| --- | --- |
+| `TARGET` (positional, dotted path) | Python callable target (`my_agent:run`). |
+| `--system-prompt PATH` | Prompt-only target (PromptAdapter wraps it around `--model`). |
+| `--endpoint URL` | Hosted HTTP target. |
+| `--framework KIND` + `--framework-ref MODULE:ATTR` | Framework-native target (LangGraph / CrewAI / AutoGen / OpenAI Agents / ADK / Strands). |
+| `--contract PATH` | Drive the scan from a target contract YAML. Supplies transport, auth, session, and Rules of Engagement. |
+
+`--framework KIND` accepts: `adk`, `autogen`, `crewai`, `langgraph`,
+`openai_agents`, `strands`.
+
+#### LLM model wiring
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--model SPEC` | `stub` | Default LLM for all three roles. See [Python SDK → build_llm](/reference/python-sdk) for the spec grammar. |
+| `--commander-model SPEC` | unset | Override commander LLM. |
+| `--attacker-model SPEC` | unset | Override attacker LLM. |
+| `--evaluator-model SPEC` | unset | Override evaluator LLM. |
+
+Model specs: `stub`, `openai:gpt-4o`, `anthropic:claude-haiku-4-5`,
+`gemini:gemini-2.5-flash`, `ollama:llama3.1`,
+`bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0`.
+
+#### Scan shape
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--mode MODE`, `-m MODE` | `full` | Thoroughness: `full` (every probe, ~5min), `smart` (early-stop when AIVSS variance stabilises, ~2min), `fast` (3 probes / 4 turns per agent, ~45s). |
+| `--tier T` | auto-detected | Force tier: `T1`, `T2`, `T3`, `T4`. |
+| `--seed N` | `0` | RNG seed for determinism. |
+| `--max-turns N` | `20` (full/smart), `4` (fast) | Per-agent turn cap, applied uniformly to every agent across all strategies. Overrides the mode default. Raise for deeper multi-turn coverage; pair with a larger token / `--budget-usd` budget. |
+| `--goal TEXT` | unset | Operator's natural-language attack goal. When set, the Commander LLM decomposes it into per-agent briefs (adaptive allocation). When unset, the swarm uses a uniform brief — every agent gets the same weight, every scenario at the default budget. See [Commander invocation gate](#commander-invocation-gate) below for when the Commander runs vs falls back to uniform, and [`--goal` cost band](#--goal-cost-band) for the spend delta to budget for. |
+| `--no-owasp-llm` | off (specialists DO run) | Suppress the OWASP-LLM specialist agents (fuzzing, secret-extraction, denial-of-wallet, detection-evasion, output-handling). |
+| `--pretext` | off | Wrap attacker payloads in a rotating legitimate-operations pretext (auditor / compliance / incident / onboarding). |
+| `--indirect` | off | Deliver attacker payloads embedded in trusted-channel content (retrieved doc / tool output / email / memory / a2a). |
+| `--pov-gate` | off | Re-run each finding's trigger N times and drop the unreproducible ones before scoring. |
+| `--critic` | off | With `--pov-gate`, also score PoV-passing findings on an LLM rubric and drop low-quality / high-FP-risk ones. |
+| `--bundle DIR` | unset | Write a checksummed SARIF+PoV bundle to this directory. |
+
+#### Budget + gating
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--budget-usd N` | unset | Runtime USD cap (metered against actual spend). Soft-stops new attack turns at 80% and reserves the rest for the report. |
+| `--fail-under N` | unset | Exit `1` if final AIVSS `< N`. |
+
+#### Output + reports
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--output FORMAT` | `json` | Report format: `json` \| `sarif` \| `junit` \| `md` \| `gitlab` \| `pdf`. All work after a stock `pip install agent-guardian` — no extras required. |
+| `--output-path PATH` | unset | Where to write the report file. |
+| `--no-tui` | off | Disable the Rich progress panel. |
+| `--config PATH` | auto-discovered | Override the default config file location. |
+
+<Tip>
+  ReportLab is bundled in the base install, so `--output pdf` writes a clean
+  single-page summary out of the box. Install `agent-guardian[full]` to upgrade
+  the PDF engine to WeasyPrint for higher-fidelity HTML→PDF rendering (rich
+  CSS layout, real typography). The dispatcher prefers WeasyPrint when its
+  native deps (`libpango` / `libcairo`) are available, and falls back to
+  ReportLab otherwise. Engine availability is validated at scan startup —
+  the scan never starts on a configuration that can't write its report.
+</Tip>
+
+#### Scan plan panel (QA-011)
+
+Before the first LLM call, AgentGuardian prints a one-screen "scan
+plan" panel summarising everything it just verified: target
+reachability, per-role model validation, budget caps, output engine
+availability, dashboard server status, and the safety guards in play.
+This catches the failure modes that used to surface only after 6
+minutes of LLM spend — missing PDF engine, unreachable target,
+dashboard server down, model id typo.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--yes`, `-y` | off | Skip the 5-second confirmation wait. Equivalent to `AGENT_GUARDIAN_NO_PLAN_CONFIRM=1`. Implicit when stdout is not a TTY or `$CI=true`. |
+| `--no-plan` | off | Skip the panel entirely. For ultra-quiet CI use. The dashboard URL is still emitted via the legacy one-line print so the QA-003 guarantee holds. |
+
+What you'll see on an interactive scan:
+
+```text
+╭─ Scan plan · cli-6a04e02a7b5e ──────────────────────────────────────╮
+│                                                                     │
+│  TARGET                                                             │
+│    URL                  https://target.example.com/chat             │
+│    Mode                 endpoint                                    │
+│    Reachable            ✓ reachable in 247 ms                       │
+│    Multi-agent          no (single endpoint)                        │
+│  MODELS                                                             │
+│    Attacker             gemini:gemini-2.5-flash   ✓ validated       │
+│    Evaluator            gemini:gemini-2.5-flash   ✓ validated       │
+│    Commander            gemini:gemini-2.5-flash   ✓ validated       │
+│  BUDGET                                                             │
+│    Mode                 full (95% coverage threshold)               │
+│    Wall-clock cap       15 min                                      │
+│    USD cap              $0.1000                                     │
+│    Estimated cost       $0.0400 - $0.0800 (typical for full mode)   │
+│  OUTPUTS                                                            │
+│    --output pdf         ✓ reportlab                                 │
+│    --output-path        ~/finbot.pdf                                │
+│  DASHBOARD                                                          │
+│    URL                  http://127.0.0.1:7474/scan/cli-6a04e02a7b5e │
+│    Server status        ✓ auto-served (child spawned)               │
+│  SAFETY GUARDS                                                      │
+│    RoE blocklist        none                                        │
+│    Authorization        n/a                                         │
+│    Egress policy        unrestricted                                │
+│                                                                     │
+╰─────────────────────────────────────────────────────────────────────╯
+Press Enter to proceed, Ctrl-C to abort. (auto-proceed in 5s)
+```
+
+Any ✗ row appends a `WARNINGS` footer with one line per ✗. The
+5-second timer keeps interactive use frictionless; scripted use opts
+out via `--yes` or one of the implicit skips:
+
+* `--yes` / `-y` (CLI)
+* `--no-plan` (CLI; suppresses the panel itself)
+* `$AGENT_GUARDIAN_NO_PLAN_CONFIRM=1` (env)
+* `$CI=true` (env)
+* stdout is not a TTY (e.g. `agent-guardian scan ... | cat`)
+* stdin is not a TTY
+
+#### Phase composition (QA-012)
+
+Once the scan starts, the Rich Live region renders three phase-locked
+panels composed inside a single `rich.console.Group` so the QA-002
+"one Live region per scan" invariant holds — there is one Live frame,
+three panel sections, and Rich repaints them in place each tick.
+
+```text
+┌─ Phase 1 · Reconnaissance ──────────────────────────────────────────┐
+│  goal:          Black-box capability audit                          │
+│  target:        https://target.example.com/chat                     │
+│  what we found: 13 probes apply · 3 skipped · multi-agent: no       │
+│  status:        ◐ running (12s)                                     │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 2 · Red Teaming ─────────────────────────────────────────────┐
+│  Queued — waiting on reconnaissance to complete.                    │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 3 · Findings · 0 total · 0 critical · 0 high · 0 medium ─────┐
+│  Findings will appear here as red-team agents complete.             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+As later phases activate, earlier phases auto-collapse into a
+one-line summary so the operator's focus follows the active work:
+
+```text
+┌─ Phase 1 · Reconnaissance ✓ done (90.0s) · 13 probes apply ─────────┐
+┌─ Phase 2 · Red Teaming · 4m 12s elapsed · budget 47% ───────────────┐
+│  goal-hijack-agent  ASI01  ● done     9/12   3                      │
+│  privilege-agent    ASI03  ● done     6/12   2                      │
+│  supply-chain       ASI04  ◐ running  3/12   1                      │
+│  ...                                                                │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ Phase 3 · Findings · 6 total · 0 critical · 6 high ────────────────┐
+│  HIGH                                                               │
+│  ✗ ASI01-GH-004 · goal-hijack-agent · prompt-injection succeeded    │
+│  ✗ ASI01-GH-005 · secret-extraction · system-prompt leak            │
+│  ✗ ASI03-PR-002 · privilege-agent · cross-tenant data read          │
+│  ... (3 more streaming)                                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Findings stream in parallel with Phase 2 — every agent that completes
+with `findings_count > 0` projects rows into the severity-grouped list
+(CRITICAL → HIGH → MEDIUM → LOW → INFO). The `--debug` attack feed
+(QA-005) flows ABOVE the Live frame as scrollback, so panel borders
+never tear.
+
+#### Network + reachability
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--no-preflight` | off | Skip the pre-scan reachability check for `--endpoint` mode. The default preflight protects against burning LLM budget on an unreachable target. |
+
+#### Observability
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--otel-endpoint URL` | env: `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP-HTTP endpoint to export OpenTelemetry GenAI spans to (e.g. `http://localhost:4318/v1/traces`). Contract `observability.otel_endpoint` wins when both are set. |
+
+#### Debug stream
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--debug` | off | Stream per-agent reflections (prompt + response + verdict). Count-style: `--debug` for truncated panels, `--debug --debug` to disable truncation. |
+| `--debug-format` | `text` | `text` (Rich panels) or `json` (NDJSON, one record per line). `json` implicitly disables the Live region. |
+| `--log-agent-io` | off | Troubleshooting: write every LLM agent's full I/O — recon, commander, attacker, and judge — to the scan's `run.log`. Each `agent-io [<role>]` block carries the folded system prompt + input and the raw model output, so a single file reconstructs the whole reasoning chain (grep by role, e.g. `grep -A12 "agent-io \[attacker\]" run.log`). Secrets and control characters are redacted. Equivalent to `AGENT_GUARDIAN_LOG_FULL_PROMPTS=1`. |
+
+#### Dashboard URL emission + auto-serve
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--publish / --no-publish` | `--publish` | Emit the live-dashboard URL at scan start. `--no-publish` suppresses for sensitive scans. |
+| `--no-serve` | off | Disable the auto-spawn dashboard server. Equivalent to `AGENT_GUARDIAN_DISABLE_AUTO_SERVE=1`. |
+| `--serve-grace-seconds N` | `3600` | Keep the auto-spawned dashboard alive for N seconds after completion (default 60 minutes). `0` = shut down immediately. `-1` = keep alive until Ctrl-C. |
+
+#### Minimal example
+
+```bash
+agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
+```
+
+Outputs (truncated):
+
+```text
+▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+▸ Report when complete                http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report
+no budget cap (running to completion)
+... (Rich progress panel) ...
+AIVSS 87 (GOOD)
+```
+
+The two URL lines land in the first two lines of stdout (QA-003) so CI
+jobs can `grep` for them. When stdout is a TTY, the URLs are wrapped in
+an OSC 8 hyperlink escape so Warp / iTerm2 / Terminal.app / VS Code
+render them cmd-clickable.
+
+#### Commander invocation gate
+
+The SwarmCommander LLM (which decomposes a high-level goal into per-agent
+briefs with custom `priority_weight` + `n_scenarios_requested` allocations)
+**only runs when the scan has a goal anchor**. There are three ways to
+supply one:
+
+1. `--goal "..."` on the CLI.
+2. `--operator-profile path/to/profile.yaml` (the profile's `description`
+   becomes the goal).
+3. An inferred goal from recon — the recon agent reads the target's
+   declared intent + tools and writes one when confident.
+
+When none of the three are present, the swarm short-circuits to a **uniform
+brief**: every agent gets the same `priority_weight=0.5` and the default
+`n_scenarios_requested` for its ASI category. This is correct (you can't
+plan adaptively without a goal anchor), but it's a quieter failure than
+operators sometimes expect.
+
+To audit which mode a scan ran in:
+
+- The **report.json** carries `planner_fallback: "adaptive" | "uniform" | null`
+  at the headline level — `null` means the commander wasn't invoked (no goal
+  anchor and no profile), `"uniform"` means it was invoked but refused or
+  errored and the swarm fell back, `"adaptive"` means a successful per-agent
+  plan landed.
+- The **events.jsonl** stream emits a `phase_done` event for `commander-decompose`
+  with `summary.skipped=True` when the gate short-circuits.
+- The **run.log** carries a `phase commander-decompose: skipped (no operator or
+  inferred goal)` INFO line at the gate point.
+
+**Recommended:** pass `--goal` for any scan where you want an adaptive plan,
+or rely on recon's inferred-goal write-through for goal-less invocations.
+
+#### `--goal` cost band
+
+`--goal` triggers a 3.5x median spend surge vs the no-goal baseline on fast
+mode. The Commander allocates many more scenarios per specialist (top-
+aligned agents typically get `n_scenarios_requested=15` instead of the
+default 5-10), roughly doubling the attacker token spend at the same
+`agents_planned` / `attempts_total` headline.
+
+Reference cost bands on the **finbot** testbench (a 5-tool HTTP target,
+seed=42, gemini:gemini-3.5-flash):
+
+| Mode | No `--goal` | With `--goal` | Surge |
+|---|---|---|---|
+| fast (`--budget-usd 0.20 --budget-seconds 300`) | ~\$0.0095, ~21k tokens | ~\$0.0323, ~44k tokens | **~3.5x** |
+| smart (`--budget-usd 0.30 --budget-seconds 600`) | ~\$0.020, ~50k tokens | ~\$0.070, ~110k tokens | **~3.5x** |
+| full (`--budget-usd 0.60 --budget-seconds 1200`) | ~\$0.17, ~700k tokens | ~\$0.30, ~1.2M tokens | **~1.7x** (already wide) |
+
+**Recommended CI configuration:** when wiring `--goal` into a CI gate, set
+`--budget-usd` to **at least 3.5x your no-goal fast-mode default**. A
+canonical fast-mode `--budget-usd 0.02` (no goal) → `--budget-usd 0.07`
+(with goal). Without the bump, the soft-stop fires at 80% and you get a
+budget-truncated scan with `mode_authoritative=false` even though the
+swarm completed cleanly.
+
+The surge is the feature working as designed — the Commander pays for
+diversity-of-scenario per agent, which is what lets `--goal` find
+goal-specific exploits a uniform sweep wouldn't. Budget for it.
+
+---
+
+## Sub-apps
+
+### `telemetry`
+
+Opt-in usage telemetry. Disabled by default.
+
+| Sub-command | Effect |
+| --- | --- |
+| `telemetry essential` | Operational counts only (the post-prompt default) — agents fired, attempts, successes, threats, AIVSS, duration, crash status, install_id. **Does not** send adapter / Python / OS / arch. |
+| `telemetry extended` | Essential + environment fingerprint (adapter, Python version, OS family, CPU arch). Powers the community compatibility matrix. |
+| `telemetry enable` | Legacy alias for `telemetry extended` (v1.0rc1 compat). |
+| `telemetry disable` | Disable telemetry. Emits a `forget` event so the collector drops your `install_id`. |
+| `telemetry status` | Show the current telemetry tier + local buffer depth. |
+| `telemetry reset` | Clear consent + delete `install_id` + purge pending events. The opt-in prompt re-fires on next interactive scan. |
+| `telemetry show` | Print the full list of fields telemetry would send if enabled. |
+
+```bash
+agent-guardian telemetry status
+agent-guardian telemetry disable
+```
+
+### `contract`
+
+Work with target contracts.
+
+| Sub-command | Args / flags | Purpose |
+| --- | --- | --- |
+| `contract schema [--out PATH]` | `--out` optional (stdout when omitted) | Emit the contract JSON Schema. Defaults to stdout for piping into `jq` / a schema validator; pass `--out PATH` to persist to a file. |
+| `contract migrate FILE` | `--write` to overwrite (else print to stdout) | Migrate a contract toward the current schema version. |
+
+```bash
+agent-guardian contract schema                  # → stdout
+agent-guardian contract schema --out contract-schema.json
+agent-guardian contract migrate agentguardian.yaml --write
+```
+
+### `scans`
+
+Manage stored scans (list, delete, purge `--older-than`). Scans live
+under `$AGENT_GUARDIAN_HOME/scans` (default `~/.agentguardian/scans`).
+
+| Sub-command | Args / flags | Purpose |
+| --- | --- | --- |
+| `scans list` | — | List stored scans (id + mtime), most recent first. |
+| `scans delete SCAN_ID` | `SCAN_ID` (required) | Delete a single stored scan directory. Rejects path-traversal and out-of-root targets. |
+| `scans purge --older-than SPEC` | `--older-than` (required, e.g. `30d`, `2w`, `6m`), `--dry-run` | Purge stored scans older than the threshold. |
+
+```bash
+agent-guardian scans list
+agent-guardian scans purge --older-than 30d --dry-run
+agent-guardian scans purge --older-than 30d
+```
+
+### `validate`
+
+Run the payload-free pre-flight against a contract (Stage 1B).
+
+| Argument | Default | Purpose |
+| --- | --- | --- |
+| `CONTRACT` | `agentguardian.yaml` | Path to the contract YAML to validate. |
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--json` | off | Emit the pre-flight report as JSON instead of text. |
+| `--stage NAME` | unset | Only print this single stage's result. |
+
+Walks the seven non-adversarial stages (resolve, connect, probe,
+round-trip, session, capability, RoE) and stops at the first failure.
+Exits with the failing stage's exit code.
+
+```bash
+agent-guardian validate agentguardian.yaml
+agent-guardian validate agentguardian.yaml --json
+```
+
+### `init`
+
+Author a new target contract, then pre-flight it.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--out PATH` | `agentguardian.yaml` | Where to write the new contract. |
+| `--yes`, `-y` | off | Non-interactive: write a minimal valid contract from defaults/flags. |
+| `--from-openapi PATH` | unset | Pre-fill the transport / request / response from an OpenAPI 3.1 spec. |
+| `--openapi-path PATH` | unset | With `--from-openapi`: the spec path to derive shapes from. |
+| `--openapi-method METHOD` | `post` | With `--from-openapi --openapi-path`: HTTP method. |
+
+```bash
+agent-guardian init --yes                       # scaffold a placeholder contract for CI
+agent-guardian init --from-openapi openapi.yaml --openapi-path /v1/chat
+```
+
+### `calibrate`
+
+Calibrate a judge model against the packaged calibration set (Brier
+score + accuracy). Uses the same `AGENT_GUARDIAN_<PROVIDER>_API_KEY`
+(then standard) env precedence as `scan`.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--judge-model SPEC` | required | Judge model spec, e.g. `gemini:gemini-2.5-flash`, `anthropic:claude-haiku-4-5`, `openai:gpt-4o-mini`. |
+| `--calibration-set PATH` | packaged `_calibration.yaml` | Override path to a calibration YAML. |
+| `--output FORMAT` | `text` | Report format: `text` \| `json` \| `md` \| `sarif`. |
+| `--output-path PATH` | unset | Write the formatted report to this path (in addition to the stdout summary). |
+| `--label TEXT` | model spec | Free-text judge label surfaced in the report. |
+
+```bash
+agent-guardian calibrate --judge-model gemini:gemini-2.5-flash
+agent-guardian calibrate --judge-model anthropic:claude-haiku-4-5 --output json --output-path calib.json
+```
+
+### `comment`
+
+Upsert an AgentGuardian summary comment on the current PR / MR. The gate
+verdict embedded in the comment uses the same `--fail-under` / `--max-*`
+thresholds as the `scan` gate, so a green/red comment matches the CI exit
+code.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--scan ID_OR_PATH` | newest scan | Scan id, or a path to a `scan.json`. Defaults to the newest scan under `~/.agentguardian/scans`. |
+| `--platform NAME` | `github` | Code host to post to: `github` \| `gitlab` \| `bitbucket`. |
+| `--fail-under N` | unset | Gate floor mirrored into the comment verdict. |
+| `--max-critical N` | unset | CRITICAL-finding ceiling mirrored into the verdict. |
+| `--max-high N` | unset | HIGH-finding ceiling mirrored into the verdict. |
+| `--max-medium N` | unset | MEDIUM-finding ceiling mirrored into the verdict. |
+| `--max-low N` | unset | LOW-finding ceiling mirrored into the verdict. |
+| `--dry-run` | off | Print the comment body to stdout instead of posting it. |
+
+```bash
+agent-guardian comment --platform github --fail-under 70
+agent-guardian comment --dry-run
+```
+
+### `code-insights`
+
+Publish a Code Insights report for a scan (Bitbucket). The platform poster
+must implement `post_code_insights(scan)`.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--scan ID_OR_PATH` | newest scan | Scan id, or a path to a `scan.json`. Defaults to the newest scan under `~/.agentguardian/scans`. |
+| `--platform NAME` | `bitbucket` | Code host for the Code Insights report (`bitbucket`). |
+| `--dry-run` | off | Render the report without posting it. |
+
+```bash
+agent-guardian code-insights --platform bitbucket
+agent-guardian code-insights --dry-run
+```
+
+### `agentdojo`
+
+AgentDojo benchmark adapter. Install the full upstream corpus with
+`pip install 'agent-guardian[agentdojo]'`; without it, a vendored smoke
+corpus is used unless `--require-upstream` is set.
+
+#### `agentdojo run`
+
+Run an AgentDojo benchmark suite against an HTTP target.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--suite NAME`, `-s` | required | AgentDojo suite name. Canonical suites: `banking`, `slack`, `travel`, `workspace`. Any suite the installed `agentdojo` package exposes also works. |
+| `--target URL`, `-t` | required | Target endpoint URL (HTTP target). For non-HTTP targets use the library API `agent_guardian.adapters.agentdojo.run_agentdojo_suite`. |
+| `--output-path PATH`, `-o` | stdout | Where to write the AgentDojo-shaped JSON report. |
+| `--max-concurrency N` | `8` | Bounded fan-out for per-task adapter calls. |
+| `--require-upstream` | off | Fail with a clear error when the optional `agentdojo` package is not installed, instead of falling back to the vendored smoke corpus. |
+
+```bash
+agent-guardian agentdojo run --suite banking --target http://localhost:8000/agent
+agent-guardian agentdojo run -s slack -t http://localhost:8000/agent --require-upstream -o report.json
+```
+
+---
+
+## Exit codes
+
+Defined in `src/agent_guardian/cli.py`:
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `0` | `EXIT_OK` | Success. |
+| `1` | `EXIT_FAIL_UNDER` | Final AIVSS fell below `--fail-under`, or `verify` failed / `last-score --score-only` had no scans on record. |
+| `2` | `EXIT_CONFIG` | Configuration error (bad flag, missing file, unknown format, refused unsafe bind). |
+| `3` | `EXIT_TARGET_UNREACHABLE` | Endpoint preflight could not reach the target. |
+| `4` | `EXIT_LLM_PROVIDER` | LLM provider misconfigured (missing key, unknown provider) or model not found. |
+| `5` | `EXIT_SANDBOX` | Sandbox violation — agent attempted a blocked operation. |
+| `130` | `EXIT_USER_INTERRUPT` | Operator hit Ctrl-C. |
+
+CI gates should branch on the exit code rather than parsing stdout. The
+`--fail-under N` flag turns "scan finished but below N" into a non-zero
+exit so the job fails the build.
+
+## State + config locations
+
+| Path | Purpose |
+| --- | --- |
+| `~/.agentguardian/` | State dir (override with `AGENT_GUARDIAN_HOME`). |
+| `~/.agentguardian/state.json` | First-run ethical banner ACK + `last_score`. |
+| `~/.agentguardian/scans/` | Per-scan output directories. |
+| `~/.agentguardian/config.yaml` | User-level config (lowest precedence after defaults). |
+| `./.agentguardian.yaml` | Project-level config (overrides user-level). |
+| `./.env`, `./.env.local` | Project-local env vars (only with `python-dotenv` installed). |
+
+See [Configuration](/reference/config) for the full schema and
+precedence rules. See [Error codes](/reference/exit-codes) for the LLM
+exception taxonomy.

@@ -1,0 +1,224 @@
+---
+title: "SARIF export"
+sidebarTitle: "SARIF export"
+description: "SARIF 2.1.0 — for GitHub Code Scanning, Sonar, and any static-analysis pipeline."
+icon: "shield-check"
+---
+
+The SARIF emitter writes a schema-validated SARIF 2.1.0 file that any
+code-scanning UI can consume. Source:
+[`reports/sarif.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/sarif.py)
++ the bundled schema at
+[`reports/sarif-2.1.0.schema.json`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/sarif-2.1.0.schema.json).
+
+## When to use this page
+
+- You're wiring AgentGuardian into a GitHub Actions workflow and need
+  the SARIF to upload to the Security tab.
+- You're feeding a Sonar / SemGrep-style aggregator that already
+  consumes SARIF from other scanners.
+- You want per-finding inline annotations on the PR's Files changed
+  view.
+
+## Generate one
+
+```bash
+agent-guardian scan \
+  --framework langgraph \
+  --framework-ref my_app.graph:graph \
+  --model gemini:gemini-2.5-flash \
+  --mode full \
+  --output sarif \
+  --output-path scan.sarif \
+  --fail-under 70
+```
+
+Or regenerate from a stored scan:
+
+```bash
+agent-guardian report cli-3a4c1d9c2840 --output sarif --output-path scan.sarif
+```
+
+The SARIF emitter validates the payload against the bundled SARIF
+2.1.0 schema *before* writing. A malformed payload raises
+`ReportError` rather than landing on disk silently broken.
+
+## The SARIF shape
+
+One `runs[]` entry per scan. Each run carries one `tool.driver` (the
+AgentGuardian metadata), one `rules[]` entry per *triggered probe*,
+and one `results[]` entry per finding.
+
+```json
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "agent-guardian",
+          "version": "1.0.0",
+          "informationUri": "https://agentguardian.io",
+          "rules": [
+            {
+              "id": "ASI01-GH-005",
+              "name": "dialect-roleplay",
+              "shortDescription": {"text": "Encoded dialect roleplay reroutes goal."},
+              "fullDescription": {"text": "Encoding / dialect roleplay attempting to smuggle a goal change…"},
+              "helpUri": "https://docs.agentguardian.io/attacks/prompt-injection",
+              "properties": {
+                "asi": "ASI01",
+                "mitre_atlas": ["AML.T0054", "AI Agent Context Poisoning"],
+                "csa": "goal-instruction-manipulation"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "ASI01-GH-005",
+          "level": "error",
+          "message": {"text": "Target wobbled on pirate-slang reroute and volunteered tool descriptions."},
+          "properties": {
+            "aivss_severity": "high",
+            "asi": "ASI01",
+            "mitre_atlas": ["AML.T0054", "AI Agent Context Poisoning"],
+            "csa": "goal-instruction-manipulation",
+            "confidence": 0.9,
+            "success": true,
+            "attempt_count": 2,
+            "finding_id": "f_3a4c1d9c_001",
+            "pov_reference": "pov/f_3a4c1d9c_001.py",
+            "pov_reliability": 0.85
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+## How severity maps
+
+SARIF only has three levels (`error`, `warning`, `note`). AgentGuardian
+has four (`critical`, `high`, `medium`, `low`). The mapping folds
+`critical` + `high` into `error` and the four-tier value goes into
+`properties.aivss_severity` for downstream tools that want the full
+resolution.
+
+| AgentGuardian severity | SARIF `level` | `properties.aivss_severity` |
+|---|---|---|
+| `critical` | `error` | `"critical"` |
+| `high` | `error` | `"high"` |
+| `medium` | `warning` | `"medium"` |
+| `low` | `note` | `"low"` |
+
+GitHub Code Scanning, Sonar, and the major static-analysis UIs all
+render `error` distinct from `warning` distinct from `note`. The
+`aivss_severity` property is what lets a custom dashboard re-split
+`error` into critical vs high.
+
+## The mapping triple inside SARIF
+
+Every finding carries the same OWASP / MITRE / CSA triple as the JSON
+emitter — propagated through `properties` so a SARIF consumer can
+group findings by ASI without ever loading the JSON:
+
+| SARIF location | JSON equivalent | Notes |
+|---|---|---|
+| `rules[].properties.asi` | `findings[].asi` | The probe's static mapping. |
+| `results[].properties.asi` | `findings[].asi` | The per-finding mapping (always equal to the probe's). |
+| `rules[].properties.mitre_atlas` | `findings[].mitre_atlas` | Multiple entries — numeric `AML.T*` + named techniques. |
+| `results[].properties.csa` | `findings[].csa_category` | The CSA Agentic Risk bucket. |
+
+## Redaction
+
+The SARIF emitter routes every finding through the shared
+`redact_finding` helper before serialisation — same scrubbing the
+JSON emitter applies. `message.text`, `properties.trigger_prompt` (if
+present), and any embedded transcripts are scrubbed of PII and
+credential shapes (OpenAI / AWS / GitHub / Google keys, JWTs, bearer
+tokens, `password=` assignments).
+
+This is not a knob. A security scanner must never re-emit a captured
+secret into a SARIF that gets uploaded to a public PR.
+
+## Schema validation
+
+The SARIF emitter validates against the bundled SARIF 2.1.0 schema
+*before* writing the file. A schema violation raises `ReportError`
+with the offending JSON Pointer.
+
+The bundled schema is the published draft from
+[oasis-tcs/sarif-spec](https://docs.oasis-open.org/sarif/sarif/v2.1.0/cs01/sarif-v2.1.0-cs01.html).
+
+This catches the failure modes a downstream consumer (GHAS, Sonar)
+would silently reject:
+
+- Missing required `version`, `runs[]`, `tool.driver.name`.
+- A `results[].ruleId` that doesn't match any `rules[].id`.
+- An out-of-enum `level` value.
+
+## Uploading to GitHub Code Scanning
+
+The official action handles the upload — see [Upload SARIF to
+GitHub](/ci-cd/upload-sarif) for the full walk-through. The minimal
+shape:
+
+```yaml
+- name: Upload SARIF to GitHub Code Scanning
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: scan.sarif
+```
+
+Two non-obvious GHAS rules:
+
+1. Your job needs `permissions: security-events: write` at the
+   workflow or job level.
+2. Use `if: always()` so a failed `--fail-under` gate still uploads
+   the SARIF — otherwise reviewers lose the annotations on the PR
+   that needs them most.
+
+## Anti-patterns
+
+<Warning>
+  **Don't** rely on the SARIF `level` field to distinguish critical
+  vs high findings. Both fold into `error`. Read
+  `properties.aivss_severity` for the four-tier resolution.
+</Warning>
+
+<Warning>
+  **Don't** assume `results[].ruleId` is unique per probe. A probe can
+  produce multiple findings on one scan (one per landed turn) — each
+  finding has its own `results[]` entry but shares the `ruleId` with
+  every other finding from the same probe. Group by
+  `properties.finding_id` if you need uniqueness.
+</Warning>
+
+<Warning>
+  **Don't** upload an unredacted SARIF to a public Code Scanning
+  surface. The emitter redacts by default; if you wrap it in your own
+  script that re-fetches the bundle, route through `redact_finding`
+  first.
+</Warning>
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Upload SARIF to GitHub" icon="upload" href="/ci-cd/upload-sarif">
+    The `github/codeql-action/upload-sarif@v3` walk-through.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The full workflow that produces + uploads the SARIF.
+  </Card>
+  <Card title="JSON export" icon="braces" href="/reports/json-export">
+    The signed canonical artifact every other emitter is derived from.
+  </Card>
+  <Card title="Report schema" icon="file-json" href="/reference/report-schema">
+    Field-by-field reference for the JSON + SARIF outputs.
+  </Card>
+</CardGroup>

@@ -1,0 +1,28 @@
+---
+title: "Vulnerable Demo Agents"
+description: "Intentionally vulnerable AI agents for red-teaming with AgentGuardian. docker compose up, then scan."
+---
+
+The **AgentGuardian Vulnerable Demo Agents** repo is a sibling project at [`glacien-technologies/agentguardian-vulnerable-agents`](https://github.com/glacien-technologies/agentguardian-vulnerable-agents). It ships five FastAPI-routed AI agents — four with planted OWASP LLM Top 10 (2025) vulnerabilities, one defended baseline — so you can run AgentGuardian against a real attack surface in under five minutes without needing your own target agent.
+
+## Why a separate repo
+
+- The vulnerable agents are unsafe by construction. Keeping them out of the main scanner repo prevents accidental imports and keeps the scanner's CI matrix clean.
+- The repo doubles as the **hosted testbench** at `https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app`. The hosted version is what the docs Quickstart points at when you don't want to run anything locally.
+- It can be docker-pulled and used as a CI fixture in any project (`ghcr.io/glacien-technologies/agentguardian-vulnerable-agents:latest`).
+
+## What's planted
+
+| Agent                              | OWASP LLM (2025)                                        |
+| ---------------------------------- | ------------------------------------------------------- |
+| `vulnerable-langgraph-chatbot`     | LLM01, LLM02, LLM03, LLM05, LLM06, LLM07, LLM09, LLM10  |
+| `vulnerable-rag-agent`             | LLM02, LLM06, LLM10                                     |
+| `vulnerable-tool-agent`            | LLM01, LLM03, LLM05, LLM06                              |
+| `vulnerable-mcp-server`            | LLM01, LLM06, LLM07                                     |
+| `defended-baseline`                | none — false-positive control                           |
+
+Full ASI 2026 + MITRE ATLAS mapping lives in the repo's [`OWASP-ASI-mapping.md`](https://github.com/glacien-technologies/agentguardian-vulnerable-agents/blob/main/OWASP-ASI-mapping.md).
+
+## Get started in two minutes
+
+See [Quick start](/vulnerable-agents/quick-start).

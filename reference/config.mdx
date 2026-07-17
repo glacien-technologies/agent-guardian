@@ -1,0 +1,267 @@
+---
+title: "Configuration"
+description: "YAML config schema, env vars, and precedence rules."
+icon: "settings"
+---
+
+How `agent-guardian` resolves every setting at scan time. The schema is
+sourced from `src/agent_guardian/config.py`; every key documented here
+is a field on a real Pydantic model with `extra="forbid"` — typos raise
+at load time.
+
+## When to use a config file
+
+The CLI works out of the box with zero config. Reach for a YAML file
+when:
+
+- You're checking the same project into git and want CI runs to be
+  reproducible without sprawling CLI flags.
+- You have a team-wide default model / budget you want every developer to
+  pick up.
+- You want one project's settings to live next to its code without
+  polluting `~/.agentguardian/config.yaml`.
+
+## Precedence (highest wins)
+
+```text
+1. Explicit CLI flags         (--model, --tier, --budget-usd, …)
+2. Environment variables      (AGENT_GUARDIAN_*, plus standard provider keys)
+3. YAML config file           (--config, then ./.agentguardian.yaml, then ~/.agentguardian/config.yaml)
+4. Built-in defaults          (baked into the Pydantic models)
+```
+
+A missing config file is a no-op: the CLI uses defaults so a fresh
+install works. Missing sections inside a file also fall back to defaults
+— a half-populated file is fine.
+
+## Config file discovery
+
+`load_config(path=None)` walks this chain:
+
+1. The explicit path passed via `--config PATH`.
+2. `./.agentguardian.yaml` in the current working directory.
+3. `~/.agentguardian/config.yaml`.
+
+First hit wins. Stop the search by setting `--config` to a real path
+or by deleting the higher-priority candidates.
+
+## Full schema
+
+The Pydantic shape, exactly as the loader enforces it:
+
+```yaml
+swarm:
+  commander_model: claude-haiku-4-5     # default
+  attacker_model: gemini-3.5-flash      # default
+  evaluator_model: gemini-3.5-flash     # default
+  max_parallel_agents: 11               # default; clamped to 1..=11
+  budget:
+    wall_seconds: null                  # default (uncapped); set an int >= 1 to cap
+    max_total_tokens: 10000000          # default (10M); must be >= 1
+
+target:
+  mode: prompt                          # default; one of: prompt | code | http | framework
+  path: null                            # optional
+  endpoint: null                        # optional
+  framework: null                       # optional
+  tier: null                            # optional override; one of T1 | T2 | T3 | T4
+
+output:
+  formats: ["json"]                     # default; list of formats to emit
+  redact_pii: false                     # default (opt-in PII redaction)
+  sign_evidence: true                   # DEPRECATED (no-op) — see note below
+  output_dir: null                      # optional; default is alongside the scan
+
+server:
+  host: 127.0.0.1                       # default (loopback)
+  port: 7474                            # default; 1..=65535
+
+telemetry:
+  enabled: false                        # default; disabled until opt-in
+```
+
+Every section has sensible defaults. The shortest valid config file is
+an empty document:
+
+```yaml
+# .agentguardian.yaml — every field defaults
+```
+
+## `swarm`
+
+LLM identifiers and budget for one scan.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `commander_model` | `claude-haiku-4-5` | Commander LLM. CLI override: `--commander-model` or `--model`. |
+| `attacker_model` | `gemini-3.5-flash` | Attacker LLM. CLI override: `--attacker-model` or `--model`. |
+| `evaluator_model` | `gemini-3.5-flash` | Judge / evaluator LLM. CLI override: `--evaluator-model` or `--model`. |
+| `max_parallel_agents` | `11` | Cap on concurrent specialist agents. Range `1..=11`. |
+| `budget.wall_seconds` | `null` (uncapped) | Optional hard wall-clock cap. `null` = no cap; set an int `>= 1` to enable. |
+| `budget.max_total_tokens` | `10000000` | Token budget across all roles. Range `>= 1`. |
+
+The runtime USD cap is a CLI / SDK concern only (`--budget-usd` or
+`SwarmConfig.usd_cap`) — it's not in the config schema today.
+
+## `target`
+
+Default target shape. The CLI's four target modes (`TARGET` positional /
+`--system-prompt` / `--endpoint` / `--framework`) override this section.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `mode` | `prompt` | One of `prompt`, `code`, `http`, `framework`. |
+| `path` | `null` | For `mode: prompt` / `code`. |
+| `endpoint` | `null` | For `mode: http`. |
+| `framework` | `null` | For `mode: framework` — the framework kind. |
+| `tier` | `null` | Optional tier override. One of `T1`, `T2`, `T3`, `T4`. |
+
+## `output`
+
+Default report shape.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `formats` | `["json"]` | List of formats to emit. Each must be one of `json`, `sarif`, `junit`, `md`, `gitlab`, `pdf`. |
+| `redact_pii` | `false` | Opt-in: run findings through `PiiRedactor` before emit (also `AGENT_GUARDIAN_REDACT_PII=1`). Off by default — operators see verbatim target output. |
+| `sign_evidence` | `true` | **DEPRECATED in 1.0 — no-op forward-compat placeholder.** See note below. |
+| `output_dir` | `null` | Where reports land. `null` = alongside the scan dir. |
+
+> **As of 1.0:** scan-bundle integrity signing keyed by `output.sign_evidence`
+> is **not yet wired**. The flag is accepted for forward compatibility so
+> existing operator configs don't break on upgrade, but setting it has no
+> effect today — `agent-guardian` emits a `DeprecationWarning` on config load
+> if the field is present.
+>
+> What *is* signed today, unconditionally:
+>
+> - Every `scan.json` ships with Ed25519 + HMAC-SHA256 signatures, verifiable
+>   via `agent-guardian verify <scan.json>`. This happens regardless of the
+>   `sign_evidence` value.
+> - Release artifacts (PyPI wheel / sdist, GitHub release tarball) are signed
+>   via Sigstore + verified-publisher OIDC in CI.
+>
+> Bundle-level Sigstore signing — the path the `sign_evidence` flag was
+> originally intended to gate — is roadmapped for **1.1.0**. The flag will
+> gain effect there, or be removed if the implementation lands without
+> needing operator opt-in.
+
+## `server`
+
+Defaults for the `serve` command.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | Bind host. Loopback by default — see [serve](/reference/cli#serve) for the off-loopback rules. |
+| `port` | `7474` | Bind port. Range `1..=65535`. |
+
+## `telemetry`
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `enabled` | `false` | Disabled until you opt in via `agent-guardian telemetry essential` / `telemetry extended`. |
+
+## Environment variables
+
+Settings the CLI reads from the environment.
+
+### Provider API keys
+
+The CLI accepts both a namespaced key and the provider's conventional
+env var. The namespaced key wins.
+
+| Provider | Namespaced (preferred) | Conventional fallback |
+| --- | --- | --- |
+| OpenAI | `AGENT_GUARDIAN_OPENAI_API_KEY` | `OPENAI_API_KEY` |
+| Anthropic | `AGENT_GUARDIAN_ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` |
+| Gemini (AI Studio) | `AGENT_GUARDIAN_GEMINI_API_KEY` | `GEMINI_API_KEY`, then `GOOGLE_API_KEY` |
+| AWS Bedrock | — | Standard AWS chain: `AWS_REGION` / `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, or IAM role. No `--api-key` is consulted. |
+| Ollama | — | Local — no auth. |
+
+`agent-guardian doctor` lists which keys it found without sending a
+request. `doctor --check-connectivity` issues one tiny validation call
+per provider.
+
+### CLI behaviour
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `AGENT_GUARDIAN_HOME` | `~/.agentguardian` | Root for state, scans, signed reports, leaderboards. |
+| `AGENT_GUARDIAN_DASHBOARD_URL` | `http://127.0.0.1:7474` | Base URL for the live-dashboard links the scanner prints. Trailing slashes are stripped. |
+| `AGENT_GUARDIAN_DASHBOARD_TOKEN` | unset | Dashboard auth token. Required for non-loopback `serve` binds unless `--insecure-no-auth` is passed. Same value clients must present via the `X-Dashboard-Token` header (or Bearer auth). |
+| `AGENT_GUARDIAN_DASHBOARD_INGEST_TOKEN` | unset | Enables the telemetry-ingest WRITE endpoint off-loopback. |
+| `AGENT_GUARDIAN_DASHBOARD_ALLOW_PUBLIC_INGEST` | unset | When `1`, allow off-loopback telemetry writes without a token. |
+| `AGENT_GUARDIAN_DISABLE_URL_EMISSION` | unset | When `1`, suppress the two `▸ Scan …` URL lines on stdout. Same as `--no-publish`. |
+| `AGENT_GUARDIAN_DISABLE_AUTO_SERVE` | unset | When `1`, disable the auto-spawn dashboard for `scan` runs. Same as `--no-serve`. |
+| `AGENT_GUARDIAN_SIGNING_SECRET` | unset (uses public `DEFAULT_SIGNING_SECRET`) | HMAC secret for signed reports. The public default is never accepted on `verify` — verification requires an explicit anchor. |
+| `AGENT_GUARDIAN_LOG_LEVEL` | `INFO` | Set to `DEBUG` for the full review trace. |
+
+### Observability (OpenTelemetry)
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | OTLP-HTTP endpoint for GenAI spans (e.g. `http://localhost:4318/v1/traces`). Same as `--otel-endpoint`. |
+| `OTEL_SEMCONV_STABILITY_OPT_IN` | unset | Set to opt in to stable / GenAI semconv flavours. `doctor` reports the current value. |
+
+### Auto-loaded `.env`
+
+When `python-dotenv` is installed (it's in the `dev` extra), the CLI
+loads `./.env` and `./.env.local` from the current working directory at
+startup. Existing shell exports always win — `.env` never overrides them.
+
+Project-local only: `.env` files in `$HOME` or arbitrary ancestor
+directories are not loaded, to avoid leaking keys between projects.
+
+## Runnable example
+
+A complete `.agentguardian.yaml` for a small team:
+
+```yaml
+# .agentguardian.yaml
+swarm:
+  commander_model: claude-haiku-4-5
+  attacker_model: gpt-4o-mini
+  evaluator_model: gpt-4o-mini
+  budget:
+    wall_seconds: 600
+    max_total_tokens: 1500000
+
+target:
+  mode: http
+  endpoint: https://api.your-agent.com/v1/chat
+
+output:
+  formats: ["sarif", "md"]
+  redact_pii: true
+  # sign_evidence: true  # omitted — DEPRECATED in 1.0 (no-op); see `output` table above
+```
+
+Validate it loads cleanly:
+
+```bash
+python -c "from agent_guardian.config import load_config; print(load_config())"
+```
+
+Expected output: a `Config(...)` repr with the values above (and any
+unset key showing its default). A typo or wrong type raises a Pydantic
+`ValidationError` instead.
+
+## How to interpret the result
+
+- Extra keys at any level **fail** — the loader uses `extra="forbid"`.
+  If you see `Extra inputs are not permitted`, you've got a typo or
+  you're trying to extend the schema (open an issue).
+- `agent-guardian doctor` reports the **effective** config file path:
+  the line `config (cwd): <path>` (or `<not present>`) tells you what
+  the CLI sees right now.
+- Provider keys are read at scan time, not load time. Rotating a key
+  doesn't require restarting the dashboard.
+
+## Next step
+
+- Pair this with the [CLI reference](/reference/cli) to see which flag
+  overrides which key.
+- Read the [Python SDK](/reference/python-sdk) page if you want
+  programmatic access to the same `Config` model.
+- Wire it into a CI job — see
+  [GitHub Actions integration](/ci-cd/github-actions).

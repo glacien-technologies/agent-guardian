@@ -1,0 +1,232 @@
+---
+title: "GitLab CI"
+sidebarTitle: "GitLab CI"
+description: "Gate every merge request on an AIVSS floor with the agent-guardian CLI."
+icon: "gitlab"
+---
+
+A merge-request check that fails when the AgentGuardian AIVSS score
+drops below your floor — and surfaces the same scan three ways for
+reviewers: the SARIF report in GitLab's security dashboard, a
+**Code Quality** widget that annotates findings inline on the MR diff,
+and a single **sticky MR note** that AgentGuardian creates once and
+updates in place on every push (no comment spam).
+
+## When to add this
+
+- The first time an LLM agent lands in `main` and needs a regression
+  gate on merge requests.
+- On every release branch before tagging.
+- For any change that touches the agent's system prompt, tool
+  surface, memory layer, or framework graph.
+
+## Wire it up
+
+Create `.gitlab-ci.yml` (or add an `agentguardian` job to your existing
+pipeline). The full copy-pasteable file lives at
+[`examples/ci/gitlab/.gitlab-ci.yml`](https://github.com/glacien-technologies/agent-guardian/blob/main/examples/ci/gitlab/.gitlab-ci.yml):
+
+```yaml .gitlab-ci.yml
+stages:
+  - redteam
+
+agentguardian:
+  stage: redteam
+  image: python:3.12-slim
+  variables:
+    GEMINI_API_KEY: $GEMINI_API_KEY      # set in CI/CD → Variables (masked)
+    GITLAB_TOKEN: $GITLAB_TOKEN          # PAT/project token with `api` scope
+  before_script:
+    - pip install --no-cache-dir agent-guardian
+  script:
+    # 1) Run the swarm; emit SARIF for the security dashboard. Capture the gate
+    #    exit code instead of aborting, so we still publish the report + note.
+    - |
+      agent-guardian scan \
+        --framework langgraph \
+        --framework-ref my_app.graph:graph \
+        --model gemini:gemini-2.5-flash \
+        --mode full \
+        --budget-usd 0.10 \
+        --output sarif \
+        --output-path gl-sast-report.json \
+        --fail-under 70 \
+      && SCAN_EXIT=0 || SCAN_EXIT=$?
+    # 2) Re-emit the scan as a GitLab Code Quality report (inline MR widget).
+    - SCAN_ID="$(ls -t ~/.agentguardian/scans | head -n 1)"
+    - |
+      agent-guardian report "$SCAN_ID" \
+        --output gitlab \
+        --output-path gl-code-quality-report.json
+    # 3) Upsert the single sticky MR note (create-or-update).
+    - agent-guardian comment --platform gitlab --fail-under 70
+    # 4) Re-raise the gate's exit code so a regression blocks the merge.
+    - exit "$SCAN_EXIT"
+  artifacts:
+    when: always       # upload even when --fail-under fails
+    paths:
+      - gl-sast-report.json
+      - gl-code-quality-report.json
+    reports:
+      sast: gl-sast-report.json                 # Security & Compliance widget
+      codequality: gl-code-quality-report.json  # inline MR Code Quality widget
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+```
+
+Four things to know:
+
+1. **`artifacts.when: always`** is mandatory — without it, a failed
+   `--fail-under` would suppress the reports and leave reviewers
+   without the annotations they need. The script captures the gate
+   exit code (`SCAN_EXIT`) and re-raises it last so the reports + note
+   are always published *before* the job goes red.
+2. **`artifacts.reports.sast`** feeds GitLab's
+   Security & Compliance → Vulnerability Report. The SARIF emitter
+   produces a schema-valid file every time, so the report contract
+   is satisfied without a converter step.
+3. **`artifacts.reports.codequality`** feeds the inline MR
+   **Code Quality** widget. `agent-guardian report --output gitlab`
+   emits one CodeClimate entry per finding, severity-mapped
+   (`critical`/`high`/`medium`/`low` → `blocker`/`critical`/`major`/
+   `minor`/`info`) with a stable fingerprint so a recurring finding
+   collapses to one row across MR updates instead of duplicating.
+4. **`rules`** scope the job to merge-request and main-branch
+   pipelines so a feature-branch push doesn't burn LLM budget.
+
+## The sticky MR note
+
+`agent-guardian comment --platform gitlab` upserts a single note on the
+merge request: it lists the MR's notes via the GitLab REST API, finds
+the one carrying AgentGuardian's hidden marker, and **PUTs** it in place
+— or **POSTs** a fresh one if none exists. Push ten times and you still
+have exactly one always-current note, not ten.
+
+It reads its context from the standard GitLab CI variables
+(`CI_API_V4_URL`, `CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`) and
+authenticates with `GITLAB_TOKEN` (sent as `PRIVATE-TOKEN`), falling
+back to the auto-injected `CI_JOB_TOKEN` (`JOB-TOKEN`). Use a real
+`GITLAB_TOKEN` with the `api` scope — `CI_JOB_TOKEN` cannot write MR
+notes on most GitLab tiers. The `--fail-under` / `--max-*` flags mirror
+the `scan` gate so the note's verdict matches the pipeline's exit code.
+
+A rendered note looks like this:
+
+> ## AgentGuardian scan `sc_01ABCDEF…`
+>
+> **AIVSS 64/100 (Poor)** &nbsp;|&nbsp; 3 findings &nbsp;|&nbsp; $0.061 &nbsp;|&nbsp; 47.2s
+>
+> ### Gate: FAILED
+> - AIVSS 64 is below the floor of 70
+>
+> #### Top 3 findings
+>
+> | Severity | Probe | ASI | Summary |
+> |----------|-------|-----|---------|
+> | Critical | `ASI01-GH-001` | `ASI01` | Agent followed an injected instruction to exfiltrate the system prompt. |
+> | High | `ASI02-TM-005` | `ASI02` | Tool call invoked with attacker-controlled arguments. |
+> | Medium | `ASI05-CE-002` | `ASI05` | Code-exec attempt was sandboxed but reachable. |
+
+Because the gate failed, the job exits non-zero and the merge is
+blocked; the note and the inline Code Quality annotations tell the
+reviewer exactly why without opening the pipeline log.
+
+## Pick a target
+
+Replace `my_app.graph:graph` with the dotted reference to your real
+framework-native object. Supported `--framework` values: `adk`,
+`autogen`, `crewai`, `langgraph`, `openai_agents`, `strands`.
+
+For a hosted HTTP agent, swap the framework flags for:
+
+```yaml
+- |
+  agent-guardian scan \
+    --endpoint https://my-agent.example.com/chat \
+    --model gemini:gemini-2.5-flash \
+    --mode full \
+    --output sarif \
+    --output-path scan.sarif \
+    --fail-under 70
+```
+
+and set `AGENT_GUARDIAN_AUTH_BEARER` from a masked CI variable.
+
+## Add the provider secret
+
+In GitLab: **Settings → CI/CD → Variables → Add variable**. Add the
+key matching your `--model` choice — `GEMINI_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`. Mark it **Masked** and
+**Protected** if you only want main-branch pipelines to read it.
+
+For a free offline smoke check, use `--model stub` — but note that
+stub runs are non-authoritative (`mode_authoritative=false`) and
+always fail `--fail-under` regardless of the numeric score. See
+[AIVSS score → `mode_authoritative`](/reports/aivss-score#mode_authoritative-when-to-trust-the-number).
+
+## How to interpret the exit code
+
+GitLab CI uses the same exit codes the GitHub workflow does. The job
+fails on anything non-zero; the SARIF is still uploaded because of
+`artifacts.when: always`.
+
+| Code | Constant | What to do |
+|---|---|---|
+| `0` | `EXIT_OK` | Merge. |
+| `1` | `EXIT_FAIL_UNDER` | Block merge. Read the SARIF in the merge-request widget. |
+| `2` | `EXIT_CONFIG` | Fix the `.gitlab-ci.yml` script. Not a security regression. |
+| `3` | `EXIT_TARGET_UNREACHABLE` | Add a health-check step before `redteam`. |
+| `4` | `EXIT_LLM_PROVIDER` | Check the provider secret and rerun. |
+| `5` | `EXIT_SANDBOX` | Inspect the job log; fix the target reference. |
+| `130` | `EXIT_USER_INTERRUPT` | Job was cancelled. Re-run; raise `--budget-usd` if it was timing out. |
+
+Full reference: [CLI exit codes](/reference/cli#exit-codes) +
+[Exit codes](/reference/exit-codes).
+
+## Tune the floor
+
+Same progression as the GitHub Actions page:
+
+- **First two weeks** — `--fail-under 60`. Catches catastrophic
+  regressions, lets the team see what a real swarm finds.
+- **Steady state** — `--fail-under 70`. Matches the WARNING/POOR
+  boundary; rejects merges that introduce a medium-severity
+  ASI01 / ASI02 finding.
+- **Hardened release branch** — `--fail-under 80`. Matches the
+  GOOD/WARNING boundary; only ships when the agent has no
+  high-severity outstanding findings.
+
+Band cutoffs:
+[`src/agent_guardian/models/severity.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/models/severity.py).
+
+## Cap the spend
+
+Pass `--budget-usd` so a runaway provider can never cost more than
+budgeted per pipeline. The swarm soft-stops new attack turns at 80 %
+of the cap and reserves the remainder for the report emission step.
+
+```bash
+agent-guardian scan ... --budget-usd 0.10 ...
+```
+
+On a `gemini:gemini-2.5-flash` `--mode full` run the typical cost is
+~$0.06; `0.10` gives headroom + the soft-stop reserve.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Reports" icon="file-text" href="/reports/overview">
+    Open the `scan.sarif` and the signed `scan.json` every job emits.
+  </Card>
+  <Card title="Fail builds on high risk" icon="circle-x" href="/ci-cd/fail-builds-on-high-risk">
+    Add a finding gate on top of the score gate.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The same flow on GitHub, with Code Scanning annotations.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Every flag on `agent-guardian scan`.
+  </Card>
+</CardGroup>

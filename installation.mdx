@@ -1,0 +1,329 @@
+---
+title: "Installation"
+description: "Install AgentGuardian with pip, pipx, uv, or Docker, plus the right extras for your scan target."
+icon: "download"
+---
+
+Pick one install path and go. All paths give you the `agent-guardian`
+CLI and the Python SDK; the base install already ships the full attack
+swarm, all six report writers (`json`, `sarif`, `junit`, `md`, `gitlab`,
+`pdf` via ReportLab), the seed-probe corpus, the loopback dashboard, and the
+Ed25519 / HMAC signing primitives. Optional extras (WeasyPrint PDFs,
+OpenTelemetry, AWS Bedrock, Vertex AI, WebSocket / gRPC / browser
+transports, bundled demo agents) are opt-in below.
+
+## Pick an install path
+
+| Install path                               | When to pick it                                                                  |
+|--------------------------------------------|----------------------------------------------------------------------------------|
+| `pip install agent-guardian`               | You're adding AgentGuardian as a project dependency or running it in CI.         |
+| `pipx install agent-guardian`              | You want an isolated CLI on your laptop, separate from your project venvs.       |
+| `uv add agent-guardian`                    | Your project uses `uv` and you want a pinned, reproducible lockfile entry.       |
+| `docker pull` / `docker compose up`        | You want a reproducible runner with WeasyPrint native libs already wired up.     |
+| `git clone && uv sync --all-extras`        | You're contributing — every extra installed, dev tooling, pre-commit hooks.      |
+
+<Note>
+  Python **3.11, 3.12, 3.13** are supported (Python 3.14 is not yet supported —
+  `pyproject.toml` pins `requires-python = ">=3.11,<3.14"`). The wheel is pure
+  Python; no compilation step is required for the base install.
+</Note>
+
+<Note>
+  **If your default `python3` is 3.14+** (true on a current macOS box), the
+  plain `pip install agent-guardian` will fail with `No matching distribution
+  found`. Install Python 3.13 first with [pyenv](https://github.com/pyenv/pyenv)
+  and pin it for this directory:
+
+  ```bash
+  pyenv install 3.13
+  pyenv local 3.13
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install agent-guardian
+  ```
+
+  The pinned-3.11 Docker image and the `agentguardian-scan` GitHub Action
+  (default 3.12) consumer paths are insulated from this — only ad-hoc
+  `pip install` against the system Python is affected.
+</Note>
+
+## Install
+
+<Tabs>
+  <Tab title="pip">
+    ```bash
+    pip install agent-guardian
+    ```
+  </Tab>
+  <Tab title="pipx">
+    ```bash
+    pipx install agent-guardian
+    ```
+  </Tab>
+  <Tab title="uv">
+    ```bash
+    uv add agent-guardian
+    # or, for a CLI tool install:
+    uv tool install agent-guardian
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    # Build from source (recommended until v1.0.0 hits Docker Hub):
+    git clone https://github.com/glacien-technologies/agent-guardian.git
+    cd agent-guardian
+    docker build -t agent-guardian:dev .
+
+    # Run the dashboard on http://localhost:7474:
+    docker run --rm -p 7474:7474 agent-guardian:dev serve --host 0.0.0.0
+
+    # Or with the bundled compose file (persists state to ./.agentguardian):
+    docker compose up --build
+    ```
+  </Tab>
+  <Tab title="source">
+    ```bash
+    git clone https://github.com/glacien-technologies/agent-guardian.git
+    cd agent-guardian
+    uv sync --all-extras
+    uv run pre-commit install
+    uv run agent-guardian --version
+    ```
+  </Tab>
+</Tabs>
+
+### Optional extras
+
+<CodeGroup>
+```bash full
+# Heavyweight: WeasyPrint PDF + FAISS dedupe + sentence-transformers
+# embeddings + Presidio PII detection.
+pip install 'agent-guardian[full]'
+```
+
+```bash aws
+# botocore for AWS Bedrock model dispatch (SigV4 + credential chain).
+pip install 'agent-guardian[aws]'
+```
+
+```bash gcp
+# google-auth for Vertex AI providers (ADC + service-account JSON).
+pip install 'agent-guardian[gcp]'
+```
+
+```bash otel
+# OpenTelemetry SDK + OTLP-HTTP exporter for GenAI-semconv traces.
+pip install 'agent-guardian[otel]'
+```
+
+```bash ws
+# websockets client for the WebSocket contract transport.
+pip install 'agent-guardian[ws]'
+```
+
+```bash grpc
+# grpcio for the gRPC contract transport.
+pip install 'agent-guardian[grpc]'
+```
+
+```bash browser
+# Playwright for the headless-browser contract transport.
+# Requires `playwright install` afterwards to fetch browser binaries.
+pip install 'agent-guardian[browser]'
+playwright install
+```
+
+```bash examples
+# LangGraph + OpenAI Agents SDK targets bundled under examples/.
+pip install 'agent-guardian[examples]'
+```
+
+```bash dev
+# Test runner, ruff, mypy, hypothesis, bandit, pre-commit.
+pip install 'agent-guardian[dev]'
+```
+</CodeGroup>
+
+<Warning>
+  The `[full]` extra pulls WeasyPrint, which links against **cairo**,
+  **pango**, **harfbuzz**, **gdk-pixbuf**, and **libjpeg** native libraries.
+  On Debian/Ubuntu: `apt-get install libpango-1.0-0 libpangoft2-1.0-0
+  libharfbuzz0b libjpeg62-turbo libcairo2 fonts-dejavu-core`. On macOS:
+  `brew install pango cairo libffi`. If you only need PDF output without
+  the HTML→PDF fidelity, the base install already ships ReportLab.
+</Warning>
+
+## Expected output
+
+Verify the install with `agent-guardian doctor`:
+
+```bash
+agent-guardian doctor
+```
+
+```text expandable
+agent-guardian 1.0.0
+CLI: ok
+python: 3.11.13
+llm keys detected: openai, gemini (NOT validated -- pass --check-connectivity to probe each provider)
+bedrock: aws extra not installed (pip install 'agent-guardian[aws]').
+sandbox: importable
+pdf engines — weasyprint: not installed | reportlab: reportlab 4.2  (install 'agent-guardian[full]' to add WeasyPrint for higher-fidelity HTML→PDF)
+otel: extra not installed (pip install 'agent-guardian[otel]'). Without it the OTel exporter is a no-op.
+dashboard port 7474: free
+state dir: /Users/you/.agentguardian
+config (cwd): <not present>
+```
+
+You can also confirm the version directly:
+
+```bash
+agent-guardian --version
+# 1.0.0
+```
+
+<Check>
+  `agent-guardian --version` prints a version string and `agent-guardian
+  doctor` reports `CLI: ok`. You are ready to scan.
+</Check>
+
+## How to interpret the extras
+
+Every extra is opt-in by design: the base install stays lean so a stock
+`pip install` runs in under a second and the CLI boots without paying for
+ML wheels you may never use. The table below maps each extra to the
+packages it pulls and the feature it unlocks, sourced from
+`pyproject.toml`.
+
+| Extra            | Packages added                                                                                                              | What it enables                                                            |
+|------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
+| `[full]`         | `weasyprint>=63.0`, `faiss-cpu>=1.9`, `sentence-transformers>=3.3`, `presidio-analyzer>=2.2`                                | High-fidelity HTML→PDF, vector-search scenario dedupe, on-device PII detection. |
+| `[pdf-fallback]` | `reportlab>=4.2`                                                                                                            | Deprecated; ReportLab now ships in base. Kept as a no-op alias for one release. |
+| `[aws]`          | `botocore>=1.34`                                                                                                            | `--model bedrock:<id>` dispatch with the AWS credential chain + SigV4 signer.  |
+| `[gcp]`          | `google-auth>=2.0`                                                                                                          | Vertex / GCP contract-auth providers (`gcp_adc`, `gcp_sa_json`).                |
+| `[otel]`         | `opentelemetry-api/sdk/exporter-otlp-proto-http/semantic-conventions>=1.27` (semconv `>=0.48b0`)                            | OTLP-HTTP export of GenAI-semconv spans (`gen_ai.*` attributes).                |
+| `[ws]`           | `websockets>=12.0`                                                                                                          | `websocket` contract transport for WebSocket-fronted agents.                    |
+| `[grpc]`         | `grpcio>=1.60`                                                                                                              | `grpc` contract transport.                                                      |
+| `[browser]`      | `playwright>=1.40` (plus `playwright install` for browser binaries)                                                         | Headless-browser transport for web-UI targets.                                  |
+| `[examples]`     | `langgraph>=0.2`, `langchain-google-genai>=2.0`, `langchain-core>=0.3`, `openai>=1.50`, `openai-agents>=0.3`                | The bundled `examples/` demo agents (LangGraph + OpenAI Agents SDK trios).      |
+| `[dev]`          | `pytest>=8.3`, `pytest-asyncio`, `pytest-cov`, `ruff>=0.8`, `mypy>=1.13`, `hypothesis`, `pre-commit`, `respx`, `bandit`, ... | Contributor toolchain (tests, lint, type-check, SAST).                          |
+
+<Tip>
+  ReportLab is already bundled in the base install, so `--output pdf` works
+  out of the box without any extra. `[full]` upgrades the renderer to
+  WeasyPrint for higher-fidelity HTML→PDF output. See
+  [QA-010](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md)
+  for the rationale.
+</Tip>
+
+## Environment variables
+
+AgentGuardian reads its provider keys, dashboard wiring, and signing
+secrets from the environment. A project-local `.env` file in the current
+working directory is loaded automatically at CLI startup (handled in
+`src/agent_guardian/cli.py::_try_load_dotenv`).
+
+| Variable                                  | Purpose                                                                                                |
+|-------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| `OPENAI_API_KEY`                          | OpenAI key used by `--model openai:<id>`.                                                              |
+| `ANTHROPIC_API_KEY`                       | Anthropic key used by `--model anthropic:<id>`.                                                        |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)    | Google AI Studio key used by `--model gemini:<id>`.                                                    |
+| `AGENT_GUARDIAN_<PROVIDER>_API_KEY`       | Namespaced override that wins over the standard variable. Use when running multiple red-team tools side by side. |
+| `AGENT_GUARDIAN_HOME`                     | Override the state-dir root (default `~/.agentguardian`). Scan history + cache land here.              |
+| `AGENT_GUARDIAN_LOG_LEVEL`                | `DEBUG` / `INFO` / `WARNING` / `ERROR`. Default `INFO`.                                                |
+| `AGENT_GUARDIAN_LOG_JSON`                 | Set to `1` / `true` to switch console logs from rich text to structlog JSON for SIEM ingestion.        |
+| `AGENT_GUARDIAN_DASHBOARD_URL`            | Override the dashboard base URL printed in scan output (default `http://127.0.0.1:7474`).              |
+| `AGENT_GUARDIAN_DASHBOARD_TOKEN`          | Bearer token enforced by `agent-guardian serve` on non-loopback binds.                                 |
+| `AGENT_GUARDIAN_DISABLE_AUTO_SERVE`       | Set to `1` to suppress the auto-spawned dashboard child on `scan` (one of the eight suppression triggers in `ui/auto_serve.py`). |
+| `AGENT_GUARDIAN_DISABLE_URL_EMISSION`     | Set to `1` to suppress the dashboard URL line in scan output (equivalent to `--no-publish`).           |
+| `AGENT_GUARDIAN_SIGNING_SECRET`           | HMAC secret used to sign and verify scan reports (`reports/json_report.py`).                           |
+| `AGENT_GUARDIAN_SKIP_MODEL_PROBE`         | Set to `1` to bypass the QA-001 model-validation preflight (escape hatch for offline / air-gapped CI). |
+| `AGENT_GUARDIAN_MODEL_PROBE_TIMEOUT`      | Override the per-provider model-validation timeout in seconds (default 4s).                            |
+| `CI`                                      | Standard `CI=true` suppresses the auto-served dashboard so it doesn't try to spawn in a runner.        |
+
+<Note>
+  Bedrock uses the AWS credential chain, not a namespaced API key. Set
+  `AWS_PROFILE` or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+  `AWS_REGION` per the standard botocore conventions; `agent-guardian
+  doctor` will report `bedrock: aws extra OK, region=...` once both the
+  `[aws]` extra and the credentials are in place.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="`--output pdf` fails with PdfFeatureUnavailable" icon="file-warning">
+    Older builds (pre-1.0) shipped no PDF engine in the base install. As of
+    v1.0.0 ReportLab is bundled by default, so `--output pdf` works out of
+    the box. If you're on an older build, install one of the engines:
+
+    ```bash
+    pip install 'agent-guardian[full]'         # WeasyPrint (preferred)
+    # or
+    pip install 'agent-guardian[pdf-fallback]' # ReportLab fallback
+    ```
+
+    Background: [QA-010](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md).
+  </Accordion>
+
+  <Accordion title="`--model gemini:foo-bar` exits with `unknown model id`" icon="alert-triangle">
+    AgentGuardian validates the model id at scan preflight and fails fast
+    in ~3 seconds instead of burning the full LLM budget on a typo. The
+    error message lists the closest candidate from the live AI Studio /
+    Vertex catalog. Pick a valid id (for example `gemini:gemini-2.5-flash`)
+    or list available models against your key. To skip the probe in CI:
+
+    ```bash
+    export AGENT_GUARDIAN_SKIP_MODEL_PROBE=1
+    ```
+
+    Background: [QA-001](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md).
+  </Accordion>
+
+  <Accordion title="Endpoint preflight times out before the scan starts" icon="timer">
+    The scan preflight probes the target URL with a tight timeout to avoid
+    wasting LLM budget on an unreachable endpoint. If your endpoint is
+    slow or behind a VPN, override the probe timeout (env var
+    `AGENT_GUARDIAN_MODEL_PROBE_TIMEOUT`) or pass `--no-preflight` on
+    `scan`. Background:
+    [QA-002](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md).
+  </Accordion>
+
+  <Accordion title="WeasyPrint imports but raises `OSError` on first PDF render" icon="puzzle">
+    WeasyPrint links against native libraries that aren't bundled in the
+    Python wheel. Install them with your system package manager (see the
+    warning above), or use the Docker image — it already includes the
+    cairo / pango / harfbuzz / libjpeg / dejavu fonts stack. `doctor`
+    will report `weasyprint installed but native libs missing (...)` when
+    this is the case.
+  </Accordion>
+
+  <Accordion title="Dashboard URL prints but Chrome shows `ERR_CONNECTION_REFUSED`" icon="link-2-off">
+    Scans auto-spawn a loopback dashboard server and emit a clickable URL.
+    If you see a connection refused error, the auto-serve was suppressed
+    for one of eight reasons (non-TTY stdout, `$CI=true`, `--no-serve`,
+    `--no-tui`, `--debug-format json`, `--no-publish`,
+    `$AGENT_GUARDIAN_DISABLE_AUTO_SERVE=1`, or a custom
+    `$AGENT_GUARDIAN_DASHBOARD_URL`). Run `agent-guardian serve` manually
+    in another terminal to view the scan. Background:
+    [QA-009](https://github.com/glacien-technologies/agent-guardian/blob/main/QA_FEEDBACKS.md).
+  </Accordion>
+
+  <Accordion title="`agent-guardian` not on PATH after `pip install --user`" icon="terminal">
+    Add the user-base scripts directory to your `PATH`:
+
+    ```bash
+    export PATH="$(python -m site --user-base)/bin:$PATH"
+    ```
+
+    Or use `pipx install agent-guardian`, which puts the binary in
+    `~/.local/bin` and isolates the venv.
+  </Accordion>
+</AccordionGroup>
+
+## Next step
+
+Run your first scan:
+
+- [Quickstart](/quickstart) — three minutes from `pip install` to your first AIVSS score.
+- [Try the demo agent](/start-here/try-the-demo-agent) — point the scanner at a hosted, deliberately-vulnerable banking assistant.
+- [Contributing](/community/contributing) — set up the full dev environment with `uv sync --all-extras`.

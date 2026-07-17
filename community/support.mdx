@@ -1,0 +1,110 @@
+---
+title: "Support"
+description: "How to get help with AgentGuardian: GitHub Discussions for questions, GitHub Issues for bugs, security@glacien.ai for vulnerabilities."
+icon: "life-buoy"
+---
+
+## Pick the right channel
+
+AgentGuardian is an open-source project. Support is community-driven
+and best-effort. Pick the channel that matches what you need.
+
+<CardGroup cols={2}>
+  <Card title="Ask a question" icon="message-circle" href="https://github.com/glacien-technologies/agent-guardian/discussions">
+    GitHub Discussions — for "how do I...", "should I...", and general usage questions.
+  </Card>
+  <Card title="Join Discord" icon="message-square" href="https://discord.gg/X6UFKYXdBJ">
+    Real-time chat with maintainers and other users — probe and adapter design, informal Q&A.
+  </Card>
+  <Card title="Report a bug" icon="bug" href="https://github.com/glacien-technologies/agent-guardian/issues">
+    GitHub Issues — for reproducible bugs, with `agent-guardian --version` and a minimal repro.
+  </Card>
+  <Card title="Report a vulnerability" icon="shield" href="/community/security-policy">
+    GitHub Security Advisory — private channel for security issues. Never use public Issues.
+  </Card>
+  <Card title="Commercial support" icon="briefcase" href="/enterprise/index">
+    AgentGuardian Enterprise (from Glacien) — for SLA-backed support, paid features, and audit workflows.
+  </Card>
+</CardGroup>
+
+## GitHub Discussions
+
+Use [Discussions](https://github.com/glacien-technologies/agent-guardian/discussions)
+for:
+
+- **Q&A** — "how do I scan a Bedrock agent?", "does AgentGuardian
+  support streaming responses?", "what does the AIVSS score mean?"
+- **Show & Tell** — share a custom probe, a custom adapter, a CI
+  integration that worked for you.
+- **Ideas** — feature requests, roadmap candidates, "wouldn't it be
+  cool if".
+- **General** — anything else that isn't a bug or a security issue.
+
+We do **not** promise response time on Discussions — they're a public
+forum, the maintainers triage when they can, and the community often
+answers before we do.
+
+## GitHub Issues
+
+Use [Issues](https://github.com/glacien-technologies/agent-guardian/issues)
+for reproducible bugs only. Include:
+
+1. **Output of `agent-guardian --version`** (we need to know which
+   build).
+2. **The full CLI invocation** that triggered the bug.
+3. **Expected vs actual behaviour.**
+4. **A minimal reproduction** — ideally a target agent we can scan
+   ourselves, or a copy-pasteable `--model stub` command.
+5. **OS + Python version** (`uname -a`, `python --version`).
+
+If you can't write a reproduction, file it in Discussions instead and
+we'll help you narrow it down.
+
+<Tip>
+Searches on closed issues are often the fastest way to resolve a bug —
+many problems have already been fixed in a release you haven't pulled
+yet.
+</Tip>
+
+## Security vulnerabilities
+
+**Never** file a security issue in public Issues. Use a [GitHub
+Security Advisory](https://github.com/glacien-technologies/agent-guardian/security/advisories/new)
+(private vulnerability report) or email `security@glacien.ai` as a
+fallback. See [Security policy](/community/security-policy) for the
+full responsible-disclosure terms (90-day embargo, GHSA preferred,
+Sigstore-signed releases).
+
+## Commercial support
+
+AgentGuardian is free and Apache-2.0 licensed forever. For
+commercial-grade support — SLA, named contact, prioritised bug fixes,
+runtime governance features, audit dashboards — Glacien offers
+**AgentGuardian Enterprise**. See the [Enterprise](/enterprise/index)
+cross-link page or contact `sales@glacien.ai`.
+
+The OSS docs deliberately do **not** include feature comparisons,
+pricing, or sales copy. The OSS package is fully usable without ever
+touching the Enterprise tier.
+
+## What we don't offer
+
+To keep expectations honest:
+
+- **No private support channel for OSS users.** Email to maintainers
+  about general usage will be redirected to Discussions.
+- **No guaranteed SLA on OSS issues.** Community speed only.
+- **No paid SLA support for OSS.** Community chat happens on [Discord](https://discord.gg/X6UFKYXdBJ) on a best-effort basis.
+- **No backports.** Security fixes ship in the latest minor; older
+  minors get fixes only if the maintainers choose to.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Contributing" icon="users" href="/community/contributing">
+    The fastest way to get a bug fixed is often to PR the fix yourself.
+  </Card>
+  <Card title="Security policy" icon="shield" href="/community/security-policy">
+    Responsible-disclosure terms and the GHSA channel.
+  </Card>
+</CardGroup>

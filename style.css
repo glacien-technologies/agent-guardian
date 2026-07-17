@@ -1,0 +1,217 @@
+/* ============================================================
+ * AgentGuardian docs — Mintlify custom CSS overrides
+ *
+ * Mintlify auto-injects any .css file placed at the docs root
+ * (no docs.json reference needed). Each block here is tagged
+ * with the corresponding tester report item so future readers
+ * understand why a global !important is in play.
+ * ============================================================ */
+
+/* ----------------------------------------------------------
+ * Tester #11 — Move the Ask Assistant panel to the RIGHT.
+ *
+ * Mintlify's #chat-assistant-sheet is a shadcn Sheet that
+ * mounts on the LEFT and pushes #content-area to the right,
+ * leaving a wide blank gutter on the left that obscures the
+ * docs and shortens the reading column. Pin the sheet to the
+ * right edge of the viewport so the main content keeps its
+ * full reading width; the sheet floats over the right margin
+ * (matching how AI side-panels typically dock in tools like
+ * Cursor / GitHub Copilot Chat).
+ * ---------------------------------------------------------- */
+#chat-assistant-sheet {
+  position: fixed !important;
+  left: auto !important;
+  right: 0 !important;
+  border-left: 1px solid var(--border, rgba(0, 0, 0, 0.08)) !important;
+  border-right: none !important;
+  /* Soft inner shadow on the left edge separates the panel
+     from the docs content underneath. */
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Keep the docs reading column at full width regardless of
+ * whether the assistant panel is open. */
+#content-area {
+  max-width: none !important;
+  margin-right: 0 !important;
+}
+
+#sidebar {
+  flex-shrink: 0;
+}
+
+/* ----------------------------------------------------------
+ * Tester #10 — Brand icon size.
+ *
+ * The brand marks (`docs/images/logo-light.svg` /
+ * `docs/images/logo-dark.svg`) are the canonical Aegis Keyline
+ * shield from the agent_guardian_web repo — a 32x32 square
+ * SVG. Mintlify clamps the rendered height to roughly 24px,
+ * and when the Ask Assistant sheet opens the navbar reflows
+ * and the logo gets compressed further. Lock the height +
+ * flex-shrink so the shield always renders at a readable size,
+ * regardless of panel state. 32px matches the SVG's native
+ * viewBox so the strokes stay crisp.
+ * ---------------------------------------------------------- */
+nav-logo {
+  height: 32px !important;
+  max-height: 32px !important;
+  width: 32px !important;
+  flex-shrink: 0 !important;
+}
+
+nav-logo img,
+nav-logo svg {
+  height: 32px !important;
+  width: 32px !important;
+  max-height: 32px !important;
+}
+
+/* Hold the topbar height so opening the side panel cannot
+ * reflow the navbar (which is what shrunk the logo). */
+#navbar {
+  min-height: 64px !important;
+  align-items: center !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester #7 — Hide the file-attach affordance in Ask Assistant.
+ *
+ * Mintlify's chat input row renders a paperclip "attach file"
+ * button next to the send button. The docs assistant is a Q&A
+ * over the AgentGuardian docs corpus — it has no use for an
+ * attached file (the user can't paste a corpus shard mid-chat),
+ * so the affordance is confusing. There's no docs.json toggle
+ * to disable just the attach button (the Mintlify dashboard
+ * only allows on/off for the whole assistant), so we hide it
+ * via CSS.
+ *
+ * Three layered selectors so a Mintlify rename of the aria
+ * label still gets caught by the icon-only fallback:
+ *   (a) aria-label substring match — most robust to icon swaps
+ *   (b) explicit #chat-assistant-textarea wrapper match
+ *   (c) icon-only-button fallback inside chat-assistant-input
+ *       that excludes the documented send button.
+ * ---------------------------------------------------------- */
+chat-assistant-input button[aria-label*="attach" i],
+chat-assistant-input button[aria-label*="file" i],
+chat-assistant-input button[aria-label*="upload" i],
+#chat-assistant-textarea button[aria-label*="attach" i],
+#chat-assistant-textarea button[aria-label*="file" i],
+#chat-assistant-textarea button[aria-label*="upload" i] {
+  display: none !important;
+}
+
+/* Fallback: hide any icon-only button inside the chat input
+ * row that is NOT the send button. The send button uses the
+ * documented `chat-assistant-send-button` element selector
+ * (a custom element wrapping its own <button>); siblings to
+ * it that contain only an <svg> are upload/attach affordances. */
+chat-assistant-input
+  button:not(chat-assistant-send-button):has(svg):not(:has(span:not([class*="sr"]))) {
+  display: none !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #9 — Stabilise brand logo height.
+ *
+ * When the assistant sheet opens, the topbar reflows and the
+ * brand mark visibly shrinks (the layout switches from a
+ * full-width header to a narrower one). Pin a min-height /
+ * max-height pair on the navbar logo container so the icon
+ * stays the same size in both states.
+ * ---------------------------------------------------------- */
+#navbar [class*="logo"],
+#navbar [data-slot="logo"] {
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #20 — Semi-transparent components are washed-out.
+ *
+ * Mintlify defaults several inline highlight + card components
+ * to ~0.5 opacity on dark themes, which reads as washed-out
+ * grey on the AgentGuardian palette. Restore full opacity for
+ * the affected wrappers so colours render as intended.
+ * ---------------------------------------------------------- */
+/* Bug 8 fix — chat panel was blank because the prior
+ * [data-theme="dark"] [class*="opacity-"] selector matched every
+ * descendant of #chat-assistant-sheet that uses an opacity-*
+ * Tailwind utility (Mintlify uses them for the sheet's mount
+ * fade-in and for muted-state children), pinning them to
+ * opacity:1 !important during the animation and leaving the
+ * panel as an unresolved dark rectangle. Narrow the override to
+ * the documented card/callout wrappers only. */
+[data-theme="dark"] .callout,
+[data-theme="dark"] .info-card,
+.card[class*="bg-"],
+.info-card[class*="bg-"] {
+  opacity: 1 !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #21 — Chat sheet resize handle is broken.
+ *
+ * The shadcn Sheet's resize ghost renders as a 1px vertical
+ * line because the wrapper sets `cursor: col-resize` but the
+ * handle itself is invisible. Give it a visible 4px-wide
+ * grip with a subtle hover state so users can find + drag it.
+ * ---------------------------------------------------------- */
+#chat-assistant-sheet [data-resize-handle],
+#chat-assistant-sheet [class*="resize-handle"],
+#chat-assistant-sheet > div:first-child {
+  width: 4px !important;
+  background-color: var(--border, rgba(255, 255, 255, 0.12)) !important;
+  cursor: col-resize !important;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+#chat-assistant-sheet [data-resize-handle]:hover,
+#chat-assistant-sheet [class*="resize-handle"]:hover,
+#chat-assistant-sheet > div:first-child:hover {
+  opacity: 1;
+  background-color: var(--accent, #8b5cf6) !important;
+}
+
+/* ----------------------------------------------------------
+ * Tester PDF #22 — Wordmark next to brand logo disappears.
+ *
+ * At certain viewport widths Mintlify hides the brand wordmark
+ * span (the literal "AgentGuardian" text next to the logo
+ * icon), leaving just the icon. Force the wordmark to stay
+ * visible until below the mobile breakpoint so the navbar
+ * doesn't look unbranded.
+ * ---------------------------------------------------------- */
+/* Bug 9 fix — wordmark was hidden because the live navbar DOM
+ * has no visible wordmark <span> at all: Mintlify only renders
+ * the two <img class="nav-logo"> brand marks inside the brand
+ * anchor, plus an sr-only span ("AgentGuardian home page") for
+ * accessibility. The prior `nav-logo + span`, `[class*="logo"] +
+ * span`, and `[class*="brand"] span` selectors targeted siblings
+ * / descendants that never existed, so the rule was a no-op AND
+ * risked unhiding the sr-only label if the DOM shifted. Narrow
+ * to a wordmark-specific hook (`[class*="wordmark"]`,
+ * `[data-slot="brand-text"]`) and explicitly exclude `.sr-only`,
+ * so the override only fires if Mintlify reintroduces a real
+ * visible wordmark element. */
+#navbar [class*="wordmark"]:not(.sr-only),
+#navbar [data-slot="brand-text"]:not(.sr-only),
+#navbar [class*="brand"] span:not(.sr-only),
+#navbar [class*="logo"] + span:not(.sr-only),
+nav-logo + span:not(.sr-only) {
+  display: inline !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  #navbar [class*="wordmark"]:not(.sr-only),
+  #navbar [data-slot="brand-text"]:not(.sr-only),
+  #navbar [class*="brand"] span:not(.sr-only),
+  #navbar [class*="logo"] + span:not(.sr-only),
+  nav-logo + span:not(.sr-only) {
+    display: none !important;
+  }
+}

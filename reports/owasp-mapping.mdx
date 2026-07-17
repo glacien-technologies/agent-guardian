@@ -1,0 +1,302 @@
+---
+title: "OWASP mapping"
+sidebarTitle: "OWASP mapping"
+description: "Canonical mapping from every shipped probe to OWASP ASI 2026, OWASP LLM Top 10, MITRE ATLAS, and CSA Agentic Risk categories — sourced directly from src/agent_guardian/probes/."
+icon: "shield-check"
+---
+
+## What this is
+
+One row per **shipped probe** in `src/agent_guardian/probes/`. Each row
+binds the probe's `id` and `name` to its OWASP ASI 2026 category, the
+specific OWASP scenario it operationalises, the MITRE ATLAS techniques
+it exercises, and the CSA Agentic Risk category it lands in.
+
+This is what `scan.json` writes into every `findings[].asi` /
+`findings[].mitre_atlas` / `findings[].csa_category` triple — the same
+mapping every emitter (JSON, SARIF, JUnit, Markdown, PDF) carries.
+
+## When to use this
+
+- You opened a finding and want to know **exactly** which OWASP /
+  MITRE / CSA buckets it touches.
+- You're filling out a compliance matrix and need a per-control trace
+  back to the probe that exercises it.
+- You want to know which probes are missing for a specific OWASP
+  scenario before opening a contribution PR.
+- You need to convince a reviewer that "ASI03" in the report is the
+  same ASI03 OWASP shipped in 2026, not an internal taxonomy.
+
+## How the mapping is generated
+
+The rows below are extracted from the `asi`, `owasp_scenario`,
+`mitre_atlas`, and `csa_category` keys on every `*.yaml` under
+`src/agent_guardian/probes/`. The loader at
+`src/agent_guardian/probes/loader.py` is the same code path that
+populates the canonical `scan.json` — there is no second table, no
+human-curated rewrite. Source-of-truth = the YAML files.
+
+```bash
+# Regenerate this view locally from the probe corpus.
+uv run python -c "
+import yaml, pathlib
+for f in sorted(pathlib.Path('src/agent_guardian/probes').rglob('*.yaml')):
+    d = yaml.safe_load(f.read_text())
+    if not d.get('asi'): continue
+    print(d['id'], d['asi'], d['owasp_scenario'], d.get('mitre_atlas'), d.get('csa_category'))
+"
+```
+
+## ASI category totals
+
+96 probes ship in this release, distributed across the ten OWASP ASI
+2026 categories. **Coverage** in the table below is the probe count
+that lands in each category; **Severity floor** is the lowest severity
+shipped in that category (severities are assigned per-probe and
+flow straight through to the emitter).
+
+| OWASP ASI 2026 | Probes | Severity floor | CSA category |
+|---|---:|---|---|
+| **ASI01** — Prompt Injection / Goal Hijack | 9 | high | `goal-instruction-manipulation` |
+| **ASI02** — Tool Misuse | 8 | high | `agent-critical-system-interaction` |
+| **ASI03** — Privilege Compromise | 9 | high | `authorization-control-hijacking` |
+| **ASI04** — Resource Overload / Supply Chain | 8 | medium | `supply-chain-dependency` |
+| **ASI05** — Cascading Hallucination → Code Execution | 8 | critical | `agent-critical-system-interaction` |
+| **ASI06** — Memory Poisoning | 13 | high | `memory-context-manipulation`, `knowledge-base-poisoning`, `checker-out-of-the-loop` |
+| **ASI07** — Misalignment / A2A Trust | 8 | high | `multi-agent-exploitation` |
+| **ASI08** — Cascading Failure | 8 | medium | `impact-chain-blast-radius` |
+| **ASI09** — Identity Spoofing / Output Handling | 17 | medium | `hallucination-exploitation`, `resource-service-exhaustion` |
+| **ASI10** — Untraceability / Goal Drift | 8 | low | `agent-untraceability` |
+
+## Canonical probe → OWASP mapping
+
+### ASI01 — Prompt Injection / Goal Hijack
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI01-GH-001` | goal-redirect-direct | `OWASP_ASI01_DirectGoalHijack` | `AML.T0051`, `AML.T0054` | `goal-instruction-manipulation` |
+| `ASI01-GH-002` | indirect-via-doc | `OWASP_ASI01_OperatorPromptInjectionViaWebContent` | `AML.T0054`, AI Agent Context Poisoning | `goal-instruction-manipulation` |
+| `ASI01-GH-003` | role-swap-pretext | `OWASP_ASI01_InceptionAttackOnChatGPT` | `AML.T0054` | `goal-instruction-manipulation` |
+| `ASI01-GH-004` | scheduled-prompt-drift | `OWASP_ASI01_GoalLockDriftViaScheduledPrompts` | `AML.T0054` | `goal-instruction-manipulation` |
+| `ASI01-GH-005` | dialect-roleplay | `OWASP_ASI01_DirectGoalHijack` | `AML.T0054`, AI Agent Context Poisoning | `goal-instruction-manipulation` |
+| `ASI01-GH-006` | echoleak-zero-click | `OWASP_ASI01_EchoLeak` | `AML.T0051`, AI Agent Context Poisoning | `goal-instruction-manipulation` |
+| `ASI01-GH-007` | time-anchor-redirect | `OWASP_ASI01_GoalLockDriftViaScheduledPrompts` | `AML.T0054` | `goal-instruction-manipulation` |
+| `ASI01-GH-008` | tool-output-ipi | `OWASP_ASI01_OperatorPromptInjectionViaWebContent` | `AML.T0051`, AI Agent Context Poisoning | `goal-instruction-manipulation` |
+| `ASI01-T4-014` | persona-break-jailbreak | `OWASP_ASI01_PromptInjection` | `AML.T0054` | `goal-instruction-manipulation` |
+
+### ASI02 — Tool Misuse
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI02-TA-001` | tool-arg-injection | `OWASP_ASI02_UnvalidatedInputForwarding` | `AML.T0050`, Exfiltration via AI Agent Tool Invocation | `agent-critical-system-interaction` |
+| `ASI02-TA-002` | dns-exfil-via-approved-tool | `OWASP_ASI02_InternalQueryExternalExfiltration` | `AML.T0024`, Exfiltration via AI Agent Tool Invocation | `agent-critical-system-interaction` |
+| `ASI02-TA-003` | scope-expansion | `OWASP_ASI02_OverPrivilegedAPI` | `AML.T0050`, Modify AI Agent Configuration | `agent-critical-system-interaction` |
+| `ASI02-TA-004` | tool-name-typosquat | `OWASP_ASI02_ToolNameImpersonation` | Publish Poisoned AI Agent Tool | `agent-critical-system-interaction` |
+| `ASI02-TA-005` | recursion-bomb | `OWASP_ASI02_LoopAmplification` | `AML.T0034` | `agent-critical-system-interaction` |
+| `ASI02-TA-006` | parameter-smuggle | `OWASP_ASI02_ApprovedToolMisuse` | `AML.T0050` | `agent-critical-system-interaction` |
+| `ASI02-TA-007` | chain-exfil | `OWASP_ASI02_ToolNameImpersonation` | Exfiltration via AI Agent Tool Invocation | `agent-critical-system-interaction` |
+| `ASI02-TA-008` | edr-bypass-via-legit-chain | `OWASP_ASI02_EDRBypassViaToolChaining` | Exfiltration via AI Agent Tool Invocation | `agent-critical-system-interaction` |
+
+### ASI03 — Privilege Compromise
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI03-PII-001` | cross-tenant-pii-read | `OWASP_ASI03_IdentityImpersonation` | `AML.T0048`, RAG Credential Harvesting | `authorization-control-hijacking` |
+| `ASI03-PR-001` | jit-credential-bypass | `OWASP_ASI03_DelegatedPrivilegeAbuse` | `AML.T0048` | `authorization-control-hijacking` |
+| `ASI03-PR-002` | non-human-identity-coerce | `OWASP_ASI03_SyntheticIdentityInjection` | `AML.T0048` | `authorization-control-hijacking` |
+| `ASI03-PR-003` | role-inherit-escalate | `OWASP_ASI03_UnscopedPrivilegeInheritance` | `AML.T0050` | `authorization-control-hijacking` |
+| `ASI03-PR-004` | scope-token-replay | `OWASP_ASI03_MemoryBasedEscalation` | `AML.T0048` | `authorization-control-hijacking` |
+| `ASI03-PR-005` | impersonate-supervisor | `OWASP_ASI03_ForgedAgentPersona` | `AML.T0050` | `authorization-control-hijacking` |
+| `ASI03-PR-006` | toctou-workflow-drift | `OWASP_ASI03_WorkflowAuthorizationDrift` | `AML.T0050` | `authorization-control-hijacking` |
+| `ASI03-PR-007` | memory-cached-cred-reuse | `OWASP_ASI03_MemoryBasedEscalation` | `AML.T0048`, RAG Credential Harvesting | `authorization-control-hijacking` |
+| `ASI03-PR-008` | device-code-phish-relay | `OWASP_ASI03_DeviceCodePhishingAcrossAgents` | `AML.T0048` | `authorization-control-hijacking` |
+
+### ASI04 — Resource Overload / Supply Chain
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI04-SC-001` | mcp-server-poison | `OWASP_ASI04_MaliciousMCPServerImpersonatingPostmark` | Publish Poisoned AI Agent Tool | `supply-chain-dependency` |
+| `ASI04-SC-002` | dynamic-template-inject | `OWASP_ASI04_PoisonedPromptTemplatesLoadedRemotely` | `AML.T0051` | `supply-chain-dependency` |
+| `ASI04-SC-003` | agent-in-middle-via-card | `OWASP_ASI04_AgentSmithPromptHubProxyAttack` | `AML.T0051` | `supply-chain-dependency` |
+| `ASI04-SC-004` | poisoned-finetune-checkpoint | `OWASP_ASI04_CompromisedNPMPackage` | `AML.T0058` | `supply-chain-dependency` |
+| `ASI04-SC-005` | registry-spoof | `OWASP_ASI04_CompromisedMCPRegistryServer` | Publish Poisoned AI Agent Tool | `supply-chain-dependency` |
+| `ASI04-SC-006` | plugin-hijack | `OWASP_ASI04_AgentInTheMiddleViaAgentCards` | Publish Poisoned AI Agent Tool | `supply-chain-dependency` |
+| `ASI04-SC-007` | coding-agent-poison-dep | `OWASP_ASI04_CompromisedNPMPackage` | Publish Poisoned AI Agent Tool | `supply-chain-dependency` |
+| `ASI04-SC-008` | runtime-tool-substitution | `OWASP_ASI04_CompromisedNPMPackage` | Publish Poisoned AI Agent Tool | `supply-chain-dependency` |
+
+### ASI05 — Cascading Hallucination → Code Execution
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI05-CE-001` | eval-smuggle | `OWASP_ASI05_UnsafeFunctionCallsAndEval` | `AML.T0050` | `agent-critical-system-interaction` |
+| `ASI05-CE-002` | memory-system-rce | `OWASP_ASI05_MemorySystemRCE` | Memory Manipulation | `agent-critical-system-interaction` |
+| `ASI05-CE-003` | unsafe-pickle | `OWASP_ASI05_UnsafeObjectDeserialization` | `AML.T0050` | `agent-critical-system-interaction` |
+| `ASI05-CE-004` | shell-meta-injection | `OWASP_ASI05_DirectShellInjection` | `AML.T0050`, Escape to Host | `agent-critical-system-interaction` |
+| `ASI05-CE-005` | exec-chain-construction | `OWASP_ASI05_MultiToolChainExploitation` | `AML.T0050`, Escape to Host | `agent-critical-system-interaction` |
+| `ASI05-CE-006` | vibe-coding-runaway | `OWASP_ASI05_ReplitVibeCodingRunawayExecution` | Escape to Host | `agent-critical-system-interaction` |
+| `ASI05-CE-007` | lockfile-poisoning | `OWASP_ASI05_DependencyLockfilePoisoning` | Publish Poisoned AI Agent Tool | `agent-critical-system-interaction` |
+| `ASI05-CE-008` | sandbox-escape-primitive | `OWASP_ASI05_MemorySystemRCE` | Escape to Host | `agent-critical-system-interaction` |
+
+### ASI06 — Memory Poisoning
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI06-MP-001` | rag-corpus-inject | `OWASP_ASI06_RAGAndEmbeddingsPoisoning` | `AML.T0029`, Memory Manipulation | `knowledge-base-poisoning` |
+| `ASI06-MP-002` | persistent-trigger-token | `OWASP_ASI06_SystemicMisalignmentAndBackdoors` | `AML.T0029`, Memory Manipulation | `memory-context-manipulation` |
+| `ASI06-MP-003` | cross-session-payload | `OWASP_ASI06_ContextWindowExploitation` | Memory Manipulation | `memory-context-manipulation` |
+| `ASI06-MP-004` | embedding-collision | `OWASP_ASI06_CrossTenantVectorBleed` | `AML.T0029` | `knowledge-base-poisoning` |
+| `ASI06-MP-005` | false-memory-plant | `OWASP_ASI06_TravelBookingMemoryPoisoning` | Memory Manipulation | `memory-context-manipulation` |
+| `ASI06-MP-006` | iterative-fact-reinforcement | `OWASP_ASI06_TravelBookingMemoryPoisoning` | Memory Manipulation | `memory-context-manipulation` |
+| `ASI06-MP-007` | cross-tenant-vector-bleed | `OWASP_ASI06_CrossTenantVectorBleed` | `AML.T0029` | `knowledge-base-poisoning` |
+| `ASI06-MP-008` | validator-bypass-via-memory | `OWASP_ASI06_MemoryPoisoningForSystem` | Memory Manipulation | `checker-out-of-the-loop` |
+| `ASI06-HITL-009` | plan-execution-without-review | `OWASP_ASI06_MemoryPoisoningForSystem` | Memory Manipulation | `checker-out-of-the-loop` |
+| `ASI06-HITL-010` | sign-off-spoofing | `OWASP_ASI06_MemoryPoisoningForSystem` | Memory Manipulation | `checker-out-of-the-loop` |
+| `ASI06-HITL-011` | after-hours-autonomous-action | `OWASP_ASI06_SystemicMisalignmentAndBackdoors` | Memory Manipulation | `checker-out-of-the-loop` |
+| `ASI06-HITL-012` | defender-memory-subversion | `OWASP_ASI06_MemoryPoisoningForSystem` | Memory Manipulation | `checker-out-of-the-loop` |
+| `ASI06-HITL-013` | user-instructed-rule-violation | `OWASP_ASI06_MemoryPoisoningForSystem` | Memory Manipulation | `checker-out-of-the-loop` |
+
+### ASI07 — Misalignment / A2A Trust
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI07-A2A-001` | agent-card-spoof | `OWASP_ASI07_A2ARegistrationSpoofing` | `AML.T0050`, Modify AI Agent Configuration | `multi-agent-exploitation` |
+| `ASI07-A2A-002` | message-bus-spoof | `OWASP_ASI07_SemanticInjectionViaUnencryptedCommunications` | Thread Injection | `multi-agent-exploitation` |
+| `ASI07-A2A-003` | confused-deputy | `OWASP_ASI07_AgentInTheMiddleViaMCPDescriptorPoisoning` | `AML.T0050`, Thread Injection | `multi-agent-exploitation` |
+| `ASI07-A2A-004` | trust-message-replay | `OWASP_ASI07_TrustPoisoningViaMessageTampering` | Thread Injection | `multi-agent-exploitation` |
+| `ASI07-A2A-005` | supervisor-impersonate | `OWASP_ASI07_A2ARegistrationSpoofing` | `AML.T0050`, Modify AI Agent Configuration | `multi-agent-exploitation` |
+| `ASI07-A2A-006` | protocol-downgrade | `OWASP_ASI07_GoalManipulationViaProtocolDowngrade` | Modify AI Agent Configuration | `multi-agent-exploitation` |
+| `ASI07-A2A-007` | collusion-induce | `OWASP_ASI07_ContextConfusionViaReplay` | Thread Injection | `multi-agent-exploitation` |
+| `ASI07-A2A-008` | semantics-split-brain | `OWASP_ASI07_SemanticsSplitBrain` | Thread Injection | `multi-agent-exploitation` |
+
+### ASI08 — Cascading Failure
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI08-CF-001` | feedback-loop-amplification | `OWASP_ASI08_AutoRemediationFeedbackLoop` | `AML.T0034` | `impact-chain-blast-radius` |
+| `ASI08-CF-002` | alarm-suppression | `OWASP_ASI08_SecurityOperationsCompromise` | `AML.T0043` | `impact-chain-blast-radius` |
+| `ASI08-CF-003` | retry-storm | `OWASP_ASI08_CloudOrchestrationBreakdown` | `AML.T0034` | `impact-chain-blast-radius` |
+| `ASI08-CF-004` | dependency-cascade | `OWASP_ASI08_HealthcareProtocolPropagation` | `AML.T0034` | `impact-chain-blast-radius` |
+| `ASI08-CF-005` | fail-loud-to-silent | `OWASP_ASI08_AgenticCyberDefensePropagatingFalseAlerts` | `AML.T0043` | `impact-chain-blast-radius` |
+| `ASI08-CF-006` | planner-executor-auto-run | `OWASP_ASI08_PlannerExecutorCoupling` | `AML.T0050` | `impact-chain-blast-radius` |
+| `ASI08-CF-007` | blast-radius-probe | `OWASP_ASI08_AutoRemediationFeedbackLoop` | `AML.T0050` | `impact-chain-blast-radius` |
+| `ASI08-CF-008` | governance-drift-bulk | `OWASP_ASI08_GovernanceDriftCascade` | Modify AI Agent Configuration | `impact-chain-blast-radius` |
+
+### ASI09 — Identity Spoofing / Output Handling
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI09-TE-001` | manufactured-authority | `OWASP_ASI09_CredentialHarvestingViaContextualDeception` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-002` | confident-hallucination | `OWASP_ASI09_ClinicalDecisionManipulation` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-003` | anthropomorphic-persuasion | `OWASP_ASI09_EmotionalManipulation` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-004` | weaponized-explainability | `OWASP_ASI09_ExplainabilityFabrications` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-005` | citation-fabrication | `OWASP_ASI09_FraudulentPaymentAdvice` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-006` | helpful-trojan-command | `OWASP_ASI09_HelpfulAssistantTrojan` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-007` | false-consensus | `OWASP_ASI09_WeaponizedExplainabilityProductionOutage` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-TE-008` | consent-launder-preview | `OWASP_ASI09_ConsentLaunderingThroughReadOnlyPreviews` | `AML.T0053` | `hallucination-exploitation` |
+| `ASI09-RSE-009` | denial-of-wallet | `OWASP_ASI09_FraudulentPaymentAdvice` | `AML.T0034` | `resource-service-exhaustion` |
+| `ASI09-RSE-010` | recursive-tool-calls | `OWASP_ASI09_WeaponizedExplainabilityProductionOutage` | `AML.T0034` | `resource-service-exhaustion` |
+| `ASI09-RSE-011` | fanout-amplification | `OWASP_ASI09_WeaponizedExplainabilityProductionOutage` | `AML.T0034` | `resource-service-exhaustion` |
+| `ASI09-RSE-012` | infinite-loop-tool-spec | `OWASP_ASI09_HelpfulAssistantTrojan` | `AML.T0034` | `resource-service-exhaustion` |
+| `ASI09-T4-013` | classic-jailbreak-seed | `OWASP_ASI09_EmotionalManipulation` | `AML.T0054` | `hallucination-exploitation` |
+| `ASI09-T4-014` | stateless-roleplay-bait | `OWASP_ASI09_EmotionalManipulation` | `AML.T0054` | `hallucination-exploitation` |
+| `ASI09-OH-001` | output-reflection-xss | `OWASP_LLM02_ImproperOutputHandling` | `AML.T0012` | `hallucination-exploitation` |
+| `ASI09-OH-002` | reflected-script-injection | `OWASP_LLM02_ImproperOutputHandling` | `AML.T0012` | `hallucination-exploitation` |
+| `ASI09-OH-003` | output-context-payloads | `OWASP_LLM02_ImproperOutputHandling` | `AML.T0012` | `hallucination-exploitation` |
+
+### ASI10 — Untraceability / Goal Drift
+
+| Probe ID | Name | OWASP scenario | MITRE ATLAS | CSA category |
+|---|---|---|---|---|
+| `ASI10-DR-001` | long-horizon-drift | `OWASP_ASI10_GoalDriftAndScheming` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-002` | sandbagging-detect | `OWASP_ASI10_RewardHackingAndOptimizationAbuse` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-003` | workflow-hijack-takeover | `OWASP_ASI10_WorkflowHijacking` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-004` | capability-mask | `OWASP_ASI10_GoalDriftAndScheming` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-005` | off-task-drift | `OWASP_ASI10_AutonomousDataExfiltrationAfterIPI` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-006` | self-replicate-via-api | `OWASP_ASI10_SelfReplicationViaProvisioningAPIs` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-007` | reward-hacking | `OWASP_ASI10_RewardHackingCriticalDataLoss` | AI Agent Context Poisoning | `agent-untraceability` |
+| `ASI10-DR-008` | mode-shift | `OWASP_ASI10_WorkflowHijacking` | AI Agent Context Poisoning | `agent-untraceability` |
+
+## OWASP LLM Top 10 (2025) crosswalk
+
+The OWASP **LLM Top 10** is a separate (model-centric) list from
+ASI 2026 (agent-centric). Most LLM-Top-10 items map onto an ASI
+category — and the ASI corpus is what AgentGuardian actually
+exercises. The single LLM-Top-10 item that's explicitly tagged in the
+probe corpus today is **`OWASP_LLM02_ImproperOutputHandling`** (three
+ASI09 `-OH-` probes); the rest of this crosswalk shows the natural
+ASI category each LLM-Top-10 item lands in for an agent.
+
+| OWASP LLM Top 10 (2025) | Closest ASI 2026 bucket | AgentGuardian probes |
+|---|---|---|
+| **LLM01 — Prompt Injection** | ASI01 (Prompt Injection / Goal Hijack) | All 9 ASI01 probes |
+| **LLM02 — Improper Output Handling** | ASI09 (`-OH-` family) | `ASI09-OH-001`, `ASI09-OH-002`, `ASI09-OH-003` (explicitly tagged `OWASP_LLM02_ImproperOutputHandling`) |
+| **LLM03 — Supply Chain** | ASI04 (Resource Overload / Supply Chain) | All 8 ASI04 probes |
+| **LLM04 — Data & Model Poisoning** | ASI06 (Memory Poisoning) | All 13 ASI06 probes (`ASI06-MP-*`, `ASI06-HITL-*`) |
+| **LLM05 — Improper Output Handling (legacy renumber)** | ASI09 | See LLM02 row |
+| **LLM06 — Excessive Agency** | ASI02 (Tool Misuse) + ASI03 (Privilege Compromise) | All 8 ASI02 + 9 ASI03 probes |
+| **LLM07 — System Prompt Leakage** | ASI01 (`echoleak-zero-click`, `tool-output-ipi`, `indirect-via-doc`) | `ASI01-GH-006`, `ASI01-GH-008`, `ASI01-GH-002` |
+| **LLM08 — Vector & Embedding Weaknesses** | ASI06 (`embedding-collision`, `cross-tenant-vector-bleed`, `rag-corpus-inject`) | `ASI06-MP-001`, `ASI06-MP-004`, `ASI06-MP-007` |
+| **LLM09 — Misinformation** | ASI09 (`-TE-` family: hallucination / persuasion) | 8 ASI09 `-TE-` probes |
+| **LLM10 — Unbounded Consumption** | ASI09 (`-RSE-` family) + ASI02 (`recursion-bomb`) + ASI08 (`retry-storm`) | `ASI09-RSE-009..012`, `ASI02-TA-005`, `ASI08-CF-003` |
+
+<Note>
+  Only `LLM02 — Improper Output Handling` is asserted as a first-class
+  `owasp_scenario` in the probe YAML today (three ASI09 `-OH-` probes).
+  Every other row above is the ASI category that operationally covers
+  the LLM-Top-10 risk for an agent target — it is not an additional
+  `owasp_scenario` tag emitted in `scan.json`. If you need LLM-Top-10
+  trace IDs in your report, post-process `findings[].asi` /
+  `findings[].probe_id` using this table.
+</Note>
+
+## How to interpret a finding's mapping
+
+A `scan.json` finding carries the OWASP / MITRE / CSA triple directly:
+
+```json
+{
+  "probe_id": "ASI06-MP-001",
+  "asi": "ASI06",
+  "mitre_atlas": ["AML.T0029", "Memory Manipulation"],
+  "csa_category": "knowledge-base-poisoning"
+}
+```
+
+Read it in this order:
+
+1. **`probe_id`** — the row in the per-ASI table above. That row is the
+   ground truth for everything else.
+2. **`asi`** — the OWASP ASI 2026 category. Use it for the
+   high-level "what kind of risk is this" lens (and for SARIF rule
+   grouping in code-scanning).
+3. **`mitre_atlas`** — the techniques the probe exercises. Multiple
+   entries are normal: a probe usually combines a tactic from the
+   numeric MITRE ATLAS catalogue (`AML.T*`) with a named
+   agent-specific technique (`Memory Manipulation`,
+   `Escape to Host`, `Thread Injection`, `Publish Poisoned AI Agent Tool`,
+   `Modify AI Agent Configuration`, `RAG Credential Harvesting`,
+   `Exfiltration via AI Agent Tool Invocation`,
+   `AI Agent Context Poisoning`).
+4. **`csa_category`** — the CSA Agentic Risk taxonomy bucket. Use it
+   when reporting into a CSA-aligned risk register.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Reports overview" icon="file-text" href="/reports/overview">
+    See the five emitters that carry this mapping into JSON, SARIF,
+    JUnit, Markdown, and PDF.
+  </Card>
+  <Card title="Signatures & trust" icon="signature" href="/reports/signatures">
+    The mapping rides inside the Ed25519-signed envelope — verify it
+    end-to-end with `agent-guardian verify`.
+  </Card>
+  <Card title="Attack library" icon="list" href="/attacks/overview">
+    Browse the same probe corpus organised by attack technique, with
+    payload seeds and detection logic.
+  </Card>
+  <Card title="Contributing a probe" icon="git-pull-request" href="/community/contributing">
+    Add a probe and its OWASP / MITRE / CSA triple — the YAML schema
+    that drives this table.
+  </Card>
+</CardGroup>

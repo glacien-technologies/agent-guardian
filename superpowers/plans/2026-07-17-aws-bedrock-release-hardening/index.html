@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>AWS Bedrock Release Hardening Implementation Plan - AgentGuardian</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#aws-bedrock-release-hardening-implementation-plan" class="nav-link">AWS Bedrock Release Hardening Implementation Plan</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#global-constraints" class="nav-link">Global Constraints</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="aws-bedrock-release-hardening-implementation-plan">AWS Bedrock Release Hardening Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Prevent AWS credential leakage, price current Bedrock Claude Haiku 4.5 inference profiles correctly, and preserve conservative spend for dispatched requests without usage receipts.</p>
+<p><strong>Architecture:</strong> Harden logging at both the dependency-level and value-redaction boundaries. Preserve Bedrock's provider-qualified pricing identity and resolve the current model family by its AWS inference-profile shape. Reconcile successful-response cost with the shared budget ledger so final reports retain conservative unknown-outcome spend without fabricating tokens.</p>
+<p><strong>Tech Stack:</strong> Python 3.11+, asyncio, botocore, httpx, Pydantic v2, pytest/pytest-asyncio, Ruff, mypy, pre-commit, existing <code>BudgetLedger</code>, existing report signing.</p>
+<h2 id="global-constraints">Global Constraints</h2>
+<ul>
+<li>Add no runtime dependency.</li>
+<li>Preserve all existing CLI flags and report fields.</li>
+<li>Never log AWS access keys, secret keys, session tokens, SigV4 signatures, or populated AWS credential fields at any log level.</li>
+<li>Preserve full AgentGuardian-owned DEBUG diagnostics in <code>run.log</code>.</li>
+<li>Do not fabricate observed token usage when a dispatched request has no usage receipt.</li>
+<li>A conservative unknown-outcome charge must never be lower than the reserved request ceiling and must remain within the admitted cap.</li>
+<li>Successful provider responses must still be counted exactly once.</li>
+<li>Keep uncapped, non-Bedrock, and non-<code>PromptAdapter</code> behavior unchanged.</li>
+<li>Every production change follows red-green-refactor TDD.</li>
+<li>Every commit uses a Conventional Commit prefix and <code>git commit -s</code>.</li>
+<li>Work only in <code>/Users/mobionix/.config/superpowers/worktrees/agent_guardian_oss/fix-gcp-redteam-hardening</code> on <code>codex/fix-gcp-redteam-hardening</code>.</li>
+<li>Do not push, merge, deploy, or modify the user's main checkout.</li>
+</ul>
+<hr />
+<h3 id="task-1-prevent-botocore-sso-credentials-from-entering-logs">Task 1: Prevent botocore SSO credentials from entering logs</h3>
+<p><strong>Files:</strong>
+- Modify: <code>tests/unit/test_logging_setup.py</code>
+- Modify: <code>src/agent_guardian/logging_setup.py</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: stdlib <code>logging.LogRecord</code> messages and the existing <code>_RedactingFilter</code>.
+- Produces: <code>redact_secrets(text: str) -&gt; str</code> that masks AWS credential shapes; <code>configure_logging()</code> that pins the <code>botocore</code> hierarchy at <code>WARNING</code> or above.</p>
+<ul>
+<li>[x] <strong>Step 1: Add synthetic AWS credential fixtures and failing redaction tests</strong></li>
+</ul>
+<p>Add to <code>tests/unit/test_logging_setup.py</code>:</p>
+<pre><code class="language-python">_AWS_ACCESS_KEY = &quot;ASIAABCDEFGHIJKLMNOP&quot;
+_AWS_SECRET_KEY = &quot;aws-secret-example-value-1234567890&quot;
+_AWS_SESSION_TOKEN = &quot;aws-session-token-example-value-ABCDEFGHIJKLMNOPQRSTUVWXYZ&quot;
+_AWS_SSO_RESPONSE = (
+    'Response body: b\'{&quot;roleCredentials&quot;: {'
+    f'&quot;accessKeyId&quot;: &quot;{_AWS_ACCESS_KEY}&quot;, '
+    f'&quot;secretAccessKey&quot;: &quot;{_AWS_SECRET_KEY}&quot;, '
+    f'&quot;sessionToken&quot;: &quot;{_AWS_SESSION_TOKEN}&quot;, '
+    '&quot;expiration&quot;: 1784303417000}}\''
+)
+
+
+@pytest.mark.parametrize(
+    &quot;message&quot;,
+    [
+        _AWS_SSO_RESPONSE,
+        f&quot;Authorization: AWS4-HMAC-SHA256 Credential={_AWS_ACCESS_KEY}/scope, &quot;
+        &quot;SignedHeaders=host;x-amz-date, Signature=abcdef0123456789&quot;,
+        f&quot;X-Amz-Security-Token: {_AWS_SESSION_TOKEN}&quot;,
+        f&quot;aws_access_key_id={_AWS_ACCESS_KEY} aws_secret_access_key={_AWS_SECRET_KEY}&quot;,
+    ],
+)
+def test_redact_secrets_masks_aws_credentials(message: str) -&gt; None:
+    redacted = logging_setup.redact_secrets(message)
+    assert _AWS_ACCESS_KEY not in redacted
+    assert _AWS_SECRET_KEY not in redacted
+    assert _AWS_SESSION_TOKEN not in redacted
+    assert &quot;***REDACTED***&quot; in redacted
+</code></pre>
+<ul>
+<li>[x] <strong>Step 2: Add failing run-log dependency-clamp and defense-in-depth tests</strong></li>
+</ul>
+<p>Extend the autouse logger reset tuple with <code>"botocore"</code> and <code>"botocore.parsers"</code>, then add:</p>
+<pre><code class="language-python">def test_botocore_debug_is_excluded_from_run_log(tmp_path: Path) -&gt; None:
+    logging_setup.configure_logging(level=&quot;WARNING&quot;, stream=io.StringIO(), force=True)
+    run_log = tmp_path / &quot;run.log&quot;
+    handler = logging_setup.attach_run_log_file(run_log, level=&quot;DEBUG&quot;)
+    try:
+        logging.getLogger(&quot;botocore.parsers&quot;).debug(_AWS_SSO_RESPONSE)
+        logging.getLogger(&quot;agent_guardian.test.aws&quot;).debug(&quot;guardian-debug-visible&quot;)
+        handler.flush()
+        text = run_log.read_text(encoding=&quot;utf-8&quot;)
+        assert &quot;guardian-debug-visible&quot; in text
+        assert &quot;roleCredentials&quot; not in text
+        assert _AWS_ACCESS_KEY not in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+
+
+def test_reenabled_botocore_debug_is_still_redacted(tmp_path: Path) -&gt; None:
+    logging_setup.configure_logging(level=&quot;WARNING&quot;, stream=io.StringIO(), force=True)
+    run_log = tmp_path / &quot;run.log&quot;
+    handler = logging_setup.attach_run_log_file(run_log, level=&quot;DEBUG&quot;)
+    logger = logging.getLogger(&quot;botocore.parsers&quot;)
+    logger.setLevel(logging.DEBUG)
+    try:
+        logger.debug(_AWS_SSO_RESPONSE)
+        handler.flush()
+        text = run_log.read_text(encoding=&quot;utf-8&quot;)
+        assert &quot;roleCredentials&quot; in text
+        assert _AWS_ACCESS_KEY not in text
+        assert _AWS_SECRET_KEY not in text
+        assert _AWS_SESSION_TOKEN not in text
+        assert &quot;***REDACTED***&quot; in text
+    finally:
+        logging_setup.detach_run_log_file(handler)
+</code></pre>
+<ul>
+<li>[x] <strong>Step 3: Run the focused logging tests and verify red</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_logging_setup.py::test_redact_secrets_masks_aws_credentials \
+  tests/unit/test_logging_setup.py::test_botocore_debug_is_excluded_from_run_log \
+  tests/unit/test_logging_setup.py::test_reenabled_botocore_debug_is_still_redacted
+</code></pre>
+<p>Expected: AWS values remain in <code>redact_secrets()</code> output, and botocore DEBUG enters <code>run.log</code> before the implementation.</p>
+<ul>
+<li>[x] <strong>Step 4: Extend AWS redaction patterns</strong></li>
+</ul>
+<p>Add field-preserving patterns to <code>_SECRET_PATTERNS</code> in <code>logging_setup.py</code> before the bare access-key pattern:</p>
+<pre><code class="language-python">(
+    re.compile(
+        r&quot;(?i)([\&quot;']?(?:accessKeyId|secretAccessKey|sessionToken|&quot;
+        r&quot;aws_access_key_id|aws_secret_access_key|aws_session_token)[\&quot;']?&quot;
+        r&quot;\s*[:=]\s*[\&quot;']?)[^\&quot;'\s,}]+&quot;
+    ),
+    r&quot;\1&quot; + _REDACTED,
+),
+(
+    re.compile(r&quot;(?i)(x-amz-security-token:\s*)\S+&quot;),
+    r&quot;\1&quot; + _REDACTED,
+),
+(
+    re.compile(r&quot;(?i)(authorization:\s*AWS4-HMAC-SHA256\s+).+&quot;),
+    r&quot;\1&quot; + _REDACTED,
+),
+(re.compile(r&quot;\b(?:AKIA|ASIA)[A-Z0-9]{16}\b&quot;), _REDACTED),
+</code></pre>
+<p>Keep the existing provider API-key and bearer-token patterns unchanged.</p>
+<ul>
+<li>[x] <strong>Step 5: Clamp botocore dependency logging</strong></li>
+</ul>
+<p>Extend <code>_NOISY_DEPS</code> in <code>configure_logging()</code>:</p>
+<pre><code class="language-python">_NOISY_DEPS = (
+    &quot;httpx&quot;,
+    &quot;httpcore&quot;,
+    &quot;httpcore.http11&quot;,
+    &quot;httpcore.connection&quot;,
+    &quot;urllib3&quot;,
+    &quot;google_genai.models&quot;,
+    &quot;botocore&quot;,
+    &quot;botocore.parsers&quot;,
+    &quot;botocore.credentials&quot;,
+)
+</code></pre>
+<p>Update the logging-test autouse reset fixture and noisy-dependency assertions to cover these names.</p>
+<ul>
+<li>[x] <strong>Step 6: Run all logging and agent-I/O tests</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_logging_setup.py \
+  tests/unit/test_agent_io_logging.py \
+  tests/unit/test_partial_scan_jsonl_log_handler.py
+</code></pre>
+<p>Expected: all tests pass; synthetic credentials are absent from every captured sink.</p>
+<ul>
+<li>[x] <strong>Step 7: Commit the logging fix</strong></li>
+</ul>
+<pre><code class="language-bash">git add src/agent_guardian/logging_setup.py tests/unit/test_logging_setup.py
+git commit -s -m &quot;fix(logging): redact AWS session credentials&quot;
+</code></pre>
+<hr />
+<h3 id="task-2-price-current-bedrock-inference-profile-identifiers">Task 2: Price current Bedrock inference-profile identifiers</h3>
+<p><strong>Files:</strong>
+- Modify: <code>tests/unit/test_llm_bedrock.py</code>
+- Modify: <code>tests/unit/test_cost.py</code>
+- Modify: <code>tests/unit/test_cost_qualifiers.py</code>
+- Modify: <code>src/agent_guardian/llm/bedrock.py</code>
+- Modify: <code>src/agent_guardian/cost.py</code>
+- Modify: <code>src/agent_guardian/cli.py</code>
+- Modify: <code>docs/reference/cli.mdx</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>BedrockClient.pricing_model_spec(request: LLMRequest) -&gt; str</code> returning exactly one <code>bedrock:</code> prefix.
+- Produces: <code>lookup_price()</code> rows for current Claude Haiku 4.5 global and geographic inference profiles.</p>
+<ul>
+<li>[x] <strong>Step 1: Add a failing Bedrock pricing-identity test</strong></li>
+</ul>
+<p>Add to <code>tests/unit/test_llm_bedrock.py</code>:</p>
+<pre><code class="language-python">def test_bedrock_pricing_identity_is_provider_qualified(_fake_aws_env: None) -&gt; None:
+    client = BedrockClient(region=&quot;us-east-1&quot;)
+    try:
+        bare = LLMRequest(
+            messages=[LLMMessage(role=&quot;user&quot;, content=&quot;x&quot;)],
+            model=&quot;us.anthropic.claude-haiku-4-5-20251001-v1:0&quot;,
+        )
+        prefixed = bare.model_copy(update={&quot;model&quot;: f&quot;bedrock:{bare.model}&quot;})
+        assert client.pricing_model_spec(bare) == (
+            &quot;bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0&quot;
+        )
+        assert client.pricing_model_spec(prefixed) == client.pricing_model_spec(bare)
+    finally:
+        asyncio.run(client.aclose())
+</code></pre>
+<p>Add <code>import asyncio</code> to the test module.</p>
+<ul>
+<li>[x] <strong>Step 2: Add failing global and geographic price tests</strong></li>
+</ul>
+<p>Add to <code>tests/unit/test_cost_qualifiers.py</code>:</p>
+<pre><code class="language-python">@pytest.mark.parametrize(
+    (&quot;model&quot;, &quot;input_rate&quot;, &quot;output_rate&quot;),
+    [
+        (&quot;global.anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.00, 5.00),
+        (&quot;us.anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.10, 5.50),
+        (&quot;eu.anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.10, 5.50),
+        (&quot;au.anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.10, 5.50),
+        (&quot;jp.anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.10, 5.50),
+        (&quot;anthropic.claude-haiku-4-5-20251001-v1:0&quot;, 1.10, 5.50),
+        (&quot;us.anthropic.claude-haiku-4-5-v1:0&quot;, 1.10, 5.50),
+    ],
+)
+def test_bedrock_haiku45_inference_profile_rates(
+    model: str,
+    input_rate: float,
+    output_rate: float,
+) -&gt; None:
+    row = lookup_price(f&quot;bedrock:{model}&quot;)
+    assert row.provider == &quot;bedrock&quot;
+    assert row.model == model
+    assert row.input_per_1m == pytest.approx(input_rate)
+    assert row.output_per_1m == pytest.approx(output_rate)
+
+
+def test_unknown_bedrock_model_keeps_conservative_fallback() -&gt; None:
+    row = lookup_price(&quot;bedrock:vendor.future-model-v99&quot;)
+    assert row.provider == &quot;bedrock&quot;
+    assert row.input_per_1m == pytest.approx(3.00)
+    assert row.output_per_1m == pytest.approx(15.00)
+</code></pre>
+<p>Update the table-date assertion in <code>tests/unit/test_cost.py</code> to expect <code>2026-07-17</code>.</p>
+<ul>
+<li>[x] <strong>Step 3: Run the focused pricing tests and verify red</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_llm_bedrock.py::test_bedrock_pricing_identity_is_provider_qualified \
+  tests/unit/test_cost_qualifiers.py::test_bedrock_haiku45_inference_profile_rates \
+  tests/unit/test_cost_qualifiers.py::test_unknown_bedrock_model_keeps_conservative_fallback
+</code></pre>
+<p>Expected: provider identity is bare and current IDs resolve to the <code>$3/$15</code> fallback.</p>
+<ul>
+<li>[x] <strong>Step 4: Preserve provider identity in <code>BedrockClient</code></strong></li>
+</ul>
+<p>Add to <code>BedrockClient</code>:</p>
+<pre><code class="language-python">def pricing_model_spec(self, request: LLMRequest) -&gt; str:
+    &quot;&quot;&quot;Return the provider-qualified Bedrock model used for pricing.&quot;&quot;&quot;
+    model = request.model
+    if model.startswith(&quot;bedrock:&quot;):
+        model = model[len(&quot;bedrock:&quot;) :]
+    return f&quot;bedrock:{model}&quot;
+</code></pre>
+<ul>
+<li>[x] <strong>Step 5: Resolve the Haiku 4.5 model family by AWS identifier shape</strong></li>
+</ul>
+<p>In <code>cost.py</code>, import <code>re</code>, set <code>PRICE_TABLE_AS_OF = "2026-07-17"</code>, and add:</p>
+<pre><code class="language-python">_BEDROCK_HAIKU_45_RE = re.compile(
+    r&quot;^(?:(global|us|eu|au|jp)\.)?&quot;
+    r&quot;anthropic\.claude-haiku-4-5(?:-20251001)?-v1:0$&quot;
+)
+
+
+def _bedrock_haiku_45_price(model: str) -&gt; PriceRow | None:
+    match = _BEDROCK_HAIKU_45_RE.fullmatch(model)
+    if match is None:
+        return None
+    rates = (1.00, 5.00) if match.group(1) == &quot;global&quot; else (1.10, 5.50)
+    return PriceRow(&quot;bedrock&quot;, model, *rates)
+</code></pre>
+<p>Inside the provider-qualified branch of <code>lookup_price()</code>, before exact table
+matching:</p>
+<pre><code class="language-python">if provider == &quot;bedrock&quot;:
+    bedrock_row = _bedrock_haiku_45_price(model)
+    if bedrock_row is not None:
+        return bedrock_row
+</code></pre>
+<p>Remove stale <code>$0.80/$4.00</code> Claude Haiku 4.5 exact rows from <code>PRICE_TABLE</code> so the
+family helper is the single source of truth. Preserve Sonnet and unknown-model
+fallback rows.</p>
+<ul>
+<li>[x] <strong>Step 6: Update current CLI examples</strong></li>
+</ul>
+<p>Replace <code>bedrock:us.anthropic.claude-haiku-4-5-v1:0</code> with
+<code>bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0</code> in <code>cli.py</code> help text and
+<code>docs/reference/cli.mdx</code>.</p>
+<ul>
+<li>[x] <strong>Step 7: Run Bedrock, cost, admission, and registry tests</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_llm_bedrock.py \
+  tests/unit/test_cost.py \
+  tests/unit/test_cost_qualifiers.py \
+  tests/unit/test_budget_ledger.py \
+  tests/unit/test_llm_registry.py
+</code></pre>
+<p>Expected: all tests pass; current US ID resolves to <code>$1.10/$5.50</code> and global to <code>$1/$5</code>.</p>
+<ul>
+<li>[x] <strong>Step 8: Commit the pricing fix</strong></li>
+</ul>
+<pre><code class="language-bash">git add \
+  src/agent_guardian/llm/bedrock.py \
+  src/agent_guardian/cost.py \
+  src/agent_guardian/cli.py \
+  tests/unit/test_llm_bedrock.py \
+  tests/unit/test_cost.py \
+  tests/unit/test_cost_qualifiers.py \
+  docs/reference/cli.mdx
+git commit -s -m &quot;fix(cost): price current Bedrock inference profiles&quot;
+</code></pre>
+<hr />
+<h3 id="task-3-surface-conservative-cancellation-spend-consistently">Task 3: Surface conservative cancellation spend consistently</h3>
+<p><strong>Files:</strong>
+- Modify: <code>tests/unit/test_budget_cap.py</code>
+- Modify: <code>tests/unit/reports/test_postscan_accounting.py</code>
+- Modify: <code>src/agent_guardian/core/swarm.py</code>
+- Modify: <code>src/agent_guardian/reports/postscan.py</code></p>
+<p><strong>Interfaces:</strong>
+- Produces: <code>SwarmCommander._live_cost_usd()</code> as the maximum of observed-response cost and committed ledger spend.
+- Produces: <code>_build_budget_report(*, spent_usd: float | None = None) -&gt; BudgetReport</code> so final report construction can use the identical cost baseline.
+- Produces: <code>fold_postscan_usage()</code> with one baseline for both cost fields.</p>
+<ul>
+<li>[x] <strong>Step 1: Add a failing ledger-only final-report regression</strong></li>
+</ul>
+<p>Add to <code>tests/unit/test_budget_cap.py</code>:</p>
+<pre><code class="language-python">@pytest.mark.asyncio
+async def test_cancelled_request_reservation_reaches_live_and_final_cost_without_tokens() -&gt; None:
+    swarm = _swarm(usd_cap=1.0)
+    assert swarm._budget_ledger is not None
+    receipt = swarm._budget_ledger.reserve(&quot;target&quot;, tokens=1_111, est_usd=0.0154321)
+    swarm._budget_ledger.commit(
+        receipt,
+        actual_usd=receipt.est_usd,
+        actual_tokens=receipt.tokens,
+    )
+
+    assert swarm._usage_rollup(include_report_fallback=False) == pytest.approx((0, 0.0))
+    assert swarm._live_cost_usd() == pytest.approx(0.0154321)
+
+    swarm._start_time = 1.0
+    scan = await swarm._phase_finalise()
+
+    assert scan.tokens_total == 0
+    assert scan.cost_usd == pytest.approx(0.0154321)
+    assert scan.budget is not None
+    assert scan.budget.spent_usd == pytest.approx(scan.cost_usd)
+</code></pre>
+<ul>
+<li>[x] <strong>Step 2: Replace the separate post-scan baseline test with a failing consistency test</strong></li>
+</ul>
+<p>Rename <code>test_fold_postscan_usage_uses_separate_scan_and_budget_cost_baselines</code>
+to <code>test_fold_postscan_usage_reconciles_to_conservative_baseline</code> and assert:</p>
+<pre><code class="language-python">base = 0.020
+expected = base + expected_extra
+assert updated.cost_usd == pytest.approx(expected)
+assert updated.budget is not None
+assert updated.budget.spent_usd == pytest.approx(expected)
+assert updated.budget.pct_of_cap == pytest.approx(expected / 0.05)
+</code></pre>
+<ul>
+<li>[x] <strong>Step 3: Run focused tests and verify red</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_budget_cap.py::test_cancelled_request_reservation_reaches_live_and_final_cost_without_tokens \
+  tests/unit/reports/test_postscan_accounting.py::test_fold_postscan_usage_reconciles_to_conservative_baseline
+</code></pre>
+<p>Expected: live/final cost remains zero for ledger-only spend, and post-scan cost fields diverge.</p>
+<ul>
+<li>[x] <strong>Step 4: Add a ledger spend floor to live cost</strong></li>
+</ul>
+<p>In <code>SwarmCommander</code> add:</p>
+<pre><code class="language-python">def _ledger_spend_floor(self) -&gt; float:
+    return self._budget_ledger.spent_usd if self._budget_ledger is not None else 0.0
+
+
+def _conservative_cost_usd(self, observed_cost_usd: float) -&gt; float:
+    return max(observed_cost_usd, self._ledger_spend_floor())
+</code></pre>
+<p>Change <code>_live_cost_usd()</code> to:</p>
+<pre><code class="language-python">def _live_cost_usd(self) -&gt; float:
+    &quot;&quot;&quot;Return live observed spend with a floor for unknown dispatched calls.&quot;&quot;&quot;
+    observed = self._usage_rollup(include_report_fallback=False)[1]
+    return self._conservative_cost_usd(observed)
+</code></pre>
+<ul>
+<li>[x] <strong>Step 5: Use one final report baseline</strong></li>
+</ul>
+<p>Change <code>_build_budget_report</code> to accept an optional override:</p>
+<pre><code class="language-python">def _build_budget_report(self, *, spent_usd: float | None = None) -&gt; BudgetReport:
+    cap = self.config.usd_cap
+    spent = self._live_cost_usd() if spent_usd is None else spent_usd
+    pct = (spent / cap) if (cap is not None and cap &gt; 0) else None
+    return BudgetReport(
+        cap_usd=cap,
+        spent_usd=spent,
+        pct_of_cap=pct,
+        soft_stop_fraction=self.config.budget_soft_stop_fraction,
+        finalise_truncated=self._finalise_truncated,
+    )
+</code></pre>
+<p>In <code>_phase_finalise()</code>, replace the current cost calculation with:</p>
+<pre><code class="language-python">tokens_total, unrounded_observed_cost = self._usage_rollup(include_report_fallback=True)
+rounded_observed_cost = round(unrounded_observed_cost, 4)
+cost_usd = self._conservative_cost_usd(rounded_observed_cost)
+</code></pre>
+<p>Pass the exact same value into the scan:</p>
+<pre><code class="language-python">budget=self._build_budget_report(spent_usd=cost_usd),
+</code></pre>
+<p>This retains uncapped four-decimal behavior, retains the existing conservative
+round-up when rounding increases observed cost, and never rounds a larger
+ledger-only reservation down.</p>
+<ul>
+<li>[x] <strong>Step 6: Reconcile post-scan fields</strong></li>
+</ul>
+<p>Change <code>fold_postscan_usage()</code> to:</p>
+<pre><code class="language-python">extra_cost = tokens_to_usd(
+    model_spec,
+    counter.prompt_tokens,
+    counter.completion_tokens,
+)
+budget = scan.budget
+base_cost = scan.cost_usd
+if budget is not None:
+    base_cost = max(base_cost, budget.spent_usd)
+cost_usd = base_cost + extra_cost
+if budget is not None:
+    pct_of_cap = cost_usd / budget.cap_usd if budget.cap_usd else None
+    budget = budget.model_copy(
+        update={&quot;spent_usd&quot;: cost_usd, &quot;pct_of_cap&quot;: pct_of_cap}
+    )
+</code></pre>
+<p>Preserve immutable <code>model_copy()</code> behavior and successful summary token folding.</p>
+<ul>
+<li>[x] <strong>Step 7: Run budget, prompt-target, and post-scan tests</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q \
+  tests/unit/test_budget_ledger.py \
+  tests/unit/test_budget_cap.py \
+  tests/unit/test_prompt_target_accounting.py \
+  tests/unit/reports/test_postscan_accounting.py \
+  tests/unit/test_cli.py
+</code></pre>
+<p>Expected: all tests pass; cancellation contributes dollars but zero tokens, and final cost fields agree.</p>
+<ul>
+<li>[x] <strong>Step 8: Commit the accounting fix</strong></li>
+</ul>
+<pre><code class="language-bash">git add \
+  src/agent_guardian/core/swarm.py \
+  src/agent_guardian/reports/postscan.py \
+  tests/unit/test_budget_cap.py \
+  tests/unit/reports/test_postscan_accounting.py
+git commit -s -m &quot;fix(budget): preserve unknown Bedrock spend&quot;
+</code></pre>
+<hr />
+<h3 id="task-4-run-complete-and-live-aws-release-verification">Task 4: Run complete and live AWS release verification</h3>
+<p><strong>Files:</strong>
+- Create ignored report: <code>.superpowers/sdd/task-aws-live-rerun-report.md</code>
+- Update after success: <code>docs/superpowers/plans/2026-07-17-aws-bedrock-release-hardening.md</code></p>
+<p><strong>Interfaces:</strong>
+- Consumes: signed implementation commits from Tasks 1-3 and AWS SSO profile <code>ag-dev</code>.
+- Produces: fresh automated and live evidence for a final release verdict.</p>
+<ul>
+<li>[x] <strong>Step 1: Run static, type, repository, and package gates</strong></li>
+</ul>
+<p>Run:</p>
+<pre><code class="language-bash">/Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/ruff check src tests
+/Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/ruff format --check src tests
+PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/mypy src
+git diff --check main...HEAD
+pre-commit run --from-ref main --to-ref HEAD
+uv build
+</code></pre>
+<p>Expected: every command exits 0.</p>
+<ul>
+<li>[x] <strong>Step 2: Run the complete suite</strong></li>
+</ul>
+<pre><code class="language-bash">PYTHONPATH=src /Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/pytest -q
+</code></pre>
+<p>Expected: zero failures; only documented skips and existing deprecation warnings.</p>
+<ul>
+<li>[x] <strong>Step 3: Perform safe AWS credential readiness checks</strong></li>
+</ul>
+<p>Use <code>AWS_PROFILE=ag-dev</code> and <code>AWS_REGION=us-east-1</code>. Redirect all STS identity
+output and access tokens to <code>/dev/null</code>. If SSO is expired, run the standard
+<code>aws sso login --profile ag-dev</code> flow. Print only exit state, region, and
+credential method.</p>
+<ul>
+<li>[x] <strong>Step 4: Run one direct Bedrock exact-response smoke</strong></li>
+</ul>
+<p>Use <code>BedrockClient(region="us-east-1")</code>, model
+<code>us.anthropic.claude-haiku-4-5-20251001-v1:0</code>, temperature 0, and a fixed
+sentinel instruction. Print only provider, equality state, and numeric usage.
+Do not print prompt, response, account, role, headers, or credentials.</p>
+<ul>
+<li>[x] <strong>Step 5: Run the <code>$0.02</code> hard-cap scan</strong></li>
+</ul>
+<p>Run the same bounded command shape as the original AWS verification:</p>
+<pre><code class="language-bash">AWS_PROFILE=ag-dev AWS_REGION=us-east-1 \
+CI=true AGENT_GUARDIAN_DISABLE_AUTO_SERVE=1 \
+AGENT_GUARDIAN_DISABLE_URL_EMISSION=1 PYTHONPATH=src \
+/Users/mobionix/workspace/Glacien/Guardian/agent_guardian_oss/.venv/bin/python \
+  -m agent_guardian.cli scan \
+  --system-prompt /tmp/agentguardian-gcp-live-prompt.txt \
+  --model 'bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0' \
+  --mode fast --max-turns 1 --budget-usd 0.02 \
+  --budget-seconds 120 --recon-budget-seconds 30 \
+  --output json --output-path /tmp/agentguardian-aws-hardcap-rerun.json \
+  --no-tui --no-serve --no-open --no-publish --yes \
+  --log-agent-io --log-agent-io-summary
+</code></pre>
+<p>Acceptance:</p>
+<ul>
+<li>process exit 0;</li>
+<li>reported spend is at least every completed response plus any committed
+  unknown-outcome reservation and never exceeds <code>$0.02</code>;</li>
+<li>completed-response tokens are represented exactly once;</li>
+<li>
+<p>no credential pattern exists in any artifact.</p>
+</li>
+<li>
+<p>[x] <strong>Step 6: Run exactly one <code>$1.00</code> functional fallback when required</strong></p>
+</li>
+</ul>
+<p>If the hard-cap scan has zero tested attack turns, repeat it once with
+<code>--budget-usd 1.00</code> and a unique output path. Do not run a second fallback.</p>
+<p>Acceptance:</p>
+<ul>
+<li>attacker active and at least one tested probe turn;</li>
+<li>Bedrock request/response counts reconcile, with any unmatched request charged
+  at its reservation;</li>
+<li>all completed provider tokens match requested report, <code>scan.json</code>, and
+  <code>scan.raw.json</code> exactly;</li>
+<li><code>cost_usd == budget.spent_usd</code> in all report forms;</li>
+<li>Haiku US geo pricing uses <code>$1.10/$5.50</code> rather than fallback;</li>
+<li>
+<p>zero findings caused only by escaped ANSI text and zero actual ESC bytes.</p>
+</li>
+<li>
+<p>[x] <strong>Step 7: Audit logs, manifests, and signatures</strong></p>
+</li>
+</ul>
+<p>For both scans:</p>
+<ul>
+<li>count true ERROR/CRITICAL, auth, 401/403, throttling, and provider failures;</li>
+<li>search console, <code>run.log</code>, events, reports, probe exports, and verifier output
+  for <code>AKIA</code>, <code>ASIA</code>, SigV4 Authorization, <code>X-Amz-Security-Token</code>, populated AWS
+  credential fields, bearer/API-key/private-key shapes, without printing any
+  match;</li>
+<li>recompute every forensic manifest SHA-256 and byte count;</li>
+<li>verify requested reports with the raw 32-byte Ed25519 public key;</li>
+<li>
+<p>retain only sanitized evidence under <code>.superpowers/sdd/</code>.</p>
+</li>
+<li>
+<p>[x] <strong>Step 8: Obtain independent code review</strong></p>
+</li>
+</ul>
+<p>Review the full diff from <code>main...HEAD</code>, the focused test output, complete-suite
+output, live report, and DCO trailers. Resolve every Critical or Important
+finding before declaring release readiness.</p>
+<ul>
+<li>[x] <strong>Step 9: Complete and commit the plan record</strong></li>
+</ul>
+<p>Mark completed checkboxes only after the evidence exists, then run:</p>
+<pre><code class="language-bash">git add docs/superpowers/plans/2026-07-17-aws-bedrock-release-hardening.md
+git commit -s -m &quot;docs: record AWS Bedrock release verification&quot;
+</code></pre>
+<p>Do not stage the pre-existing modified GCP plan unless its own outstanding live
+verification checkbox is intentionally completed with current evidence.</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

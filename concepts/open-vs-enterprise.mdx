@@ -1,0 +1,103 @@
+---
+title: "Open vs Enterprise"
+sidebarTitle: "Open vs Enterprise"
+description: "What the open-source AgentGuardian is and what it is not. The line between the open-source red-teaming toolkit and the AgentGuardian Enterprise governance platform from Glacien."
+icon: "git-compare"
+---
+
+AgentGuardian comes in two layers. They share the same attack engine
+and the same canonical `scan.json`, but they solve different problems.
+These docs cover only the open-source layer.
+
+## AgentGuardian (open source)
+
+AgentGuardian is an **open-source red-teaming toolkit for AI
+agents**. It is licensed **Apache-2.0**, runs **fully local**, and is
+designed to drop into a developer's loop and into CI/CD.
+
+It is **not** a runtime gateway. It is **not** a guardrail product.
+It is **not** a policy proxy. It is the developer's pre-flight check:
+write an agent, scan it, read the report, fix the finding, commit the
+fix.
+
+Use AgentGuardian when you want to:
+
+- Find prompt injection, tool abuse, RAG poisoning, memory poisoning,
+  cascading failures, and unsafe agent behaviour **before** you ship.
+- Run reproducible adversarial scans in CI on every PR.
+- Generate SARIF for GitHub Code Scanning, JUnit for any CI dashboard,
+  PDF for an internal review, Markdown for a PR comment.
+- Cite a deterministic AIVSS score in a security review.
+- Embed adversarial testing in your own pipeline via the Python SDK.
+
+You get all of that for free, forever, under Apache-2.0. No telemetry
+is collected unless you explicitly opt in with `agent-guardian
+telemetry on`. Every scan stays on your machine; no findings, prompts,
+or transcripts leave your laptop.
+
+## AgentGuardian Enterprise
+
+AgentGuardian Enterprise is the commercial layer Glacien ships on top
+of the same open-source engine. It is **not** documented in these
+docs — by design. It exists to solve the problems that show up after
+a security team adopts AgentGuardian across many agents and many
+teams:
+
+- **Managed evidence packs** — a central, signed, queryable store of
+  every scan run by every team, with retention, search, and audit
+  trails.
+- **Team workflows** — assignment, triage, finding lifecycle, SLA
+  tracking, escalation, integrations with Jira / Linear / ServiceNow.
+- **Audit dashboards** — historical AIVSS trends, attack-surface
+  coverage maps, evidence-pack browsing for auditors and risk teams.
+- **Policy governance** — declarative agent-safety policies that fail
+  a release if a high-risk finding regressed, with enforcement at the
+  PR-check layer and at the runtime layer.
+- **Runtime controls** — the governance and enforcement plane that
+  sits in front of production agents and the only place
+  AgentGuardian acts as a defensive runtime. Open is **not** that.
+- **Commercial support** from Glacien — SLAs, dedicated engineering
+  contacts, custom adapter and probe development.
+
+Both layers consume the same canonical `scan.json` and the same probe
+corpus. Findings produced by AgentGuardian can be ingested by
+Enterprise without re-scanning. Adapters and strategies developed
+upstream in the open-source project flow into both.
+
+## Quick reference
+
+| Capability | AgentGuardian (open source) | AgentGuardian Enterprise |
+|---|---|---|
+| Adversarial scanning | ✅ | ✅ |
+| AIVSS scoring | ✅ | ✅ |
+| Evidence-backed reports (JSON / SARIF / JUnit / MD / PDF) | ✅ | ✅ |
+| Python SDK | ✅ | ✅ |
+| CI/CD integration (GitHub Actions, GitLab CI, etc.) | ✅ | ✅ |
+| Local live dashboard | ✅ | ✅ |
+| Apache-2.0 license | ✅ | — |
+| Self-hosted only, no telemetry by default | ✅ | — |
+| Centralised evidence-pack store across teams | — | ✅ |
+| Audit dashboards and historical trend reporting | — | ✅ |
+| Team workflows, assignment, lifecycle, SLA | — | ✅ |
+| Policy governance + PR-check enforcement | — | ✅ |
+| Runtime controls in front of production agents | — | ✅ |
+| Commercial support from Glacien | — | ✅ |
+
+## A note on positioning
+
+These docs are the developer-first home of the open-source project.
+They will not turn into a sales funnel. The
+[Enterprise](/enterprise/index) page is a single cross-link to
+[glacien.com](https://glacien.com/) for readers who arrive here and
+need the commercial layer. Everything else in this site is the OSS
+toolkit — what it does, how it works, how to run it.
+
+## Where to go next
+
+- [Quickstart](/quickstart) — install and run your first scan in five
+  minutes.
+- [How AgentGuardian works](/concepts/how-agentguardian-works) — the
+  four-step developer mental model.
+- [Reports overview](/reports/overview) — what a scan produces.
+- [Enterprise](/enterprise/index) — the one cross-link page for commercial
+  features and Glacien support.

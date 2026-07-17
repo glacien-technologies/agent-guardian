@@ -1,0 +1,120 @@
+---
+title: "Scan an AWS Bedrock Agent"
+description: "Drive Bedrock Agent Runtime InvokeAgent via a target contract."
+---
+
+Scan an AWS Bedrock Agent end-to-end through the Agent Runtime
+`InvokeAgent` data-plane endpoint. The transport is contract-only —
+Bedrock agents carry server-side session state, SigV4 auth, and an
+event-stream response envelope, so the contract is the right place to
+declare all three.
+
+## What this example tests
+
+- All 10 ASI categories against a Bedrock Agent.
+- SigV4 signing via `botocore` (lazy-imported from the `[aws]` extra)
+  with the standard AWS credential chain.
+- The `server_session` pattern — Bedrock's `sessionId` lives in the URL
+  path; AgentGuardian reuses the swarm's session as the `sessionId` so
+  conversation state carries between turns.
+
+Source: [`src/agent_guardian/transports/bedrock_agent.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/bedrock_agent.py),
+[`src/agent_guardian/contract/schema.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/contract/schema.py)
+(`BedrockAgentTransport`).
+
+## Prerequisites
+
+- AgentGuardian with the AWS extra installed:
+  `pip install 'agent-guardian[aws]'`.
+- A Bedrock Agent deployed in your AWS account. The
+  [AWS quickstart](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-create.html)
+  walks through the console flow.
+- AWS credentials available via the standard chain (env vars, shared
+  config, instance profile, etc.).
+- The agent id and alias id (the `TSTALIASID` working-draft alias is the
+  fastest path).
+- A model spec — `--model stub` for the contract dry-run, or a real
+  model spec for a graded scan.
+
+## Run target
+
+The target itself is your deployed Bedrock Agent. Export the env vars
+the contract dereferences:
+
+```bash
+export BEDROCK_AGENT_ID=...
+export BEDROCK_AGENT_ALIAS_ID=...
+```
+
+The bundled contract (`examples/bedrock_agent/agentguardian.yaml`):
+
+```yaml agentguardian.yaml
+version: 1
+target:
+  name: bedrock-demo
+  environment: staging
+  transport:
+    kind: bedrock_agent
+    region: us-east-1
+    agent_id: ${env:BEDROCK_AGENT_ID}
+    agent_alias_id: ${env:BEDROCK_AGENT_ALIAS_ID}
+    enable_trace: true
+  auth:
+    kind: aws_sigv4
+    service: bedrock
+    region: us-east-1
+  response:
+    output_path: $.output.text
+roe:
+  data_egress:
+    allow_external: false
+```
+
+Every transport field is verified against `BedrockAgentTransport` in
+`src/agent_guardian/contract/schema.py`.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --contract examples/bedrock_agent/agentguardian.yaml \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+Flag-by-flag:
+
+- `--contract PATH` — drive the scan from a target contract.
+- `--model stub` — offline default. Swap for `anthropic:claude-haiku-4-5`
+  (or another model spec) for a graded run.
+- `--mode fast` — `fast` / `smart` / `full` (default).
+- `--output md --output-path scan.md` — Markdown report.
+
+## Expected output
+
+`examples/bedrock_agent/sample-scan.json` ships a committed reference
+shape (env-redacted) for a `--model stub` contract run.
+
+## Common errors
+
+- **`ImportError: botocore is required for SigV4`.** Install the AWS
+  extra: `pip install 'agent-guardian[aws]'`.
+- **`NoCredentialsError`.** AWS credentials are not on the standard
+  chain. Export `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` or run on
+  an instance with a role.
+- **`AccessDeniedException` on `InvokeAgent`.** The caller IAM principal
+  is missing `bedrock:InvokeAgent` for the agent ARN. Add the action to
+  your policy.
+- **`ResourceNotFoundException`.** The agent or alias id is wrong, or the
+  region in the contract does not match the region the agent is deployed
+  in.
+
+## Next step
+
+- For a GCP-deployed target, read
+  [Scan a Gemini Vertex agent](/try/scan-gemini-agent).
+- For CI gating, wire the scan into
+  [GitHub Actions](/ci-cd/github-actions) with OIDC-issued AWS
+  credentials.

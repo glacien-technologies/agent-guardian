@@ -1,0 +1,131 @@
+---
+title: "How prompt injection becomes tool abuse in AI agents"
+sidebarTitle: "Prompt injection → tool abuse"
+description: "The three-step cascade that turns a single injected instruction into data exfiltration or privilege escalation in a tool-using AI agent. OWASP ASI 2026, MITRE ATLAS v5.4, and the AgentGuardian swarm's detection path explained for security engineers."
+icon: "shield-alert"
+---
+
+> Prompt injection on a chatbot is a content-safety bug. Prompt injection on a tool-using agent is a privilege-escalation bug. This post walks the cascade end-to-end — recon, payload delivery, tool call, side-effect — and shows where AgentGuardian's swarm specialists catch it. Written for security engineers and principal engineers; assumes you already know what an LLM is.
+
+## The shape of the problem
+
+The chatbot threat model is simple: the user types something; the model replies something; the only thing under attacker control is the text of the reply. If the reply is harmful, the model failed.
+
+The agent threat model is not that. A modern agent reads from:
+
+- **the system prompt** (set by you),
+- **the user turn** (set by the user, possibly an attacker),
+- **tool output** (set by whoever owns the tool — could be you, could be a third party, could be untrusted web content),
+- **retrieved documents** (set by whoever can write to the corpus — RAG corpora are rarely access-controlled at write time),
+- **memory** (set by previous turns — including previous attacker turns),
+- **other agents' replies** (set by whoever controls the other agent — could be a peer system you don't own).
+
+Every channel above is an injection surface. Every channel above eventually reaches a tool call. The cascade we care about is:
+
+```text
+inject -> the agent's plan changes -> the agent calls a tool -> the tool does something the system prompt forbids
+```
+
+That cascade is what OWASP ASI 2026 categorises as **ASI01 (Prompt Injection)** in isolation, **ASI02 (Tool Misuse / Tool Abuse)** when it lands a tool call, and **ASI03 (Privilege Escalation)** when the tool call out-ranks the user's authority. MITRE ATLAS calls the same chain `AML.T0051` (LLM Prompt Injection) -> `AML.T0054` (LLM Jailbreak) -> `AML.T0049` (Exploit Public-Facing Application) when the tool surface is exposed.
+
+## Step 1: recon — what does the agent know how to do?
+
+An attacker who knows your tool surface attacks differently than one who doesn't. The first move on any modern agent is reconnaissance:
+
+1. **Ask the agent to list its tools.** The default-friendly system prompt usually answers. ("What tools do you have access to?" / "Describe yourself in JSON.")
+2. **Probe its refusal posture.** A polite refusal narrows the safety surface; an over-eager refusal tells you the agent is sensitive to specific keywords you can paraphrase around.
+3. **Inspect tool output shapes.** A tool reply that includes raw error messages, file paths, internal IDs, or third-party API responses is reconnaissance gold.
+
+AgentGuardian's `RecognitionAgent` does exactly this. Its `TargetFingerprint` records the declared tools, the declared memory keys, the response shape, and the refusal posture, and that fingerprint flows into every downstream attacker's system prompt via `StrategyContext`. Surface-aware payloads beat generic ones every time; the swarm reflects that.
+
+## Step 2: payload delivery — where does the injection enter?
+
+Direct injection (the user just types it) is the easy case. Real attackers prefer **indirect** injection, where the malicious instruction enters through a channel the agent already trusts:
+
+- **Indirect via RAG.** The attacker plants the instruction in a document the corpus ingests. The agent retrieves it and treats it as authoritative.
+- **Indirect via tool output.** The attacker controls a service the agent's tool fetches from (a web page, an API the agent queries, an email body). The instruction rides in the response.
+- **Indirect via memory.** The attacker gets one turn of injection persisted into the agent's conversation memory; subsequent turns honour it.
+- **Indirect via A2A.** The attacker controls a peer agent the target talks to. The instruction rides in the peer agent's reply, which the target treats as a trusted system-level message.
+- **Indirect via UI / artifact rendering.** The attacker delivers the payload through a rich-text artifact (HTML, Markdown, SVG, image with EXIF metadata) the agent renders or summarises.
+
+Indirect injection is materially harder to defend against than direct injection because the agent's input-side guardrails were never designed to grade content from "trusted" channels. The ASI06 (Memory Poisoning) and ASI09 (Trust Exploitation) categories exist specifically because of this asymmetry.
+
+AgentGuardian's specialist agents cover both modes. `goal_hijack` (ASI01) ships direct-injection probes; `memory_poison` (ASI06) ships cross-session payloads delivered through the agent's own memory store; `tool_abuse` (ASI02) ships indirect probes delivered through tool-output channels; `multi_agent_exploit` (ASI07) ships A2A-channel injections.
+
+## Step 3: the tool call — where the side-effect lands
+
+Once the injection has hijacked the agent's plan, the dangerous behaviour is whatever the *tool* does. The eight tool-misuse primitives OWASP ASI 2026 lists under ASI02 are:
+
+1. **Argument injection** — the agent calls a tool with attacker-controlled arguments.
+2. **Argument smuggling** — the agent passes structured arguments that look harmless to the schema validator but are interpreted differently downstream (Unicode confusables, nested JSON, SQL fragments).
+3. **Chain exfiltration** — the agent calls a benign tool that returns sensitive data, then a second tool that emits it to an attacker-controlled destination.
+4. **Tool-output two-step laundering** — the agent calls a tool that surfaces sensitive data, then a *transform* step ("summarise this for my ticket") that launders the data past the direct-disclosure refusal. AgentGuardian's `ToolExfilStrategy` is built around this pattern.
+5. **Recursion / loop bombs** — the agent calls itself or a sub-agent until the budget is exhausted (the denial-of-wallet variant, LLM10).
+6. **Privilege escalation** — the agent's service-account / JIT credential out-ranks the calling user; the attacker gets the agent to act on their behalf with the agent's authority. (ASI03.)
+7. **Destructive-prefix coercion** — the agent has a tool named `drop_*`, `wipe_*`, `delete_*`, `exec_*`, `force_*`, and the attacker frames a benign reason to call it.
+8. **Sandbox escape** — the agent has a code-execution tool (`exec_python`, `run_shell`), and the attacker uses the language's full power instead of the documented subset. (ASI05.)
+
+The cascade we care about — `inject -> plan change -> tool call -> side-effect` — touches at least one of the eight on every realistic attack. The tool-abuse specialist's probe corpus is sharded against them.
+
+## Step 4: cascading failures — when one tool call enables the next
+
+ASI08 (Cascading Failures) is the category most defenders under-test. A single tool call rarely lands the final exploit alone; the realistic chain is:
+
+- step 1: inject through RAG ->
+- step 2: agent's plan changes ->
+- step 3: agent reads sensitive memory key ->
+- step 4: agent calls a benign-looking transform tool with the sensitive content as the argument ->
+- step 5: transform tool serialises the content to a log channel the attacker can read.
+
+Every step in isolation looks innocuous. The defence-in-depth posture that grades each step individually misses the chain. AgentGuardian's `CascadeAgent` and the shared `VectorMemory` are how multi-hop attacks become detectable: a finding produced by `goal_hijack` updates memory the `tool_abuse` agent reads on its next turn, and the cascade is reconstructed in the report's evidence timeline.
+
+## How AgentGuardian detects the cascade
+
+The four-step mental model — generate, execute, evaluate, ship — at [/concepts/how-agentguardian-works](/concepts/how-agentguardian-works) is the developer-facing summary. For security engineers, the salient points:
+
+1. **Surface-aware payloads.** `TargetFingerprint.declared_tools` and `declared_memory_keys` are inlined into every attacker's system prompt by `render_surface_brief` in `strategies/base.py`. A scan against a LangGraph agent with `search_kb` produces payloads naming `search_kb`, not generic placeholder tool names.
+2. **Parallel specialists, shared memory.** Ten ASI specialists run concurrently in an `asyncio.TaskGroup` (`src/agent_guardian/core/swarm.py`). A finding by one updates the shared `VectorMemory` so the next specialist can chain off it.
+3. **PoV-as-oracle.** Every finding ships with a proof-of-vulnerability script (`core/pov/`). Before scoring, the PoV runner re-plays the script N times against the live target and computes a reliability number (with a Wilson lower confidence bound for small N). Unreproducible findings — the classic single-shot LLM hallucination — are dropped before AIVSS scoring.
+4. **Critic Layer-2 rubric.** A PoV-passing finding is additionally scored by an LLM rubric (evidence / specificity / novelty / false-positive risk). The critic drops findings the LLM judge can't justify, even when the PoV reproduces. We catch the "the model echoed the attacker's text but the side-effect is zero" failure mode.
+5. **Evidence timeline.** Multi-hop findings are rendered as a sequence in the report's evidence timeline, not a single row. The cascade is visible.
+
+## How to read the AIVSS
+
+AIVSS is inverse-risk on a 0–100 scale: 100 means the swarm found nothing; 0 means the swarm found everything it tried. The bands (`band_for_score`) are:
+
+- 0–39 **CRITICAL**
+- 40–59 **HIGH**
+- 60–79 **MEDIUM**
+- 80–100 **EXCELLENT** (called LOW in older docs; renamed in 1.1)
+
+The score is deterministic for a fixed (agent, probes, model) tuple. LLM stochasticity is absorbed by the PoV gate and the critic rubric, not by the score. See [reports/aivss-score](/reports/aivss-score) for the formula.
+
+## What this does *not* cover
+
+AgentGuardian is a **testing** tool. It does not:
+
+- sit in front of a production agent at serve time,
+- block, redact, or rewrite production traffic,
+- guarantee zero false-negatives — every red-team tool, this one included, can miss a class of attacks not represented in its corpus,
+- replace a runtime gateway. If you need runtime governance see the [AgentGuardian Enterprise](/enterprise/index) tier. The OSS layer documented in these docs is the developer-loop and the CI-gate, not the runtime.
+
+## Reading list
+
+The academic precedents in this post:
+
+- **Tree of Attacks with Pruning** — Mehrotra, Zou, Yu et al., 2024. arXiv:2312.02119. Iterative attack-prompt refinement as a tree search.
+- **MAD-MAX** — Liu, Yao, Khalifa et al., 2024. Multi-agent debate for adversarial generation.
+- **RedAgent** — Xu, Chen et al., 2024. arXiv:2407.16667. Context-aware specialist attackers.
+- **Co-RedTeam** — Zou et al., 2024. Coordinated parallel multi-agent red-teaming.
+- **MUZZLE** — Wang, Chao et al., 2024. Cross-model jailbreak benchmark.
+- **OWASP Top 10 for Agentic Applications (ASI 2026)** — owasp.org/www-project-top-10-for-agentic-applications.
+- **MITRE ATLAS v5.4** — atlas.mitre.org.
+- **CSA Agentic AI Red Teaming Guide** — Cloud Security Alliance, 2025.
+
+The AgentGuardian-side mapping back into source is at [/concepts/research-foundation](/concepts/research-foundation).
+
+## Where to go next
+
+- Run the [/start-here/try-the-demo-agent](/start-here/try-the-demo-agent) walkthrough to see the cascade end-to-end against the hosted FinBot target (about 90 seconds wall-clock, about $0.01 of Gemini Flash).
+- Read the [/blog/breaking-a-langgraph-agent](/blog/breaking-a-langgraph-agent) walkthrough for a step-by-step reproduction against the testbench's coding-assistant target with the full attack transcript inline.
+- File an issue or open a probe PR at [glacien-technologies/agent-guardian](https://github.com/glacien-technologies/agent-guardian) if you have a cascade pattern the corpus doesn't yet cover.

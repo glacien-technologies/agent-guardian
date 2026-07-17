@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>AWS Bedrock Release Blockers Design - AgentGuardian</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#aws-bedrock-release-blockers-design" class="nav-link">AWS Bedrock Release Blockers Design</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#goal" class="nav-link">Goal</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#evidence-and-root-causes" class="nav-link">Evidence and root causes</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#constraints" class="nav-link">Constraints</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#design" class="nav-link">Design</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#error-handling-and-compatibility" class="nav-link">Error handling and compatibility</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#testing-strategy" class="nav-link">Testing strategy</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#acceptance-criteria" class="nav-link">Acceptance criteria</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="aws-bedrock-release-blockers-design">AWS Bedrock Release Blockers Design</h1>
+<p><strong>Date:</strong> 2026-07-17
+<strong>Status:</strong> Approved design, pending implementation
+<strong>Branch:</strong> <code>codex/fix-gcp-redteam-hardening</code></p>
+<h2 id="goal">Goal</h2>
+<p>Make AWS Bedrock scans safe and accurately budgeted by preventing AWS
+credentials from entering forensic logs, pricing current Bedrock inference
+profile identifiers correctly, and reporting conservative spend for dispatched
+requests that finish without a provider usage receipt.</p>
+<h2 id="evidence-and-root-causes">Evidence and root causes</h2>
+<p>Live verification used AWS SSO profile <code>ag-dev</code>, region <code>us-east-1</code>, and model
+<code>us.anthropic.claude-haiku-4-5-20251001-v1:0</code> at revision
+<code>1e75c4503d793ab7e943f1a807a0bf82bf98e990</code>.</p>
+<p>The direct Bedrock completion succeeded. A <code>$1.00</code> functional scan completed 35
+requests and 35 responses, and all 46,156 provider tokens appeared exactly once
+in each report form. The live gate still failed for the following reasons:</p>
+<ol>
+<li><code>attach_run_log_file()</code> lowers the root logger to <code>DEBUG</code>. Botocore is not in
+   the noisy-dependency clamp, so <code>botocore.parsers</code> writes SSO
+   <code>GetRoleCredentials</code> response bodies to <code>run.log</code>. The existing redactor does
+   not recognize AWS access-key identifiers or AWS credential field names.</li>
+<li><code>BedrockClient</code> inherits the base pricing identity and returns a bare request
+   model. The current dated inference-profile identifier is also absent from the
+   price table. Both paths fall through to the <code>$3/$15</code> unknown-model rate.</li>
+<li><code>BudgetAdmissionLLM</code> correctly commits a full reservation when a provider
+   request raises or is cancelled, but <code>SwarmCommander._live_cost_usd()</code> and
+   final report construction only roll up successful <code>UsageCounter</code> responses.
+   Ledger-only conservative spend is therefore omitted from reports.</li>
+<li>Post-scan usage folding starts <code>cost_usd</code> and <code>budget.spent_usd</code> from
+   different baselines, allowing them to disagree after summaries.</li>
+</ol>
+<p>The credential-bearing scan directories and temporary AWS outputs from this
+verification were deleted with user approval. The sanitized report remains at
+<code>.superpowers/sdd/task-aws-live-report.md</code>.</p>
+<h2 id="constraints">Constraints</h2>
+<ul>
+<li>Add no runtime dependency.</li>
+<li>Preserve all existing CLI flags and report fields.</li>
+<li>Never log AWS access keys, secret keys, session tokens, SigV4 signatures, or
+  populated AWS credential fields at any log level.</li>
+<li>Preserve full AgentGuardian-owned DEBUG diagnostics in <code>run.log</code>.</li>
+<li>Do not fabricate observed token usage when a dispatched request has no usage
+  receipt.</li>
+<li>A conservative unknown-outcome charge must never be lower than the reserved
+  request ceiling and must remain within the admitted cap.</li>
+<li>Successful provider responses must still be counted exactly once.</li>
+<li>Keep uncapped, non-Bedrock, and non-<code>PromptAdapter</code> behavior unchanged.</li>
+<li>Use TDD for every production behavior change.</li>
+<li>Every commit must be Conventional Commit formatted and DCO-signed.</li>
+<li>Do not push, merge, deploy, or modify the user's main checkout.</li>
+</ul>
+<h2 id="design">Design</h2>
+<h3 id="1-aws-log-protection">1. AWS log protection</h3>
+<p><code>logging_setup.py</code> will protect AWS credentials at two independent boundaries.</p>
+<p>First, the noisy-dependency clamp will include the <code>botocore</code> logger hierarchy.
+Attaching a DEBUG <code>run.log</code> handler may lower the root logger, but botocore wire,
+parser, credential-provider, and endpoint diagnostics will remain at <code>WARNING</code>
+or higher. AgentGuardian's own DEBUG records remain available.</p>
+<p>Second, <code>redact_secrets()</code> will recognize and mask:</p>
+<ul>
+<li><code>AKIA</code> and <code>ASIA</code> access-key identifiers;</li>
+<li>JSON and Python-repr values for <code>accessKeyId</code>, <code>secretAccessKey</code>,
+  <code>sessionToken</code>, and their snake-case variants;</li>
+<li><code>X-Amz-Security-Token</code> values;</li>
+<li>SigV4 <code>Authorization: AWS4-HMAC-SHA256 ...</code> values, including credential and
+  signature parameters.</li>
+</ul>
+<p>This redactor remains active even when an operator explicitly re-enables a
+botocore logger after configuration. Tests will feed a synthetic SSO role
+credential response through both <code>redact_secrets()</code> and a real attached
+<code>run.log</code> handler. No real credential value will be used in tests.</p>
+<h3 id="2-bedrock-pricing-identity-and-current-inference-profiles">2. Bedrock pricing identity and current inference profiles</h3>
+<p><code>BedrockClient.pricing_model_spec()</code> will return a provider-qualified identity:
+<code>bedrock:&lt;bare-model-id&gt;</code>. It will strip an already-present <code>bedrock:</code> prefix so
+decorator chains cannot produce <code>bedrock:bedrock:...</code>.</p>
+<p><code>cost.py</code> will recognize the current Claude Haiku 4.5 Bedrock Runtime model
+family, including the dated <code>20251001-v1:0</code> suffix and supported inference
+prefixes. Pricing will distinguish:</p>
+<ul>
+<li>global inference profiles: <code>$1.00</code> input / <code>$5.00</code> output per million tokens;</li>
+<li>US, EU, AU, JP, and unprefixed regional profiles: <code>$1.10</code> input / <code>$5.50</code>
+  output per million tokens.</li>
+</ul>
+<p>The model identity is documented by AWS at:
+https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html</p>
+<p>The global and geographic rates are documented by AWS at:
+https://aws.amazon.com/jp/blogs/news/amazon-bedrock-now-supports-japan-cross-region-inference/</p>
+<p>The price-table verification date will advance to <code>2026-07-17</code>. Existing
+Bedrock models outside the recognized Haiku family retain their current exact
+rows or conservative fallback. CLI documentation will use the currently valid
+dated model identifier.</p>
+<h3 id="3-conservative-unknown-outcome-spend">3. Conservative unknown-outcome spend</h3>
+<p>The budget ledger remains the source of truth for admission. Successful
+responses continue to populate usage counters with observed tokens and exact
+request-scoped prices.</p>
+<p>For live and final USD calculations, the scan will use:</p>
+<pre><code class="language-text">max(successful-response cost rollup, committed ledger spend)
+</code></pre>
+<p>This makes an exception or cancellation visible because
+<code>BudgetAdmissionLLM.complete()</code> already commits its full reservation on every
+<code>BaseException</code>. Token totals remain based only on provider usage receipts; an
+unknown-outcome reservation contributes dollars but does not invent prompt,
+completion, or total tokens.</p>
+<p>The resulting rules are:</p>
+<ul>
+<li>rejected pre-dispatch reservation: no provider dispatch and no spend;</li>
+<li>completed response: observed tokens and observed token-priced cost;</li>
+<li>dispatched request without usage: zero observed tokens and the full
+  conservative reservation as spend;</li>
+<li>later admissions cannot reuse that reservation.</li>
+</ul>
+<p><code>cost_usd</code> and <code>budget.spent_usd</code> will share this conservative baseline. The
+budget percentage derives from the same value.</p>
+<h3 id="4-post-scan-accounting-consistency">4. Post-scan accounting consistency</h3>
+<p><code>fold_postscan_usage()</code> will choose one pre-summary baseline:</p>
+<pre><code class="language-text">base_spend = max(scan.cost_usd, scan.budget.spent_usd)
+</code></pre>
+<p>It will then add successful summary usage once and write the same result to
+<code>cost_usd</code> and <code>budget.spent_usd</code>. <code>tokens_total</code> continues to add only summary
+tokens actually returned by the provider.</p>
+<p>This preserves conservative cancellation spend and prevents the report and
+budget meter from diverging after optional summaries.</p>
+<h2 id="error-handling-and-compatibility">Error handling and compatibility</h2>
+<ul>
+<li>Botocore suppression is logger-level filtering, not exception suppression;
+  AWS authentication and provider failures still propagate through existing
+  typed errors and AgentGuardian warning/error records.</li>
+<li>Redaction preserves field names and surrounding diagnostic text while
+  replacing credential values with the standard redaction marker.</li>
+<li>Unknown Bedrock models remain fail-closed at the existing conservative
+  fallback price.</li>
+<li>Ledger drift above a reservation continues to close admission through the
+  existing <code>BudgetLedger.commit()</code> behavior.</li>
+<li>No schema migration is required.</li>
+</ul>
+<h2 id="testing-strategy">Testing strategy</h2>
+<p>Each behavior begins with a focused failing regression test.</p>
+<ol>
+<li>Logging tests:</li>
+<li>synthetic botocore SSO response values are redacted;</li>
+<li>botocore DEBUG records do not enter a normal DEBUG <code>run.log</code>;</li>
+<li>explicitly re-enabled botocore logging still cannot expose credentials;</li>
+<li>AgentGuardian DEBUG records remain present.</li>
+<li>Pricing tests:</li>
+<li><code>BedrockClient.pricing_model_spec()</code> preserves <code>bedrock:</code> identity;</li>
+<li>global and geographic dated IDs resolve to their exact rates;</li>
+<li>unrecognized Bedrock IDs retain the conservative fallback;</li>
+<li>admission and usage tracking use the same resolved rate.</li>
+<li>Cancellation tests:</li>
+<li>a dispatched cancelled request commits the reservation;</li>
+<li>live and final spend include it;</li>
+<li>observed tokens remain zero;</li>
+<li>a rejected reservation never dispatches.</li>
+<li>Post-scan tests:</li>
+<li><code>cost_usd</code> and <code>budget.spent_usd</code> remain equal after summaries;</li>
+<li>summary usage is included once.</li>
+<li>Regression gates:</li>
+<li>focused tests, complete pytest suite, Ruff, formatting, mypy, pre-commit,
+     diff check, and package build;</li>
+<li>direct Bedrock exact-response smoke;</li>
+<li>bounded <code>$0.02</code> hard-cap scan and one <code>$1.00</code> functional fallback if the
+     hard-cap scan has no tested turns;</li>
+<li>provider/report token and cost reconciliation;</li>
+<li>zero AWS credential patterns in console, <code>run.log</code>, events, reports, and
+     verifier output;</li>
+<li>zero ANSI false-positive findings;</li>
+<li>manifest hash/byte verification and raw Ed25519 public-key verification.</li>
+</ol>
+<h2 id="acceptance-criteria">Acceptance criteria</h2>
+<ul>
+<li>A live AWS scan produces zero unredacted AWS credential patterns in every
+  generated artifact.</li>
+<li>The current US Haiku 4.5 inference-profile ID prices at <code>$1.10/$5.50</code>, and
+  global prices at <code>$1.00/$5.00</code>.</li>
+<li>All completed Bedrock response tokens appear exactly once in final reports.</li>
+<li>A dispatched request without usage causes conservative non-zero spend and
+  zero fabricated observed tokens.</li>
+<li><code>cost_usd</code> equals <code>budget.spent_usd</code> before and after post-scan summaries.</li>
+<li>The live hard cap is not exceeded.</li>
+<li>Existing GCP verification behavior and all non-AWS providers remain green.</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

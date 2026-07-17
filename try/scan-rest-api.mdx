@@ -1,0 +1,166 @@
+---
+title: "Scan a REST API agent"
+description: "Point AgentGuardian at any HTTP/JSON agent endpoint with --endpoint."
+---
+
+The simplest target shape is an agent exposed over an HTTP endpoint that
+accepts a JSON body with a prompt and returns a JSON response. If your
+agent has a `/chat`, `/invoke`, or `/v1/messages`-style endpoint, this is
+the page for you.
+
+## What this example tests
+
+- Black-box red-team of a hosted HTTP agent — no source access required.
+- All 10 ASI categories (prompt injection, tool abuse, goal hijack,
+  detection evasion, supply-chain, etc.) against the endpoint as the
+  swarm sees it.
+- The `--endpoint` mode runs a pre-flight reachability check first so an
+  unreachable target fails fast with `EXIT_TARGET_UNREACHABLE` (code 6)
+  instead of burning LLM budget.
+
+Source: [`src/agent_guardian/transports/http.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/http.py).
+
+## Prerequisites
+
+- AgentGuardian installed — `pip install agent-guardian` (or `uv sync` in
+  a checkout of the repo).
+- An HTTP endpoint that accepts `POST` with a JSON body and returns a
+  JSON response. The default request template is `{"input": "<prompt>"}`
+  and the default response shape is generic JSON; if your endpoint
+  requires a different shape, use a contract (see
+  [Scan an MCP server](/try/scan-mcp-server) for the contract pattern).
+- A model spec. `--model stub` runs offline with no keys and is the
+  fastest way to get a clean run. For a real assessment, set one of:
+  - `OPENAI_API_KEY` for `--model openai:gpt-4o`
+  - `GEMINI_API_KEY` for `--model gemini:gemini-2.5-flash`
+  - `ANTHROPIC_API_KEY` for `--model anthropic:claude-haiku-4-5`
+
+## Run target
+
+You have two easy options:
+
+**Option A — Use the public testbench.** AgentGuardian operates a
+deliberately-vulnerable hosted agent (`finbot`, a banking assistant) at
+a public Cloud Run URL. No setup required:
+
+```bash
+curl https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/health
+```
+
+**Option B — Run your own FastAPI agent locally.** Save the following as
+`my_agent.py`, then run `uvicorn my_agent:app --port 8000`:
+
+```python my_agent.py
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+
+class ChatRequest(BaseModel):
+    input: str
+
+
+@app.post("/chat")
+def chat(req: ChatRequest) -> dict:
+    # Replace with a real LLM call.
+    return {"output": f"You said: {req.input}"}
+```
+
+## Run AgentGuardian
+
+Against the public testbench:
+
+```bash
+agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+Against your local FastAPI agent:
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/chat \
+  --model stub \
+  --mode fast \
+  --output md \
+  --output-path scan.md
+```
+
+Flag-by-flag, every option below is verified against
+`src/agent_guardian/cli.py`:
+
+- `--endpoint URL` — hosted HTTP endpoint of the target agent. Mutually
+  exclusive with the positional `target`, `--system-prompt`,
+  `--framework`, and `--contract` modes.
+- `--model stub` — universal safe default. Runs the scan offline with no
+  LLM keys. Swap for `gemini:gemini-2.5-flash`, `openai:gpt-4o`,
+  `anthropic:claude-haiku-4-5`, `ollama:llama3.1`, or a Bedrock model
+  spec for a real assessment.
+- `--mode fast` — caps each agent at 3 probes / 4 turns (~45s, ~$0.008
+  on Gemini). Use `--mode smart` for the v1.0 default (early-stop) or
+  `--mode full` for the authoritative run (default).
+- `--output md --output-path scan.md` — Markdown report at `scan.md`.
+  Other formats: `json`, `sarif`, `junit`, `pdf`.
+
+## Expected output
+
+The Markdown report opens with the scan header. The exact AIVSS number
+depends on `--model`, `--mode`, and the target:
+
+```markdown
+# AgentGuardian scan `cli-2d2c1ebb5a19`
+**AIVSS** `n/a (not evaluated)`  |  **Band** `not_evaluated` (#64748b)  |  **Tier** `T4`  |  **Coverage** `C`
+- **Target:** `http://localhost:8000/chat` (http)
+- **Duration:** 12.4s  |  **Cost:** $0.0000
+- **Probe library:** `2026.05`  |  **AIVSS formula:** `aivss-v1`
+
+## Severity summary
+
+| Severity | Count |
+|----------|------:|
+| Critical | 0 |
+| High     | 0 |
+| Medium   | 0 |
+| Low      | 0 |
+| **Total** | **0** |
+```
+
+A `--model stub` scan always comes back clean — the stub model gives the
+swarm nothing to attack with. Re-run with `--model gemini:gemini-2.5-flash`
+against the live `finbot` testbench and you should land in the `POOR`
+band (40–59) with several findings under `asi01.*` and `asi02.*`.
+
+## Common errors
+
+- **`EXIT_TARGET_UNREACHABLE` (exit code 6).** The pre-flight reachability
+  check `POST`s an empty body twice with a 2-second timeout. If both
+  attempts fail with `ConnectError`/`Timeout`, the scan exits before
+  burning budget. Pass `--no-preflight` to skip the check if your
+  endpoint refuses empty bodies but is actually up.
+- **`422 Unprocessable Entity` on every request.** Your endpoint expects
+  a different request shape than `{"input": "<prompt>"}`. Use a
+  [target contract](/reference/config) to declare a custom request
+  template and `output_path` for response extraction.
+- **`401 Unauthorized` / `403 Forbidden`.** Your endpoint requires auth.
+  The `--endpoint` mode is unauthenticated; use a contract with the
+  `auth:` block for bearer, API-key, OAuth2, mTLS, AWS SigV4, GCP ADC,
+  or Azure Entra authentication.
+- **Scan finishes with `coverage = C` and `band = not_evaluated`.**
+  Expected with `--model stub`. Re-run with a real model spec to get a
+  graded AIVSS score.
+
+## Next step
+
+- For a tool-bearing or memory-bearing target, read
+  [Scan a LangGraph agent](/try/scan-langgraph) for the in-process
+  framework-adapter pattern that gives the swarm better visibility.
+- For an authenticated or shape-customised target, see the
+  [Config file reference](/reference/config) for the contract
+  schema (transports, auth, RoE).
+- To gate a CI build on AIVSS, wire this scan into
+  [GitHub Actions](/ci-cd/github-actions) with `--fail-under 70`.

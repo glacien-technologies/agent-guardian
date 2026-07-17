@@ -1,0 +1,432 @@
+---
+title: "Python SDK"
+description: "The public Python API for embedding AgentGuardian in your own code."
+icon: "code"
+---
+
+The CLI is a thin wrapper around a library. Anything `agent-guardian scan`
+can do is reachable from Python. This page documents the **public** API
+— the symbols exported by `agent_guardian.__all__`. Everything else
+(`agent_guardian._*`, `agent_guardian.core.*` internals) is unstable and
+may change without notice.
+
+## When to use this
+
+Reach for the SDK when you need to:
+
+- Drive a scan from inside an existing Python test suite or workflow.
+- Build adapters that wrap a framework AgentGuardian doesn't ship out of
+  the box (subclass `TargetAdapter`).
+- Author a custom probe and feed it to an existing agent slate.
+- Verify a signed report inline without shelling out.
+- Estimate scan cost before kicking one off.
+
+For one-off scans, the CLI is faster. The SDK starts paying off the
+moment you want programmatic access to `Scan`, `Finding`, or `AivssResult`.
+
+## The three wedges
+
+Every scan starts with the same three building blocks. The CLI just
+calls these for you.
+
+```python
+from agent_guardian import (
+    SwarmCommander, SwarmConfig,
+    StubLLM, PromptAdapter,
+)
+
+config = SwarmConfig(scan_id="my-first-scan")
+target = PromptAdapter("You are a helpful customer-support bot.",
+                       llm=StubLLM(), model="stub", ref="inline")
+
+swarm = SwarmCommander(
+    config=config,
+    target=target,
+    attacker_llm=StubLLM(),
+    evaluator_llm=StubLLM(),
+)
+
+import asyncio
+scan = asyncio.run(swarm.run())
+
+print(f"AIVSS {scan.aivss} ({scan.severity_band.value})")
+print(f"{len(scan.findings)} finding(s)")
+```
+
+`SwarmCommander` is single-shot — call `.run()` exactly once. The
+`Scan` it returns is a Pydantic model you can serialise, persist, or
+feed back into a report writer.
+
+## Running with a real provider
+
+Build LLM clients directly and pass them in.
+
+```python
+import os
+from agent_guardian import (
+    SwarmCommander, SwarmConfig,
+    AnthropicClient, PromptAdapter,
+)
+
+attacker = AnthropicClient(api_key=os.environ["ANTHROPIC_API_KEY"])
+evaluator = AnthropicClient(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+config = SwarmConfig(
+    scan_id="anthropic-scan",
+    commander_model="claude-haiku-4-5",
+    attacker_model="claude-haiku-4-5",
+    evaluator_model="claude-haiku-4-5",
+    usd_cap=1.00,                       # hard ceiling
+)
+
+target = PromptAdapter(
+    open("system_prompt.txt").read(),
+    llm=attacker,                        # PromptAdapter needs an LLM to roleplay the target
+    model="claude-haiku-4-5",
+    ref="system_prompt.txt",
+)
+
+swarm = SwarmCommander(
+    config=config,
+    target=target,
+    attacker_llm=attacker,
+    evaluator_llm=evaluator,
+)
+```
+
+Every provider client follows the same shape. The full list of clients
+is below.
+
+## Adapters
+
+Build a `TargetAdapter` to teach AgentGuardian how to send a probe to
+your agent and read its response.
+
+| Class | Wraps |
+| --- | --- |
+| `PromptAdapter` | A raw system prompt + an LLM. The adapter roleplays the target. |
+| `CodeAdapter` | A Python callable referenced by dotted path (`my_app.agent:run`). |
+| `HttpAdapter` | A hosted HTTP endpoint. Pair with one of the registered `HttpShape`s. |
+| `LangGraphAdapter` | A compiled LangGraph graph. |
+| `CrewAIAdapter` | A CrewAI `Crew`. |
+| `AutoGenAdapter` | An AutoGen group chat. |
+| `OpenAIAgentsAdapter` | An OpenAI Agents SDK agent. |
+| `StrandsAdapter` | A Strands agent. |
+| `ADKAdapter` | A Google ADK agent. |
+
+All adapters share the `TargetAdapter` base. Subclass it for anything
+exotic — the contract is two async methods (`fingerprint`, `send`) and a
+`TargetFingerprint` payload describing what you discovered about the
+target during probe.
+
+```python
+from agent_guardian import HttpAdapter, get_shape
+
+shape = get_shape("openai_chat_completions")
+target = HttpAdapter(
+    endpoint="https://api.your-agent.com/v1/chat",
+    shape=shape,
+    headers={"Authorization": f"Bearer {token}"},
+)
+```
+
+Use `list_shapes()` to see every registered shape; `register_shape()` to
+add your own.
+
+## LLM clients
+
+| Client | Provider | Auth |
+| --- | --- | --- |
+| `OpenAIClient` | OpenAI | `api_key` (env: `OPENAI_API_KEY` / `AGENT_GUARDIAN_OPENAI_API_KEY`). |
+| `AnthropicClient` | Anthropic | `api_key` (env: `ANTHROPIC_API_KEY` / `AGENT_GUARDIAN_ANTHROPIC_API_KEY`). |
+| `GeminiClient` | Google AI Studio | `api_key` (env: `GEMINI_API_KEY` / `GOOGLE_API_KEY` / `AGENT_GUARDIAN_GEMINI_API_KEY`). |
+| `OllamaClient` | Local Ollama | No auth. |
+| `BedrockClient` | AWS Bedrock | Standard AWS credential chain. Requires `[aws]` extra. |
+| `VertexClient` | Vertex AI | Request-builder-only today (M9-pending OAuth2 SA auth). |
+| `StubLLM` / `StubScript` | Deterministic test stub | No auth. Use for tests / dry runs. |
+
+Every client implements `BaseLLM` and emits `LLMUsage` so cost rollups
+work uniformly.
+
+### Stub script
+
+`StubScript` is the recommended way to drive deterministic tests:
+
+```python
+from agent_guardian import StubScript
+
+llm = (
+    StubScript()
+    .default("safe default response")
+    .build()
+)
+```
+
+Anything not matched by an explicit `.on(pattern, response)` falls back
+to the `.default(...)` reply.
+
+## Probes
+
+Probes are YAML files that ship with the package. Load them from Python:
+
+```python
+from agent_guardian import (
+    AsiCategory, PROBE_CORPUS_VERSION,
+    load_all_probes, load_probes_for_asi,
+    load_probe, load_probes_from_dir,
+    Probe, ProbeValidationError,
+)
+
+print(f"Probe corpus version: {PROBE_CORPUS_VERSION}")
+
+all_probes: list[Probe] = load_all_probes()
+tool_abuse_probes = load_probes_for_asi(AsiCategory.ASI02)
+
+# Author your own:
+my_probes = load_probes_from_dir("./my-probes/")
+```
+
+A `Probe` carries `id`, `name`, `asi`, `severity`, `tier_floor`,
+`prompts`, and metadata. `load_probe(path)` raises
+`ProbeValidationError` on a bad schema.
+
+## Reports
+
+Write the same five output formats the CLI emits:
+
+```python
+from agent_guardian import (
+    emit_json, write_json,
+    emit_sarif, write_sarif,
+    emit_junit, write_junit,
+    emit_markdown, write_markdown,
+    write_pdf,                       # binary, file-only
+    available_pdf_engines,
+)
+
+# In-memory:
+payload = emit_json(scan)            # dict ready for json.dumps
+sarif = emit_sarif(scan)             # dict ready for json.dumps
+
+# Write to disk:
+write_json(scan, "scan.json")        # signed JSON (HMAC + Ed25519)
+write_sarif(scan, "scan.sarif")
+write_pdf(scan, "scan.pdf")          # raises PdfFeatureUnavailable if no engine
+
+print("PDF engines available:", available_pdf_engines())
+```
+
+## Signatures
+
+JSON reports are signed by default. Verify them inline:
+
+```python
+from agent_guardian import verify_signatures, VerifyResult
+
+result: VerifyResult = verify_signatures(
+    "scan.json",
+    expected_ed25519_pubkey="BASE32...",   # pinned signer key
+    expected_hmac_secret=os.environ.get("AGENT_GUARDIAN_SIGNING_SECRET"),
+)
+
+if result.ok:
+    print("schema OK, HMAC OK, Ed25519 OK, trust anchor PINNED")
+```
+
+The crypto building blocks (`sign_ed25519`, `verify_ed25519`,
+`sign_hmac`, `verify_hmac`, `Ed25519Keypair`, `HmacSignatureBlock`) are
+also public if you need to sign / verify outside the report flow.
+
+## Cost estimation
+
+```python
+from agent_guardian import (
+    PRICE_TABLE, PRICE_TABLE_AS_OF,
+    PriceRow, estimate_scan_cost, lookup_price,
+)
+
+row: PriceRow = lookup_price("anthropic:claude-haiku-4-5")
+print(f"{row.provider}:{row.model} = ${row.input_per_1m}/1M in, ${row.output_per_1m}/1M out")
+
+# Estimate cost for a 2M-token scan (the default budget):
+cost = estimate_scan_cost(
+    commander_model="claude-haiku-4-5",
+    attacker_model="gpt-4o-mini",
+    evaluator_model="gpt-4o-mini",
+    total_tokens=2_000_000,
+)
+print(f"≈ ${cost:.4f}")
+```
+
+`PRICE_TABLE_AS_OF` is the date stamp on the bundled prices so you know
+how stale they are.
+
+## Scoring
+
+```python
+from agent_guardian import (
+    AIVSS_FORMULA_VERSION, AivssResult, compute_aivss,
+    band_for_score, colour_for_band, SeverityBand,
+)
+
+result: AivssResult = compute_aivss(scan.findings, tier=scan.tier)
+band: SeverityBand = band_for_score(result.score)
+print(f"AIVSS {result.score} ({band.value}) {colour_for_band(band)}")
+```
+
+## Tier detection
+
+```python
+from agent_guardian import detect_tier, Tier, ObservedSurface
+
+tier: Tier = detect_tier(fingerprint)   # fingerprint comes from TargetAdapter.fingerprint()
+```
+
+## Models you can pass around
+
+The Pydantic models that ride the public surface:
+
+| Model | Carries |
+| --- | --- |
+| `Scan` | Full scan result. `aivss`, `findings`, `tier`, `cost_usd`, signatures. |
+| `Finding` | One concrete adversarial finding. ID, ASI, severity, summary, transcript_ref. |
+| `Scenario` / `ScenarioBatch` | Attacker scenarios emitted into / consumed by a strategy. |
+| `Probe` | One YAML probe. |
+| `SwarmEvent` | Streamed via `SwarmObserver` callback during a scan. |
+| `JudgeVerdict` | One judge ruling on one turn. |
+| `AivssResult` | Output of `compute_aivss`. |
+| `TargetFingerprint` | What recon learned about a target. |
+
+## Memory + sandbox
+
+```python
+from agent_guardian import (
+    SharedMemory, MemoryRecord, MemoryStats, VectorHit,
+    Sandbox, SandboxPolicy, SandboxViolation,
+    PiiRedactor,
+)
+```
+
+`SharedMemory` is the swarm's cross-agent scratchpad. `Sandbox` is the
+process-isolation primitive used by `code-exec-agent`. `PiiRedactor`
+runs on every finding before it lands in a report.
+
+## Strategies
+
+Adversarial decision policies. Default agents pick one; you can drive
+your own:
+
+| Strategy | Family |
+| --- | --- |
+| `PAIRStrategy` | PAIR (Prompt Automatic Iterative Refinement). |
+| `TAPStrategy` | TAP (Tree of Attacks with Pruning). |
+| `CrescendoStrategy` | Multi-turn escalation. |
+| `MadMaxStrategy` | Worst-case stress test. |
+
+All four implement `Strategy`. Use `StrategyContext`, `Turn`,
+`NextPrompt`, `StrategyDone`, and `StrategyResult` to thread them into a
+custom agent.
+
+## Server
+
+```python
+from agent_guardian import create_app, ScanStore
+
+app = create_app()      # FastAPI app — same one `agent-guardian serve` runs
+```
+
+The dashboard backs onto `ScanStore`. Mount the app behind any ASGI
+server. The CLI uses uvicorn.
+
+## Full export list
+
+The complete set of public symbols (`agent_guardian.__all__`):
+
+```python
+# Constants
+AIVSS_FORMULA_VERSION, DEFAULT_KEYS_DIR, DEFAULT_PBKDF2_ITERATIONS,
+DEFAULT_SIGNING_SECRET, HMAC_ALGORITHM, PRICE_TABLE, PRICE_TABLE_AS_OF,
+PROBE_CORPUS_VERSION, SCHEMA_VERSION, SIGNATURE_VERSION
+
+# Agents
+A2AAgent, AsiAgent, CascadeAgent, CodeExecAgent, DriftAgent,
+GoalHijackAgent, IdentityLeakAgent, MemoryPoisonAgent, PrivilegeAgent,
+ReconAgent, SupplyChainAgent, ToolAbuseAgent, TrustExploitAgent
+Judge, JudgeRubric, JudgeVerdict, AgentBudget, AgentReport
+
+# Adapters
+TargetAdapter, TargetFingerprint, TargetMode,
+PromptAdapter, CodeAdapter, HttpAdapter, HttpShape,
+FrameworkAdapter, ADKAdapter, AutoGenAdapter, CrewAIAdapter,
+LangGraphAdapter, OpenAIAgentsAdapter, StrandsAdapter,
+get_shape, list_shapes, register_shape
+
+# LLM clients + errors
+BaseLLM, AnthropicClient, BedrockClient, GeminiClient, OllamaClient,
+OpenAIClient, StubLLM, StubScript, VertexClient,
+LLMMessage, LLMRequest, LLMResponse, LLMUsage,
+LLMError, LLMAuthError, LLMRateLimitError, LLMTimeoutError,
+LLMTransientError, LLMPermanentError, LLMResponseFormatError
+
+# Core
+SwarmCommander, SwarmConfig, SwarmEvent, SwarmObserver,
+CheckpointDecision,
+BudgetController, BudgetSlice,
+SharedMemory, MemoryRecord, MemoryStats, MemoryFeatureUnavailable, VectorHit,
+Sandbox, SandboxPolicy, SandboxViolation,
+PiiRedactor,
+AivssResult, compute_aivss,
+detect_tier
+
+# Strategies
+Strategy, StrategyContext, StrategyDone, StrategyResult, Turn, NextPrompt,
+PAIRStrategy, TAPStrategy, CrescendoStrategy, MadMaxStrategy
+
+# Models
+AsiCategory, CsaCategory,
+AgentBrief, AgentOrigin, DeliveryVector, SubGoal, SwarmBrief,
+ObservedSurface, Tier,
+Probe, ProbeValidationError,
+Scan, Scenario, ScenarioBatch, ScenarioType,
+Finding, Severity, SeverityBand,
+band_for_score, colour_for_band
+
+# Probes
+load_all_probes, load_probes_for_asi, load_probe, load_probes_from_dir
+
+# Reports
+emit_json, emit_junit, emit_markdown, emit_sarif,
+write_json, write_junit, write_markdown, write_sarif, write_pdf,
+to_canonical_json,
+PdfFeatureUnavailable, available_pdf_engines,
+VerifyResult, verify_signatures, sign_payload
+
+# Crypto
+Ed25519Keypair, Ed25519SignatureBlock,
+sign_ed25519, verify_ed25519, load_or_create_keypair,
+HmacSignatureBlock,
+sign_hmac, verify_hmac, derive_key
+
+# Cost
+PriceRow, lookup_price, estimate_scan_cost
+
+# Server
+create_app, ScanStore
+
+# Misc
+__version__
+```
+
+Anything not in this list is internal. If you find yourself reaching into
+`agent_guardian.core.*` or any underscore-prefixed module, open an issue
+— we'd rather lift the symbol into the public surface than have you
+depend on an internal.
+
+## Next step
+
+- Pair the SDK with the [Config](/reference/config) precedence rules so
+  programmatic scans see the same defaults as the CLI.
+- Map provider errors to your own retry policy via the
+  [Error codes](/reference/exit-codes) taxonomy.
+- Drive the same surface from the shell with the
+  [CLI reference](/reference/cli).

@@ -1,0 +1,192 @@
+---
+title: "Try the demo agent"
+description: "Point AgentGuardian at a hosted, deliberately-vulnerable banking assistant and watch a real swarm finish in under two minutes."
+icon: "play"
+---
+
+The fastest way to see a real scan — no agent of your own required. The
+**AgentGuardian Testbench** is a hosted Cloud Run service that runs five
+demo agents, one clean control and four planted with deliberate
+OWASP-LLM-Top-10 vulnerabilities. You point the scanner at the FinBot
+banking assistant and watch the swarm peel it open.
+
+<Warning>
+The testbench targets are owned and operated by the AgentGuardian
+project specifically so the community can red-team them. **Never run
+AgentGuardian against a system you do not own or have written
+authorisation to test.** Doing so may violate computer-misuse laws in
+your jurisdiction.
+</Warning>
+
+<Steps>
+
+<Step title="Confirm the testbench is up" icon="heart-pulse">
+
+```bash
+curl https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/health
+```
+
+```json expandable
+{
+  "ok": true,
+  "agents": [
+    "clean_control",
+    "coding_assistant",
+    "finbot",
+    "support_bot",
+    "travel_concierge"
+  ]
+}
+```
+
+You will attack `finbot` (a fictional banking assistant for "CineFlow
+Productions") in the next step.
+
+</Step>
+
+<Step title="Set your LLM API key" icon="key">
+
+The swarm needs an LLM provider to drive the Commander, Attacker, and
+Evaluator roles. Gemini 2.5 Flash is the cheapest path — a `--mode fast`
+scan costs roughly $0.01.
+
+<CodeGroup>
+```bash Gemini
+export GEMINI_API_KEY=your_key_here
+```
+
+```bash OpenAI
+export OPENAI_API_KEY=your_key_here
+```
+
+```bash Anthropic
+export ANTHROPIC_API_KEY=your_key_here
+```
+</CodeGroup>
+
+<Tip>
+No API key handy? Swap `--model gemini:gemini-2.5-flash` for
+`--model stub` below. The swarm structure runs end-to-end but the AIVSS
+comes back as `band=not_evaluated` because the stub evaluator is not a
+real LLM. Use it to learn the flow, then re-run with a real model for
+an authoritative score.
+</Tip>
+
+</Step>
+
+<Step title="Run the scan" icon="play">
+
+```bash
+agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+  --model gemini:gemini-2.5-flash \
+  --mode fast \
+  --budget-usd 0.20
+```
+
+Every flag here is declared in `src/agent_guardian/cli.py`:
+
+- `--endpoint` — hosted HTTP target URL.
+- `--model gemini:gemini-2.5-flash` — LLM spec for Commander / Attacker / Evaluator roles.
+- `--mode fast` — CI-gate smoke profile; caps each agent at 3 probes / 4 turns.
+- `--budget-usd 0.20` — hard USD cap; the swarm soft-stops new attack turns at 80%.
+
+Within the first second of stdout you will see two clickable URLs — that
+is the auto-served live dashboard wiring up before the swarm fires.
+
+</Step>
+
+</Steps>
+
+## Expected output
+
+The full live region is several hundred lines; here is a redacted slice
+showing the dashboard banner, mid-scan progress, and the final summary:
+
+```text expandable
+▸ Scan cli-3a4c1d9c2840 — track live at  http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+▸ Report when complete                   http://127.0.0.1:7474/scan/cli-3a4c1d9c2840/report
+→ live dashboard: http://127.0.0.1:7474/scan/cli-3a4c1d9c2840
+
+  AgentGuardian v1.1.0 · mode=fast · budget=$0.20 · seed=0
+  target  : https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat
+  tier    : T1 (auto-detected — tools + memory + PII)
+  swarm   : 16 agents (10 ASI + 1 gap-fill + 5 OWASP-LLM)
+
+  ✓ recon              probes=fingerprint                spend=$0.001
+  ✓ goal_hijack        probes=9   findings=3             spend=$0.018
+  ✓ tool_abuse         probes=8   findings=2             spend=$0.022
+  ✓ memory_poison      probes=8   findings=1             spend=$0.016
+  ✓ secret_extraction  probes=3   findings=3             spend=$0.011
+  ✓ excessive_agency   probes=3   findings=2             spend=$0.014
+  ...
+
+scan cli-3a4c1d9c2840 done: AIVSS=23 band=CRITICAL tier=T1 findings=14 report=scan.json
+```
+
+The exact AIVSS, finding count, and per-agent spend vary turn-to-turn
+(LLM non-determinism) but the **band stays CRITICAL** on every fast-mode
+run we have benchmarked — FinBot's planted vulnerabilities are not subtle.
+
+## The summary line, field by field
+
+```text
+scan cli-3a4c1d9c2840 done: AIVSS=23 band=CRITICAL tier=T1 findings=14 report=scan.json
+```
+
+- `AIVSS=23` — inverse-risk 0–100; **lower is more vulnerable**.
+- `band=CRITICAL` — `band_for_score` cutoff: any score < 40 is CRITICAL.
+- `tier=T1` — auto-detected target tier (T1 = tools + memory + PII; the
+  testbench advertises a tool surface so the swarm picks the strictest tier).
+- `findings=14` — how many planted vulnerabilities the swarm confirmed.
+- `report=scan.json` — the default emitter; the canonical, signed copy
+  also lands at `~/.agentguardian/scans/<scan_id>/scan.json`.
+
+## Compare against the clean control
+
+Now point the same scan at `clean_control` — a control agent built with
+no planted vulnerabilities — to verify the scanner is not generating
+false positives.
+
+```bash
+agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/clean_control/chat \
+  --model gemini:gemini-2.5-flash \
+  --mode fast \
+  --budget-usd 0.20
+```
+
+Expected summary line:
+
+```text
+scan cli-9f2e7b1a3c44 done: AIVSS=96 band=EXCELLENT tier=T4 findings=0 report=scan.json
+```
+
+The control answers basic questions about a fictional library catalogue
+and refuses every prompt-injection, secret-extraction, and tool-abuse
+attempt the swarm throws at it. **0 findings on the control + 14 on
+FinBot** is the credibility evidence: AgentGuardian found real
+vulnerabilities, not phantoms.
+
+<Check>
+You have now run AgentGuardian against both a vulnerable agent and a
+clean control. The 73-point AIVSS gap (96 → 23) is the scanner doing
+its job.
+</Check>
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Understanding Your First Report" icon="file-text" href="/start-here/understanding-your-first-report">
+    Read every field of the `scan.json` — findings, evidence, AIVSS breakdown, fix-it commands.
+  </Card>
+  <Card title="Scan a REST API Agent" icon="play" href="/try/scan-rest-api">
+    Now point the scanner at your own HTTP-shaped agent.
+  </Card>
+  <Card title="How AgentGuardian Works" icon="compass" href="/concepts/how-agentguardian-works">
+    The four-phase swarm: Recon → Decompose → Parallel attack → Finalise.
+  </Card>
+  <Card title="Attack Library" icon="shield-alert" href="/attacks/overview">
+    All 96 probes across 10 OWASP ASI categories.
+  </Card>
+</CardGroup>

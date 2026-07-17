@@ -1,0 +1,71 @@
+---
+title: "Quick start — vulnerable demo agents"
+description: "docker compose up, then scan. Expect a real finding in under five minutes."
+---
+
+## Prerequisites
+
+- Docker 20.10+ and Docker Compose v2.
+- Python 3.11–3.13 for `agent-guardian` (3.14 not yet supported) — or use the docker image, see below.
+
+You do **not** need a Gemini key. The repo ships with a stub adapter that returns deterministic vulnerable responses when `GEMINI_API_KEY` is unset.
+
+## Step 1 — Clone and start the stack
+
+```bash
+git clone https://github.com/glacien-technologies/agentguardian-vulnerable-agents
+cd agentguardian-vulnerable-agents
+docker compose up --build -d
+
+curl http://localhost:8000/health
+# {"ok":true,"agents":["defended-baseline","vulnerable-langgraph-chatbot","vulnerable-mcp-server","vulnerable-rag-agent","vulnerable-tool-agent"],"live_mode":false}
+```
+
+## Step 2 — Scan with AgentGuardian
+
+```bash
+pip install agent-guardian
+
+agent-guardian scan \
+  --endpoint http://localhost:8000/vulnerable-langgraph-chatbot/chat \
+  --model stub \
+  --mode fast \
+  --output pdf \
+  --output-path scan.pdf
+
+open scan.pdf
+```
+
+Expected output:
+
+- At least one finding in **LLM01 — Prompt Injection** (the agent responds `OVERRIDE_OK` to a CEO-override prompt).
+- At least one finding in **LLM06 — Excessive Agency** (the agent calls `force_wire_transfer` without confirmation).
+- At least one finding in **LLM07 — System Prompt Leakage** (the agent reveals its internal account number and signing key prefix).
+
+The full scan takes 60-120 seconds in `--mode fast` with `--model stub`.
+
+## Step 3 — Compare against the defended baseline
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/defended-baseline/chat \
+  --model stub --mode fast \
+  --output json --output-path scan-baseline.json
+
+cat scan-baseline.json | jq '.findings | length'
+# 0 (or a small number of low-severity findings)
+```
+
+If the defended-baseline scan returns high-severity findings, that's a precision regression worth filing as an issue against the scanner — not the agent.
+
+## Step 4 — Switch on live Gemini mode (optional)
+
+If you want to evaluate the scanner against real model behavior instead of canned stubs:
+
+```bash
+cp .env.example .env
+# Edit .env, paste a Gemini key from https://aistudio.google.com/apikey
+docker compose up --build -d
+```
+
+The `/health` endpoint will now report `"live_mode": true` and the agents will route prompts through `gemini-2.5-flash` / `gemini-2.5-pro` via the `google-adk` runner.

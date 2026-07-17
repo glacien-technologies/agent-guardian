@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>AgentGuardian UI Playwright Test Strategy - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#agentguardian-ui-playwright-test-strategy" class="nav-link">AgentGuardian UI Playwright Test Strategy</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#goals" class="nav-link">Goals</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#architecture" class="nav-link">Architecture</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#scenario-inventory-the-test-plan" class="nav-link">Scenario inventory (the test plan)</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#instrumentation-requirements" class="nav-link">Instrumentation requirements</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#llm-on-failure-triage-pattern" class="nav-link">LLM-on-failure triage pattern</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#implementation-roadmap" class="nav-link">Implementation roadmap</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#what-100-coverage-explicitly-does-not-include" class="nav-link">What 100% coverage explicitly does NOT include</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#open-questions-for-the-user" class="nav-link">Open questions for the user</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="agentguardian-ui-playwright-test-strategy">AgentGuardian UI Playwright Test Strategy</h1>
+<h2 id="goals">Goals</h2>
+<p>"100% coverage" here means <strong>every interactive surface and every SSE-driven state transition</strong> in the dashboard has at least one deterministic Playwright test asserting both DOM state and the cross-check against <code>report.json</code> ground truth — across all four tabs (Overview, Findings, Probes, Logs), during-scan and post-scan, plus cross-cutting flows (accessibility, theme, responsive, empty/failed, reload). It does <strong>not</strong> mean pixel-perfect screenshots or branch coverage of internal JS. The LLM enters the loop only <strong>on test failure</strong> — never during a passing run — because the value of an LLM is post-mortem triage of trace bundles, not live test orchestration. Live LLM use would make every run expensive, non-deterministic, and incompatible with the OSS CI budget.</p>
+<h2 id="architecture">Architecture</h2>
+<p><strong>Playwright Python (sync API) via <code>pytest-playwright</code>.</strong> The repo is already pytest-shaped; staying in Python lets fixtures share the FastAPI app's settings, fixture loaders, and <code>report.json</code> schema validators. Web-first assertions (<code>expect(...).to_have_text(...)</code>) give us auto-retry semantics that match SSE polling for free.</p>
+<p><strong>Two test flows:</strong></p>
+<pre><code>                 ┌─────────────────────────────────────────┐
+                 │ pytest session (AGENT_GUARDIAN_TEST     │
+                 │ _HOOKS=1)                               │
+                 └───────────────┬─────────────────────────┘
+                                 │ session-scope fixture
+                                 ▼
+                 ┌─────────────────────────────────────────┐
+                 │ uvicorn subprocess (--no-reload)        │
+                 │   FastAPI + Jinja + SSE                 │
+                 └──┬─────────────────────────────┬────────┘
+                    │                             │
+        flow (a) during-scan         flow (b) post-scan
+                    │                             │
+   POST /test/fixtures/load          POST /test/fixtures/load
+   GET  /scan/{id}/events.replay     GET  /scan/{id}
+   ?speed=20                                     │
+                    │                             │
+                    ▼                             ▼
+            Playwright Chromium ─────────► assertions read both:
+                                            • DOM via testids/aria
+                                            • #ag-state JSON blob
+                                            • report.json fixture
+</code></pre>
+<p><strong>Backend-as-fixture pattern.</strong> A session-scope <code>uvicorn_server</code> fixture spawns <code>uvicorn agent_guardian.server.app:app --no-reload</code> in a subprocess on a random port, polls <code>/health</code> until ready, and yields the base URL. <code>AGENT_GUARDIAN_TEST_HOOKS=1</code> mounts the test-only router; the router itself raises at import time if the env var is unset. No in-process <code>TestClient</code> (it conflicts with Playwright's loop — FastAPI #5446).</p>
+<h2 id="scenario-inventory-the-test-plan">Scenario inventory (the test plan)</h2>
+<p>This is the single source of truth — every scenario below is one test function.</p>
+<p><strong>During-scan — Overview (1–9):</strong> status pill "Running", scan ID stable, elapsed timer ticks, agent count grows, probe count monotonic non-decreasing, AIVSS placeholder until <code>scan_done</code>, band chips in skeleton, target metadata persists, progress bar monotonic.</p>
+<p><strong>During-scan — Findings (10–17):</strong> stream appends without re-rendering, badge equals row count, every row has severity + ASI tag, default sort stable, mid-scan severity / agent filters compose, zero-state empty message.</p>
+<p><strong>During-scan — Probes (18–22):</strong> one row per agent within 5s, per-agent counter increments, refusal rate updates live, status transitions running→done exactly once, one-finding-per-agent corner case.</p>
+<p><strong>During-scan — Logs (23–26):</strong> tail autoscroll, pause on scroll-up + resume, mid-scan level filter, no duplicate line IDs.</p>
+<p><strong>During-scan — Cross-tab (27–31):</strong> tab switch preserves scroll+filter, home-page band filter respects in-progress, backend crash → "Failed" pill within 5s, abort → "Aborted", export disabled mid-scan.</p>
+<p><strong>Post-scan — Overview (32–38):</strong> pill = "Completed", AIVSS matches <code>report.json.aivss.score</code> ±0.1, band matches, per-ASI cells match, refusal rate shown, duration matches <code>finished_at - started_at</code> ±1s, target card complete.</p>
+<p><strong>Post-scan — Findings (39–48):</strong> row count = <code>len(report.findings)</code>, detail modal opens with full evidence, modal Esc closes + restores focus, each filter (severity/agent/probe/ASI) is exact, AND-composition correct, clear-filters restores total.</p>
+<p><strong>Post-scan — Probes (49–51):</strong> every agent "done", per-agent counts sum to <code>total_probes</code>, every row has non-empty AI summary.</p>
+<p><strong>Post-scan — Logs (52–53):</strong> final line is <code>scan_done</code>, download produces <code>.log</code> matching server-side byte length.</p>
+<p><strong>Post-scan — Export (54–56):</strong> zip button enabled with href, zip contains <code>report.json</code> + <code>run.log</code> + <code>findings/*.json</code> + README, embedded <code>report.json</code> parses and matches.</p>
+<p><strong>Cross-cutting — A11y (57–61):</strong> tablist roles + <code>aria-selected</code>, arrow-key tab nav, modal focus trap, severity chip WCAG AA contrast both themes, counters use <code>aria-live="polite"</code>.</p>
+<p><strong>Cross-cutting — Theme (62–64):</strong> dark Overview legible, dark modal styled, toggle persists across reload.</p>
+<p><strong>Cross-cutting — Responsive (65–67):</strong> 480px Overview stacks, 768px findings collapses to cards, 1024px probes tabular.</p>
+<p><strong>Cross-cutting — Empty/failed (68–72):</strong> zero-scans home CTA, zero-findings message, failed-scan pill + blanked AIVSS, partial findings render, export works on failed scans + includes <code>crash.log</code>.</p>
+<p><strong>Cross-cutting — Stability (73–75):</strong> reload mid-scan resumes stream, reload post-scan identical render, two tabs same scan identical state.</p>
+<p>Total: 75 tests.</p>
+<h2 id="instrumentation-requirements">Instrumentation requirements</h2>
+<p><strong><code>data-testid</code> naming: <code>{region}-{element}[-{identifier}]</code>, kebab-case.</strong> State lives in <code>aria-*</code> and <code>data-*</code> attributes, never in extra testids.</p>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tabs</td>
+<td><code>tabs-button-{overview\|findings\|probes\|logs}</code>, <code>tabs-panel-{slug}</code></td>
+</tr>
+<tr>
+<td>Overview</td>
+<td><code>overview-aivss-score</code>, <code>overview-aivss-band</code>, <code>overview-kpi-{findings-total\|probes-total\|agents-run\|duration\|refusal-rate}</code> (each with <code>data-value="N"</code>)</td>
+</tr>
+<tr>
+<td>Findings</td>
+<td><code>findings-table</code>, <code>findings-row-{finding_id}</code>, <code>findings-cell-{id}-{column}</code>, <code>findings-filter-{severity\|asi\|agent\|probe}</code>, <code>findings-filter-clear</code>, <code>findings-result-count</code>, <code>findings-empty</code></td>
+</tr>
+<tr>
+<td>Probes</td>
+<td><code>probes-table</code>, <code>probes-row-{probe_id}</code>, <code>probes-cell-{id}-{column}</code></td>
+</tr>
+<tr>
+<td>Logs</td>
+<td><code>logs-list</code>, <code>logs-row-{seq}</code>, <code>logs-filter-{level}</code>, <code>logs-search</code>, <code>logs-tail-toggle</code></td>
+</tr>
+<tr>
+<td>Modal</td>
+<td><code>detail-modal</code> with <code>data-open</code> + <code>data-subject-id</code>, <code>detail-modal-title\|body\|close</code></td>
+</tr>
+<tr>
+<td>Export</td>
+<td><code>export-button-{json\|sarif\|pdf\|zip}</code>, <code>export-status</code></td>
+</tr>
+<tr>
+<td>Errors</td>
+<td><code>js-errors</code> with <code>data-error-count="0"</code> (populated by <code>window.onerror</code> + <code>unhandledrejection</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Custom DOM events (dispatched on <code>document</code>, namespace <code>ag:</code>):</strong> <code>ag:tab-switched {from,to}</code>, <code>ag:finding-appended {finding_id,total}</code>, <code>ag:probe-appended {probe_id,total}</code>, <code>ag:log-appended {seq}</code>, <code>ag:modal-opened {subject_id,kind}</code>, <code>ag:modal-closed</code>, <code>ag:sse-connected</code>, <code>ag:sse-closed</code>, <code>ag:sse-error {message}</code>, <code>ag:scan-complete</code>, <code>ag:render-complete {component}</code> (fired inside <code>requestAnimationFrame</code>). Tests sync with <code>page.evaluate(() =&gt; new Promise(r =&gt; document.addEventListener('ag:scan-complete', r, {once:true})))</code> — never <code>waitForTimeout</code>.</p>
+<p><strong>Test-only endpoints (<code>AGENT_GUARDIAN_TEST_HOOKS=1</code> required; module-level guard):</strong></p>
+<ul>
+<li><code>GET /scan/{id}/events.replay?speed=N</code> — re-emits a persisted SSE log at N× speed; <code>speed=0</code> = as-fast-as-consumer.</li>
+<li><code>POST /test/fixtures/load {name}</code> — atomically loads <code>tests/e2e/fixtures/{name}/report.json</code> into the in-memory store.</li>
+<li><code>POST /test/scan/{id}/crash</code> — injects a synthetic crash mid-stream for failure-path tests.</li>
+</ul>
+<p><strong>Live-data assertion slots:</strong> every aggregate carries <code>data-value</code> on its KPI element; a single <code>&lt;script id="ag-state" type="application/json"&gt;</code> at end-of-body mirrors <code>{scan_id, status, counts, last_event_seq}</code> and is re-serialised on every SSE delta. <code>last_event_seq</code> is the canonical sync primitive — wait until <code>&gt;= N</code> to assert event-N was processed.</p>
+<h2 id="llm-on-failure-triage-pattern">LLM-on-failure triage pattern</h2>
+<p>A <code>pytest_runtest_makereport</code> hook fires only on <code>report.failed</code>. It bundles:</p>
+<ul>
+<li>Playwright <code>trace.zip</code> (DOM snapshots + network + console at every step)</li>
+<li>final screenshot</li>
+<li>console messages from <code>page.on("console", ...)</code></li>
+<li><code>js-errors</code> div contents</li>
+<li>failing assertion text + traceback</li>
+<li>test source</li>
+</ul>
+<p>The bundle is written to <code>test-results/{test_id}/</code>. A <code>scripts/triage_failure.py</code> CLI (invoked by a GH Actions <code>if: failure()</code> step, <strong>not</strong> by pytest itself) posts it to an LLM with:</p>
+<pre><code>You are triaging a failed Playwright test for the AgentGuardian dashboard.
+
+TEST: {test_name}
+ASSERTION: {assertion_text}
+TRACEBACK: {traceback}
+
+CONSOLE MESSAGES (last 50): {console}
+JS-ERRORS DIV: {js_errors_json}
+FINAL DOM (head + main): {dom_excerpt}
+LAST SSE EVENTS (from trace): {sse_tail}
+
+Return JSON only, no prose:
+{
+  &quot;likely_cause&quot;: &quot;selector-drift&quot; | &quot;timing&quot; | &quot;real-bug&quot; | &quot;flake&quot; | &quot;instrumentation-gap&quot;,
+  &quot;suspected_file&quot;: &quot;&lt;relative path&gt;&quot;,
+  &quot;repro_minimal_steps&quot;: [&quot;...&quot;],
+  &quot;severity&quot;: &quot;p0&quot; | &quot;p1&quot; | &quot;p2&quot;,
+  &quot;evidence&quot;: &quot;&lt;one sentence pointing at the specific console/DOM line&gt;&quot;
+}
+</code></pre>
+<p>The result is posted as a PR comment. <strong>Off the hot path — zero cost on green runs.</strong></p>
+<h2 id="implementation-roadmap">Implementation roadmap</h2>
+<table>
+<thead>
+<tr>
+<th>PR</th>
+<th>Title</th>
+<th>Files touched</th>
+<th>Test delta</th>
+<th>Risk</th>
+<th>Depends on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>data-testid</code> instrumentation</td>
+<td><code>server/templates/**/*.html</code> (~20 files), <code>static/executive_*.js</code>, <code>static/live-append.js</code>, <code>static/streams.js</code> (event emits)</td>
+<td>+0 (no tests yet)</td>
+<td>Low — additive attrs only</td>
+<td>—</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Test-only endpoints + env gate</td>
+<td>new <code>server/routes/test_hooks.py</code>, <code>server/app.py</code> (conditional mount), <code>tests/e2e/fixtures/finbot-clean/</code>, fixture-capture script</td>
+<td>+0</td>
+<td>Low — gated by env; raises at import otherwise</td>
+<td>PR 1</td>
+</tr>
+<tr>
+<td>3</td>
+<td>pytest-playwright scaffolding + smoke</td>
+<td><code>tests/e2e/conftest.py</code> (uvicorn fixture), <code>tests/e2e/test_smoke.py</code>, <code>playwright.config</code>, <code>pyproject.toml</code> deps, <code>.github/workflows/e2e.yml</code> (<code>playwright install --with-deps chromium</code>)</td>
+<td>+10</td>
+<td>Medium — first CI integration; flake-prone if SSE sync uses timeouts</td>
+<td>PR 1, PR 2</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Full scenario inventory</td>
+<td><code>tests/e2e/test_overview.py</code>, <code>test_findings.py</code>, <code>test_probes.py</code>, <code>test_logs.py</code>, <code>test_crosscutting.py</code>, <code>test_failure_paths.py</code></td>
+<td>+65 (to 75 total)</td>
+<td>Medium — volume; mitigated by <code>ag:*</code> events</td>
+<td>PR 3</td>
+</tr>
+<tr>
+<td>5</td>
+<td>LLM-on-failure triage</td>
+<td><code>tests/e2e/conftest.py</code> (makereport hook), <code>scripts/triage_failure.py</code>, workflow <code>if: failure()</code> step</td>
+<td>+0</td>
+<td>Low — strictly off hot path</td>
+<td>PR 4</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-100-coverage-explicitly-does-not-include">What 100% coverage explicitly does NOT include</h2>
+<ul>
+<li><strong>Pixel-perfect screenshot regression.</strong> Too brittle for an OSS CI budget; we mask volatile regions in the 3–5 visual smoke shots that PR 4 does include, nothing more.</li>
+<li><strong>Production-only / cloud-run-mode flows.</strong> The dashboard runs identically locally; cloud-specific paths (auth proxy, paid-tier panels) are out of scope.</li>
+<li><strong>LLM judge / AIVSS scoring math.</strong> Covered by Python unit tests on <code>report.json</code> generation. UI tests only assert that the rendered number equals the report number — not that the report number is correct.</li>
+<li><strong>Hidden <code>--framework</code> white-box mode.</strong> Per launch posture, the public surface is endpoint+prompt+code; framework mode is not part of the UI contract until #126 lands.</li>
+<li><strong>Backend SSE wire-format conformance.</strong> Tested in <code>tests/server/</code>. UI tests treat the stream as ground truth.</li>
+</ul>
+<h2 id="open-questions-for-the-user">Open questions for the user</h2>
+<ol>
+<li><strong>Fixture capture authority</strong> — is a finbot-clean scan from the most recent rc release the canonical seed, or do you want a synthesised fixture independent of the live testbench?</li>
+<li><strong>CI budget</strong> — acceptable wall-clock for the full 75-test suite on every PR? If &lt;5 min, we shard Findings/Probes across two GH Actions jobs in PR 4.</li>
+<li><strong>LLM provider for triage</strong> — Anthropic (Claude) via the existing key the repo already uses for judges, or a separate budget-capped key gated to <code>if: failure()</code>?</li>
+<li><strong><code>#ag-state</code> blob exposure in production</strong> — keep it always-on (small payload, useful for debugging) or gate behind <code>AGENT_GUARDIAN_TEST_HOOKS=1</code>?</li>
+<li><strong>Responsive breakpoints</strong> — confirm 480 / 768 / 1024 are the supported targets; the dashboard CSS today doesn't appear to formally claim mobile support, so tests 65–67 may need to be skipped or downgraded to "no horizontal scroll" smoke until a responsive PR lands.</li>
+</ol></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

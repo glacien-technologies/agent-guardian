@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>OpenSSF Best Practices badge — enrolment status - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#openssf-best-practices-badge-enrolment-status" class="nav-link">OpenSSF Best Practices badge — enrolment status</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#current-state" class="nav-link">Current state</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#scorecard-automation-added-in-repo" class="nav-link">Scorecard automation added in-repo</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#operator-runbook" class="nav-link">Operator runbook</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#evidence-map-which-file-answers-each-criterion" class="nav-link">Evidence map — which file answers each criterion</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#readme-badge-snippet" class="nav-link">README badge snippet</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#re-affirmation-cadence" class="nav-link">Re-affirmation cadence</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="openssf-best-practices-badge-enrolment-status">OpenSSF Best Practices badge — enrolment status</h1>
+<p>This file tracks AgentGuardian's enrolment in the <a href="https://www.bestpractices.dev/">OpenSSF Best Practices
+Badge Program</a>. It exists so the badge ID
+(once issued) and the self-assessment evidence are auditable from inside the
+repo, not buried in a third-party dashboard.</p>
+<p>Linked from <code>SECURITY.md</code> and <code>docs/community/oss-roadmap.md</code> (Theme 3 — Supply-chain security
+&amp; trust signals).</p>
+<h2 id="current-state">Current state</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Programme</td>
+<td>OpenSSF Best Practices Badge</td>
+</tr>
+<tr>
+<td>Tier targeted</td>
+<td>Passing</td>
+</tr>
+<tr>
+<td>Status</td>
+<td>Enrolment in progress — see "Operator runbook" below</td>
+</tr>
+<tr>
+<td>Project URL submitted</td>
+<td><code>https://github.com/glacien-technologies/agent-guardian</code></td>
+</tr>
+<tr>
+<td>Badge URL</td>
+<td><em>pending — populated once <code>bestpractices.dev</code> issues the project ID</em></td>
+</tr>
+<tr>
+<td>Badge image URL</td>
+<td><em>pending</em></td>
+</tr>
+<tr>
+<td>README badge wired</td>
+<td><em>no — gated on the badge URL above</em></td>
+</tr>
+<tr>
+<td>Owner of the application</td>
+<td>Security Lead (see <code>MAINTAINERS.md</code>)</td>
+</tr>
+<tr>
+<td>Self-assessment evidence root</td>
+<td>This file + the artifacts it references</td>
+</tr>
+</tbody>
+</table>
+<p>When the project ID is issued, update the three "<em>pending</em>" rows above, edit
+<code>README.md</code> to add the badge image (see "README badge snippet" below), and
+record the change in <code>CHANGELOG.md</code> under <code>[Unreleased]</code>.</p>
+<h2 id="scorecard-automation-added-in-repo">Scorecard automation added in-repo</h2>
+<p>The following OpenSSF Scorecard evidence is now automated by repository files.
+These changes improve future scans once they are merged and observed by
+Scorecard; historical unsigned releases can still depress the live
+<code>Signed-Releases</code> score until a new release is cut, re-issued, or old release
+artifacts are removed.</p>
+<table>
+<thead>
+<tr>
+<th>Scorecard check</th>
+<th>Repo evidence</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Signed-Releases</td>
+<td><code>.github/workflows/publish.yml</code>, <code>.github/workflows/docker-publish.yml</code></td>
+<td>Future PyPI/GitHub release artifacts and GHCR images receive GitHub artifact attestations in addition to existing Sigstore/PEP 740 provenance.</td>
+</tr>
+<tr>
+<td>Fuzzing</td>
+<td><code>.github/workflows/clusterfuzzlite.yml</code>, <code>.clusterfuzzlite/</code>, <code>fuzzers/</code></td>
+<td>ClusterFuzzLite runs Python fuzz targets for probe YAML, contract parsing, report emitters, redaction, and HTTP response parsing.</td>
+</tr>
+<tr>
+<td>CII Best Practices</td>
+<td>This file + operator runbook</td>
+<td>Still requires external registration at <code>bestpractices.dev</code>; no repository-only change can issue the project ID.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="operator-runbook">Operator runbook</h2>
+<p>Estimated time: ~30 minutes once the operator is logged in.</p>
+<ol>
+<li><strong>Sign in.</strong> Visit <a href="https://www.bestpractices.dev/">https://www.bestpractices.dev/</a> and sign in with the
+   GitHub account that owns <code>glacien-technologies/agent-guardian</code>. The
+   Security Lead role holds this credential.</li>
+<li><strong>Add the project.</strong> Click <em>Add Project</em>, paste the repository URL
+   <code>https://github.com/glacien-technologies/agent-guardian</code>, and submit.
+   The system auto-detects several Passing criteria from repo metadata.</li>
+<li><strong>Complete the self-assessment.</strong> Work through the six sections —
+   <em>Basics</em>, <em>Change control</em>, <em>Reporting</em>, <em>Quality</em>, <em>Security</em>,
+   <em>Analysis</em>. The evidence map below tells you which existing repo file
+   answers each criterion.</li>
+<li><strong>Submit for Passing tier.</strong> No external review is required for Passing;
+   confirmation is automatic once every criterion is marked <em>Met</em> with
+   evidence.</li>
+<li><strong>Capture the badge ID.</strong> The form will issue a numeric project ID and
+   two URLs: a project page (<code>https://www.bestpractices.dev/projects/&lt;id&gt;</code>)
+   and a badge image
+   (<code>https://www.bestpractices.dev/projects/&lt;id&gt;/badge</code>). Paste both into
+   the "Current state" table above and commit the change.</li>
+<li><strong>Wire the badge into <code>README.md</code>.</strong> See snippet below.</li>
+<li><strong>Announce.</strong> Add a single bullet under <code>CHANGELOG.md</code> <code>[Unreleased] →
+   Added</code>: <em>"OpenSSF Best Practices badge (Passing tier) earned — badge URL
+   in README."</em></li>
+</ol>
+<h2 id="evidence-map-which-file-answers-each-criterion">Evidence map — which file answers each criterion</h2>
+<p>Use this when filling out the bestpractices.dev form. Every Passing-tier
+criterion already has on-repo evidence; no new artifacts need to be
+written.</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Criterion (paraphrased)</th>
+<th>Evidence in this repo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Basics</td>
+<td>Project website / source URL</td>
+<td><code>README.md</code>, <code>https://agentguardian.io</code></td>
+</tr>
+<tr>
+<td>Basics</td>
+<td>Licence is OSI-approved</td>
+<td><code>LICENSE</code> (Apache-2.0), <code>NOTICE</code></td>
+</tr>
+<tr>
+<td>Basics</td>
+<td>Documentation for users + contributors</td>
+<td><code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>docs/</code></td>
+</tr>
+<tr>
+<td>Basics</td>
+<td>Project supports HTTPS</td>
+<td>All listed URLs are HTTPS</td>
+</tr>
+<tr>
+<td>Change control</td>
+<td>Public VCS with full history</td>
+<td>This repo on GitHub</td>
+</tr>
+<tr>
+<td>Change control</td>
+<td>Unique version identifier for each release</td>
+<td>Git tags <code>v*.*.*</code> + <code>pyproject.toml</code></td>
+</tr>
+<tr>
+<td>Change control</td>
+<td>Release notes for each release</td>
+<td><code>CHANGELOG.md</code> + auto-generated GitHub Release notes</td>
+</tr>
+<tr>
+<td>Reporting</td>
+<td>Process for reporting bugs</td>
+<td><code>.github/ISSUE_TEMPLATE/1-bug-report.yml</code></td>
+</tr>
+<tr>
+<td>Reporting</td>
+<td>Process for reporting vulnerabilities</td>
+<td><code>SECURITY.md</code> + GitHub Security Advisories</td>
+</tr>
+<tr>
+<td>Reporting</td>
+<td>Acknowledge bug reports promptly</td>
+<td>Issue triage rotation in <code>MAINTAINERS.md</code></td>
+</tr>
+<tr>
+<td>Quality</td>
+<td>Build system + tests + clean build</td>
+<td><code>pyproject.toml</code>, <code>.github/workflows/ci.yml</code>, <code>tests/</code></td>
+</tr>
+<tr>
+<td>Quality</td>
+<td>New functionality tested</td>
+<td><code>CONTRIBUTING.md</code> ("Every new probe must ship with a golden test")</td>
+</tr>
+<tr>
+<td>Quality</td>
+<td>Test coverage is measured</td>
+<td><code>coverage.xml</code> + Codecov badge in <code>README.md</code></td>
+</tr>
+<tr>
+<td>Quality</td>
+<td>Coding standards documented</td>
+<td><code>CONTRIBUTING.md</code>, <code>.editorconfig</code>, <code>pyproject.toml</code> (ruff, mypy)</td>
+</tr>
+<tr>
+<td>Security</td>
+<td>Maintainers know how to develop securely</td>
+<td><code>SECURITY.md</code>, <code>docs/community/governance.md</code>, <code>CONTRIBUTING.md</code></td>
+</tr>
+<tr>
+<td>Security</td>
+<td>Cryptography practices</td>
+<td>Sigstore keyless OIDC for releases, SSH commit signing — see <code>MAINTAINERS.md</code></td>
+</tr>
+<tr>
+<td>Security</td>
+<td>Vulnerability response process</td>
+<td><code>SECURITY.md</code> (90-day coordinated disclosure)</td>
+</tr>
+<tr>
+<td>Analysis</td>
+<td>Static-analysis tool used</td>
+<td>Bandit + Semgrep + Gitleaks (<code>.github/workflows/ci.yml</code>), Scorecard (<code>scorecard.yml</code>)</td>
+</tr>
+<tr>
+<td>Analysis</td>
+<td>Findings from analysis are fixed</td>
+<td><code>CHANGELOG.md</code> <code>Fixed</code> / <code>Security</code> sections</td>
+</tr>
+<tr>
+<td>Analysis</td>
+<td>Dynamic-analysis tool used (if relevant)</td>
+<td><code>pytest</code>, Hypothesis property tests, ClusterFuzzLite (<code>.github/workflows/clusterfuzzlite.yml</code>, <code>fuzzers/</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="readme-badge-snippet">README badge snippet</h2>
+<p>Once the project ID is issued, replace <code>&lt;ID&gt;</code> in the snippet below and
+splice it into <code>README.md</code> in the badge row (currently between the
+Scorecard badge and the Downloads badge):</p>
+<pre><code class="language-markdown">[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/&lt;ID&gt;/badge)](https://www.bestpractices.dev/projects/&lt;ID&gt;)
+</code></pre>
+<h2 id="re-affirmation-cadence">Re-affirmation cadence</h2>
+<p>The Passing-tier criteria are re-affirmed annually as part of the
+Engineering Standards review (<code>docs/engineering-standards-reviews/</code>).
+Promotion to Silver or Gold is <strong>not</strong> a current cycle goal — see
+<a href="../../community/oss-roadmap/"><code>docs/community/oss-roadmap.md</code></a>.</p>
+<hr />
+<p><em>Last revised: 2026-06-06. Owner: Security Lead.</em></p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

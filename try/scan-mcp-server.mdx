@@ -1,0 +1,208 @@
+---
+title: "Scan an MCP server"
+description: "Point AgentGuardian at a Model Context Protocol server via a target contract."
+---
+
+Declare your MCP endpoint in an `agentguardian.yaml` contract, then run
+`agent-guardian scan --contract`. The transport speaks JSON-RPC 2.0 over
+MCP Streamable HTTP, discovers tools via `tools/list`, and drives each
+adversarial prompt through `tools/call`.
+
+## What this example tests
+
+- The 10 ASI categories against the MCP server itself — tool poisoning,
+  schema confusion, destructive-tool gating, session bleed — rather
+  than a specific LLM client that happens to use the server.
+- Supply-chain attacks specific to MCP: `asi04.mcp-server-poison`
+  payloads try to register an untrusted MCP server
+  (`https://tools.attacker.test/mcp`, etc.) and check whether the
+  target acknowledged or began using it.
+- Rules of Engagement enforcement: declare an allowlist/blocklist in
+  YAML and the live RoE chokepoint blocks the call before contacting
+  the server.
+
+The MCP transport is contract-only — there is no `--mcp-url` CLI flag.
+MCP servers carry session state, tool surfaces, and (often)
+OAuth-protected resources; the contract is the right place to declare
+all three.
+
+Source: [`src/agent_guardian/transports/mcp.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/transports/mcp.py),
+[`src/agent_guardian/contract/schema.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/contract/schema.py)
+(`McpTransport`).
+
+## Prerequisites
+
+- AgentGuardian installed — `pip install agent-guardian`.
+- An MCP server reachable over Streamable HTTP (default) or legacy SSE.
+- For OAuth-protected servers: client credentials available via env
+  vars (the contract dereferences `${env:NAME}` references).
+- A model spec — `--model stub` for an offline dry-run, or a real model
+  spec for a graded assessment.
+
+## Run target
+
+Create `agentguardian.yaml` next to your project. This is a minimal MCP
+target with no auth and a stateless session, plus a Rules-of-Engagement
+block that allow-lists one tool and blocks a destructive one:
+
+```yaml agentguardian.yaml
+version: 1
+target:
+  name: mcp-search
+  environment: staging
+  transport:
+    kind: mcp
+    url: https://mcp.example.com/rpc
+    transport_type: streamable_http
+    entry_tool: search
+    prompt_argument: input
+    init_timeout_ms: 30000
+  response:
+    output_path: $.output.text
+  session:
+    mode: stateless
+roe:
+  data_egress:
+    allow_external: true
+  tools:
+    allowlist: [search]
+    blocklist: [delete_everything]
+```
+
+Every transport field is verified against `McpTransport` in
+`src/agent_guardian/contract/schema.py`:
+
+| Field             | Type                              | Default              | Notes                                                              |
+| ----------------- | --------------------------------- | -------------------- | ------------------------------------------------------------------ |
+| `kind`            | `"mcp"`                           | required             | Discriminator                                                       |
+| `url`             | URL                               | required             | The MCP JSON-RPC endpoint                                           |
+| `transport_type`  | `"streamable_http"` \| `"sse"`    | `"streamable_http"`  | Streamable HTTP is the modern default                              |
+| `entry_tool`      | string \| `null`                  | `null`               | Tool to invoke each turn. When `null`, the first discovered tool is used |
+| `prompt_argument` | string                            | `"input"`            | Argument name the adversarial prompt is mapped onto                |
+| `init_timeout_ms` | int                               | `30000`              | Timeout for the `initialize` handshake (and downstream RPCs)        |
+
+The `roe.tools.blocklist` is the live RoE chokepoint: before any
+`tools/call` the transport asks the gate whether the tool name is
+allowed; a blocked tool never contacts the server (the transport
+returns a benign blocked note and a recorded `ToolCall` instead — see
+`McpTransport.send` in `transports/mcp.py`).
+
+Pre-flight will fail if your allow/blocklist names a tool the server
+did not advertise — the discovered set from `tools/list` is reconciled
+against the RoE.
+
+For OAuth-protected servers, swap the `auth` block (every field maps
+1:1 to `McpOAuthAuth` in the schema):
+
+```yaml
+target:
+  # ... transport block as above ...
+  auth:
+    kind: mcp_oauth
+    client_id: ${env:MCP_CLIENT_ID}
+    client_secret: ${env:MCP_CLIENT_SECRET}   # omit for public clients
+    scopes: [tools.read, tools.call]
+```
+
+`McpOAuthProvider` runs the full MCP authorization flow: fetches
+`{resource}/.well-known/oauth-protected-resource` (RFC 9728
+Protected-Resource-Metadata) to discover the `authorization_servers`,
+performs authorization-code + PKCE (S256), and applies the bearer token
+in the `Authorization` header.
+
+## Run AgentGuardian
+
+```bash
+agent-guardian scan \
+  --contract ./agentguardian.yaml \
+  --model stub \
+  --mode fast \
+  --output sarif \
+  --output-path mcp-scan.sarif
+```
+
+`--contract` is mutually exclusive with the positional `target` /
+`--system-prompt` / `--endpoint` / `--framework` modes. The contract
+supplies the transport, auth, session, and RoE; budgets in the contract
+map onto the swarm config, and a provenance audit is attached to the
+report.
+
+Flag-by-flag, every option below is verified against
+`src/agent_guardian/cli.py`:
+
+- `--contract PATH` — drive the scan from a target contract
+  (`agentguardian.yaml`).
+- `--model stub` — offline default. Swap for a real model spec for a
+  graded run.
+- `--mode fast` — `fast` / `smart` / `full` (default).
+- `--output sarif --output-path mcp-scan.sarif` — SARIF report, ready
+  to upload to GitHub Code Scanning. Other formats: `json`, `md`,
+  `junit`, `pdf`.
+
+## Expected output
+
+The scan emits a standard AgentGuardian report. The target block
+reflects the contract-driven path and the discovered MCP transport:
+
+```json
+{
+  "scan_id": "scan_2026...",
+  "target": {
+    "mode": "contract",
+    "name": "mcp-search",
+    "environment": "staging",
+    "transport": {
+      "kind": "mcp",
+      "endpoint": "https://mcp.example.com/rpc",
+      "supports_tools": true,
+      "session_modes": ["stateless", "server_session"],
+      "discovered_tools": ["search", "delete_everything"]
+    }
+  },
+  "aivss_score": 5.8,
+  "findings": [
+    { "id": "F-001", "probe": "asi04.mcp-server-poison", "severity": "MEDIUM" }
+  ]
+}
+```
+
+If the server returned an `Mcp-Session-Id` response header, the transport
+captures it and replays it as a request header on every later call so
+the server can resume the same session (this is MCP's `server_session`
+mode, advertised in `session_modes`).
+
+A finding under `asi04.mcp-server-poison` (the in-tree MCP probe at
+`src/agent_guardian/probes/asi04/mcp-server-poison.yaml`) means an
+attacker payload tried to register an untrusted MCP server and the
+target acknowledged or began using it. That is a supply-chain failure;
+the remediation is the RoE allow-list.
+
+## Common errors
+
+- **`tool 'X' is not advertised by the server`.** The discovery step
+  (`tools/list`) did not return a tool named in your `entry_tool` or
+  RoE allow/blocklist. Run the MCP server's own `tools/list` against
+  your endpoint to see what it actually exposes.
+- **`401 Unauthorized` on every call.** The server is OAuth-protected
+  and you used `auth: kind: none` (or omitted the block). Switch to
+  `auth: kind: mcp_oauth` with the client_id / scopes block above.
+- **Scan finishes with `error.category: PROTOCOL`.** The server
+  returned a JSON-RPC `error` member that didn't match a refusal hint
+  (`forbidden`, `denied`, `not allowed`, `blocked`, `unauthorized`).
+  Check the server logs — a malformed `inputSchema` or a missing
+  required argument is the usual cause.
+- **`EXIT_CONTRACT_INVALID` on startup.** Your `agentguardian.yaml`
+  failed Pydantic validation. The error message names the offending
+  field; cross-check it against the schema with
+  `agent-guardian contract schema` (emits the contract JSON Schema).
+
+## Next step
+
+- Author your `agentguardian.yaml` by hand, validating field names
+  against `agent-guardian contract schema`.
+- Compare with a framework-adapter target:
+  [Scan a LangGraph agent](/try/scan-langgraph).
+- Add the SARIF report to GitHub Code Scanning:
+  [Upload SARIF to GitHub Security](/ci-cd/upload-sarif).
+- Read the MCP-specific probe under
+  [Attack library overview](/attacks/overview) (ASI04 supply-chain).

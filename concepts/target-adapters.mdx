@@ -1,0 +1,112 @@
+---
+title: "Target adapters"
+sidebarTitle: "Target adapters"
+description: "The uniform interface every scan target implements: send one prompt, get one reply, expose a static fingerprint. The adapter contract and how to add a new one."
+icon: "plug"
+---
+
+A **target adapter** is the boundary between AgentGuardian and whatever
+you are scanning. Every adapter normalises its target to the same
+"send one prompt, get one text reply" interface and exposes a static
+`TargetFingerprint` describing the surface area the swarm should attack.
+
+Source-of-truth: `src/agent_guardian/adapters/base.py`.
+
+## The contract
+
+Every adapter is a subclass of `TargetAdapter` and must implement
+exactly two things:
+
+```python
+from agent_guardian.adapters.base import TargetAdapter, TargetFingerprint
+
+class MyAdapter(TargetAdapter):
+    def __init__(self, ...):
+        # Build a TargetFingerprint describing the static surface area.
+        self._fingerprint = TargetFingerprint(
+            target_mode="prompt",          # one of TargetMode
+            tools=[],                       # tools the target surfaces
+            memory_present=False,
+            multi_agent=False,
+            external_systems=[],
+            pii_surface=False,
+            description="One-line target description.",
+        )
+
+    async def call(self, prompt: str, *, session: str | None = None) -> str:
+        """Send one prompt, return one text reply.
+
+        ``session`` is an opaque token that threads conversation state for
+        multi-turn agents. Adapters that are stateless ignore it; adapters
+        that need conversation memory key off it.
+        """
+        ...
+```
+
+That is the whole adapter contract. Everything else — fingerprint
+refinement during recon, parallel attack execution, evaluation, signing,
+report generation — is the swarm's responsibility.
+
+## The fingerprint
+
+`TargetFingerprint` is the static attack surface known at
+adapter-construction time. The recon agent refines it during Phase 1 of
+the swarm; the swarm's tiering and applicability logic reads it via
+`TargetFingerprint.to_observed_surface()`.
+
+| Field | What it captures | What it gates |
+|---|---|---|
+| `target_mode` | `prompt`, `python`, `http`, `framework`, `mcp` | Which transport runs the call |
+| `tools` | Names of tools the target exposes | Tool Abuse (ASI02), Code Execution (ASI08) |
+| `memory_present` | True if the target keeps state across turns | Memory Poisoning (ASI06) |
+| `multi_agent` | True if the target hands off to other agents | Cascade Failure (ASI05), Trust Exploit (ASI10) |
+| `external_systems` | URLs / hosts the target can reach | Data Exfiltration, Identity Leak |
+| `pii_surface` | True if the target has access to PII | Identity Leak (ASI07) |
+
+A specialist whose category does not apply to this fingerprint is filtered
+out before Phase 3 — see
+[Adversarial swarm § Applicability filter](/concepts/adversarial-swarm).
+
+## Bundled adapters
+
+Five adapter families ship in the box. They cover the targets developers
+hit most often:
+
+| Adapter | Source | Use it when |
+|---|---|---|
+| Prompt | `adapters/prompt.py` | You only have a system prompt — no live target. The scan runs the prompt through a stub LLM and attacks the resulting agent shape. |
+| Code | `adapters/code.py` | You have a Python callable / class — pass `module:attr`. The adapter introspects the source to refine the fingerprint. |
+| HTTP | `adapters/http.py` | You have a hosted endpoint — pass `--endpoint URL`. Uses `transports/http.py` under the hood. |
+| Framework | `adapters/framework/{langgraph,crewai,autogen,openai_agents,adk,strands}.py` | You have a native framework object — pair `--framework KIND` with `--framework-ref MODULE:ATTR`. |
+| MCP | `transports/mcp.py` (driven through the contract adapter) | You have an MCP server — only adapter where Rules-of-Engagement tool blocklists are pre-execution gates. |
+
+`agent-guardian scan --help` lists every flag combination, and the
+[Try AgentGuardian](/try/scan-rest-api) group walks through each target
+type end-to-end.
+
+## Adding a new adapter
+
+Three steps.
+
+1. **Subclass `TargetAdapter`** in a new module under
+   `src/agent_guardian/adapters/` and implement `__init__` (build the
+   fingerprint) and `async def call(prompt, *, session)`.
+2. **Register the entry point** in `pyproject.toml` under
+   `[project.entry-points."agent_guardian.adapters"]` so the CLI can
+   resolve your adapter by name.
+3. **Ship a `TargetFingerprint`** that honestly describes the surface.
+   Setting `memory_present=False` when memory exists will skip ASI06
+   specialists and silently under-test the target.
+
+The recon agent will refine your fingerprint at scan time, but it cannot
+add a capability your adapter never declared. Be honest in the
+constructor.
+
+## Where to go next
+
+- [Adversarial swarm](/concepts/adversarial-swarm) — how the fingerprint
+  decides which specialists run.
+- [Evaluators](/concepts/evaluators) — how each turn is judged.
+- [Try AgentGuardian](/try/scan-rest-api) — adapter-by-adapter walkthroughs.
+- [Reference: Python SDK](/reference/python-sdk) — the public adapter
+  surface for embedding AgentGuardian in your own code.

@@ -1,0 +1,162 @@
+---
+title: "Scan with Docker"
+description: "Run AgentGuardian from a Docker container — no Python install required."
+---
+
+If you don't want to install Python locally, you can run AgentGuardian
+straight from a Docker image. The repo ships a `Dockerfile` and a
+`docker-compose.yml` that build the image and serve the live dashboard
+on port 7474.
+
+## What this example tests
+
+- Same 10 ASI categories as a native install — the Docker image runs
+  the `agent-guardian` console script unchanged.
+- The live dashboard at `http://localhost:7474` (when you run `serve`),
+  including per-scan transcript view and report download.
+- A clean isolation seam for CI: mount your contract / report
+  directories and you don't need Python on the runner.
+
+Source: [`Dockerfile`](https://github.com/glacien-technologies/agent-guardian/blob/main/Dockerfile),
+[`docker-compose.yml`](https://github.com/glacien-technologies/agent-guardian/blob/main/docker-compose.yml).
+
+## Prerequisites
+
+- Docker installed and running (`docker --version`).
+- A clone of the AgentGuardian repo (the image is built from local
+  source — until v1.0.0 ships on PyPI, this is the recommended path;
+  see the commented PyPI-install variant at the top of the
+  `Dockerfile`).
+- For an authenticated scan: the relevant model API key available as an
+  env var to pass into the container.
+
+## Run target
+
+You don't need a separate target service to demonstrate the Docker
+flow — point the container at the public AgentGuardian testbench (a
+deliberately-vulnerable `finbot` banking agent hosted on Cloud Run):
+
+```bash
+curl https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/health
+```
+
+If you want to scan a local target instead, run it on the host first
+(e.g. `uvicorn my_agent:app --port 8000`) and use
+`host.docker.internal:8000` from inside the container.
+
+## Run AgentGuardian
+
+**One-shot scan from the image:**
+
+```bash
+# Build the image from a clone of the repo (one-time).
+docker build -t agent-guardian:dev .
+
+# Run a scan. The --rm flag cleans up the container on exit.
+docker run --rm \
+  -v "$(pwd)/reports:/home/ag/reports" \
+  agent-guardian:dev scan \
+    --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+    --model stub \
+    --mode fast \
+    --output md \
+    --output-path /home/ag/reports/scan.md
+```
+
+The Markdown report lands at `./reports/scan.md` on the host.
+
+**With an authenticated model:**
+
+```bash
+docker run --rm \
+  -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+  -v "$(pwd)/reports:/home/ag/reports" \
+  agent-guardian:dev scan \
+    --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+    --model gemini:gemini-2.5-flash \
+    --mode fast \
+    --output sarif \
+    --output-path /home/ag/reports/scan.sarif
+```
+
+**Dashboard via docker-compose:**
+
+The shipped `docker-compose.yml` runs `agent-guardian serve --host
+0.0.0.0 --port 7474`, persists scan state to `./.agentguardian` on the
+host, and exposes the live dashboard on `http://localhost:7474`:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:7474` to see live scans, completed reports, and
+the per-scan transcript view. In another terminal you can drive scans
+into the running container:
+
+```bash
+docker compose exec agentguardian agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+  --model stub \
+  --mode fast
+```
+
+Every flag above is verified against `src/agent_guardian/cli.py`:
+`--endpoint`, `--model`, `--mode`, `--output`, `--output-path` (see
+[Scan a REST API agent](/try/scan-rest-api) for the flag-by-flag
+breakdown).
+
+## Expected output
+
+A one-shot scan prints the live progress panel and the report header to
+stdout, then writes the report file to the volume-mounted path:
+
+```text
+▸ Scan cli-7a3b2c1d4e5f — track live at  http://127.0.0.1:7474/scan/cli-7a3b2c1d4e5f
+
+scan cli-7a3b2c1d4e5f done: AIVSS=n/a band=not_evaluated tier=T3 findings=0 coverage=C report=/home/ag/reports/scan.md
+```
+
+(The `http://127.0.0.1:7474` URL is the in-container dashboard URL.
+Inside the one-shot `docker run`, no server is running on that port —
+use docker-compose if you want the dashboard reachable.)
+
+The Markdown report at `./reports/scan.md` opens with the standard
+AgentGuardian header — same shape as a native scan:
+
+```markdown
+# AgentGuardian scan `cli-7a3b2c1d4e5f`
+**AIVSS** `n/a (not evaluated)`  |  **Band** `not_evaluated` (#64748b)  |  **Tier** `T3`  |  **Coverage** `C`
+- **Target:** `https://...­.run.app/finbot/chat` (http)
+- **Duration:** 18.6s  |  **Cost:** $0.0000
+```
+
+## Common errors
+
+- **`Cannot connect to the Docker daemon`.** Docker Desktop (or the
+  daemon on Linux) is not running. Start it and re-run.
+- **`docker build` fails on `apt-get install`.** The image installs
+  native libraries for WeasyPrint PDF rendering (`libpango-1.0-0`,
+  `libcairo2`, etc.). A flaky Debian mirror is the usual culprit —
+  retry, or build behind a proxy with `--build-arg http_proxy=...`.
+- **Report files don't appear on the host.** You forgot the
+  `-v "$(pwd)/reports:/home/ag/reports"` bind mount, or the path
+  inside the container (`--output-path`) doesn't match. The container
+  runs as user `ag` (uid 1000); make sure the host directory is
+  writable by uid 1000.
+- **`Connection refused` against `host.docker.internal:8000`.** On
+  Linux, `host.docker.internal` needs `--add-host=host.docker.internal:host-gateway`
+  on the `docker run` command (Docker Desktop on macOS/Windows wires
+  this automatically).
+- **`No module named 'agent_guardian'`.** The image's entry point is
+  `ENTRYPOINT ["agent-guardian"]`. Don't pass `python -m
+  agent_guardian` — pass scan subcommand args directly.
+
+## Next step
+
+- For CI gating, the same `docker run` pattern works in
+  [GitHub Actions](/ci-cd/github-actions) — just call it from a
+  workflow step.
+- For Python install instead of Docker, see [Installation](/installation).
+- To run the dashboard standalone (without docker-compose), use
+  `agent-guardian serve --host 0.0.0.0 --port 7474` as the `docker run`
+  command.

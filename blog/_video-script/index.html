@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>GTM-007 Demo Video — Recording Script - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#gtm-007-demo-video-recording-script" class="nav-link">GTM-007 Demo Video — Recording Script</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#owner" class="nav-link">Owner</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#target" class="nav-link">Target</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#pre-flight" class="nav-link">Pre-flight</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#scene-by-scene" class="nav-link">Scene-by-scene</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#youtube-metadata" class="nav-link">YouTube metadata</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#post-recording-checklist" class="nav-link">Post-recording checklist</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="gtm-007-demo-video-recording-script">GTM-007 Demo Video — Recording Script</h1>
+<p>Operator-facing recording script for the 60–90s launch demo video. This file is <strong>not</strong> linked from the Mintlify nav (it lives under <code>docs/blog/</code> so it travels with the asset, but the <code>_</code> prefix excludes it from the build). The leading underscore matches the convention already used by <code>docs/_design/</code>.</p>
+<h2 id="owner">Owner</h2>
+<p>Human (founder voice). Claude can re-edit copy but does not produce the recording.</p>
+<h2 id="target">Target</h2>
+<ul>
+<li><strong>Length:</strong> 60–90 seconds. Hard cap 95 seconds.</li>
+<li><strong>Format:</strong> 1080p, H.264, mp4. 16:9.</li>
+<li><strong>Audio:</strong> real human voice (founder or core maintainer). Do <strong>not</strong> use synthetic TTS for the launch cut.</li>
+<li><strong>Tone:</strong> technical, direct, no marketing fluff. The same tone as the docs.</li>
+<li><strong>Hosting:</strong> YouTube (Unlisted pre-launch, flip to Public on launch day). Channel: Glacien Technologies (or a per-project channel if one is set up).</li>
+</ul>
+<h2 id="pre-flight">Pre-flight</h2>
+<pre><code class="language-bash"># 1. Confirm testbench is up
+curl https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/health
+
+# 2. Install latest agent-guardian into a clean venv
+python -m venv /tmp/agentguardian-demo-venv
+source /tmp/agentguardian-demo-venv/bin/activate
+pip install --upgrade agent-guardian
+agent-guardian --version   # should report 1.1.0 or later
+
+# 3. Export the LLM key — do NOT show this on screen
+export GEMINI_API_KEY=...   # set in shell, do not include in the cap
+
+# 4. Pre-warm the dashboard
+agent-guardian serve &amp;
+DASHBOARD_PID=$!
+sleep 1
+curl -s http://127.0.0.1:7474/health
+</code></pre>
+<p>Recording app: QuickTime Player (macOS, File -&gt; New Screen Recording) or OBS. Capture at 1080p. Hide the menu bar (<code>defaults write NSGlobalDomain _HIHideMenuBar -bool true; killall Finder</code>) before starting.</p>
+<h2 id="scene-by-scene">Scene-by-scene</h2>
+<h3 id="scene-1-title-card-000005-5s">Scene 1 — Title card (0:00–0:05, 5s)</h3>
+<p>Static black slide with the AgentGuardian wordmark (<code>docs/images/logo-dark.svg</code>). Overlay one line: <strong>"Red team your AI agents in 90 seconds."</strong></p>
+<p>Voiceover:</p>
+<blockquote>
+<p>"AgentGuardian — open source red-teaming for AI agents. Here's the 90-second demo."</p>
+</blockquote>
+<h3 id="scene-2-the-vulnerable-agent-005015-10s">Scene 2 — The vulnerable agent (0:05–0:15, 10s)</h3>
+<p>Terminal full-screen. Run the testbench healthcheck and show the five agents:</p>
+<pre><code class="language-bash">curl https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/health | jq .
+</code></pre>
+<p>Voiceover:</p>
+<blockquote>
+<p>"This is our hosted testbench. Five demo agents — one clean, four planted with real OWASP-LLM vulnerabilities. We'll attack <code>finbot</code>, the banking assistant."</p>
+</blockquote>
+<h3 id="scene-3-run-the-scan-015050-35s">Scene 3 — Run the scan (0:15–0:50, 35s)</h3>
+<p>Type the scan command live. Do <strong>not</strong> paste — typing reads as real.</p>
+<pre><code class="language-bash">agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+  --model gemini:gemini-2.5-flash \
+  --mode fast \
+  --budget-usd 0.20
+</code></pre>
+<p>Press enter. Within a second two dashboard URLs appear. Speed the recording 2x through the swarm progress lines (most editors support a clip-speed multiplier; keep the per-agent <code>findings=</code> lines readable).</p>
+<p>Voiceover during the run:</p>
+<blockquote>
+<p>"One command. Fourteen specialist attackers run in parallel against the agent — goal hijack, tool abuse, memory poisoning, secret extraction, the OWASP ASI categories. They share findings through an adversarial memory store, so multi-hop attacks compose. A live dashboard wires up before the swarm fires."</p>
+</blockquote>
+<p>When the summary line lands, slow back to 1x and let the viewer read it:</p>
+<pre><code class="language-text">scan cli-XXXX done: AIVSS=23 band=CRITICAL tier=T1 findings=14 report=scan.json
+</code></pre>
+<p>Voiceover:</p>
+<blockquote>
+<p>"AIVSS 23, critical band, fourteen findings. Ninety seconds wall-clock, about a cent of Gemini Flash."</p>
+</blockquote>
+<h3 id="scene-4-open-the-report-050110-20s">Scene 4 — Open the report (0:50–1:10, 20s)</h3>
+<p>Open the HTML report in the live dashboard (browser tab). Scroll to one finding — show:</p>
+<ul>
+<li>the attacker prompt,</li>
+<li>the agent's verbatim reply,</li>
+<li>the OWASP ASI category badge,</li>
+<li>the MITRE ATLAS technique,</li>
+<li>the PoV reliability number.</li>
+</ul>
+<p>Voiceover:</p>
+<blockquote>
+<p>"Every finding ships with the verbatim attack prompt, the agent's reply, the OWASP ASI category, the MITRE ATLAS technique, and a proof-of-vulnerability reliability score. The PoV is replayed against the target before the finding survives, so single-shot hallucinations don't land in the report."</p>
+</blockquote>
+<h3 id="scene-5-mitigation-re-run-110125-15s">Scene 5 — Mitigation + re-run (1:10–1:25, 15s)</h3>
+<p>Back to the terminal. Run the scan against the <code>clean_control</code> agent (the testbench's hardened control):</p>
+<pre><code class="language-bash">agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/clean_control/chat \
+  --model gemini:gemini-2.5-flash \
+  --mode fast \
+  --budget-usd 0.20
+</code></pre>
+<p>Speed 4x through the run. Land on the summary:</p>
+<pre><code class="language-text">scan cli-YYYY done: AIVSS=96 band=EXCELLENT tier=T4 findings=0 report=scan.json
+</code></pre>
+<p>Voiceover:</p>
+<blockquote>
+<p>"Same swarm, same flags, the hardened agent. AIVSS 96, zero findings. The 73-point swing is the credibility evidence — the scan found a real defect on the vulnerable agent and confirms a clean control."</p>
+</blockquote>
+<h3 id="scene-6-outro-125130-5s">Scene 6 — Outro (1:25–1:30, 5s)</h3>
+<p>Static slide. Three lines:</p>
+<ul>
+<li><code>pip install agent-guardian</code></li>
+<li><code>docs.agentguardian.io/quickstart</code></li>
+<li><code>github.com/glacien-technologies/agent-guardian</code></li>
+</ul>
+<p>Voiceover:</p>
+<blockquote>
+<p>"Apache 2.0. No telemetry. Local-first. Install it, scan your own agent, file an issue if you find a gap."</p>
+</blockquote>
+<h2 id="youtube-metadata">YouTube metadata</h2>
+<p><strong>Title:</strong></p>
+<pre><code>AgentGuardian — open-source red-teaming for AI agents (90s demo)
+</code></pre>
+<p><strong>Description:</strong></p>
+<pre><code>AgentGuardian is an open-source, Apache-2.0, local-first red-teaming toolkit for AI agents. Point it at your LangGraph, CrewAI, MCP server, RAG app, or REST-API agent and it deploys a swarm of fourteen specialist attackers, produces a deterministic AIVSS score mapped to OWASP ASI 2026 / MITRE ATLAS v5.4 / CSA, and emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
+
+In this 90-second demo:
+- 0:05  the hosted testbench
+- 0:15  one-command scan against the FinBot banking agent
+- 0:50  reading the report — OWASP / ATLAS / PoV reliability
+- 1:10  re-scan against the hardened control — zero findings
+
+Try it:
+  pip install agent-guardian
+
+Docs: https://docs.agentguardian.io
+Quickstart: https://docs.agentguardian.io/quickstart
+Source: https://github.com/glacien-technologies/agent-guardian
+Testbench: https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app
+
+Apache 2.0. No telemetry. Local-first.
+</code></pre>
+<p><strong>Tags:</strong></p>
+<pre><code>ai security, ai agents, llm security, prompt injection, red team, owasp, mitre atlas, langgraph, crewai, mcp, rag security, open source
+</code></pre>
+<p><strong>Visibility:</strong> Unlisted until launch day; flip to Public when GTM-008 fires.</p>
+<h2 id="post-recording-checklist">Post-recording checklist</h2>
+<ul>
+<li>[ ] Length verified (60–90s window; hard cap 95s).</li>
+<li>[ ] No API keys, env vars, or local paths visible in any frame.</li>
+<li>[ ] Sound levels normalised (voice peaks ~ -3 dB; no clipping).</li>
+<li>[ ] Closed captions auto-generated and reviewed for accuracy (YouTube Studio -&gt; Subtitles).</li>
+<li>[ ] Thumbnail uploaded — 1280x720, AgentGuardian wordmark + "90-second demo" overlay.</li>
+<li>[ ] Public URL captured into <code>GTM_TASKS.md</code> GTM-007 status line.</li>
+<li>[ ] Public URL pasted into <code>README.md</code> Demo section (Edit operation in this plan).</li>
+<li>[ ] Public URL pasted into <code>docs/blog/introducing-agentguardian.mdx</code> (already references <code>README.md#demo</code> — refresh if a direct URL is preferred).</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

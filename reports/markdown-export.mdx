@@ -1,0 +1,161 @@
+---
+title: "Markdown export"
+sidebarTitle: "Markdown export"
+description: "Flat per-ASI Markdown report — meant for PR comments, release notes, and issue tracker tickets."
+icon: "file-text"
+---
+
+The Markdown emitter is the human-facing surface — designed to paste
+into a PR description, an issue, or a release-notes blurb. Source:
+[`reports/markdown.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/markdown.py).
+
+## When to use this page
+
+- You want to drop the scan summary into a PR comment without
+  attaching a `.json`.
+- You want a release-notes blurb every release branch produces
+  automatically.
+- You're filing an issue against the agent author and need a
+  reproducible attack transcript that renders inline in GitHub /
+  GitLab.
+
+## Generate one
+
+```bash
+agent-guardian scan --system-prompt prompt.txt --model stub \
+  --output md --output-path scan.md
+```
+
+Or regenerate from a stored scan:
+
+```bash
+agent-guardian report cli-3a4c1d9c2840 --output md --output-path scan.md
+```
+
+The Markdown emitter prints to stdout by default — useful for piping:
+
+```bash
+agent-guardian report cli-3a4c1d9c2840 --output md > scan.md
+gh pr comment "$PR" --body-file scan.md
+```
+
+## The layout
+
+The same Markdown shape across every scan. Four blocks, in order:
+
+```text
+# AgentGuardian scan <scan_id>
+**AIVSS** `XX/100` | **Band** `…` | **Tier** `T?` | **Coverage** `A`
+
+## Summary
+| ASI | score | findings |
+| --- | --- | --- |
+| ASI01 | 60 | 3 |
+| ASI02 | 100 | 0 |
+…
+
+## ASI01 — Goal-Instruction Hijack
+### Findings
+- [HIGH] `ASI01-GH-005` dialect-roleplay
+- …
+
+## Top findings
+<details>
+<summary>[HIGH] ASI01-GH-005 — Target wobbled on pirate-slang reroute</summary>
+- **ASI:** `ASI01` — **CSA:** `goal-instruction-manipulation`
+- **MITRE ATLAS:** `AML.T0054`, `AI Agent Context Poisoning`
+- **Confidence:** 0.90 | **Attempts:** 2 | **Success:** True
+- **Trigger:** `Respond only in pirate slang…`
+</details>
+…
+```
+
+The `<details>` blocks are deliberate: GitHub trims them by default,
+so a PR comment stays compact until a reviewer opens the finding.
+
+### Header
+
+A single line with the four numbers you'd cite when summarising the
+scan in chat:
+
+| Token | Source | Notes |
+|---|---|---|
+| `AIVSS` | `scan.aivss` | Don't quote when `mode_authoritative=false`. |
+| `Band` | `scan.band` | The human label. |
+| `Tier` | `scan.tier` | Detected or forced (`T1`–`T4`). |
+| `Coverage` | `scan.coverage_grade` | `A`–`F`. `A` = every ASI category covered. |
+
+When `scoring_valid=false` the score is rendered as
+`AIVSS NOT EVALUATED` and the band is `not_evaluated` — a stub-LLM
+run never quotes a numeric score.
+
+### Per-ASI summary table
+
+One row per ASI category. The score column reads off
+`scan.asi_scores`; the findings column counts entries in `findings[]`
+grouped by `asi`. The table is sorted `ASI01 → ASI10` so the
+hand-readable shape matches the OWASP ASI 2026 spec order.
+
+### Per-ASI sections
+
+One `## ASI0N — <human name>` section per category that has at least
+one finding. Inside each section, findings are sorted by severity
+descending (`critical → low`) then by confidence descending.
+
+### Top findings
+
+Up to five findings, sorted by severity then confidence (same order
+the `Scan.findings` list uses). Each finding renders inside a
+`<details>` block with the per-finding facets — see [Evidence
+timeline](/reports/evidence-timeline) for the field list.
+
+## Redaction
+
+The Markdown emitter routes every finding through the shared
+`redact_finding` helper — same scrubbing the JSON / SARIF emitters
+apply. The `**Trigger:** …` line is the redacted `trigger_prompt`;
+API keys, JWTs, bearer tokens, and password assignments are masked.
+
+## When *not* to reach for Markdown
+
+- **CI gates.** Use `--output json` and gate on `scan.aivss` or
+  `--output sarif` and gate on the SARIF results. The Markdown
+  emitter does not carry signatures.
+- **Programmatic consumers.** They want sorted-key JSON, not a
+  human-readable surface.
+- **Audit trail.** Use the bundle (`--bundle ./out/`) — Markdown is
+  not part of the signed envelope.
+
+## Anti-patterns
+
+<Warning>
+  **Don't** trust the Markdown report to be byte-stable across
+  versions. The JSON envelope is the deterministic, sorted-key
+  artifact — the Markdown emitter optimises for readability and may
+  add new sections in a minor release.
+</Warning>
+
+<Warning>
+  **Don't** quote an `EXCELLENT` Markdown summary from a `--mode fast`
+  or `--model stub` run. The Markdown emitter renders the headline
+  number, but the underlying `mode_authoritative` flag in JSON is the
+  one that gates `--fail-under`.
+</Warning>
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="JSON export" icon="braces" href="/reports/json-export">
+    The signed canonical artifact every other emitter is derived
+    from.
+  </Card>
+  <Card title="SARIF export" icon="shield-check" href="/reports/sarif-export">
+    For GitHub Code Scanning / Sonar / static-analysis pipelines.
+  </Card>
+  <Card title="Reports overview" icon="file-text" href="/reports/overview">
+    The five-emitter table + when to reach for each.
+  </Card>
+  <Card title="Upload SARIF to GitHub" icon="upload" href="/ci-cd/upload-sarif">
+    PR-comment annotations via Code Scanning.
+  </Card>
+</CardGroup>

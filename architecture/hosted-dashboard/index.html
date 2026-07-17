@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>Hosted dashboard (forward-looking) - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../live-dashboard.mdx" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../observability.mdx" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#hosted-dashboard-architecture" class="nav-link">Hosted dashboard architecture</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#trust-anchor" class="nav-link">Trust anchor</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#tenant-model" class="nav-link">Tenant model</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#auth-flow" class="nav-link">Auth flow</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#migration-from-local" class="nav-link">Migration from local</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="hosted-dashboard-architecture">Hosted dashboard architecture</h1>
+<p><strong>Status:</strong> Architecture captured. Not yet deployed.</p>
+<p>AgentGuardian today ships a <strong>local-only</strong> dashboard. Every
+<code>agent-guardian scan</code> emits a URL at
+<code>http://127.0.0.1:7474/scans/&lt;id&gt;</code> that points at the operator's own
+machine; the dashboard process is a single-tenant uvicorn app and
+stores state under <code>~/.agentguardian/scans/&lt;id&gt;/</code>.</p>
+<p>This document specifies how a future <strong>hosted SaaS dashboard</strong> layers
+onto the same scan binary without changing CLI ergonomics. The only
+knob the CLI needs is the environment variable
+<code>AGENT_GUARDIAN_DASHBOARD_URL</code>. Everything else — trust anchor, tenant
+model, auth, transport — lives behind that one base URL.</p>
+<p>This is <strong>forward-looking documentation</strong>. There is no code in this
+repository that talks to a hosted endpoint today.</p>
+<p>Coming soon: a fully-rendered version of this page lives in
+<a href="../live-dashboard.mdx"><code>docs/architecture/live-dashboard.mdx</code></a>. This
+<code>.md</code> placeholder pins the legacy URL (<code>architecture/hosted-dashboard.md</code>)
+so external links keep resolving and so the architecture-presence test
+can guard against silent doc loss.</p>
+<h2 id="trust-anchor">Trust anchor</h2>
+<p>Every scan binary embeds a fingerprint for the AgentGuardian release
+public key (used today to verify report signatures locally). The
+hosted side maintains the same key registry — published as a static
+JSON manifest at <code>/.well-known/agentguardian/keys.json</code>.</p>
+<p>The render path on the hosted side is strict:</p>
+<ol>
+<li>Receive a signed scan bundle (<code>scan.json</code> + detached signature +
+   public-key id).</li>
+<li>Look the key id up against the manifest. Unknown key → <code>403</code>, scan
+   never touches storage.</li>
+<li>Verify the Ed25519 detached signature against the canonical JSON.</li>
+<li>Persist the bundle. Render only what was in the verified payload.</li>
+</ol>
+<p>The hosted side <strong>does not</strong> mutate the bundle. Findings, AIVSS,
+sub-scores, ASI rows — all come from the signed payload. The hosted
+renderer is a read-only formatter; it cannot synthesise or edit
+findings.</p>
+<h2 id="tenant-model">Tenant model</h2>
+<p>A tenant is the entity that owns a publishing key.</p>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Storage</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tenant</td>
+<td><code>tenants/&lt;tenant_id&gt;</code></td>
+<td><code>tenants/glacien</code></td>
+</tr>
+<tr>
+<td>Publishing key</td>
+<td><code>tenants/&lt;id&gt;/keys/&lt;key_id&gt;</code></td>
+<td><code>tenants/glacien/keys/ed25519-2026-Q2</code></td>
+</tr>
+<tr>
+<td>Scan</td>
+<td><code>tenants/&lt;id&gt;/scans/&lt;scan_id&gt;</code></td>
+<td><code>tenants/glacien/scans/cli-3a4c1d9c2840</code></td>
+</tr>
+<tr>
+<td>Member</td>
+<td><code>tenants/&lt;id&gt;/members/&lt;user_id&gt;</code></td>
+<td>(sets visibility ACL)</td>
+</tr>
+</tbody>
+</table>
+<p>Operators in a tenant either share a publishing key (simple) or hold
+their own and have it admitted to the tenant key set (auditable). The
+CLI never asks the operator to log in — it just signs the bundle and
+POSTs it. AuthN of the operator happens <em>only</em> via the signature.</p>
+<p>Visibility:</p>
+<ul>
+<li><strong>Private</strong> (default) — only authenticated tenant members can render
+  the scan URL.</li>
+<li><strong>Org-visible</strong> — visible to a configured GitHub org / Google
+  Workspace.</li>
+<li><strong>Public</strong> — anyone with the URL can render. Operators opt in
+  explicitly.</li>
+</ul>
+<p>Scan URLs always carry an unguessable random suffix; the visibility
+flag only relaxes the auth wall around them.</p>
+<h2 id="auth-flow">Auth flow</h2>
+<pre><code>operator                       agent-guardian CLI            hosted dashboard
+   │                                  │                              │
+   │  agent-guardian scan ...         │                              │
+   │  AGENT_GUARDIAN_DASHBOARD_URL=…  │                              │
+   │ ────────────────────────────────►│                              │
+   │                                  │ 1. run swarm locally         │
+   │                                  │ 2. sign scan.json (Ed25519)  │
+   │                                  │ 3. POST {bundle}             │
+   │                                  │ ────────────────────────────►│
+   │                                  │                              │ verify sig
+   │                                  │                              │ store bundle
+   │                                  │ ◄────────────────────────────│
+   │                                  │   202 {scan_url}             │
+   │ ◄────────────────────────────────│                              │
+   │  ▸ Scan cli-3a4c1d9c2840 — …     │                              │
+   │  ▸ Report when complete  …       │                              │
+</code></pre>
+<p>The CLI authenticates only with the signature. The hosted side issues
+short-lived cookies for <em>viewers</em> of the URL — that is a browser-side
+concern, not a CLI concern.</p>
+<h2 id="migration-from-local">Migration from local</h2>
+<p>Nothing forced. An operator running only <code>agent-guardian scan</code> against
+<code>localhost:7474</code> today keeps doing exactly that. The hosted surface is
+opt-in by setting one environment variable:</p>
+<pre><code class="language-bash">export AGENT_GUARDIAN_DASHBOARD_URL=https://dash.agentguardian.dev
+agent-guardian scan --endpoint https://agent.example.com
+</code></pre>
+<p>When the env var points at a non-loopback host:</p>
+<ul>
+<li>The CLI emits the hosted URL at scan start (so the operator can
+  share it before the scan finishes).</li>
+<li>The CLI publishes the signed bundle after the scan completes.</li>
+<li>The hosted dashboard renders the <em>same</em> templates as the local one
+  (<code>templates/dashboard/scan_detail.html</code>) — only the chrome's
+  locality pill changes (<code>Hosted · evidence-signed</code>).</li>
+</ul>
+<p>When the env var is unset or points at loopback, the CLI behaves
+exactly as it did before this work shipped.</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

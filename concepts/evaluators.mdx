@@ -1,0 +1,120 @@
+---
+title: "Evaluators"
+sidebarTitle: "Evaluators"
+description: "The three-layer verdict pipeline: LLM-as-judge with category-specific rubrics, heuristic judge for cheap pre-screening, and Rules-of-Engagement blocklist for safety enforcement."
+icon: "gavel"
+---
+
+An **evaluator** decides whether a target's response to one attack prompt
+crossed a safety or security boundary. AgentGuardian does this with three
+layers stacked from cheapest to strictest. Each layer can drop a turn
+before the next one sees it.
+
+Source-of-truth:
+- `src/agent_guardian/agents/base.py::Judge` — LLM-as-judge.
+- `src/agent_guardian/core/heuristic_judge.py::HeuristicJudge` — heuristic pre-screen.
+- `src/agent_guardian/core/roe.py::RoeController` — Rules-of-Engagement enforcement.
+
+## Layer 1 — Rules-of-Engagement blocklist
+
+Before any prompt reaches the target the swarm calls
+`RoeController.may_send(...)`. The RoE controller paces requests through a
+token-bucket rate limiter, caps total requests, screens tool calls against
+allow/block lists, and answers egress questions sourced from the
+contract's `roe` block.
+
+For MCP servers the RoE controller is a **pre-execution gate** — a
+blocklisted tool call is refused before the server runs it. For HTTP and
+cloud transports the controller is **observe-only**: those transports
+surface a tool call only after the target has already executed it
+server-side, so the controller can count and record the attempt for the
+audit but cannot prevent it.
+
+This layer never produces a finding. It exists to keep the scan inside
+the rules the operator declared.
+
+## Layer 2 — Heuristic judge
+
+A cheap, deterministic, LLM-free pre-screen runs against every response.
+It looks for high-signal patterns — leaked secrets that match common
+formats (API keys, JWTs, private keys), refusal phrases, tool-call
+artefacts, structured PII leaks. When the heuristic judge fires with
+high confidence its verdict short-circuits the LLM judge so the swarm
+does not pay for an obvious finding.
+
+When the heuristic judge fires with low confidence it annotates the turn
+and lets the LLM judge make the final call.
+
+Source: `src/agent_guardian/core/heuristic_judge.py::HeuristicJudge`.
+
+## Layer 3 — LLM-as-judge
+
+The default and the one most findings come from. Each specialist agent
+owns a `JudgeRubric` — a category-specific prompt that tells the
+evaluator LLM:
+
+- what counts as a violation for this ASI category,
+- what the target was supposed to do (the contract / target description),
+- what the attack tried to make it do,
+- what evidence to extract on a positive verdict.
+
+The judge LLM receives the `(prompt, response)` pair and returns a
+structured `JudgeVerdict`:
+
+```json
+{
+  "verdict": "fail",
+  "severity": "high",
+  "confidence": 0.92,
+  "rationale": "Target executed the tool call despite the contract forbidding it.",
+  "evidence": ["the tool call payload", "the exact target string"]
+}
+```
+
+`verdict="fail"` writes a `Finding`. `verdict="pass"` records the turn
+in the transcript but does not surface it. `verdict="abstain"` defers —
+the strategy may re-issue or escalate.
+
+## Why the judge is a different LLM from the attacker
+
+The judge is intentionally separate from the strategy. An attacker LLM
+that also grades its own output would inflate the score because the
+chain-of-thought that picked the attack would also pick a forgiving
+rubric. By splitting roles the evaluator only sees `(prompt, response)`
+pairs and a category-specific rubric — never the strategy's
+chain-of-thought.
+
+You can wire three different models with three flags:
+
+```bash
+agent-guardian scan \
+  --commander-model gemini:gemini-2.5-flash \
+  --attacker-model openai:gpt-4o \
+  --evaluator-model anthropic:claude-3-5-sonnet
+```
+
+Or use one model for all three by passing only `--model`.
+
+## What ends up in the report
+
+Every `Finding` written by the LLM judge carries the verdict, the
+rationale, the evidence list, the AIVSS sub-score, the OWASP ASI
+category, the MITRE ATLAS technique, and the CSA AI category. The full
+attack transcript is attached, so the report can reproduce the finding
+turn-by-turn.
+
+See [Evidence timeline](/reports/evidence-timeline) for how the
+transcript is rendered and
+[AIVSS score](/reports/aivss-score) for how the verdict severity rolls
+up into the final 0-100 score.
+
+## Where to go next
+
+- [Adversarial swarm](/concepts/adversarial-swarm) — the specialists
+  that emit verdicts.
+- [Target adapters](/concepts/target-adapters) — the call surface the
+  evaluator sees.
+- [Reports & Evidence overview](/reports/overview) — what the evidence
+  store does with finalised findings.
+- [Research foundation](/concepts/research-foundation) — why LLM-as-judge,
+  with citations.

@@ -1,0 +1,95 @@
+---
+title: "CI/CD overview"
+sidebarTitle: "Overview"
+description: "Gate every pull request on an AIVSS floor and per-severity ceilings — across GitHub, GitLab, and Bitbucket — with one shared CLI."
+icon: "git-branch"
+---
+
+AgentGuardian runs as a merge gate: the same `agent-guardian scan` you run
+locally exits non-zero when an agent regresses, and your CI provider turns that
+exit code into a failed check. The findings surface three ways — a SARIF /
+Code Quality report, inline annotations, and a single sticky PR comment — all
+from the one CLI.
+
+## Start here
+
+<CardGroup cols={3}>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    Composite action + SARIF upload to the Security tab + sticky PR comment.
+  </Card>
+  <Card title="GitLab CI" icon="gitlab" href="/ci-cd/gitlab-ci">
+    SARIF security report + inline Code Quality widget + sticky MR note.
+  </Card>
+  <Card title="Bitbucket" icon="bitbucket" href="/ci-cd/bitbucket">
+    Code Insights report + per-finding annotations + sticky PR comment.
+  </Card>
+</CardGroup>
+
+## The pieces
+
+| Page | What it covers |
+|---|---|
+| [GitHub Actions](/ci-cd/github-actions) | The `pull_request` workflow, the composite action, the permissions block. |
+| [Composite action](/ci-cd/composite-action) | The reusable `agentguardian-scan` action and its inputs. |
+| [GitLab CI](/ci-cd/gitlab-ci) | The `.gitlab-ci.yml` job, SAST + Code Quality artifacts. |
+| [Bitbucket Pipelines](/ci-cd/bitbucket) | `bitbucket-pipelines.yml`, Code Insights, annotations. |
+| [Security gates](/ci-cd/security-gates) | `--fail-under` plus the `--max-critical` / `--max-high` / `--max-medium` / `--max-low` ceilings, and the authoritativeness rules. |
+| [Upload SARIF](/ci-cd/upload-sarif) | `github/codeql-action/upload-sarif@v3` and the permissions it needs. |
+| [PR / MR comments](/ci-cd/pr-comments) | The single sticky comment, its hidden-marker contract, and a rendered sample. |
+| [Parallel suites](/ci-cd/parallel-suites) | Run a whole fleet of agents in parallel from one YAML file — nightly sweeps, benchmarks, regression suites. |
+
+## The gate, in one line
+
+```bash
+agent-guardian scan \
+  --framework langgraph --framework-ref my_app.graph:graph \
+  --model gemini:gemini-2.5-flash --mode full --budget-usd 0.10 \
+  --output sarif --output-path scan.sarif \
+  --fail-under 70 --max-critical 0 --max-high 0
+```
+
+`--fail-under` is the AIVSS floor; the `--max-*` flags are per-severity finding
+ceilings. They are **AND-combined** — the gate fails if the score drops below
+the floor **or** any severity count exceeds its ceiling. Full matrix on the
+[security gates](/ci-cd/security-gates) page.
+
+<Warning>
+  **AgentGuardian's open-source gate is stateless — there is no baseline.**
+
+  Every scan is judged on its own. The gate has no memory of the previous scan,
+  so it cannot tell a *newly introduced* finding from one that was already
+  there. Consequences:
+
+  - **Every finding counts.** A `--max-critical 0` gate fails the moment a
+    single CRITICAL finding exists, even if that finding predates the PR under
+    review.
+  - **A pre-existing finding can fail the gate.** Turning the gate on against an
+    agent that already has open findings will go red on the first run. That is
+    by design — the gate reports the agent's *current* posture, not the delta.
+  - **Tune the floor to where you are, then tighten.** Start permissive
+    (`--fail-under 60`, no `--max-*`), land mitigations, and ratchet the
+    thresholds down as the agent improves. See
+    [security gates → picking the floor](/ci-cd/security-gates).
+
+  **Baseline-diff — failing only on findings a PR *introduces* relative to a
+  recorded baseline — is a hosted (SaaS) feature, not part of the OSS CLI.**
+  If you need delta-only gating, that lives in AgentGuardian Cloud.
+</Warning>
+
+## Surfacing the result
+
+Each platform exposes the same scan three ways:
+
+- **A machine-readable report** — SARIF (GitHub Code Scanning / GitLab SAST),
+  GitLab Code Quality JSON, or a Bitbucket Code Insights report.
+- **Inline annotations** — per-finding, severity-mapped, shown on the diff.
+- **A sticky PR/MR comment** — one comment upserted in place on every push, keyed
+  by a hidden marker so it never spams. Identical body across all three hosts;
+  see [PR / MR comments](/ci-cd/pr-comments).
+
+## Cost control
+
+Cap the spend with `--budget-usd` so a runaway provider can never cost more than
+budgeted per PR. The swarm soft-stops new attack turns at 80% of the cap and
+reserves the remainder for the report-emission step. A `full`-mode scan against
+the bundled vulnerable demo costs roughly $0.06 on `gemini:gemini-2.5-flash`.

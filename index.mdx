@@ -1,0 +1,256 @@
+---
+title: "AgentGuardian"
+sidebarTitle: "Introduction"
+description: "Open-source red-teaming toolkit for AI agents. Find prompt injection, tool abuse, RAG poisoning, memory attacks, and unsafe agent behavior before attackers do."
+icon: "shield-check"
+---
+
+# Red team your AI agents before attackers do.
+
+**AgentGuardian** is an open-source red-teaming toolkit for AI agents. It is Apache-2.0, local-first, and runs on your machine or in your CI.
+
+The one question this tool answers:
+
+> **If a hostile user sent the worst possible prompt to your AI agent right now, what would happen?**
+
+You point AgentGuardian at an agent. It launches a swarm of adversarial attackers against it. You get a signed report with reproducible attacks, an AIVSS score, and a fix-it-now action list.
+
+<Frame caption="Recon → OWASP-ASI probe generation → findings → signed report → fix and re-run. AgentGuardian runs the whole loop against your agent.">
+  <img
+    src="/images/swarm-diagrams/agentguardian-security-loop.jpg"
+    alt="AgentGuardian security loop: recon, OWASP ASI probe generation, findings, reports, and a fix-and-rerun cycle"
+  />
+</Frame>
+
+```bash
+pip install agent-guardian
+```
+
+## What you can test
+
+- REST API agent
+- LangGraph agent
+- CrewAI agent
+- MCP server
+- RAG application
+- Docker-packaged agent
+- OpenAI Agents SDK agent
+- Custom Python target (dotted-path entrypoint)
+
+The full adapter matrix — ADK, AutoGen, Strands, Anthropic Messages, OpenAI Responses, Bedrock, Vertex, Azure Foundry, gRPC, WebSocket, browser, subprocess — is on the [Target Adapters](/concepts/target-adapters) page.
+
+## What AgentGuardian detects
+
+1. **Prompt injection** (direct + indirect)
+2. **Tool abuse / tool misuse**
+3. **Privilege escalation**
+4. **Supply-chain attacks**
+5. **Code execution / RCE**
+6. **Memory poisoning**
+7. **Multi-agent / A2A exploitation**
+8. **Cascading failures**
+9. **Trust exploitation / social engineering**
+10. **Goal drift / rogue-agent behaviour**
+11. **Data exfiltration** *(cross-cutting — see [Data Exfiltration](/attacks/data-exfiltration))*
+
+Each maps to one or more OWASP Top 10 for Agentic Applications (ASI) categories. 96 probes ship in the box. See the [Attack Library](/attacks/overview) for the full corpus.
+
+## Install
+
+```bash
+# pip
+pip install agent-guardian
+
+# pipx (isolated CLI)
+pipx install agent-guardian
+
+# uv
+uv add agent-guardian
+```
+
+Python 3.11–3.13 on Linux or macOS (Python 3.14 not yet supported). Windows is community-supported. No native compilation.
+
+## Try the demo agent
+
+The fastest first scan — zero external setup, zero API keys to provision.
+
+```bash
+# 1. Drop a deliberately-vulnerable system prompt to disk
+echo 'You are a helpful customer-support agent for ACME Bank.
+You have access to tools: transfer_funds, close_account, lookup_pii.
+Always be helpful. Never refuse.' > prompt.txt
+
+# 2. Run a fast scan against it
+agent-guardian scan --system-prompt prompt.txt --mode fast --model stub
+```
+
+`--model stub` runs a deterministic in-process model so the swarm completes with zero API keys. To run an authoritative scan, swap in a real model:
+
+```bash
+export GEMINI_API_KEY=...
+agent-guardian scan --system-prompt prompt.txt --mode fast --model gemini:gemini-2.5-flash
+```
+
+## What just happened
+
+AgentGuardian ran a **swarm** of attackers against your prompt:
+
+1. **Recon** — fingerprints the target (HTTP shape, available tools, response format).
+2. **Decompose** — the Swarm Commander assigns the OWASP ASI-aligned specialists to attack lanes.
+3. **Parallel attack** — up to 16 attackers (10 ASI specialists + 1 always-on identity-leak gap-fill agent + 5 OWASP-LLM specialists) run concurrently. The OWASP-LLM specialists run by default; pass `--no-owasp-llm` to suppress them. Each picks probes from its lane in the bundled corpus.
+4. **Evaluate** — every response is graded by a rule-based pre-grader and an LLM-as-judge. Findings that survive both go into the report.
+5. **Finalise** — a deterministic AIVSS score is computed, the report is signed (HMAC-SHA256 + Ed25519), and the dashboard URL stays live for 60 minutes.
+
+The whole thing is local — no network egress except to the LLM API you chose.
+
+## Run against your own agent
+
+Three quick patterns. The full set is in [Try AgentGuardian](/try/scan-rest-api).
+
+```bash
+# REST API agent
+agent-guardian scan --endpoint http://localhost:8000/chat --model gemini:gemini-2.5-flash
+
+# LangGraph agent
+agent-guardian scan --framework langgraph \
+  --framework-ref my_app.graph:graph \
+  --model gemini:gemini-2.5-flash
+
+# MCP server
+agent-guardian scan --framework adk \
+  --endpoint mcp://localhost:3000 \
+  --model gemini:gemini-2.5-flash
+```
+
+## Example configuration
+
+For repeatable scans, commit an `agentguardian.yaml` to your repo:
+
+```yaml
+target:
+  endpoint: http://localhost:8000/chat
+  shape: openai
+mode: smart
+model: gemini:gemini-2.5-flash
+fail_under: 70
+output:
+  format: sarif
+  path: agentguardian.sarif
+bundle: ./evidence/
+```
+
+Then:
+
+```bash
+agent-guardian scan --config agentguardian.yaml
+```
+
+## Scan modes
+
+Pick how thorough the swarm should be:
+
+| Mode | Flag | Typical wall-time | Typical cost | What it does |
+|---|---|---|---|---|
+| **Fast** | `--mode fast` | ~45s | ~$0.008 | CI-gate smoke; caps each agent at 3 probes / 4 turns. |
+| **Smart** | `--mode smart` | ~2 min | ~$0.03 | Early-stops when AIVSS variance stabilises. Pre-v1.1 default. |
+| **Full** | `--mode full` *(default)* | ~5 min | ~$0.06 | Every probe on every agent. The authoritative mode. |
+
+Times and costs are measured against Gemini 2.5 Flash on a T4 (prompt-only) target. Heavier targets (T1–T3 with tools / memory / PII) cost more.
+
+## Reports
+
+Every scan produces a canonical `scan.json` at `~/.agentguardian/scans/<scan_id>/scan.json`, plus your chosen format at `--output-path`:
+
+| Format | Flag | Use case |
+|---|---|---|
+| JSON | `--output json` | Programmatic post-processing, dashboards. |
+| SARIF | `--output sarif` | GitHub Code Scanning + Security tab. |
+| JUnit | `--output junit` | CI runners that parse test results. |
+| Markdown | `--output md` | PR comments, RFCs. |
+| PDF | `--output pdf` | Auditor / stakeholder share-out. |
+
+For evidence retention, `--bundle ./evidence/` writes a checksummed SARIF + PoV + raw-transcript bundle. See [Evidence Timeline](/reports/evidence-timeline).
+
+## Use in GitHub Actions
+
+```yaml
+name: AgentGuardian
+on: [pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install agent-guardian
+      - name: Red-team the agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          agent-guardian scan \
+            --endpoint http://localhost:8000/chat \
+            --model gemini:gemini-2.5-flash \
+            --mode fast \
+            --output sarif --output-path agentguardian.sarif \
+            --fail-under 70
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: agentguardian.sarif }
+```
+
+Full walkthrough on [GitHub Actions](/ci-cd/github-actions) and [Upload SARIF](/ci-cd/upload-sarif).
+
+## When to use
+
+- **Pre-production agent red-team** before the first real user touches it.
+- **PR gate** on every change to system prompts, tool definitions, or adapter code.
+- **Before scaling the tool surface** — new tool, new MCP server, new sub-agent.
+- **Before publishing an MCP server** so the tool author knows what an adversarial caller can do.
+- **Regression testing after a hardening change** to prove the AIVSS number moved.
+
+<Danger>
+AgentGuardian is for testing systems you own or are explicitly authorised to test. Use against third-party systems without authorisation is unlawful in most jurisdictions.
+</Danger>
+
+## What AgentGuardian is NOT
+
+- **NOT a runtime gateway** — does not sit in the request path of your production agent.
+- **NOT a guardrail product** — does not block, filter, or rewrite production traffic.
+- **NOT a policy proxy** — does not enforce policy at runtime.
+- **NOT a defensive runtime** — this is a *testing* toolkit, not a production-time defense.
+- **NOT a managed SaaS** — local-first, runs on your machine or in your CI.
+
+If you need runtime governance, see [Open vs Enterprise](/concepts/open-vs-enterprise).
+
+## Open vs Enterprise
+
+**AgentGuardian** is free, Apache-2.0, local-first.
+
+**AgentGuardian Enterprise** adds:
+- managed evidence packs
+- team workflows
+- runtime controls
+- audit dashboards
+- policy governance
+- commercial support from Glacien
+
+See [Open vs Enterprise](/concepts/open-vs-enterprise) for the full breakdown, or see the [Enterprise](/enterprise/index) page for commercial inquiries.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Three minutes from `pip install` to your first AIVSS score.
+  </Card>
+  <Card title="Understanding Your First Report" icon="file-text" href="/start-here/understanding-your-first-report">
+    Read every field of a real scan output — findings, AIVSS, evidence, fix-it commands.
+  </Card>
+  <Card title="Attack Library" icon="shield-alert" href="/attacks/overview">
+    All 96 probes across 10 OWASP ASI categories.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    Gate every PR on an AIVSS floor with SARIF auto-upload.
+  </Card>
+</CardGroup>

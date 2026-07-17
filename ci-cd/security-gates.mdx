@@ -1,0 +1,164 @@
+---
+title: "Security gates"
+sidebarTitle: "Security gates"
+description: "Block merges when AgentGuardian's AIVSS score drops below your floor, with the authoritativeness rules that make the gate honest."
+icon: "shield-check"
+---
+
+A *security gate* is a non-zero CLI exit that a CI provider treats as a failed check. AgentGuardian's gate combines an AIVSS floor (`--fail-under N`) with optional per-severity finding ceilings (`--max-critical` / `--max-high` / `--max-medium` / `--max-low`), backed by a six-code exit table and the QA-004 authoritativeness rules that refuse to gate-pass on a thin scan.
+
+## When to use this
+
+- Every pull request that touches an agent's system prompt, tool surface, memory layer, or framework graph.
+- Release branches before tag cut.
+- A scheduled `cron` workflow against a long-lived hosted agent, to catch drift between releases.
+
+If a workflow only needs a smoke check (no merge-blocking semantics), skip the gate and run `agent-guardian scan --mode fast` without `--fail-under`.
+
+## The flag
+
+```bash
+agent-guardian scan \
+  --framework langgraph \
+  --framework-ref my_app.graph:graph \
+  --model gemini:gemini-2.5-flash \
+  --mode full \
+  --budget-usd 0.10 \
+  --output sarif \
+  --output-path scan.sarif \
+  --fail-under 70
+```
+
+`--fail-under` is the primary flag that turns a scan into a gate. Without any gate flag the CLI always exits `0` on a clean run regardless of the AIVSS — the report is produced, but no merge is ever blocked. Source: [`cli.py:2303–2305`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L2303-L2305).
+
+## Per-severity ceilings
+
+The AIVSS floor is a single aggregate number — a scan can clear `--fail-under` while still introducing one nasty CRITICAL finding. The `--max-*` flags add per-severity **ceilings** on the finding count:
+
+```bash
+agent-guardian scan ... \
+  --fail-under 70 \
+  --max-critical 0 \   # fail if ANY critical finding is present
+  --max-high 0 \       # fail if ANY high finding is present
+  --max-medium 5 \     # tolerate up to 5 medium findings
+  --max-low 20         # tolerate up to 20 low findings
+```
+
+Each ceiling fails the gate when the **count** of findings in that severity band **exceeds** the value (so `--max-critical 0` fails on the first critical, `--max-high 3` fails on the fourth high). A flag left unset imposes no ceiling for that band.
+
+**All conditions are AND-combined.** The gate passes only when *every* configured condition passes: the AIVSS is at or above `--fail-under` **and** each severity count is at or below its `--max-*` ceiling. Any single failing condition fails the whole gate, and every failing condition is named in the stderr banner and the [PR comment verdict](/ci-cd/pr-comments). The decision logic is a pure, unit-tested function — [`core/gate.py:evaluate_gate`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/core/gate.py) — shared by the `scan` enforcement path and the `comment` sub-command, so the comment verdict always matches the exit code.
+
+<Warning>
+  The OSS gate is **stateless — there is no baseline**. `--max-critical 0` fails on *any* critical finding, including one that predates the PR. The gate reports the agent's current posture, not the delta versus a previous scan. Baseline-diff (failing only on *newly introduced* findings) is a hosted (SaaS) feature. See the [CI/CD overview](/ci-cd/overview) for the full caveat.
+</Warning>
+
+## Exit-code table
+
+The six exit codes are defined as module-level constants in [`cli.py:83–89`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L83-L89). A gate should treat `0` as pass and everything else as block.
+
+| Exit | Constant | Why it fired | What to do |
+|------|----------|--------------|------------|
+| `0` | `EXIT_OK` | Scan completed authoritatively and AIVSS &ge; `--fail-under`. | Allow merge. |
+| `1` | `EXIT_FAIL_UNDER` | Scan completed and AIVSS &lt; `--fail-under`, **or** the scan was non-authoritative (stub model / non-`full` mode / coverage below threshold). | Block merge. Read the SARIF annotations and the stderr banner. |
+| `2` | `EXIT_CONFIG` | Bad invocation — unknown flag, missing `--framework-ref`, malformed `--contract`, conflicting target modes. | Fix the workflow YAML. Not a security regression. |
+| `3` | `EXIT_TARGET_UNREACHABLE` | The pre-scan reachability probe for `--endpoint` mode failed (two POSTs, 2s timeout each). | Verify the agent is up before the scan step. Add a `curl --retry` health check, or pass `--no-preflight` if you have your own readiness gate. |
+| `4` | `EXIT_LLM_PROVIDER` | The LLM provider returned an unrecoverable error (auth, rate limit, network). | Re-run; check the provider secret. |
+| `5` | `EXIT_SANDBOX` | The sandboxed code adapter refused to load the target. | Inspect the job log; fix the target reference. |
+| `130` | `EXIT_USER_INTERRUPT` | The runner cancelled the job (timeout, manual cancel). | Re-run; raise `--budget-usd` or `--budget-seconds` if the scan is timing out. |
+
+<Warning>
+  `EXIT_CONFIG`, `EXIT_TARGET_UNREACHABLE`, `EXIT_LLM_PROVIDER`, and `EXIT_SANDBOX` mean the scan **never produced a verdict**. Do not treat them as a security pass. The recommended gate condition is "exit code == 0", not "exit code != 1".
+</Warning>
+
+## The authoritativeness rules (QA-004)
+
+A scan can finish with a high AIVSS for the wrong reasons — a stub evaluator that cannot flag findings, a `fast` mode that only ran 3 probes per agent, or a `full` mode that ran out of budget before covering enough probes for a band call. AgentGuardian refuses to gate-pass on any of those.
+
+The gate logic in [`cli.py:3114–3131`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/cli.py#L3114-L3131) checks three things in order before comparing the AIVSS to the floor:
+
+1. **Is the scan authoritative?** A scan is non-authoritative when `scoring_valid=False`. With `--fail-under` set, a non-authoritative scan **always** returns `EXIT_FAIL_UNDER` with this stderr line:
+
+   ```text
+   --fail-under 70: FAILED -- scan is non-authoritative (NOT_EVALUATED); a stub/unscored run never passes a gate.
+   ```
+
+2. **Is the mode authoritative?** Only `--mode full` produces a `mode_authoritative=True` scan (see [`core/swarm.py:2104`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/core/swarm.py#L2104)). With `--fail-under` and `--mode fast` or `--mode smart`, the CLI prints:
+
+   ```text
+   WARNING: --fail-under 70: this scan was run in --mode smart; quoted score 82 is not authoritative -- re-run with --mode full for a real gate.
+   ```
+
+   …and returns `EXIT_FAIL_UNDER`. Fast and smart scans are iteration smoke checks, not release gates.
+
+3. **Did coverage clear the mode's threshold?** Each mode has an authoritative-coverage floor, defined in [`reports/warnings.py`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/warnings.py) (`MODE_AUTHORITATIVE_THRESHOLDS`):
+
+   | `--mode` | Authoritative coverage floor |
+   |----------|------------------------------|
+   | `fast` | 60% |
+   | `smart` | 80% |
+   | `full` | 95% |
+
+   A scan that finishes below its mode's floor finalises to `band=NOT_EVALUATED` with `scoring_valid=False`, which falls through to rule 1 above. The banner names the actual coverage, the threshold, the finding count, and a remediation (raise budget, or drop to a smaller mode).
+
+Only after all three checks pass does the gate compare `scan_result.aivss < fail_under`.
+
+## How to interpret a failure
+
+When the gate blocks a merge, the stderr line is the first thing to read — it tells you *why*. Map it to one of the four failure modes below and the right remediation is obvious:
+
+| stderr line starts with… | Failure mode | Fix |
+|---------------------------|--------------|-----|
+| `--fail-under N: FAILED -- AIVSS X < floor N` | Real regression. The scan was authoritative and the score dropped. | Triage the SARIF findings; revert or mitigate. |
+| `--fail-under N: FAILED -- scan is non-authoritative (NOT_EVALUATED)` | Stub model, mixed evaluator, or coverage below the mode floor. | Re-run with a real `--model` and `--mode full`; raise `--budget-usd` if coverage was the cause. |
+| `WARNING: --fail-under N: this scan was run in --mode fast/smart` | Mode is wrong for a gate. | Switch the gating workflow to `--mode full`. Keep `fast`/`smart` for unit-test-style smoke checks. |
+| `WARNING: coverage X% is below the --mode full authoritative threshold (95%)` | Budget ran out before enough probes ran. The scan still scored, but the band finalised to `NOT_EVALUATED`. | Raise `--budget-usd` or `--budget-seconds`. |
+
+The full QA-004 banner builder is [`reports/warnings.py:build_authoritativeness_warning`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/reports/warnings.py) — it is the single source of truth for the four banner branches (stub / mixed / low-coverage / authoritative-no-banner) and is unit-snapshot-tested per branch.
+
+## Picking the floor
+
+The five-band AIVSS scale is defined in [`models/severity.py:band_for_score`](https://github.com/glacien-technologies/agent-guardian/blob/main/src/agent_guardian/models/severity.py):
+
+| Band | Score range |
+|------|-------------|
+| `excellent` | 90&ndash;100 |
+| `good` | 80&ndash;89 |
+| `warning` | 60&ndash;79 |
+| `poor` | 40&ndash;59 |
+| `critical` | 0&ndash;39 |
+| `not_evaluated` | (non-numeric — see authoritativeness rules above) |
+
+A practical progression:
+
+- **First two weeks** &mdash; `--fail-under 40`. Blocks only `critical`-band regressions; the team sees what a real swarm finds without breaking every merge.
+- **Steady state** &mdash; `--fail-under 60`. Matches the `warning`/`poor` boundary; rejects merges that introduce a `poor`-band finding.
+- **Hardened release branch** &mdash; `--fail-under 80`. Matches the `good`/`warning` boundary; only ships when the agent is in the `good` or `excellent` band.
+
+Start permissive and tighten as you land mitigations. The score has integer granularity, so a floor of `70` is meaningfully different from `60` and `80`.
+
+## Cost ceiling
+
+A gate that can spend unbounded LLM dollars per PR is not a gate you can leave on. Cap the spend with `--budget-usd` (USD, metered against actual provider spend) or `--budget-seconds` (wall-clock).
+
+```bash
+agent-guardian scan ... --budget-usd 0.10 --fail-under 70
+```
+
+The swarm soft-stops new attack turns at 80% of the cap and reserves the remaining 20% for the report-emission step. A `full`-mode scan against the bundled vulnerable demo costs roughly $0.06 on `gemini:gemini-2.5-flash`; `0.10` leaves headroom for variance.
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Fail builds on critical findings" icon="circle-x" href="/ci-cd/fail-builds-on-critical-findings">
+    The recipe for translating SARIF severity into a build break, without double-counting against the AIVSS gate.
+  </Card>
+  <Card title="GitHub Actions" icon="git-branch" href="/ci-cd/github-actions">
+    The full workflow YAML, with SARIF auto-upload to the Security tab.
+  </Card>
+  <Card title="Reports" icon="file-text" href="/reports/overview">
+    Open the `scan.sarif` and the signed `scan.json` the gate produces.
+  </Card>
+  <Card title="Scan modes" icon="gauge" href="/concepts/scan-modes">
+    Why `full` is the only mode a gate should run.
+  </Card>
+</CardGroup>

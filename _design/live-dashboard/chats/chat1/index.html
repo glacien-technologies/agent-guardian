@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../../../img/favicon.ico">
+        <title>Local Development Dashboard - AgentGuardian</title>
+        <link href="../../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#local-development-dashboard" class="nav-link">Local Development Dashboard</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#user" class="nav-link">User</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#assistant" class="nav-link">Assistant</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#user_1" class="nav-link">User</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#assistant_1" class="nav-link">Assistant</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#assistant_2" class="nav-link">Assistant</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#user_2" class="nav-link">User</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#assistant_3" class="nav-link">Assistant</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="local-development-dashboard">Local Development Dashboard</h1>
+<p><em>Started 2026-05-26 15:23 UTC</em></p>
+<hr />
+<h2 id="user">User</h2>
+<p>create a stunning single page ui desing to show the live version wher the its not going to bhsoted in a centrla place. its in lcoal . so desing has to be base don that but th eui has to be very good and the score board with nice chart and everythign t o show best version fo it. udnerstand th prd for tdetails an dbiuld it pelase.</p>
+<h2 id="assistant">Assistant</h2>
+<p><em>[tool: list_files]</em></p>
+<p><em>[tool: read_file]</em></p>
+<p><em>[tool: list_files]</em></p>
+<p><em>[tool: read_file]</em></p>
+<p><em>[tool: list_files]</em></p>
+<p>I'll explore the marketing UI kit briefly to see how the design system handles complex compositions, then build a stunning local dashboard.</p>
+<p><em>[tool: grep]</em></p>
+<p><em>[tool: copy_files]</em></p>
+<p><em>[tool: write_file]</em></p>
+<p>Now I have the foundation. Let me build the dashboard — a stunning single-page live scan view themed around localhost emphasis with the editorial-tech aesthetic.</p>
+<p><em>[tool: write_file]</em></p>
+<p>Now the dashboard CSS — this is where the visual design lives.</p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>Now let me look at the rest of the page to verify it all renders cleanly. Let me also fix the issues I spotted in the first viewport.</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: image_metadata]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>The math labels are getting ellipsis-truncated. Let me shorten them and tighten the AIVSS card layout.</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p>The page is too tall to capture in one screenshot. Let me check the swarm via a targeted scroll first, then deliver.</p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>The swarm looks gorgeous but satellite labels are wrapping. Let me fix that.</p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p>The swarm is excellent now. Let me check the lower sections.</p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: snip]</em></p>
+<p><em>[tool: done]</em></p>
+<p><em>[tool: fork_verifier_agent]</em></p>
+<p>Built the local dashboard as a single dense page. A few notes:</p>
+<ul>
+<li><strong>Locality emphasis</strong>: the topbar shows a <code>http://localhost:7474/scan/…</code> faux URL bar with a green lock and a pulsing "Local · no telemetry" pill — making the "runs on your machine" story visible at all times.</li>
+<li><strong>Hero strip</strong>: AIVSS gauge with a real arc gauge + indicator tick, full penalty math, six-axis radar of sub-scores, and a live-activity card with budget/tokens/cost bars plus a finding-rate sparkline with critical-finding markers.</li>
+<li><strong>Swarm centerpiece</strong>: target node in the middle with violet halo, 11 satellite cards at fixed radial positions, dashed violet connection lines that flow on active links and a green "done" line for the completed cascade agent.</li>
+<li><strong>Per-ASI breakdown</strong>: ten-row list with tier-weights, progress bars (striped/animated for in-progress categories), and severity-count chips.</li>
+<li><strong>Findings feed</strong>: streaming list with severity color-bar, editorial-style copy with italics + mono code spans, and triple-framework tags (ASI / ATLAS / CSA / probe ID).</li>
+<li><strong>Reproducibility receipt</strong>: package versions, models, RNG seed, and a big Base32 Ed25519 evidence fingerprint — the "this can be re-run" promise.</li>
+</ul>
+<p>Type system stays editorial — Source Serif for the big numbers and italic accents, Inter for body, JetBrains Mono for every taxonomy label.</p>
+<h2 id="user_1">User</h2>
+<p>give me tow more vairant with difrent  desing splease totally differne tprofessional, informative and very clear</p>
+<h2 id="assistant_1">Assistant</h2>
+<p><em>[tool: update_todos]</em></p>
+<p>Two new directions, both fundamentally different from the v1 swarm-canvas: a light editorial <strong>briefing report</strong> focused on clarity and reading flow, and a dark technical <strong>schematic</strong> showing the three-layer architecture as a blueprint with timeline.</p>
+<p>Let me build the briefing first.</p>
+<p><em>[tool: write_file]</em></p>
+<h2 id="assistant_2">Assistant</h2>
+<p><em>[tool: write_file]</em></p>
+<p><em>[tool: write_file]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>The masthead has a grid-flow bug — let me fix the layout.</p>
+<p><em>[tool: show_html]</em></p>
+<p>Got it — you want a coverage-matrix view: rows for each framework, cells for each domain with score + test count. Let me build that as v3 (instead of my original schematic plan).</p>
+<p>Let me also verify the briefing fix worked, then build the coverage variant.</p>
+<p><em>[tool: set_project_title]</em></p>
+<p><em>[tool: write_file]</em></p>
+<p><em>[tool: write_file]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>Looking gorgeous and matches your reference style. Let me fix a few minor wrap issues and check the rest of the page.</p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p>Let me verify the briefing's masthead fix works.</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: update_todos]</em></p>
+<p><em>[tool: snip]</em></p>
+<p><em>[tool: done]</em></p>
+<p><em>[tool: fork_verifier_agent]</em></p>
+<p>Two new variants, both very different from the v1 swarm dashboard:</p>
+<p><strong>v2 — <code>Live Dashboard - Briefing.html</code></strong> (light editorial)
+A long-form report that reads like a magazine data piece. Tall masthead with a serif italic headline (<em>"Your agent is scoring 84"</em>), narrow column for the lede, sidebar with target metadata, then sections for sub-scores (horizontal bars with explanatory paragraphs and a baseline tick), the full ASI table, an i/ii/iii-numbered swarm list, and findings written as proper editorial entries with structured DL tags for OWASP/ATLAS/CSA/probe/remediation. Light cream paper, generous whitespace.</p>
+<p><strong>v3 — <code>Live Dashboard - Coverage.html</code></strong> (assignments-table style, per your reference)
+A coverage matrix where rows are frameworks and cells are scored sub-domains — exactly the layout from the screenshot you shared. Five rows: <strong>OWASP Top 10 for Agentic</strong> (10 cells), <strong>MITRE ATLAS v5.4</strong> (10 tactics), <strong>CSA Agentic AI Red Team Guide</strong> (12 categories), <strong>AIVSS sub-scores</strong> (6 axes), <strong>Attack strategies in play</strong> (5). Each cell uses a pastel band color (excellent green / good purple / attention orange / failing red) with a striped state for in-progress and a small red corner dot for cells with a critical finding. Above the matrix: big AIVSS score with a horizontal band axis showing the needle position, plus a six-tile glance grid. Below: critical-findings drill-down table with remediation pointers.</p>
+<p>All three (v1 swarm, v2 briefing, v3 coverage) share the same scan data (AIVSS 84, same findings, same agents) so they're directly comparable. Switch between them in the file tabs.</p>
+<h2 id="user_2">User</h2>
+<p>Address these comments from my teammates:</p>
+<p><strong>Jegan</strong> (on <code>Live Dashboard - Coverage.html</code> at <code>[data-comment-anchor="9a61882c66-header"]</code>):
+we shouldhave all theevidcnece for al tle runs. with filter by deufal thsowing only finging in order of recireitcaly.y</p>
+<p><strong>Jegan</strong> (on <code>Live Dashboard - Coverage.html</code> at <code>[data-comment-anchor="881d7ffaf8-span"]</code>):
+Clciking on the each of this should shouls findings for that</p>
+<p><strong>Jegan</strong> (on <code>Live Dashboard - Coverage.html</code> at <code>[data-comment-anchor="e0b54fce11-div"]</code>):
+remvoe the no telemetry word. we actually send telemetry . so dont put anything reglate dtelmetry</p>
+<p><strong>Jegan</strong> (on <code>Live Dashboard - Coverage.html</code> at <code>[data-comment-anchor="900ecf9003-a"]</code>):
+we need to show all the findings. with paginateion . instead of showing selected ones</p>
+<p><strong>Jegan</strong> (on <code>Live Dashboard - Coverage.html</code> at <code>[data-comment-anchor="5737b8810f-a"]</code>):
+remove the top tabs. we dont need it</p>
+<h2 id="assistant_3">Assistant</h2>
+<p><em>[tool: read_file]</em></p>
+<p><em>[tool: update_todos]</em></p>
+<p>I'll address all 5 comments in one pass:</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>Now the big change — replace the limited drill section with a full paginated findings list.</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p>Add script to point cells to findings, then add CSS for the new components.</p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: str_replace_edit]</em></p>
+<p><em>[tool: show_html]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: save_screenshot]</em></p>
+<p><em>[tool: view_image]</em></p>
+<p><em>[tool: update_todos]</em></p>
+<p><em>[tool: snip]</em></p>
+<p><em>[tool: done]</em></p>
+<p>All five comments addressed in <code>Live Dashboard - Coverage.html</code>:</p>
+<ul>
+<li><strong>Top nav removed.</strong> The Overview/Coverage/Findings/Transcripts/Export tabs are gone; the topbar is now just brand + URL chip + status.</li>
+<li><strong>"No telemetry" wording removed</strong> from the locality pill (now just <code>● Local</code>) and from the footer.</li>
+<li><strong>Drill section replaced with a full paginated findings list.</strong> Eyebrow + serif title <em>"All findings so far."</em> + lede ("61 findings · sorted by criticality by default"). Toolbar underneath has a search input, a segmented severity control (All 61 / Critical 2 / High 7 / Medium 19 / Low 33) with counts colored by band, ASI category dropdown, and a sort dropdown defaulted to "Criticality ↓".</li>
+<li><strong>15 findings visible on page 1</strong>, sorted critical → high → medium, each with severity pill, when/agent, ASI pill, summary, framework tags, and a remediation pointer with hint copy.</li>
+<li><strong>Pagination at the bottom</strong>: "Showing 1–15 of 61", Prev/Next + numbered pages (1–5), Per-page selector (15/25/50/100).</li>
+<li><strong>Cells now link to <code>#findings</code></strong> so clicking any coverage cell jumps to the findings list (a small ↗ chevron now appears on cell hover to signal the click affordance). Filtering by ASI is wired conceptually — in a live build the cell click would set the ASI filter on arrival.</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../../js/base.js"></script>
+        <script src="../../../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

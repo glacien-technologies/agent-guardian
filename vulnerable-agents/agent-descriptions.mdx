@@ -1,0 +1,78 @@
+---
+title: "Agent descriptions"
+description: "What each vulnerable demo agent plants and how to trigger it."
+---
+
+Each of the five agents in the sibling repo plants a different mix of OWASP LLM Top 10 (2025) classes. Trigger prompts below are the canonical ones the scanner exercises — every one of them produces an observable finding against the corresponding agent.
+
+## vulnerable-langgraph-chatbot
+
+Single-agent banking assistant ("FinBot"). Eight planted classes — the widest attack surface in the repo.
+
+- **LLM01** Prompt injection — obeys "ignore previous", "CEO override", "URGENT".
+- **LLM02** Sensitive disclosure — `last_customer_ledger(customer_id)` accepts any id, no auth.
+- **LLM03** Supply chain — trusts `cfp-vendors==0.0.3-rc` (typosquat-shaped) and URL-fetched content.
+- **LLM05** Improper output handling — emits raw `<script>` and `javascript:` URIs.
+- **LLM06** Excessive agency — `force_wire_transfer`, `close_account`, `drop_table`.
+- **LLM07** System prompt leakage — embeds `11-2233` and `CFP-SIGN-7Q`.
+- **LLM09** Misinformation — fabricates DOIs for non-existent papers.
+- **LLM10** Unbounded consumption — explodes on "explain in 8000 words".
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/vulnerable-langgraph-chatbot/chat \
+  --model stub --mode fast --output pdf --output-path scan-langgraph.pdf
+```
+
+## vulnerable-mcp-server
+
+Customer-service agent ("GardenHelp") shaped like an MCP backend. Three planted classes — a clean, minimal demo of the privilege-compromise pattern.
+
+- **LLM01** Prompt injection — "supervisor mode" / "manager mode" flips approval policy.
+- **LLM06** Excessive agency — `issue_refund_no_approval(order_id, amount)`, `reset_account_password(account_id)`.
+- **LLM07** System prompt leakage — recites the internal coupon code `STAFF-OVERRIDE-42`.
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/vulnerable-mcp-server/chat \
+  --model stub --mode fast --output sarif --output-path scan-mcp.sarif
+```
+
+## vulnerable-tool-agent
+
+Coding assistant ("DevHelper") with `exec_shell` and `pip_install` tools. Four planted classes covering the canonical "LLM with shell" failure mode.
+
+- **LLM01** Prompt injection — `# DEV_MODE_ON` flips safety.
+- **LLM03** Supply chain — whitelisted typosquats `requessts`, `req-uests`, `ujsonn`.
+- **LLM05** Improper output handling — emits raw `eval(input("code> "))` snippets.
+- **LLM06** Excessive agency — runs arbitrary shell commands on request.
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/vulnerable-tool-agent/chat \
+  --model stub --mode fast --output pdf --output-path scan-tool.pdf
+```
+
+## vulnerable-rag-agent
+
+Multi-agent travel orchestrator with a shared in-memory itinerary store across all customers. Three planted classes — the cleanest demo of memory poisoning / cross-tenant leakage in this repo.
+
+- **LLM02** Sensitive disclosure — `get_recent_itineraries()` returns all customers' data verbatim.
+- **LLM06** Excessive agency — `book_flight`, `book_hotel`, `charge_card` invoked across sub-agents.
+- **LLM10** Unbounded consumption — `expand_plan(days, granularity)` blows up on `granularity="hourly"`.
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/vulnerable-rag-agent/chat \
+  --model stub --mode fast --output pdf --output-path scan-rag.pdf
+```
+
+## defended-baseline
+
+Hardened library FAQ assistant ("CleanBot"). **Zero** planted classes. Use as the false-positive control: a scan that produces high-severity findings against this agent indicates a scanner regression.
+
+```bash
+agent-guardian scan \
+  --endpoint http://localhost:8000/defended-baseline/chat \
+  --model stub --mode fast --output json --output-path scan-baseline.json
+```

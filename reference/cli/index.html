@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>CLI - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle active" aria-current="page" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="./" class="dropdown-item active" aria-current="page">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../../ci-cd/pr-comments.mdx" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../roadmap/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#cli-reference" class="nav-link">CLI reference</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#global-options" class="nav-link">Global options</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#commands" class="nav-link">Commands</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#scan-options" class="nav-link">Scan options</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="cli-reference">CLI reference</h1>
+<p>The canonical <code>agent-guardian</code> CLI surface, sourced from the live Typer
+app in <code>src/agent_guardian/cli.py</code>. For the always-up-to-date version
+run <code>agent-guardian &lt;command&gt; --help</code>.</p>
+<p>Coming soon: this Markdown page is a stable redirect target for the
+v1.0 IA. The fully-rendered reference lives in
+<a href="../cli.mdx"><code>docs/reference/cli.mdx</code></a> and is published via the Mintlify
+site at <a href="https://docs.agentguardian.io/reference/cli">https://docs.agentguardian.io/reference/cli</a>. This <code>.md</code> stub
+exists so the v1.0 docs URL (<code>docs/reference/cli.md</code>) keeps resolving
+for inbound links and so the CLI-coverage test can assert that every
+flag landing in <code>cli.py</code> is named here.</p>
+<h2 id="global-options">Global options</h2>
+<pre><code class="language-text">agent-guardian [--version] [--help] COMMAND [ARGS]...
+</code></pre>
+<p>The CLI also auto-loads <code>.env</code> / <code>.env.local</code> from the current working
+directory when <code>python-dotenv</code> is installed. Existing shell exports
+always win.</p>
+<h2 id="commands">Commands</h2>
+<p>Every top-level command listed below resolves to a Typer command in
+<code>src/agent_guardian/cli.py</code>. Run <code>agent-guardian &lt;command&gt; --help</code> for
+the full option set.</p>
+<h3 id="version"><code>version</code></h3>
+<pre><code class="language-text">agent-guardian version
+</code></pre>
+<p>Print the installed package version and exit.</p>
+<h3 id="doctor"><code>doctor</code></h3>
+<pre><code class="language-text">agent-guardian doctor
+</code></pre>
+<p>Verify the install, detect available LLM keys, confirm the sandbox is
+importable, and print state / config locations.</p>
+<h3 id="gate"><code>gate</code></h3>
+<pre><code class="language-text">agent-guardian gate [SCAN_ID] [--fail-under N] [--max-critical N] [--max-high N] [--max-medium N] [--max-low N]
+</code></pre>
+<p>Apply pass/fail thresholds to a <strong>stored</strong> scan, decoupled from <code>scan</code> — re-gate
+a completed scan without re-running it. Defaults to the newest scan. Exits <code>0</code>
+on pass and <code>1</code> on breach, so it drops straight into a CI step. (An AIVSS badge
+is now <code>agent-guardian report &lt;id&gt; --output badge</code>.)</p>
+<h3 id="last-score"><code>last-score</code></h3>
+<pre><code class="language-text">agent-guardian last-score
+</code></pre>
+<p>Print the AIVSS of the most recent scan in the local scan store.</p>
+<h3 id="serve"><code>serve</code></h3>
+<pre><code class="language-text">agent-guardian serve
+</code></pre>
+<p>Start the local FastAPI dashboard at <code>http://127.0.0.1:7474/</code>.</p>
+<h3 id="report"><code>report</code></h3>
+<pre><code class="language-text">agent-guardian report &lt;SCAN_ID&gt; [--output {json|sarif|junit|md|pdf|badge|badge-svg}] [--output-path PATH]
+</code></pre>
+<p>Regenerate a report from a stored scan in any supported output format. The
+positional <code>&lt;SCAN_ID&gt;</code> is required — it resolves under
+<code>~/.agentguardian/scans/&lt;scan-id&gt;/</code>. Text formats (<code>json</code> / <code>sarif</code> / <code>junit</code> /
+<code>md</code>) print to stdout by default, or to <code>--output-path</code> when given. <code>--output
+pdf</code> is binary and always requires <code>--output-path</code>. <code>--output badge</code> (text) and
+<code>badge-svg</code> emit an AIVSS badge from the scan's score — this subsumes the former
+top-level <code>badge</code> command.</p>
+<h3 id="verify"><code>verify</code></h3>
+<pre><code class="language-text">agent-guardian verify
+</code></pre>
+<p>Verify HMAC-SHA256 + Ed25519 signatures on a stored report.</p>
+<h3 id="calibrate"><code>calibrate</code></h3>
+<pre><code class="language-text">agent-guardian calibrate
+</code></pre>
+<p>Run the calibration harness against a target to size budgets before a
+full scan.</p>
+<h3 id="config"><code>config</code></h3>
+<pre><code class="language-text">agent-guardian config show [--config PATH]
+agent-guardian config init [--out PATH] [--force]
+</code></pre>
+<p><code>config show</code> prints the effective resolved config (file values merged over
+built-in defaults) so you can see what actually took effect. <code>config init</code>
+scaffolds a default config file (default <code>~/.agentguardian/config.yaml</code>;
+<code>--force</code> to overwrite).</p>
+<h3 id="validate"><code>validate</code></h3>
+<pre><code class="language-text">agent-guardian validate
+</code></pre>
+<p>Run the payload-free pre-flight against a target contract.</p>
+<h3 id="init"><code>init</code></h3>
+<pre><code class="language-text">agent-guardian init
+</code></pre>
+<p>Author a new target contract interactively, then pre-flight it.</p>
+<h3 id="scan"><code>scan</code></h3>
+<pre><code class="language-text">agent-guardian scan
+</code></pre>
+<p>Run an adversarial swarm scan against a target. The full option table
+follows in <a href="#scan-options">Scan options</a>.</p>
+<h3 id="telemetry"><code>telemetry</code></h3>
+<pre><code class="language-text">agent-guardian telemetry enable
+agent-guardian telemetry disable
+agent-guardian telemetry status
+</code></pre>
+<p>Opt-in usage telemetry. <code>agent-guardian telemetry enable</code> records the
+consent decision; <code>agent-guardian telemetry status</code> prints the current
+state.</p>
+<h3 id="models"><code>models</code></h3>
+<pre><code class="language-text">agent-guardian models list
+agent-guardian models list --provider openai
+</code></pre>
+<p>Inspect the LLM provider/model ids the framework knows about. <code>models
+list</code> prints every supported provider plus its stable id allow-list —
+the same data the fail-fast model validator uses to power the "did you
+mean" suggestion when an unknown <code>--model</code> is rejected. Pass any id
+straight to <code>--model &lt;provider&gt;:&lt;id&gt;</code>. Use <code>--provider &lt;name&gt;</code> to
+narrow to a single provider; gateway- or deployment-scoped providers
+(azure, openrouter, groq, together, fireworks, vllm) are listed
+without a static corpus because their catalogs vary per account.</p>
+<h3 id="contract"><code>contract</code></h3>
+<pre><code class="language-text">agent-guardian contract schema
+agent-guardian contract migrate
+</code></pre>
+<p>Work with target contracts. <code>agent-guardian contract schema</code> writes the
+contract JSON Schema to a file (or to stdout if no <code>--out</code> is given);
+<code>agent-guardian contract migrate</code> upgrades older contracts to the
+current shape.</p>
+<h3 id="agentdojo"><code>agentdojo</code></h3>
+<pre><code class="language-text">agent-guardian agentdojo run
+</code></pre>
+<p>Run the optional AgentDojo benchmark pack against a target. Requires
+the <code>[agentdojo]</code> extra.</p>
+<h3 id="comment"><code>comment</code></h3>
+<pre><code class="language-text">agent-guardian comment --platform github --fail-under 70
+</code></pre>
+<p>Upsert a single AgentGuardian summary comment on the current pull /
+merge request. The comment is keyed by a hidden HTML marker so repeated
+runs update the same comment in place instead of spamming a new one on
+every push. <code>--platform</code> is <code>github</code> | <code>gitlab</code> | <code>bitbucket</code>; the
+embedded gate verdict reuses the same <code>--fail-under</code> / <code>--max-critical</code>
+/ <code>--max-high</code> / <code>--max-medium</code> / <code>--max-low</code> thresholds as the <code>scan</code>
+gate, so the comment's green/red verdict matches the CI exit code. Pass
+<code>--dry-run</code> to print the rendered body instead of posting it.</p>
+<h3 id="code-insights"><code>code-insights</code></h3>
+<pre><code class="language-text">agent-guardian code-insights --platform bitbucket
+</code></pre>
+<p>Publish a Bitbucket Code Insights report (a quality report plus inline
+annotations) for a scan. Defaults to the newest scan under
+<code>~/.agentguardian/scans</code>; pass <code>--scan</code> to target a specific scan id or
+<code>scan.json</code> path, and <code>--dry-run</code> to render without posting.</p>
+<h3 id="suite"><code>suite</code></h3>
+<pre><code class="language-text">agent-guardian suite run SUITE.yaml [--concurrency N] [--out-dir DIR] [--dry-run]
+agent-guardian suite validate SUITE.yaml
+agent-guardian suite summary OUT_DIR
+</code></pre>
+<p>Run a fleet of independent scans <strong>in parallel</strong> from a single YAML file.
+Each workload is launched as a separate <code>agent-guardian scan</code> subprocess
+under its own isolated <code>HOME</code>, so concurrent scans never collide or share
+state — a suite run of one workload is identical to running that one
+<code>scan</code> command. Every workload key maps 1:1 onto a real <code>scan</code> flag; the
+suite layer never changes single-scan behavior.</p>
+<p>After all workloads finish, <code>agent-guardian suite run</code> prints a
+cross-scan summary table (per-workload AIVSS / band / tier / findings,
+with a trust flag), lists every scan log folder, and writes
+<code>&lt;out_dir&gt;/summary.json</code>. Each requested report format is collected flat
+at <code>&lt;out_dir&gt;/reports/&lt;name&gt;.&lt;ext&gt;</code> (extra formats are rendered from the
+same finished scan, never a second scan). With <code>register_scans: true</code>
+(the default) each finished scan is also moved into
+<code>~/.agentguardian/scans/&lt;id&gt;/</code> so <code>agent-guardian serve</code> and
+<code>agent-guardian report &lt;id&gt;</code> can browse each workload by its own scan id.</p>
+<p><code>agent-guardian suite validate</code> schema-checks the file without launching
+anything; <code>agent-guardian suite run --dry-run</code> prints the resolved
+<code>scan</code> command for each workload and spawns nothing; <code>agent-guardian
+suite summary OUT_DIR</code> re-prints the summary from a prior run. See
+<code>examples/suite.yaml</code> in the repository for a complete, commented suite file.</p>
+<h2 id="scan-options">Scan options</h2>
+<p>The <code>scan</code> command exposes every knob the swarm respects. The list
+below is the documented set parsed by the docs-coverage test against
+<code>cli.py</code> (see <code>tests/docs/test_docs_cli_coverage.py</code>). A small number of
+commands and flags are intentionally excluded from that test via the
+<code>_SKIP_COMMAND_NAMES</code> and <code>_DOC_SKIP_FLAGS</code> frozensets — each entry
+carries an inline rationale (operator-internal toggles, alpha shims,
+or duplicate spellings).</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--system-prompt</code></td>
+<td>Override the target's system prompt for the scan.</td>
+</tr>
+<tr>
+<td><code>--endpoint</code></td>
+<td>Target endpoint URL (HTTP adapter targets).</td>
+</tr>
+<tr>
+<td><code>--framework</code></td>
+<td>Framework adapter kind (<code>langgraph</code>, <code>openai-agents</code>, …).</td>
+</tr>
+<tr>
+<td><code>--model</code></td>
+<td>Default model used by every swarm agent unless overridden.</td>
+</tr>
+<tr>
+<td><code>--commander-model</code></td>
+<td>Model used by the swarm commander.</td>
+</tr>
+<tr>
+<td><code>--attacker-model</code></td>
+<td>Model used by attacker / probe agents.</td>
+</tr>
+<tr>
+<td><code>--evaluator-model</code></td>
+<td>Model used by the evaluator / critic.</td>
+</tr>
+<tr>
+<td><code>--tier</code></td>
+<td>Target tier (<code>T1</code>–<code>T4</code>) — gates which probes run.</td>
+</tr>
+<tr>
+<td><code>--budget-usd</code></td>
+<td>Hard ceiling on spend per scan, in USD.</td>
+</tr>
+<tr>
+<td><code>--budget-seconds</code></td>
+<td>Hard ceiling on wall-clock per scan.</td>
+</tr>
+<tr>
+<td><code>--recon-budget-seconds</code></td>
+<td>Per-recon-phase wall-clock budget.</td>
+</tr>
+<tr>
+<td><code>--fail-under</code></td>
+<td>Exit non-zero when the AIVSS sits below this threshold.</td>
+</tr>
+<tr>
+<td><code>--max-critical</code></td>
+<td>Fail the gate when the CRITICAL-finding count exceeds this ceiling (AND-combined with <code>--fail-under</code>).</td>
+</tr>
+<tr>
+<td><code>--max-high</code></td>
+<td>Fail the gate when the HIGH-finding count exceeds this ceiling.</td>
+</tr>
+<tr>
+<td><code>--max-medium</code></td>
+<td>Fail the gate when the MEDIUM-finding count exceeds this ceiling.</td>
+</tr>
+<tr>
+<td><code>--max-low</code></td>
+<td>Fail the gate when the LOW-finding count exceeds this ceiling.</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td>One or more output formats (<code>json</code>, <code>sarif</code>, <code>junit</code>, <code>md</code>, <code>pdf</code>).</td>
+</tr>
+<tr>
+<td><code>--output-path</code></td>
+<td>Directory to write report artefacts to.</td>
+</tr>
+<tr>
+<td><code>--no-tui</code></td>
+<td>Disable the interactive TUI; emit plain logs only.</td>
+</tr>
+<tr>
+<td><code>--legacy-board</code></td>
+<td>Render the legacy swarm board instead of the Executive dashboard.</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td>Path to a YAML / TOML config to merge over CLI flags.</td>
+</tr>
+<tr>
+<td><code>--seed</code></td>
+<td>RNG seed for deterministic probe sampling and replay.</td>
+</tr>
+<tr>
+<td><code>--max-turns</code></td>
+<td>Per-agent turn cap, applied uniformly to every agent across all strategies. Overrides the mode default (<code>full</code>/<code>smart</code> = 20, <code>fast</code> = 4). Raise for deeper multi-turn coverage; pair with a larger token / <code>--budget-usd</code> budget.</td>
+</tr>
+<tr>
+<td><code>--goal</code></td>
+<td>Free-form natural-language goal passed to the commander.</td>
+</tr>
+<tr>
+<td><code>--mode</code></td>
+<td>Scan mode (<code>fast</code> / <code>smart</code> / <code>full</code>).</td>
+</tr>
+<tr>
+<td><code>--pov-gate</code></td>
+<td>Enable / disable the point-of-view gate (T3+ contracts).</td>
+</tr>
+<tr>
+<td><code>--critic</code></td>
+<td>Enable / disable the critic agent.</td>
+</tr>
+<tr>
+<td><code>--bundle</code></td>
+<td>Optional named bundle of probes to run.</td>
+</tr>
+<tr>
+<td><code>--pretext</code></td>
+<td>Pretext to inject into multi-turn attacks.</td>
+</tr>
+<tr>
+<td><code>--indirect</code></td>
+<td>Enable indirect-prompt-injection probes.</td>
+</tr>
+<tr>
+<td><code>--contract</code></td>
+<td>Path to a target contract file.</td>
+</tr>
+<tr>
+<td><code>--otel-endpoint</code></td>
+<td>OTel collector endpoint to export traces to.</td>
+</tr>
+<tr>
+<td><code>--publish</code></td>
+<td>Publish the scan bundle to the configured dashboard.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>Enable debug-level logging.</td>
+</tr>
+<tr>
+<td><code>--debug-format</code></td>
+<td>Debug-log format (<code>text</code> / <code>json</code>).</td>
+</tr>
+<tr>
+<td><code>--log-agent-io</code></td>
+<td>Troubleshooting: write every agent's full LLM I/O (recon, commander, attacker, judge — system prompt + input + raw output) to the scan's <code>run.log</code>. Secrets are redacted. Equivalent to <code>AGENT_GUARDIAN_LOG_FULL_PROMPTS=1</code>.</td>
+</tr>
+<tr>
+<td><code>--log-agent-io-summary</code></td>
+<td>Companion to <code>--log-agent-io</code>. Truncates each I/O block to 200 chars per side with a <code>…[+N chars]</code> marker so the audit trail keeps the shape of the call without burning a 10x <code>run.log</code> on full-mode scans (rc35 #03 was 9.6MB; summary mode brings it down ~10x). Equivalent to <code>AGENT_GUARDIAN_LOG_AGENT_IO_SUMMARY=1</code>.</td>
+</tr>
+<tr>
+<td><code>--no-serve</code></td>
+<td>Do not auto-start the local dashboard during the scan.</td>
+</tr>
+<tr>
+<td><code>--serve-grace-seconds</code></td>
+<td>How long to keep the local dashboard alive after the scan finishes.</td>
+</tr>
+<tr>
+<td><code>--open</code> / <code>--no-open</code></td>
+<td>Open the scan-specific dashboard URL in the default browser once the scan completes. Auto-skipped under CI / SSH / non-TTY environments.</td>
+</tr>
+<tr>
+<td><code>--yes</code></td>
+<td>Skip interactive confirmations (CI mode).</td>
+</tr>
+<tr>
+<td><code>--no-plan-confirm</code></td>
+<td>Skip the plan-confirmation step.</td>
+</tr>
+<tr>
+<td><code>--no-plan</code></td>
+<td>Skip plan generation entirely; run the default probe order.</td>
+</tr>
+</tbody>
+</table>
+<p>For the rendered, narrative reference with worked examples, see
+<a href="../cli.mdx"><code>cli.mdx</code></a>.</p></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

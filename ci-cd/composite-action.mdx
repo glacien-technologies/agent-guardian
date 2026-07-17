@@ -1,0 +1,144 @@
+---
+title: "Composite GitHub Action"
+sidebarTitle: "Composite Action"
+description: "Drop AgentGuardian into a GitHub workflow with one `uses:` line via the shipped composite action."
+icon: "package"
+---
+
+## What this gives you
+
+A single `uses:` line that installs `agent-guardian`, runs a scan, writes SARIF, and uploads it to GitHub Code Scanning. Use this in place of the longhand workflow in [GitHub Actions](/ci-cd/github-actions) when you want the shortest possible adoption path.
+
+## Wire it up
+
+<Steps>
+  <Step title="Grant permissions" icon="key">
+    The calling workflow must grant `security-events: write` so SARIF
+    upload succeeds, and `pull-requests: write` so the sticky PR comment can
+    be upserted. Composite actions cannot declare repository-level
+    permissions, so the caller owns this.
+
+    ```yaml
+    permissions:
+      contents: read
+      pull-requests: write     # required for the sticky AgentGuardian comment
+      security-events: write   # required for codeql-action/upload-sarif
+    ```
+  </Step>
+
+  <Step title="Add the action" icon="file-plus">
+    ```yaml .github/workflows/agent-guardian.yml
+    name: AgentGuardian
+    on:
+      pull_request:
+      push:
+        branches: [main]
+
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+
+    jobs:
+      scan:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: glacien-technologies/agent-guardian/.github/actions/agentguardian-scan@v1
+            with:
+              framework: langgraph
+              framework-ref: my_app.graph:graph
+              model: gemini:gemini-2.5-flash
+              mode: full
+              fail-under: "70"
+              max-critical: "0"
+              comment: "true"
+            env:
+              GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    ```
+  </Step>
+
+  <Step title="Confirm the run" icon="check">
+    Open a PR. The `scan` check appears in the PR conversation, the
+    SARIF artifact is attached to the workflow run, and findings show
+    up under **Security → Code scanning** keyed by the
+    `agentguardian` category.
+  </Step>
+</Steps>
+
+## Inputs
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `target` | `""` | Positional dotted path (`MODULE:ATTR`). Mutually exclusive with the other target inputs. |
+| `system-prompt` | `""` | Path to a system prompt file. |
+| `endpoint` | `""` | Hosted HTTP endpoint URL. |
+| `framework` | `""` | `adk`, `autogen`, `crewai`, `langgraph`, `openai_agents`, `strands`. |
+| `framework-ref` | `""` | `MODULE:ATTR` for the framework-native object. |
+| `model` | `stub` | LLM spec (e.g. `gemini:gemini-2.5-flash`). |
+| `mode` | `full` | `fast`, `smart`, or `full`. |
+| `budget-usd` | `""` | Runtime USD cap. Empty disables the cap. |
+| `fail-under` | `70` | Minimum AIVSS for exit-0. Empty skips the gate. |
+| `max-critical` | `0` | CRITICAL-finding ceiling (`--max-critical`). Exceeding it fails the gate. Empty disables this ceiling. |
+| `max-high` | `""` | HIGH-finding ceiling (`--max-high`). Empty disables this ceiling. |
+| `max-medium` | `""` | MEDIUM-finding ceiling (`--max-medium`). Empty disables this ceiling. |
+| `max-low` | `""` | LOW-finding ceiling (`--max-low`). Empty disables this ceiling. |
+| `comment` | `true` | On a `pull_request` event, upsert a sticky AgentGuardian summary comment via `agent-guardian comment`. Set `false` to skip. |
+| `output-path` | `agentguardian-scan.sarif` | Where the SARIF is written. |
+| `upload-sarif` | `true` | Set `false` to skip the Code Scanning upload. |
+| `category` | `agentguardian` | SARIF category used for Code Scanning grouping. |
+| `agent-guardian-version` | `""` | `pip install` version specifier. Empty = latest. |
+| `python-version` | `3.12` | Python runtime. |
+| `extra-args` | `""` | Extra flags appended verbatim. |
+
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| `sarif-path` | Path of the SARIF report. |
+| `exit-code` | Raw scan exit code (see [exit codes](/reference/exit-codes)). |
+
+## Severity gates
+
+`fail-under` gates on the numeric AIVSS floor. The `max-*` inputs add
+**per-severity ceilings** on top of it, AND-combined: the gate fails if AIVSS
+drops below `fail-under` **or** any severity count exceeds its ceiling. The
+default `max-critical: "0"` means a single CRITICAL finding fails the build
+even when the AIVSS still clears the floor.
+
+```yaml
+with:
+  fail-under: "70"   # AIVSS floor
+  max-critical: "0"  # zero CRITICAL findings tolerated
+  max-high: "0"      # zero HIGH findings tolerated
+  max-medium: "5"    # up to 5 MEDIUM findings allowed
+```
+
+Set any of these to an empty string (`""`) to disable that individual ceiling.
+
+## Sticky PR comment
+
+When `comment` is `true` (default) and the workflow is triggered by a
+`pull_request` event, the action runs `agent-guardian comment --platform
+github` after the scan. It upserts a single summary comment on the PR — keyed
+by a hidden HTML marker so re-runs edit the existing comment in place rather
+than posting a new one on every push. The comment embeds the same
+`fail-under` / `max-*` verdict as the gate, so a green/red comment always
+matches the CI exit code.
+
+The comment step is advisory: if it cannot post (for example a fork PR whose
+`GITHUB_TOKEN` lacks write scope) it logs a warning and the job continues — it
+never changes the scan's pass/fail outcome. See [PR comments](/ci-cd/pr-comments)
+for a rendered sample and the marker details.
+
+## Sample report
+
+A static reference report generated from a real scan: [sample-report.pdf](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/_assets/sample-report.pdf).
+
+## When to use the longhand form instead
+
+Use the [longhand workflow](/ci-cd/github-actions) when you need to:
+
+- Run on a self-hosted runner without internet access (you supply your own install step).
+- Run the scan inside a `services:` container that the composite action would not see.
+- Compose multiple scans against the same target across the same job (the composite action assumes one scan per step).

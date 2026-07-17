@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../img/favicon.ico">
+        <title>Framework-coverage matrix - AgentGuardian</title>
+        <link href="../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../css/brands.min.css" rel="stylesheet">
+        <link href="../../css/solid.min.css" rel="stylesheet">
+        <link href="../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#framework-coverage-matrix" class="nav-link">Framework-coverage matrix</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#owasp-top-10-for-agentic-applications-2026" class="nav-link">OWASP Top 10 for Agentic Applications 2026</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#mitre-atlas-v540" class="nav-link">MITRE ATLAS v5.4.0</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#csa-agentic-ai-red-teaming-guide" class="nav-link">CSA Agentic AI Red Teaming Guide</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="framework-coverage-matrix">Framework-coverage matrix</h1>
+<blockquote>
+<p><strong>Honest framing.</strong> This page replaces the older README claim of "MITRE ATLAS v5.4.0 mappings" (which read as full-catalogue coverage). What AgentGuardian actually ships, today, against the corpus on disk: <strong>11+ MITRE ATLAS techniques covered</strong> (see the matrix below for the exact set - currently 26 techniques). The remaining ~85% of the v5.4.0 catalogue is out of scope for a black-box agent scanner - training-pipeline compromise, ML-platform-internal techniques, and infrastructure-layer attacks do not surface at the agent's I/O boundary and are therefore not probed.</p>
+</blockquote>
+<p>All three tables below are auto-generated from 124 probe YAMLs by <code>scripts/build_coverage_matrix.py</code>. Re-run that script after adding or removing probes - the doc is the loader's view of the world, not a hand-maintained narrative.</p>
+<h2 id="owasp-top-10-for-agentic-applications-2026">OWASP Top 10 for Agentic Applications 2026</h2>
+<p>Auto-generated from <code>src/agent_guardian/probes/asiNN/*.yaml</code> — one row per ASI category. All ten categories are present in the shipped corpus.</p>
+<table>
+<thead>
+<tr>
+<th>ASI</th>
+<th>Name</th>
+<th>Probe count</th>
+<th>Example probe IDs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ASI01</td>
+<td>Goal Hijack</td>
+<td>20</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-002</code>, <code>ASI01-GH-003</code></td>
+</tr>
+<tr>
+<td>ASI02</td>
+<td>Tool Misuse</td>
+<td>8</td>
+<td><code>ASI02-TA-001</code>, <code>ASI02-TA-002</code>, <code>ASI02-TA-003</code></td>
+</tr>
+<tr>
+<td>ASI03</td>
+<td>Privilege Abuse</td>
+<td>9</td>
+<td><code>ASI03-PII-001</code>, <code>ASI03-PR-001</code>, <code>ASI03-PR-002</code></td>
+</tr>
+<tr>
+<td>ASI04</td>
+<td>Supply Chain</td>
+<td>17</td>
+<td><code>ASI04-SC-001</code>, <code>ASI04-SC-002</code>, <code>ASI04-SC-003</code></td>
+</tr>
+<tr>
+<td>ASI05</td>
+<td>Code Execution</td>
+<td>8</td>
+<td><code>ASI05-CE-001</code>, <code>ASI05-CE-002</code>, <code>ASI05-CE-003</code></td>
+</tr>
+<tr>
+<td>ASI06</td>
+<td>Memory Poisoning</td>
+<td>13</td>
+<td><code>ASI06-HITL-009</code>, <code>ASI06-HITL-010</code>, <code>ASI06-HITL-011</code></td>
+</tr>
+<tr>
+<td>ASI07</td>
+<td>Agent-to-Agent (A2A)</td>
+<td>15</td>
+<td><code>ASI07-A2A-001</code>, <code>ASI07-A2A-002</code>, <code>ASI07-A2A-003</code></td>
+</tr>
+<tr>
+<td>ASI08</td>
+<td>Cascading Failures</td>
+<td>8</td>
+<td><code>ASI08-CF-001</code>, <code>ASI08-CF-002</code>, <code>ASI08-CF-003</code></td>
+</tr>
+<tr>
+<td>ASI09</td>
+<td>Trust Exploitation</td>
+<td>18</td>
+<td><code>ASI09-OH-001</code>, <code>ASI09-OH-002</code>, <code>ASI09-OH-003</code></td>
+</tr>
+<tr>
+<td>ASI10</td>
+<td>Rogue Agents (drift)</td>
+<td>8</td>
+<td><code>ASI10-DR-001</code>, <code>ASI10-DR-002</code>, <code>ASI10-DR-003</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="mitre-atlas-v540">MITRE ATLAS v5.4.0</h2>
+<p>Auto-generated from <code>mitre_atlas:</code> entries in every probe YAML. Rows are listed for every technique the shipped corpus actually cites (no padding, no aspirational entries). Techniques the corpus does not yet exercise are flagged honestly rather than hidden.</p>
+<table>
+<thead>
+<tr>
+<th>ATLAS Technique</th>
+<th>Description</th>
+<th>Probe count</th>
+<th>Example probe IDs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AI Agent Context Poisoning</code></td>
+<td>AI Agent Context Poisoning (named, v5.4.0)</td>
+<td>18</td>
+<td><code>ASI01-GH-002</code>, <code>ASI01-GH-003</code>, <code>ASI01-GH-005</code></td>
+</tr>
+<tr>
+<td><code>AML.T0012</code></td>
+<td>Valid Accounts</td>
+<td>8</td>
+<td><code>ASI03-PR-001</code>, <code>ASI03-PR-002</code>, <code>ASI03-PR-003</code></td>
+</tr>
+<tr>
+<td><code>AML.T0024</code></td>
+<td>Exfiltration via ML Inference API</td>
+<td>1</td>
+<td><code>ASI03-PII-001</code></td>
+</tr>
+<tr>
+<td><code>AML.T0029</code></td>
+<td>Denial of ML Service</td>
+<td>4</td>
+<td><code>ASI09-RSE-009</code>, <code>ASI09-RSE-010</code>, <code>ASI09-RSE-011</code></td>
+</tr>
+<tr>
+<td><code>AML.T0034</code></td>
+<td>Cost Harvesting</td>
+<td>8</td>
+<td><code>ASI08-CF-001</code>, <code>ASI08-CF-002</code>, <code>ASI08-CF-003</code></td>
+</tr>
+<tr>
+<td><code>AML.T0043</code></td>
+<td>Craft Adversarial Data</td>
+<td>12</td>
+<td><code>ASI07-A2A-013</code>, <code>ASI07-A2A-014</code>, <code>ASI07-A2A-015</code></td>
+</tr>
+<tr>
+<td><code>AML.T0048</code></td>
+<td>External Harms</td>
+<td>17</td>
+<td><code>ASI02-TA-007</code>, <code>ASI04-SC-001</code>, <code>ASI04-SC-002</code></td>
+</tr>
+<tr>
+<td><code>AML.T0050</code></td>
+<td>Command and Scripting Interpreter</td>
+<td>10</td>
+<td><code>ASI05-CE-001</code>, <code>ASI05-CE-002</code>, <code>ASI05-CE-003</code></td>
+</tr>
+<tr>
+<td><code>AML.T0051</code></td>
+<td>LLM Prompt Injection</td>
+<td>13</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-003</code>, <code>ASI01-GH-004</code></td>
+</tr>
+<tr>
+<td><code>AML.T0053</code></td>
+<td>LLM Plugin Compromise</td>
+<td>11</td>
+<td><code>ASI02-TA-001</code>, <code>ASI02-TA-002</code>, <code>ASI02-TA-003</code></td>
+</tr>
+<tr>
+<td><code>AML.T0054</code></td>
+<td>LLM Jailbreak</td>
+<td>15</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-002</code>, <code>ASI01-GH-004</code></td>
+</tr>
+<tr>
+<td><code>AML.T0058</code></td>
+<td>Publish Hallucinated Entities</td>
+<td>1</td>
+<td><code>ASI04-SC-008</code></td>
+</tr>
+<tr>
+<td><code>AML.T0060</code></td>
+<td>ML Supply Chain Compromise: Hardware</td>
+<td>7</td>
+<td><code>ASI04-SC-001</code>, <code>ASI04-SC-002</code>, <code>ASI04-SC-003</code></td>
+</tr>
+<tr>
+<td><code>AML.T0062</code></td>
+<td>Discover ML Artifacts</td>
+<td>4</td>
+<td><code>ASI04-SC-008</code>, <code>ASI06-MP-001</code>, <code>ASI06-MP-002</code></td>
+</tr>
+<tr>
+<td><code>AML.T0064</code></td>
+<td>LLM Prompt Injection: Direct</td>
+<td>8</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-002</code>, <code>ASI01-HCOT-001</code></td>
+</tr>
+<tr>
+<td><code>AML.T0067</code></td>
+<td>LLM Prompt Injection: Indirect</td>
+<td>9</td>
+<td><code>ASI01-GH-002</code>, <code>ASI01-GH-006</code>, <code>ASI01-GH-008</code></td>
+</tr>
+<tr>
+<td><code>AML.T0068</code></td>
+<td>LLM Prompt Self-Replication</td>
+<td>2</td>
+<td><code>ASI02-TA-004</code>, <code>ASI02-TA-008</code></td>
+</tr>
+<tr>
+<td><code>AML.T0070</code></td>
+<td>RAG Poisoning</td>
+<td>2</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-006</code></td>
+</tr>
+<tr>
+<td><code>AML.T0071</code></td>
+<td>False RAG Entry Injection</td>
+<td>2</td>
+<td><code>ASI03-PII-001</code>, <code>ASI03-PR-007</code></td>
+</tr>
+<tr>
+<td><code>Escape to Host</code></td>
+<td>Escape to Host (named, v5.4.0)</td>
+<td>6</td>
+<td><code>ASI05-CE-001</code>, <code>ASI05-CE-002</code>, <code>ASI05-CE-003</code></td>
+</tr>
+<tr>
+<td><code>Exfiltration via AI Agent Tool Invocation</code></td>
+<td>Exfiltration via AI Agent Tool Invocation (named, v5.4.0)</td>
+<td>5</td>
+<td><code>ASI02-TA-001</code>, <code>ASI02-TA-002</code>, <code>ASI02-TA-004</code></td>
+</tr>
+<tr>
+<td><code>Memory Manipulation</code></td>
+<td>Memory Manipulation (named, v5.4.0)</td>
+<td>14</td>
+<td><code>ASI03-PR-007</code>, <code>ASI05-CE-008</code>, <code>ASI06-HITL-009</code></td>
+</tr>
+<tr>
+<td><code>Modify AI Agent Configuration</code></td>
+<td>Modify AI Agent Configuration (named, v5.4.0)</td>
+<td>14</td>
+<td><code>ASI01-GH-007</code>, <code>ASI03-PR-008</code>, <code>ASI04-SC-006</code></td>
+</tr>
+<tr>
+<td><code>Publish Poisoned AI Agent Tool</code></td>
+<td>Publish Poisoned AI Agent Tool (named, v5.4.0)</td>
+<td>14</td>
+<td><code>ASI02-TA-007</code>, <code>ASI04-SC-001</code>, <code>ASI04-SC-002</code></td>
+</tr>
+<tr>
+<td><code>RAG Credential Harvesting</code></td>
+<td>RAG Credential Harvesting (named, v5.4.0)</td>
+<td>3</td>
+<td><code>ASI06-MP-001</code>, <code>ASI06-MP-004</code>, <code>ASI06-MP-007</code></td>
+</tr>
+<tr>
+<td><code>Thread Injection</code></td>
+<td>Thread Injection (named, v5.4.0)</td>
+<td>2</td>
+<td><code>ASI06-MP-002</code>, <code>ASI06-MP-003</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Honest scope note.</strong> MITRE ATLAS v5.4.0 ships roughly 80 techniques across the full matrix. AgentGuardian is a black-box agent scanner — it can only meaningfully exercise techniques that manifest at the agent's input / output / tool-call surface. Techniques targeting model training, data-pipeline infrastructure, or out-of-band ML-platform compromise are out of scope by design and <strong>not covered by the current corpus</strong>. Roughly 85% of the v5.4.0 catalogue falls into that out-of-scope set; the matrix above lists the in-scope subset we exercise.</p>
+</blockquote>
+<h2 id="csa-agentic-ai-red-teaming-guide">CSA Agentic AI Red Teaming Guide</h2>
+<p>Auto-generated from <code>csa_category:</code> entries in every probe YAML. All 12 categories from the CSA Agentic AI Red Teaming Guide (Huang et al., 2025-05-28) are listed; zero-coverage rows are marked honestly rather than dropped.</p>
+<table>
+<thead>
+<tr>
+<th>CSA Category</th>
+<th>Name</th>
+<th>Probe count</th>
+<th>Example probe IDs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>goal-instruction-manipulation</code></td>
+<td>Goal &amp; Instruction Manipulation</td>
+<td>20</td>
+<td><code>ASI01-GH-001</code>, <code>ASI01-GH-002</code>, <code>ASI01-GH-003</code></td>
+</tr>
+<tr>
+<td><code>authorization-control-hijacking</code></td>
+<td>Authorization &amp; Control Hijacking</td>
+<td>9</td>
+<td><code>ASI03-PII-001</code>, <code>ASI03-PR-001</code>, <code>ASI03-PR-002</code></td>
+</tr>
+<tr>
+<td><code>agent-critical-system-interaction</code></td>
+<td>Agent ↔ Critical-System Interaction</td>
+<td>16</td>
+<td><code>ASI02-TA-001</code>, <code>ASI02-TA-002</code>, <code>ASI02-TA-003</code></td>
+</tr>
+<tr>
+<td><code>supply-chain-dependency</code></td>
+<td>Supply Chain &amp; Dependency</td>
+<td>17</td>
+<td><code>ASI04-SC-001</code>, <code>ASI04-SC-002</code>, <code>ASI04-SC-003</code></td>
+</tr>
+<tr>
+<td><code>knowledge-base-poisoning</code></td>
+<td>Knowledge Base Poisoning</td>
+<td>2</td>
+<td><code>ASI06-MP-001</code>, <code>ASI06-MP-004</code></td>
+</tr>
+<tr>
+<td><code>memory-context-manipulation</code></td>
+<td>Memory &amp; Context Manipulation</td>
+<td>6</td>
+<td><code>ASI06-MP-002</code>, <code>ASI06-MP-003</code>, <code>ASI06-MP-005</code></td>
+</tr>
+<tr>
+<td><code>multi-agent-exploitation</code></td>
+<td>Multi-Agent Exploitation</td>
+<td>15</td>
+<td><code>ASI07-A2A-001</code>, <code>ASI07-A2A-002</code>, <code>ASI07-A2A-003</code></td>
+</tr>
+<tr>
+<td><code>impact-chain-blast-radius</code></td>
+<td>Impact Chain &amp; Blast Radius</td>
+<td>8</td>
+<td><code>ASI08-CF-001</code>, <code>ASI08-CF-002</code>, <code>ASI08-CF-003</code></td>
+</tr>
+<tr>
+<td><code>hallucination-exploitation</code></td>
+<td>Hallucination Exploitation</td>
+<td>14</td>
+<td><code>ASI09-OH-001</code>, <code>ASI09-OH-002</code>, <code>ASI09-OH-003</code></td>
+</tr>
+<tr>
+<td><code>checker-out-of-the-loop</code></td>
+<td>Checker-Out-of-the-Loop</td>
+<td>5</td>
+<td><code>ASI06-HITL-009</code>, <code>ASI06-HITL-010</code>, <code>ASI06-HITL-011</code></td>
+</tr>
+<tr>
+<td><code>agent-untraceability</code></td>
+<td>Agent Untraceability</td>
+<td>8</td>
+<td><code>ASI10-DR-001</code>, <code>ASI10-DR-002</code>, <code>ASI10-DR-003</code></td>
+</tr>
+<tr>
+<td><code>resource-service-exhaustion</code></td>
+<td>Resource &amp; Service Exhaustion</td>
+<td>4</td>
+<td><code>ASI09-RSE-009</code>, <code>ASI09-RSE-010</code>, <code>ASI09-RSE-011</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p>Regenerate this page with:</p>
+<pre><code class="language-bash">uv run python scripts/build_coverage_matrix.py
+</code></pre></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../js/base.js"></script>
+        <script src="../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

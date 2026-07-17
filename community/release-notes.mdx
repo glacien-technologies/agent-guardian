@@ -1,0 +1,99 @@
+---
+title: "Release notes"
+description: "Where to find changelogs, release announcements, and how AgentGuardian versioning works."
+icon: "clipboard-list"
+---
+
+## Where to read the notes
+
+AgentGuardian publishes release notes in two places — they're the same
+content in two views:
+
+- **[CHANGELOG.md](https://github.com/glacien-technologies/agent-guardian/blob/main/CHANGELOG.md)**
+  — the canonical, version-controlled changelog at the repo root.
+  Keep-a-Changelog format, every release tagged.
+- **[GitHub Releases](https://github.com/glacien-technologies/agent-guardian/releases)**
+  — the same content, plus signed Sigstore bundles and the PyPI
+  upload artifact for each tag.
+
+Use **GitHub Releases** for the per-release downloads and signatures.
+Use **CHANGELOG.md** when you want the full history on one page.
+
+## What the entries mean
+
+We follow [Keep a Changelog](https://keepachangelog.com/) with the
+following section conventions:
+
+| Section | Means |
+|---|---|
+| **Added** | New user-visible feature. |
+| **Changed** | A user-visible behaviour change that's not a bug fix. |
+| **Deprecated** | Still works but will be removed in a future release. |
+| **Removed** | Removed in this release (was previously deprecated). |
+| **Fixed** | Bug fix. |
+| **Security** | Security fix — see the linked advisory for the embargoed disclosure history. |
+
+## Versioning
+
+AgentGuardian follows [Semantic Versioning 2.0](https://semver.org/):
+
+- `MAJOR.MINOR.PATCH`
+- `MAJOR` bumps for backwards-incompatible API or CLI changes.
+- `MINOR` bumps for new probes, new adapters, new flags — additive only.
+- `PATCH` bumps for bug fixes, doc fixes, internal refactors.
+
+The version is single-sourced from `pyproject.toml` and exposed via
+`agent-guardian --version`. The probe-corpus version is tracked
+separately at `src/agent_guardian/probes/_meta/version.yaml` and follows
+a `YYYY.MM` calendar version (e.g., `2026.05`) — the corpus grows
+faster than the package.
+
+<Info>
+A new probe is a **MINOR** package bump and a **calendar** corpus bump.
+A removed probe is a **MAJOR** package bump.
+</Info>
+
+## Release cadence
+
+Tagged PyPI releases ship whenever the changelog accumulates more than
+a few user-visible entries — historically every 2-4 weeks. The release
+process is documented in
+[`MAINTAINERS.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/MAINTAINERS.md).
+
+There is **no fixed schedule**. We don't release on Fridays. We don't
+release the day a major LLM provider ships a breaking change to their
+API — we wait, validate, then release.
+
+## How to get notified
+
+- **Watch the repo** on GitHub (Releases only) — fastest path.
+- **Subscribe to PyPI**: the PyPI project page has an RSS feed for new
+  releases.
+- **Star the repo** to see releases in your GitHub feed.
+
+## Verify a release
+
+Every tagged release artifact is signed via Sigstore keyless OIDC. See
+[Security policy → Supply-chain integrity](/community/security-policy)
+for the `cosign verify-blob` command.
+
+## Where to file feedback about a release
+
+- **Regression in this release vs the previous one** —
+  [open an issue](https://github.com/glacien-technologies/agent-guardian/issues/new)
+  with the `kind/regression` label.
+- **A bug that's been around a while** — same place, without the
+  regression label.
+- **A feature request inspired by what shipped** — use
+  [Discussions → Ideas](https://github.com/glacien-technologies/agent-guardian/discussions/categories/ideas).
+
+## Next step
+
+<CardGroup cols={2}>
+  <Card title="Roadmap" icon="map" href="/community/roadmap">
+    What's coming next, and how to influence it.
+  </Card>
+  <Card title="Support" icon="life-buoy" href="/community/support">
+    How to get help with a specific release.
+  </Card>
+</CardGroup>

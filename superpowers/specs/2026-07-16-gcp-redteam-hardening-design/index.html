@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        
+        <link rel="shortcut icon" href="../../../img/favicon.ico">
+        <title>GCP Red-Team Reliability Hardening - AgentGuardian</title>
+        <link href="../../../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../../../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../../../css/brands.min.css" rel="stylesheet">
+        <link href="../../../css/solid.min.css" rel="stylesheet">
+        <link href="../../../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../../../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="../../..">AgentGuardian</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href="../../../index.mdx" class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Concepts</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../architecture/system-overview.mdx" class="dropdown-item">Architecture overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/live-dashboard.mdx" class="dropdown-item">Live dashboard</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/hosted-dashboard/" class="dropdown-item">Hosted dashboard (forward-looking)</a>
+</li>
+                                    
+<li>
+    <a href="../../../architecture/observability.mdx" class="dropdown-item">Observability</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">CI/CD</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../ci-cd/overview.mdx" class="dropdown-item">Overview</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/github-actions.mdx" class="dropdown-item">GitHub Actions</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/composite-action.mdx" class="dropdown-item">Composite action</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/gitlab-ci.mdx" class="dropdown-item">GitLab CI</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/bitbucket.mdx" class="dropdown-item">Bitbucket Pipelines</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/security-gates.mdx" class="dropdown-item">Security gates</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/upload-sarif.mdx" class="dropdown-item">Upload SARIF</a>
+</li>
+                                    
+<li>
+    <a href="../../../ci-cd/pr-comments.mdx" class="dropdown-item">PR comments</a>
+</li>
+                                </ul>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a href="#" class="nav-link dropdown-toggle" role="button" data-bs-toggle="dropdown"  aria-expanded="false">Reference</a>
+                                <ul class="dropdown-menu">
+                                    
+<li>
+    <a href="../../../reference/cli/" class="dropdown-item">CLI</a>
+</li>
+                                    
+<li>
+    <a href="../../../reference/roadmap/" class="dropdown-item">Roadmap</a>
+</li>
+                                </ul>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#gcp-red-team-reliability-hardening" class="nav-link">GCP Red-Team Reliability Hardening</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#context" class="nav-link">Context</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#goals" class="nav-link">Goals</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#non-goals" class="nav-link">Non-goals</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#design" class="nav-link">Design</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#error-handling-and-compatibility" class="nav-link">Error handling and compatibility</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#test-strategy" class="nav-link">Test strategy</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#acceptance-criteria" class="nav-link">Acceptance criteria</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="gcp-red-team-reliability-hardening">GCP Red-Team Reliability Hardening</h1>
+<p>Date: 2026-07-16
+Status: Approved for implementation planning</p>
+<h2 id="context">Context</h2>
+<p>A bounded live scan using Google Application Default Credentials and
+<code>vertex:gemini-2.5-flash</code> proved that AgentGuardian can authenticate to Vertex
+AI and run a real red-team swarm. The run also exposed four correctness defects
+and two reliability gaps:</p>
+<ol>
+<li>The anonymous Vertex publisher-catalog preflight returned HTTP 401 and the
+   CLI misreported that response as invalid ADC, even though authenticated
+   Vertex completion succeeded.</li>
+<li>The output-handling oracle classified the literal text <code>\\x1b[2J</code> as an
+   active ANSI terminal escape because it matched only the canary token.</li>
+<li>Probe-summary model calls occurred after the scan's cost and token totals
+   were finalized, so the persisted report omitted paid usage.</li>
+<li><code>run.log</code> continued receiving lines after the forensic manifest hashed it,
+   making the stored digest fail immediate verification.</li>
+<li>Gemini frequently wrapped judge JSON in Markdown fences or explanatory
+   prose, causing avoidable parser fallback events.</li>
+<li>Vertex completion-token accounting excluded thinking tokens even though
+   provider <code>totalTokenCount</code> included them.</li>
+</ol>
+<p>The live scan's single HIGH result was therefore not valid evidence: byte
+inspection showed <code>5c 78 31 62</code> (the characters <code>\\x1b</code>), not byte <code>1b</code> (ESC).</p>
+<h2 id="goals">Goals</h2>
+<ul>
+<li>Let Vertex scans proceed when only the anonymous catalog probe is
+  unavailable while preserving fail-fast behavior for authenticated data-plane
+  failures.</li>
+<li>Require dangerous output syntax, not merely a canary word, before the
+  deterministic output-handling oracle returns <code>exploited</code>.</li>
+<li>Parse common fenced or prose-wrapped judge JSON without weakening schema
+  validation or accepting multiple ambiguous objects.</li>
+<li>Include Vertex thinking tokens and post-scan summary calls in usage and cost
+  accounting.</li>
+<li>Never start optional paid summaries when the remaining explicit USD budget
+  cannot conservatively cover them.</li>
+<li>Seal a stable <code>run.log</code> so every manifest digest verifies immediately after
+  a completed scan.</li>
+<li>Preserve the existing CLI, report schema, adapters, and default scan
+  behavior outside these correctness changes.</li>
+</ul>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+<li>Redesigning the complete scan finalization pipeline.</li>
+<li>Adding a new provider SDK or changing ADC resolution order.</li>
+<li>Making fast, one-turn scans authoritative.</li>
+<li>Replacing the LLM judge or changing ASI severity policy.</li>
+<li>Removing full local provider traces from <code>run.log</code>; they remain a documented
+  local troubleshooting artifact and must never include authorization headers.</li>
+</ul>
+<h2 id="design">Design</h2>
+<h3 id="1-vertex-preflight-classification">1. Vertex preflight classification</h3>
+<p>The anonymous publisher-catalog request sends no credential, so its 401 or 403
+cannot prove that ADC is invalid. The Vertex-specific probe will translate
+those two statuses to <code>unsupported</code> with <code>valid=True</code> and a message explaining
+that model existence is deferred to authenticated invocation. HTTP 404 remains
+<code>not_found</code>; 2xx remains <code>valid</code>; network and 5xx behavior remains transient.</p>
+<p>The generic response classifier will not change. This keeps authenticated
+providers' 401/403 handling intact and limits the exception to the known
+anonymous Vertex boundary.</p>
+<h3 id="2-context-aware-dangerous-output-oracle">2. Context-aware dangerous-output oracle</h3>
+<p>Replace the token-only <code>reflects_canary</code> decision with a two-stage API:</p>
+<ol>
+<li>Find a known <code>AG_*_CANARY</code> token.</li>
+<li>Validate that the token occurs inside the raw dangerous syntax for its
+   family.</li>
+</ol>
+<p>The validator will recognize:</p>
+<ul>
+<li>ANSI only when an actual ESC byte precedes a control-sequence introducer;
+  <code>\\x1b</code>, <code>ESC</code>, HTML entities, and Unicode-escaped text are inert.</li>
+<li>XSS and image-onerror only inside raw HTML tags, not entity-escaped markup.</li>
+<li>JNDI only inside a raw <code>${jndi:...}</code> expression.</li>
+<li>JavaScript URI canaries only inside a raw <code>javascript:</code> URI context.</li>
+<li>RTL only when the actual bidi control character is present.</li>
+<li>Log injection only when the response contains an actual line break and the
+  forged-log payload shape.</li>
+<li>Template, SQL, and SSI canaries only inside their seeded raw expression
+  shapes.</li>
+</ul>
+<p>The deterministic short-circuit, evidence tags, and finding builder will all
+use the same validated match object so verdict, evidence, and reporting cannot
+disagree. Partial or defanged reflections fall through to the ordinary judge
+instead of being forced to <code>exploited</code>.</p>
+<h3 id="3-judge-json-normalization">3. Judge JSON normalization</h3>
+<p>Add a small shared helper used by <code>_parse_verdict_payload</code> that accepts exactly
+one JSON object from any of these common forms:</p>
+<ul>
+<li>raw JSON;</li>
+<li>a single fenced <code>json</code> block;</li>
+<li>brief prose surrounding one balanced JSON object.</li>
+</ul>
+<p>The extractor will be quote- and escape-aware while matching braces. It will
+reject truncated objects, multiple objects, arrays, and non-object payloads.
+The existing <code>JudgeVerdict</code> model remains the final schema and enum validator.
+Heuristic fallback behavior remains unchanged when normalization cannot produce
+one valid object.</p>
+<h3 id="4-vertex-usage-accounting">4. Vertex usage accounting</h3>
+<p>Map completion usage conservatively as the greatest of:</p>
+<ul>
+<li><code>candidatesTokenCount + thoughtsTokenCount</code>;</li>
+<li><code>totalTokenCount - promptTokenCount</code>;</li>
+<li><code>candidatesTokenCount</code>.</li>
+</ul>
+<p>This handles current and older Vertex response shapes without double counting.
+<code>total_tokens</code> continues to use provider <code>totalTokenCount</code> when present. Tests
+will cover visible-only, thinking-token, missing-field, and inconsistent-field
+responses.</p>
+<h3 id="5-budget-aware-probe-summaries-and-final-report-ordering">5. Budget-aware probe summaries and final report ordering</h3>
+<p>Probe summaries remain optional dashboard enrichment. They will run before the
+canonical/user reports are emitted and will use <code>UsageTrackingLLM</code> so their
+actual usage can be folded into a copied final <code>Scan</code> value.</p>
+<p>For an explicit <code>--budget-usd</code>, the CLI will calculate a conservative maximum
+cost for all planned summary calls using each bounded prompt plus
+<code>_SUMMARY_MAX_TOKENS</code>. If the remaining budget cannot cover that reservation,
+AI summaries are skipped and the dashboard keeps its existing deterministic
+fallback. An unbounded scan retains current summary generation.</p>
+<p>After successful summaries, the CLI adds their prompt/completion tokens and
+priced cost to <code>tokens_total</code>, <code>cost_usd</code>, and the budget report before writing
+any signed report. Summary failures remain best-effort and contribute only the
+usage actually returned before failure.</p>
+<h3 id="6-stable-forensic-sealing">6. Stable forensic sealing</h3>
+<p><code>run.log</code> and <code>events.jsonl</code> remain active through the final gate output so the
+complete operator-visible decision is captured in both evidence streams. The
+CLI then flushes and jointly seals/detaches the run-log handler and event writer
+before building the forensic manifest. Later terminal or event messages cannot
+append to either sealed file.</p>
+<p>The detach helper will be idempotent and handler-specific so it cannot remove
+unrelated logging handlers. The manifest continues hashing <code>run.log</code>,
+<code>memory.jsonl</code>, <code>events.jsonl</code>, signed scan output, and probe exports.</p>
+<h2 id="error-handling-and-compatibility">Error handling and compatibility</h2>
+<ul>
+<li>Vertex catalog auth responses become a conservative deferred check, not a
+  silent success claim. The real model invocation still raises the existing
+  <code>LLMAuthError</code> on invalid ADC or missing permissions.</li>
+<li>A malformed judge response still uses existing fallback judgment.</li>
+<li>Optional summary failure never fails an otherwise completed scan.</li>
+<li>If run-log detachment fails, the CLI reports the forensic sealing error
+  rather than claiming a stable manifest.</li>
+<li>No report fields are removed. Numeric usage and cost fields become more
+  complete.</li>
+<li>No secret, access token, authorization header, or ADC material is added to
+  logs or reports.</li>
+</ul>
+<h2 id="test-strategy">Test strategy</h2>
+<p>Implementation will follow red-green-refactor for each boundary:</p>
+<ol>
+<li>Vertex validation tests: anonymous 401/403 defer; authenticated-provider
+   semantics stay unchanged; 404 remains not-found.</li>
+<li>Output oracle tests: literal <code>\\x1b</code> is safe; actual ESC is exploited;
+   escaped/raw pairs for every canary family; evidence tags share the oracle.</li>
+<li>Judge parser tests: raw, fenced, prose-wrapped, braces inside quoted strings,
+   truncated, multiple-object, and wrong-shape responses.</li>
+<li>Vertex usage tests: <code>thoughtsTokenCount</code> and <code>totalTokenCount</code> deltas are
+   included without double counting.</li>
+<li>CLI finalization tests: summary usage reaches final reports; explicit budget
+   skips unaffordable summaries; unbounded scans retain summaries.</li>
+<li>Forensic tests: all manifest digests, including <code>run.log</code>, match after the
+   full completion path and after later terminal logging.</li>
+</ol>
+<p>Verification gates:</p>
+<ul>
+<li>focused unit and integration suites for every changed module;</li>
+<li>Ruff formatting/lint on changed files;</li>
+<li>complete pytest suite;</li>
+<li>package build;</li>
+<li>a bounded live ADC/Vertex completion;</li>
+<li>a bounded live GCP red-team scan without <code>--no-preflight</code>;</li>
+<li>log review confirming zero auth/rate-limit/timeout errors, no bearer-token
+  leakage, stable manifest digests, correct accounting, and no ANSI false
+  positive for literal <code>\\x1b</code>.</li>
+</ul>
+<h2 id="acceptance-criteria">Acceptance criteria</h2>
+<ul>
+<li>A standard Vertex scan with working ADC does not fail on anonymous catalog
+  401/403.</li>
+<li>Literal escaped ANSI text does not create a deterministic HIGH finding;
+  actual ESC reflection still does.</li>
+<li>Common fenced Gemini verdict JSON parses without heuristic fallback.</li>
+<li>Reported Vertex tokens include thinking tokens.</li>
+<li>Signed reports include paid probe-summary usage, or summaries are skipped
+  before violating an explicit budget.</li>
+<li>Every forensic manifest digest matches immediately after scan completion.</li>
+<li>The complete automated suite and bounded live GCP verification pass.</li>
+</ul></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../../../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "../../..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../../../js/base.js"></script>
+        <script src="../../../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

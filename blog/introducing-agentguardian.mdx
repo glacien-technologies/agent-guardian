@@ -1,0 +1,122 @@
+---
+title: "Introducing AgentGuardian: open-source red-teaming for AI agents"
+sidebarTitle: "Introducing AgentGuardian"
+description: "Why single-prompt testers miss tool abuse, what changes when sixteen specialist attackers run concurrently, and how to point AgentGuardian at your own agent in five minutes."
+icon: "rocket"
+---
+
+> AgentGuardian is an open-source, Apache-2.0, local-first red-teaming toolkit for AI agents. Point it at a LangGraph, CrewAI, MCP server, RAG app, or REST-API agent — it deploys a swarm of sixteen specialist attackers, produces a deterministic 0–100 AIVSS score mapped to OWASP ASI 2026, MITRE ATLAS v5.4, and the CSA Agentic AI Red Teaming Guide, and emits SARIF / JSON / JUnit / Markdown / PDF reports your CI can gate on.
+>
+> `pip install agent-guardian` to try it. The 90-second demo is on [YouTube](https://github.com/glacien-technologies/agent-guardian#demo).
+
+## Why we built this
+
+Most LLM-security tools were designed in the chatbot era. They send one prompt, read one reply, and grade the reply with a string match or a second LLM. That model worked when the system under test was a single completion call.
+
+Production agents are not single completion calls. They:
+
+- compose tools (`search_kb`, `send_email`, `query_db`, `exec_python`),
+- hold memory across sessions,
+- talk to other agents over A2A or MCP channels,
+- and run real code in real environments.
+
+That stack has an attack surface single-prompt testers cannot reach. A goal-hijack that the chat-layer evaluator scores "refused" can still trigger a tool call that exfiltrates data, mutates state, or escalates the agent's privilege. The chat reply looks compliant. The side-effect is anything but.
+
+We started AgentGuardian to fix that gap.
+
+## What ships in v1.1
+
+The v1.1 line is the first "production" line. The headline pieces:
+
+- **The swarm.** Sixteen attacker specialists (ten OWASP ASI 2026 categories, one always-on identity-leak gap-fill agent, plus five OWASP LLM Top 10 specialists — fuzzing, secret extraction, denial of wallet, detection evasion, output handling) run concurrently against your agent, coordinated by a Swarm Commander LLM. The Commander reads the recon fingerprint, decomposes the attack surface, and re-tasks idle agents until either the budget is exhausted or the AIVSS variance has stabilised.
+- **The AIVSS scorer.** Every finding contributes to a deterministic 0–100 score. Higher is safer. The formula is open — see [reports/aivss-score](/reports/aivss-score). The same agent + the same probes + the same model produce the same score; LLM stochasticity is bounded by the swarm structure, not absorbed into the score.
+- **PoV-as-oracle.** Every finding ships with a proof-of-vulnerability script. Before the score is computed the runner replays each PoV N times against the live target and drops findings that don't reproduce. Score inflation from one-off LLM hallucinations is gated out.
+- **Three scan modes.** `--mode fast` for CI gates (~45 seconds, ~$0.01), `--mode smart` for everyday use (~2 minutes, ~$0.03), `--mode full` for the authoritative pre-release scan (~5 minutes, ~$0.06). Numbers measured against Gemini 2.5 Flash on a tools-only target.
+- **Standards-anchored taxonomy.** Every finding is triple-tagged with OWASP ASI 2026, MITRE ATLAS v5.4, and CSA Agentic-RT categories. SARIF output drops into GitHub's Security tab. JUnit drops into any CI dashboard. PDF goes to your auditor.
+- **Local-first, no telemetry.** Reports stay on your disk. The package does not phone home. The Enterprise tier is a separate product on top of the same engine — these docs cover only the OSS layer.
+
+## The five-minute path from `pip install` to a real report
+
+```bash
+pip install agent-guardian
+export GEMINI_API_KEY=...
+
+# Scan the hosted vulnerable testbench (we own it; safe to attack)
+agent-guardian scan \
+  --endpoint https://agent-guardian-testbench-u6tm6gzysq-uc.a.run.app/finbot/chat \
+  --model gemini:gemini-2.5-flash \
+  --mode fast \
+  --budget-usd 0.20
+```
+
+A `fast` scan finishes in about ninety seconds, costs about a cent of Gemini Flash, and lands an AIVSS in the CRITICAL band against the FinBot demo agent — the testbench's planted banking-assistant target. The full walkthrough lives at [Try the demo agent](/start-here/try-the-demo-agent).
+
+If you want to scan your own agent, the three most common shapes are one-liners:
+
+```bash
+# REST API agent
+agent-guardian scan --endpoint http://localhost:8000/chat --model gemini:gemini-2.5-flash
+
+# LangGraph agent
+agent-guardian scan --framework langgraph --framework-ref my_app.graph:graph --model gemini:gemini-2.5-flash
+
+# MCP server
+agent-guardian scan --framework adk --endpoint mcp://localhost:3000 --model gemini:gemini-2.5-flash
+```
+
+The full adapter matrix — ADK, AutoGen, Strands, Anthropic Messages, OpenAI Responses, Bedrock, Vertex, Azure Foundry, gRPC, WebSocket, browser, subprocess — is on the [Target Adapters](/concepts/target-adapters) page.
+
+## How the swarm differs from a single-prompt tester
+
+A single-prompt tester runs `attack -> reply -> grade`. The bug it solves is "did this single response cross a line?"
+
+AgentGuardian's swarm runs `recon -> decompose -> parallel attack -> evaluate -> finalise`. The bug it solves is "across a realistic adversarial session, did the agent's tools, memory, or sub-agents do something the system prompt does not permit?"
+
+The difference is not philosophical. Concretely:
+
+1. **Recon first.** A `RecognitionAgent` fingerprints the target — declared tools, declared memory keys, response shape, refusal posture. Every downstream attacker conditions its payloads on the fingerprint instead of throwing a generic ASI corpus at the wall. A tool-exfil payload aimed at an MCP server that exposes `search_kb` looks nothing like one aimed at a REST agent with `transfer_funds`; the swarm produces both correctly.
+2. **Parallel specialists.** Each OWASP ASI category has its own specialist agent (`asi01..asi10`), driven by its own system prompt, its own probe slice from `src/agent_guardian/probes/`, and its own LLM-as-judge rubric. The five OWASP LLM specialists (LLM05 fuzzing, LLM07 secret extraction, LLM10 denial of wallet, LLM02 output handling, detection-evasion coverage) run by default; suppress them with `--no-owasp-llm`.
+3. **Shared adversarial memory.** A finding by the goal-hijack agent updates a shared `VectorMemory` that the tool-abuse agent reads on its next turn. Multi-hop attacks (inject -> persist -> chain into a tool call) are first-class, not retrofitted.
+4. **PoV-as-oracle gate.** Every candidate finding is re-played N times against the live target before it goes into the report. Unreproducible findings are dropped *before* AIVSS scoring, so a flaky win can't inflate the score.
+5. **Budget-aware scheduling.** A USD-denominated budget ledger reserves and commits spend per agent. The Commander early-stops at 90% of the cap. Scans are bounded by what you said you'd spend, not by how aggressive the attackers feel.
+
+The academic precedents — TAP, MAD-MAX, RedAgent, Co-RedTeam, MUZZLE — are spelled out at [Research foundation](/concepts/research-foundation).
+
+## Standards alignment
+
+Every finding carries three classifiers:
+
+- **OWASP ASI 2026** — the ten Agentic Security Initiative categories. Each specialist owns exactly one.
+- **MITRE ATLAS v5.4** — the technique enum that SARIF emitters expose so GitHub Code Scanning and SOC tooling can pivot.
+- **CSA Agentic AI Red Teaming Guide / CSA AI Controls Matrix** — the governance-facing taxonomy GRC tooling already speaks.
+
+The triple-tagging is not cosmetic. Different audiences read different taxonomies — security engineers read ATLAS, application developers read ASI, governance teams read CSA. A finding that scrolls past all three audiences gets actioned by all three.
+
+## What ships next
+
+The roadmap is canonical in [`docs/community/oss-roadmap.md`](https://github.com/glacien-technologies/agent-guardian/blob/main/docs/community/oss-roadmap.md). The themes for the v1.1.x stream:
+
+- **Probe corpus growth.** ASI04 supply-chain probes for the MCP-registry ecosystem, ASI10 long-horizon drift probes that span multiple scan windows, ASI09 trust-exploitation probes for new output channels.
+- **Adapter coverage.** Stable adapters for ADK, AutoGen, Strands, and a documented MCP-server target shape.
+- **Report ergonomics.** PDF cover page redesign, SARIF rule-help URLs, an HTML report with collapsible evidence trees.
+- **CI ergonomics.** A first-class GitHub Action (`glacien-technologies/agent-guardian@v1`) and a Docker image on GHCR.
+
+Nothing not in the OSS roadmap is a public commitment. We ship from PRs, not from blog posts.
+
+## How to help
+
+The fastest contributions are:
+
+- **A new probe** under `src/agent_guardian/probes/asi0X/`. The probe schema is at [reference/probe-schema](/reference/probe-schema).
+- **A new adapter** under `src/agent_guardian/targets/`. The contract is small — adapt your agent to a `TargetTransport` and the swarm picks it up.
+- **A reproduction** against a deliberately-vulnerable agent you wrote. PR it as a walkthrough into `docs/blog/`; we'll review it for the next release notes.
+
+DCO sign-off is required on every commit (`git commit -s`). See [CONTRIBUTING.md](https://github.com/glacien-technologies/agent-guardian/blob/main/CONTRIBUTING.md) for the full rules.
+
+## Pointers
+
+- **Quickstart** — [/quickstart](/quickstart). Five minutes from install to first AIVSS.
+- **How AgentGuardian works** — [/concepts/how-agentguardian-works](/concepts/how-agentguardian-works). The four-step mental model.
+- **Comparison** — [/concepts/agent-guardian-vs](/concepts/agent-guardian-vs). What we chose and why.
+- **Attack library** — [/attacks/overview](/attacks/overview). All ninety-six probes across the ten OWASP ASI categories.
+- **GitHub** — [glacien-technologies/agent-guardian](https://github.com/glacien-technologies/agent-guardian). Star it if it's useful; file an issue if it isn't.

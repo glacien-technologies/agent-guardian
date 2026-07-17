@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 32" fill="none" stroke="#111013" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="AgentGuardian">
+  <title>AgentGuardian</title>
+  <path d="M16 3 L27 6 V14 C27 21 22.5 26 16 29 C9.5 26 5 21 5 14 V6 Z"/>
+  <path d="M16 6.2 L24 8.4 V14 C24 19.4 20.5 23.4 16 25.6 C11.5 23.4 8 19.4 8 14 V8.4 Z" stroke-width="1.1"/>
+  <path d="M12.6 15.6 L15.2 18.4 L19.6 11.8" stroke="#8B5CF6"/>
+  <text x="42" y="22" fill="#111013" stroke="none" font-family="'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="600" letter-spacing="-0.01em">AgentGuardian</text>
+</svg>

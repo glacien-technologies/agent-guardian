@@ -1,0 +1,120 @@
+---
+title: "Adversarial swarm"
+sidebarTitle: "Adversarial swarm"
+description: "The sixteen specialist agents, parallelism limits, Commander/Attacker/Evaluator split, and how the swarm decides which specialists to run against your target."
+icon: "network"
+---
+
+The adversarial swarm is the engine. It takes the `TargetFingerprint`
+produced by recon, picks the specialists that apply, runs them
+concurrently, and writes their findings into a single
+`SharedMemory`. This page describes the swarm shape — for the four-phase
+flow it sits inside, see [How AgentGuardian works](/concepts/how-agentguardian-works).
+
+## Three roles, never collapsed
+
+| Role | What it does | Source-of-truth |
+|---|---|---|
+| **Commander** | Reads `--goal`, emits a `SwarmBrief` (per-agent sub-goals, hypotheses, priorities). Skipped when no goal is supplied. | `src/agent_guardian/core/swarm.py` |
+| **Attacker** | Each specialist agent owns one OWASP ASI category and synthesises category-specific attack prompts. | `src/agent_guardian/agents/base.py::AsiAgent` |
+| **Evaluator** | A separate LLM-as-judge labels each `(prompt, response)` pair against a category-specific rubric. | `src/agent_guardian/agents/base.py::Judge` |
+
+The three roles can be the same LLM or three different LLMs (see
+`--commander-model`, `--attacker-model`, `--evaluator-model`). They are
+*always* logically separate — the same model instance is never asked to
+both attack and grade its own attack.
+
+## The sixteen specialists
+
+Ten run one per OWASP Agentic Security Initiative (ASI) category, plus
+one always-on identity-leak gap-fill agent. Five additional OWASP-LLM
+specialists also run by default; pass `--no-owasp-llm` to suppress them.
+
+| ASI | Specialist | Source file |
+|---|---|---|
+| ASI01 | Goal Hijack | `agents/goal_hijack.py` |
+| ASI02 | Tool Abuse | `agents/tool_abuse.py` |
+| ASI03 | Privilege Escalation | `agents/privilege.py` |
+| ASI04 | Drift | `agents/drift.py` |
+| ASI05 | Cascade Failure | `agents/cascade.py` |
+| ASI06 | Memory Poisoning | `agents/memory_poison.py` |
+| ASI07 | Identity Leak | `agents/identity_leak.py` |
+| ASI08 | Code Execution | `agents/code_exec.py` |
+| ASI09 | Supply Chain | `agents/supply_chain.py` |
+| ASI10 | Trust Exploit | `agents/trust_exploit.py` |
+| OWASP-LLM | Fuzzing | `agents/fuzzing_agent.py` |
+| OWASP-LLM | Detection Evasion | `agents/detection_evasion_agent.py` |
+| OWASP-LLM | Secret Extraction | `agents/secret_extraction_agent.py` |
+| OWASP-LLM | Denial-of-Wallet | `agents/denial_of_wallet_agent.py` |
+| OWASP-LLM | Output Handling | `agents/output_handling_agent.py` |
+
+`agent-guardian list-agents` prints the same table from the CLI.
+
+## Applicability filter
+
+Not every specialist runs against every target. After recon, each agent is
+asked `AsiAgent.is_applicable(fingerprint)`. The filter is conservative —
+a specialist that cannot possibly land an attack is skipped so its budget
+slice goes to specialists that can:
+
+- A tool-less target skips **Tool Abuse** (ASI02) and **Code Execution**
+  (ASI08).
+- A memory-less target skips **Memory Poisoning** (ASI06).
+- A single-agent target skips **Cascade Failure** (ASI05) and
+  **Trust Exploit** (ASI10).
+- A target with no surfaced PII surface deprioritises **Identity Leak**
+  (ASI07) but does not skip it.
+
+The global token / wall-clock / request budget is then sliced across
+whichever specialists survive the filter.
+
+## Parallelism
+
+Phase 3 is the only place concurrency happens. Up to
+`max_parallel_agents` (default 10) specialists run under one
+`asyncio.TaskGroup`. Each specialist has its own attack loop —
+generate prompt → call target via adapter → evaluator judges → write
+finding on `verdict="fail"` — and terminates when it hits any of:
+
+- `target_findings` reached for that ASI category,
+- per-agent turn cap exhausted,
+- shared swarm budget exhausted (tokens, wall-clock, or USD),
+- target refused N consecutive turns,
+- the global scan window closed.
+
+Specialists share `SharedMemory` (the `TargetFingerprint`, the
+`SwarmBrief`, and the running `Finding` list) but they do not share
+strategy state. A bug in one specialist cannot corrupt another's findings.
+
+## Strategies, not just probes
+
+Each specialist composes one or more `Strategy` instances from
+`src/agent_guardian/strategies/`. A strategy is the *attack pattern* (e.g.
+single-turn probe, multi-turn jailbreak, indirect injection via tool
+output, adversarial role-play). The probe corpus under
+`src/agent_guardian/probes/asi01..asi10/` provides the seed prompts the
+strategy mutates and re-issues.
+
+This decoupling is why two specialists in the same ASI category can use
+different attack styles, and why a researcher can add a new strategy
+without touching the agent that uses it.
+
+## Early-stop checkpoint
+
+A concurrent checkpoint task samples provisional AIVSS every 30 seconds.
+In `--mode smart` and `--mode fast` it can vote `EARLY_STOP` when the
+score has stabilised. In `--mode full` (the default) the checkpoint
+records but does not vote — every probe runs against every applicable
+agent so CI gets reproducible coverage.
+
+## Where to go next
+
+- [Target adapters](/concepts/target-adapters) — the adapter contract and
+  the fingerprint produced by recon.
+- [Evaluators](/concepts/evaluators) — the LLM-as-judge rubric and the
+  heuristic + RoE-blocklist layers around it.
+- [How AgentGuardian works](/concepts/how-agentguardian-works) — the
+  end-to-end flow, including the recon, decompose, attack, finalise
+  phases.
+- [Research foundation](/concepts/research-foundation) — MAD-MAX, TAP,
+  Co-RedTeam, and the swarm-design citations.
